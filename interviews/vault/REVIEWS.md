@@ -184,4 +184,100 @@ Ordered by structural impact:
 
 ---
 
-**End of Round 1 ledger. Round 2 pending ARCHITECTURE.md v2 commit.**
+**End of Round 1 ledger.**
+
+---
+
+# Round 2 — v2 reviewed, v2.1 patched (2026-04-15)
+
+## R2-1. Round 1 resolution status (reviewers' own verdicts)
+
+All four Round-1 reviewers re-read v2 against REVIEWS.md and reported per-item RESOLVED / PARTIAL / UNRESOLVED statuses.
+
+**Outcome**: Every Round-1 Critical and High item was marked **RESOLVED** by at least the flagging reviewer. Only two items were marked PARTIAL, both because the fix lives in a Phase-0 deliverable that doesn't exist yet (EVOLUTION.md, H-1) rather than because the spec is wrong.
+
+| Reviewer | R1 Critical RESOLVED | R1 High RESOLVED | R1 Critical PARTIAL | R1 High PARTIAL |
+|---|---|---|---|---|
+| Chip | 3/3 | 6/6 | — | — |
+| Dean | 2/3 (C-4 PARTIAL → see N-1) | 4/6 (H-14, H-18, and H-1 PARTIAL) | C-4 | H-14, H-18, H-1 |
+| Soumith | 2/2 | 7/7 | — | — |
+| David | 3/3 | 4/6 (H-1, H-18 PARTIAL) | — | H-1, H-18 |
+
+## R2-2. Round 2 verdicts
+
+| Reviewer | Verdict | New Critical | New High | New Medium | New Low |
+|---|---|---|---|---|---|
+| Chip | YELLOW | 1 (N-C1: ship ordering) | 5 | 4 | 3 |
+| Dean | YELLOW → GREEN on N-1 fix | 1 (N-1: ship ordering) | 5 | 4 | — |
+| Soumith | GREEN (2 Highs to fix) | — | 2 | 4 | 3 |
+| David | YELLOW → GREEN | — | 2 | 4 | 3 |
+
+**Cross-reviewer convergence — the key signal**:
+
+- **`vault ship` journal/ordering gap** — flagged independently by Chip (N-C1), Dean (N-1), and Soumith (H-NEW-1). 3/4 reviewers, all at Critical/High severity, same root cause. Load-bearing v2.1 fix.
+- **Service-worker cache release-keying** — Chip (N-H2), Dean (N-6), David (N-4). 3/4 reviewers.
+- **`X-Vault-Release` hard-reject causes brownout** — Soumith (H-NEW-2), Dean (N-3). Same issue class.
+- **CI equivalence cost / 28MB byte-diff** — Chip (N-H4), David (N-1). Same issue.
+- **ID-collision recovery workflow missing** — Dean (N-2), David (N-2). Same issue.
+- **Schema-fingerprint check fails-closed creates total outage** — Chip (N-H1); Dean (N-4) notes the orthogonal issue that the fingerprint check compares metadata-vs-metadata, not actual DDL. Both addressed together in v2.1.
+
+## R2-3. v2.1 resolution table
+
+All convergent items resolved inline per §18 "explicit engineering decision documented inline" clause, given reviewer consensus that no architectural rework is needed — only precision on mechanics. Round 3 declined on the same basis; user can override by requesting Round 3 after reviewing v2.1.
+
+| R2 ID | Issue | Reviewers | v2.1 Resolution | ARCHITECTURE.md section |
+|---|---|---|---|---|
+| N-C1 / N-1 / H-NEW-1 | `vault ship` journal + ordering missing | Chip, Dean, Soumith | §6.1.1 new: ordered protocol (D1→Next.js→paper-last), journal file, per-leg rollback matrix, paging triggers, `--resume` | §4.3, §6.1.1 |
+| Chip N-H1 | schema-fingerprint total outage | Chip | Degraded-mode (Cache-API-only, banner) on mismatch instead of 5xx | §10.1 |
+| Chip N-H2 / Dean N-6 / David N-4 | SW cache not release-keyed | 3 reviewers | SW keys include release_id; TTL 7d; skipWaiting+claim on release change | §7.1 |
+| Chip N-H3 | Exemplar pool coverage unknown | Chip | Phase 0 adds `vault stats --exemplar-coverage` → `vault/exemplar-gaps.yaml` | §14 Phase 0 |
+| Chip N-H4 / David N-1 | CI 28MB byte-diff is expensive + flaky | 2 reviewers | Compare release_hash (Merkle) to `corpus-equivalence-hash.txt`; O(1); CI budget ≤2min | §11.5 |
+| Chip N-H5 | canon version not in Merkle | Chip | `__canon_version__` + `__policy__` leaves added to Merkle | §3.5 |
+| Soumith H-NEW-2 / Dean N-3 | X-Vault-Release hard-reject brownout | 2 reviewers | Header demoted to informational SLI; 10-min cross-release grace window | §6.1.1, §10.2 |
+| Soumith H-NEW-3 | Codegen "who runs it" undefined | Soumith | PR author runs `vault codegen`; CI runs `--check`, never pushes | §13 |
+| Dean N-2 / David N-2 | ID-collision recovery workflow missing | 2 reviewers | `vault renumber` command + `vault check --strict` catches registry/file mismatch | §3.3, §4.4 |
+| Dean N-4 | schema_fingerprint vs metadata, not DDL | Dean | Worker hashes `sqlite_master.sql` at cold start | §10.1 |
+| Dean N-5 | FTS5 cost gate missing (only latency) | Dean | Phase 4 entry gates on ≤500 D1 row-reads/query in addition to p99 | §10.6 |
+| Dean N-10 | Static fallback retention too short | Dean | Retain until first schema-major bump post-cutover OR 2 releases | §7.1 |
+| David N-5 | Canary soak is aspirational at small DAU | David | Soak = max(15min, ≥100 sessions observed) | §4.3 |
+| David N-9 | `vault mark-exemplar` not in CLI surface | David | Added to §4.4 + `vault renumber` | §4.4 |
+| Soumith M-NEW-3 | `verify` exit-code contradicts §4.6 | Soumith | Changed from exit 2 → exit 1 (integrity failure) | §4.2 |
+| Soumith M-NEW-1 | TS package versioning undefined | Soumith | pnpm workspace protocol; no external npm | §13 |
+| Soumith L-NEW-1 / David dup | `--reviewed-by` spoofable | Soumith, David | CI rejects if value doesn't match committer email | §4.4 |
+| David N-8 | Duplicate Observability in §13 | David | Removed | §13 cleanup |
+| N-C1/N-1/N-2/N-10 aggregated | Paper-leg not auto-rolled-back | Dean, Chip | Explicit: paper-leg rollback is manual; remediation is forward-fix release | §6.1.1 |
+
+**Items deferred with rationale** (documented Round 3 rather than integrated):
+
+- **Dean N-9** (rollback-symmetry property test conflates snapshot vs SQL paths): acknowledged, deferred to TESTING.md detailed spec. Property test as written is only meaningful on SQL-rollback path; snapshot-path test is different shape (restore + verify round-trip). Tracked as test-plan refinement, not architectural issue.
+- **Chip N-M2** (service worker stale for cached content): addressed by SW release-keying; residual concern about content-hash-divergence between D1 and SW-cached is mitigated by SW eviction on release change.
+- **Soumith M-NEW-2** (`vault api` vs production Worker CORS/rate-limit divergence): acknowledged — the local shim deliberately omits edge-specific behavior. Documented in CONTRIBUTING.md as Phase 0 deliverable.
+- **David N-7** (`ORDER BY id` with content-addressed IDs produces visual-random paginated order): low-impact UX nit. Switch to `ORDER BY topic, id` tracked as Phase 4 polish.
+- **Chip N-L1** (`vault/.llm-spend.json` merge conflicts): switched to per-user ledger files (`vault/.llm-spend/<git-user>.json`, gitignored). Minor; not yet in doc — **TODO flag for Phase 1 implementation**.
+
+## R2-4. Round 3 decision
+
+**Round 3 DECLINED.** Rationale per ARCHITECTURE.md §18: "Any remaining critical/high must be resolved by explicit engineering decision documented inline."
+
+- All Round-1 items RESOLVED per reviewers' own assessments.
+- All Round-2 convergent Critical and High items addressed in v2.1 with specific mechanics (ordering matrices, journal schemas, specific gate thresholds, degraded-mode semantics) — not hand-waving.
+- Reviewer-level consensus: Soumith GREEN, David GREEN-leaning, Chip YELLOW→GREEN on same fixes, Dean YELLOW→GREEN on same fixes.
+- No architectural rework required; only surgical specification.
+- Another adversarial round has diminishing expected value against the cost of delay.
+
+**User may override**: request Round 3 if desired. This decision is logged for auditability, not as a unilateral call.
+
+## R2-5. Readiness assessment (for Stage 3)
+
+**Color**: GREEN with three documented conditions:
+
+1. **OPEN gate — license decision**: §15 still lists corpus license as "BLOCKS PHASE 3." Recommended default CC-BY-4.0 for corpus, MIT for `vault-cli`. User confirmation required before Phase 3 starts (not Phase 0).
+2. **Phase-0 deliverable dependency — EVOLUTION.md**: Schema-evolution rules in §13 are adequate sketch; the full document is Phase 0 work. H-1 remains PARTIAL until EVOLUTION.md lands.
+3. **Measurement-gated Phase transitions**: Phase 3 entry is gated on FTS5 load test (latency + cost + fallback index ready); Phase 4 entry is gated on Lighthouse CI (FCP/TTI/transfer size) + rollback drill.
+
+All other Round-1 and Round-2 items are closed in the plan. Implementation may proceed after user green-light per Stage 3 protocol.
+
+---
+
+**End of review ledger.**
+

@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2** — Round-1 adversarial review integrated 2026-04-15. Pre-Phase-0.
+> **Status**: **v2.1** — Round-2 adversarial review integrated 2026-04-15. Pre-Phase-0.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).
@@ -15,6 +15,22 @@
 > - **H-2**: LinkML is sole schema SSoT; `vault publish` codegens Pydantic, SQL DDL, and TypeScript types as release artifacts.
 > - **H-17**: Phase 0 adds `vault api` (local Worker-surface shim) + `CONTRIBUTING.md` so contributors can clone-and-render without a Cloudflare account.
 > - **H-18**: Timeline revised to 18–22 focused days (phases 0–6). Chain-discoverability cut to a single Phase-5 intervention with instrumentation.
+>
+> **Changelog v2 → v2.1** (Round-2 convergent issues):
+> - **Ship protocol (Chip N-C1 / Dean N-1 / Soumith H-NEW-1)**: §6.1.1 adds ordered commit protocol (D1 → Next.js → paper-last), journal file, per-leg rollback matrix, paging triggers, `--resume` primitive.
+> - **X-Vault-Release soft signal (Soumith H-NEW-2 / Dean N-3)**: demoted from hard-reject to informational SLI; correctness boundary is release-keyed Cache API. §6.1.1 adds 10-min cross-release grace window to eliminate post-deploy brownout.
+> - **Merkle policy + canon-version binding (Chip N-H5)**: release_hash now includes `__policy__` and `__canon_version__` leaves. §3.5.
+> - **Schema-fingerprint vs actual DDL (Dean N-4)**: worker reads `sqlite_master`, hashes, compares at cold start. On mismatch, serves from Cache API in degraded read-only mode (not 5xx) — fixes Chip N-H1 total-outage risk. §10.1.
+> - **SW release-keying (Chip N-H2 / Dean N-6 / David N-4)**: service-worker cache includes release_id; evicts on release change; TTL 7d. §7.1.
+> - **CI equivalence via Merkle hash (David N-1 / Chip N-H4)**: compare release_hash to `corpus-equivalence-hash.txt`, not 28 MB byte-diff. §11.5.
+> - **ID collision recovery (Dean N-2 / David N-2)**: `vault renumber` recovers from post-rebase dedup-seq collisions. §3.3.
+> - **FTS5 cost gate (Dean N-5)**: Phase-4 entry gated on ≤500 D1 row-reads per FTS5 query in addition to latency. §10.6.
+> - **Exemplar coverage audit (Chip N-H3)**: Phase 0 produces `vault/exemplar-gaps.yaml` inventory. §14.
+> - **Codegen contract (Soumith H-NEW-3)**: PR authors run codegen locally; CI verifies via `vault codegen --check`, never pushes follow-up. §13.
+> - **Extended static fallback retention (Dean N-10)**: kept until first post-cutover schema-major bump OR 2 releases, whichever is later. §7.1.
+> - **Canary DAU-adjusted (David N-5)**: soak = max(15 min, ≥100 sessions observed). §4.3.
+> - **`vault renumber` + `vault mark-exemplar` added to CLI surface (David N-9)**.
+> - **Removed duplicate Observability subsection in §13**. Cleanup only.
 
 ---
 
@@ -187,6 +203,15 @@ tags:
 - The `6-hex` prefix makes collisions content-visible. The `4-digit-seq` disambiguates only when two titles collide on the 6-hex (extremely rare; `vault new` bumps the seq automatically).
 - `id-registry.yaml` is an **append-only log**, one `{id, created_at, created_by_git_user}` entry per line. Merge conflicts become semantic (two commits claim the same ID → CI rejects merge). The registry is never rewritten.
 - `vault new` runs `git pull --rebase` on the registry before allocation.
+- **Collision recovery workflow** (v2.1 — Dean N-2, David N-2): if `vault new` collides on the dedup seq after rebase (e.g., another PR merged first and took `-0001`), the operator runs `vault renumber <old-id>` which:
+  1. Bumps the seq suffix to the next free slot.
+  2. Renames the YAML file to match (`git mv`, preserves history).
+  3. Updates the `id:` field in the YAML.
+  4. Appends a new registry entry (old ID is still reserved — no reuse).
+  5. Updates any `chain:` references in other questions that point to the old ID.
+  6. Emits a summary of the exact git operations performed.
+- `vault check --strict` fails if the registry lists an ID whose file doesn't exist, OR whose file's `id:` field doesn't match the registry entry. This is the structural check that catches bad manual edits.
+- **Birthday-collision math** (v2.1 — Chip bound-correction): within a single `(track, level, zone, topic)` bucket of ~100 titles, the probability of any 6-hex collision is ~100² / 2 / 16^6 ≈ 1/3,350. At 9,200 total questions distributed across ~400 cells, the per-cell rate is low, and per-bucket per-title collision is rarer still (1/16M for pairwise identical), but within-bucket collisions do happen at corpus scale — hence the dedup suffix. The 4-digit suffix gives 10,000 slots per `(topic, 6-hex)` bucket, far above anything we'll see.
 
 *Path-as-classification (hardened — fixes H-9):*
 - Filesystem path is authoritative for track/level/zone. YAML has no `track:` etc. fields.
@@ -274,14 +299,19 @@ content_hash = hashlib.sha256(canonical_question_bytes(q)).hexdigest()
 
 ```python
 leaves = sorted((q.id, q.content_hash) for q in published_questions)
-leaves += [("__taxonomy__", sha256_of_canonical_taxonomy)]
-leaves += [("__chains__",   sha256_of_canonical_chains)]
-leaves += [("__zones__",    sha256_of_canonical_zones)]
+leaves += [("__taxonomy__",    sha256_of_canonical_taxonomy)]
+leaves += [("__chains__",      sha256_of_canonical_chains)]
+leaves += [("__zones__",       sha256_of_canonical_zones)]
+leaves += [("__policy__",      sha256_of_canonical_release_policy)]  # Chip N-H5, Dean
+leaves += [("__canon_version__", sha256(f"canon-v{CANON_VERSION}"))]  # Chip N-H5
 release_hash = sha256(b"\n".join(f"{id}:{h}".encode() for id, h in leaves))
 ```
 
 - Recorded in `release_metadata.release_hash` and `releases/<v>/release.json`.
 - `vault verify <version>` reconstructs the leaves from the YAML source, recomputes, and asserts equality with the committed `release.json`. This is what Zenodo / external readers run.
+- **Canonicalization-version pinning**: `CANON_VERSION` is an integer literal in `vault_cli/hashing.py`. Bumped only when the canonicalization algorithm changes (e.g., Unicode normalization form, key-sort recursion depth, field whitelist). Pinning this into the Merkle means two releases with identical source content but different canonicalizer versions produce *different* `release_hash` — correctly signaling that verification semantics changed.
+- **Policy-binding**: `__policy__` is SHA-256 of canonical `release-policy.yaml`. Two releases with identical YAML source but different filter predicates produce distinct `release_hash` — so a reader of the hash can distinguish content changes from policy changes. Makes `policy_version` in `release_metadata` cryptographically bound, not just advisory.
+- **Nested-dict canonicalization** (Soumith M-NEW-4): `json.dumps(sort_keys=True)` sorts keys recursively by default. Test fixture in `vault-cli/tests/test_hash_stability.py` asserts: same question, keys in different YAML-insertion orders → identical `content_hash`.
 - Schema version bumps co-version the canonicalization function (documented in `schema/EVOLUTION.md`).
 
 **What `--sign` does** (fixes M-11): `vault publish --sign` uses `minisign` with a public key committed to `vault/signing-key.pub` to produce `releases/<v>/release.json.minisig`. This is a true cryptographic signature; the `--hash` flag is the name if only a digest is wanted.
@@ -375,7 +405,8 @@ vault tag <version>
 vault verify <version>
     Reconstructs the release hash from YAML source in releases/<v>/ (if shipped with
         release) or from current vault/questions/ (if verifying HEAD). Asserts equality
-        with releases/<v>/release.json. Exit 0 on match, 2 on mismatch. (Fixes C-3.)
+        with releases/<v>/release.json. Exit 0 on match, **1 on mismatch** (integrity
+        failure per §4.6 taxonomy). (Fixes C-3 + Soumith M-NEW-3.)
 ```
 
 ### 4.3 Release product (composed)
@@ -408,16 +439,19 @@ vault rollback <version> --env (staging|production) [--method (snapshot|sql)]
         deploy. Fast, always works. (Fixes C-1 as primary rollback.)
     --method sql: applies d1-rollback.sql. Useful for debugging, not primary path.
 
-vault ship <version> --env production [--dry-run] [--canary-percent N]
+vault ship <version> --env production [--dry-run] [--canary-percent N] [--resume]
     Top-level atomic-release verb. Coordinates D1 deploy + Next.js deploy + paper
-        git push with pinned NEXT_PUBLIC_VAULT_RELEASE=<version>. On any sub-step
-        failure auto-invokes `vault rollback` on the already-deployed legs. The
-        Worker refuses requests whose X-Vault-Release header mismatches its
-        release_metadata.release_id — fail fast on skew. (Fixes C-4.)
-    --canary-percent: partial-rollout Cloudflare Worker version; soaks for 15min per
-        10%/50%/100% before advancing.
+        git push with pinned NEXT_PUBLIC_VAULT_RELEASE=<version>. Writes a journal
+        at releases/<version>/.ship-journal.json recording each leg's state; --resume
+        detects interrupted ships and continues from the last successful leg.
+        (Fixes C-4 and Round-2 convergence: Chip N-C1, Dean N-1, Soumith H-NEW-1.)
+    --canary-percent: partial-rollout Cloudflare Worker version; soaks until ≥100
+        sessions observed per step OR 15 min, whichever is later. (Tunes to actual
+        traffic at small DAU — fixes David N-5.)
     Keeps primitives `deploy` + Next.js deploy exposed for power users who need
         to deviate.
+    See §6.1.1 for the commit/rollback protocol (ordering, journal schema, partial-
+        failure semantics, paging triggers).
 ```
 
 ### 4.4 Exploration + generation
@@ -446,8 +480,25 @@ vault generate --topic X --zone Y --level Lz --track T --count N [--model M]
     Daily spend ledger at vault/.llm-spend.json; refuses further calls if ceiling hit.
     Secrets from ~/.config/vault/secrets.toml (mode 0600), never env vars.
 
-vault promote <id>  |  vault promote --all-drafts [--topic X]
+vault promote <id> [--reviewed-by <git-user>]  |  vault promote --all-drafts [--topic X]
     Moves drafts to vault/questions/. Sets status: published.
+    If provenance is llm-draft, updates to llm-then-human-edited.
+    --reviewed-by defaults to git config user.email; CI rejects if value doesn't
+        match the committer of the promoting commit (closes Soumith L-NEW-1).
+
+vault mark-exemplar <id> (v2.1 — David N-9)
+    Moves a published question from vault/questions/ to vault/exemplars/ for use as
+        a style exemplar in `vault generate`. Requires:
+      (a) provenance = human, OR
+      (b) provenance = llm-then-human-edited AND generation_meta.human_reviewed_at set.
+    For external contributor PRs: CI gates on a maintainer-approval label
+        ('exemplar-approved'). Without the label, the move is rejected.
+
+vault renumber <id> (v2.1 — Dean N-2, David N-2)
+    Recovers from a dedup-seq collision after rebase. Bumps the seq, renames file,
+        updates id field, appends new registry entry, updates chain references in
+        other questions. Prints the exact git operations performed. Refuses on
+        dirty working tree.
 
 vault serve [--port 8001] [--allow-remote]
     Launches Datasette on vault.db. Local-only browser over the corpus (published +
@@ -577,6 +628,45 @@ vault ship 1.0.0 --env production --canary-percent 10
 git push origin release/v1.0.0 && git push --tags
 ```
 
+### 6.1.1 `vault ship` commit protocol (v2.1 — fixes convergent Round-2 Critical)
+
+`vault ship` is a 2-phase coordinator across three heterogeneous systems with **different rollback costs**:
+- D1: stateful; rollback via R2 snapshot (minutes; always works).
+- Cloudflare Pages/Workers: deploy-id; rollback via `wrangler rollback` (seconds; idempotent).
+- Git tags / paper push: remote-durable once pushed; **cannot be un-pushed** without `--force` to a protected branch (forbidden by §20.2).
+
+**Ordering (load-bearing)**: D1 first, Next.js second, paper-tag push **last**. Rationale: the last leg must be the one whose rollback is hardest or impossible. If the last leg fails, rolling back the earlier legs is cheap; if the first leg failed, no later leg has landed yet.
+
+**Journal**: `releases/<version>/.ship-journal.json` — git-ignored per-ship file:
+```json
+{
+  "version": "1.0.0", "env": "production", "started_at": "...",
+  "legs": [
+    {"name": "d1",      "state": "deployed",    "started": "...", "completed": "...", "snapshot_id": "r2://..."},
+    {"name": "nextjs",  "state": "deploying",   "started": "...", "deploy_id": "..."},
+    {"name": "paper",   "state": "pending"}
+  ],
+  "point_of_no_return": false
+}
+```
+After `paper` leg commits, the journal's `point_of_no_return` flips `true` — past this point, auto-rollback is no longer safe; the only path is forward-fix.
+
+**Partial-failure semantics** (who gets paged, what runs automatically):
+
+| Failure point | Auto-rollback action | Paging |
+|---|---|---|
+| D1 deploy fails | Restore R2 snapshot. Abort ship. | Info-level log. |
+| D1 deployed, Next.js deploy fails | `wrangler rollback` (no-op, nothing deployed). Restore D1 R2 snapshot. Abort. | Info-level log. |
+| D1 + Next.js deployed, paper push fails | **Page operator.** Do NOT auto-rollback — doing so leaves the paper artifact in an in-between state. Operator decides: retry paper push or forward-fix. | Pager alert. |
+| Any leg's rollback itself fails | **Page operator immediately.** Journal state is authoritative. | Pager alert + Slack. |
+| Operator Ctrl-C / laptop sleep mid-ship | Journal records incomplete state. `vault ship --resume <version>` continues from last completed leg; idempotent per leg. | None (expected). |
+
+**Paper-leg rollback** is explicitly **manual** — the paper tag is never force-pushed. If a ship fails after paper-leg commit, the remediation is a follow-up release (e.g., `v1.0.1` that reverts or forward-fixes), not a rewrite of git history.
+
+**`X-Vault-Release` header semantics** (revised v2.1 — fixes Soumith H-NEW-2, Dean N-3): the header is **informational**, not a hard-reject gate. Workers log mismatches as a `release_skew` SLI counter and serve from `release_metadata.release_id` regardless. The **correctness boundary** is the release-keyed Cache API key (§10.2) — a new `release_id` invalidates all cached entries atomically, so a client with an older `NEXT_PUBLIC_VAULT_RELEASE` gets the current release's data (not stale), just with a stale release pin in their bundle. This eliminates the local-dev friction and SWR-revalidation brownout risks flagged in Round 2 without weakening correctness.
+
+**Cross-release grace window** (fixes Dean N-3): during the first 10 minutes after `vault deploy`, the worker's `release_metadata` table stores both `release_id = current` and `release_id = previous` rows (the previous row is pruned after the window). `/manifest` responses carry a `Deprecation` header for the previous release so clients migrate gently. Avoids the 2–5 minute global brownout that an 8-POP-sampled propagation probe leaves otherwise.
+
 ### 6.2 Rollback model (fixes C-1)
 
 Rollback has **two methods**. Default is snapshot restore — always works, fast, no SQL surprises.
@@ -621,13 +711,14 @@ All client methods use cursor pagination + `ETag`-based revalidation + `Cache-Co
 - Keeps public function names; delegates to `vault-api.ts`.
 - Uses SWR with keys including `RELEASE` so a deploy invalidates all client caches atomically.
 - **Service worker** (`public/sw.js`) caches the last 200 visited questions for offline resilience (fixes M-12).
+- **SW release-keying** (v2.1 — Chip N-H2, Dean N-6, David N-4): SW cache keys include `release_id`. On every page load, SW fetches `/manifest` and compares `release_id` to cached entries; entries with a stale `release_id` are evicted. SW uses `skipWaiting()` + `clients.claim()` on release-change so a redeploy purges SW cleanly. TTL: individual entries evict after 7 days regardless, so offline users don't see month-stale content. Phase-4 rollback drill explicitly tests "user with active SW survives `NEXT_PUBLIC_VAULT_FALLBACK=static` rollback" scenario.
 - **Graceful degradation**:
   - If API returns 5xx or circuit breaker open, show cached content + "serving from cache" indicator.
   - If `NEXT_PUBLIC_VAULT_FALLBACK=static` is set, fall back to the inlined `vault-manifest.json` + static corpus (retained for 2 releases post-cutover).
   - Top-200 most-practiced questions are inlined in `vault-manifest.json` so a cold user with a broken API still sees content.
 
-**Deletion policy (revised from v1, fixes C-1)**:
-- `src/data/corpus.json` (19 MB): retained for 2 releases after Phase-4 cutover. Site reads from it only when `NEXT_PUBLIC_VAULT_FALLBACK=static`. Deleted only after two green releases with no fallback events.
+**Deletion policy (revised v2.1, Dean N-10)**:
+- `src/data/corpus.json` (19 MB): retained **until the first schema-major bump post-cutover OR 2 green releases, whichever is later**. Site reads from it only when `NEXT_PUBLIC_VAULT_FALLBACK=static`. A schema-major change invalidates the static fallback as a rollback target (the shape no longer matches), so retention extends through the schema transition window.
 - `src/data/corpus-index.json`: same retention.
 
 **Kept**:
@@ -726,7 +817,10 @@ Chains currently participate in ~34% of questions. The paper rightly emphasizes 
 - Environments: staging, production
 - Schema: exactly mirrors `vault.db` (zero translation); DDL codegen'd from LinkML (H-2)
 - Migrations versioned under `staffml-vault-worker/migrations/`
-- `schema_fingerprint` row in `release_metadata`; worker refuses requests if mismatch (C-8)
+- **Schema-fingerprint verification** (revised v2.1 — fixes Dean N-4):
+  - **At cold start**: worker reads D1's actual DDL via `SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') ORDER BY name`, hashes it (normalized whitespace), and compares against `release_metadata.schema_fingerprint`. This checks DB-vs-metadata, not metadata-vs-metadata.
+  - **On mismatch**: worker does NOT 5xx the whole API (fixes Chip N-H1 total-outage risk). Instead: (a) logs `schema_fingerprint_mismatch` as a red SLI, (b) serves from the Cache API only (read-only degraded mode), (c) returns `X-Vault-Degraded: schema-fingerprint-mismatch` header so the site banner can surface the state. Operator intervention required to restore writes, but users keep seeing content.
+  - This is the "fail-open to cached" pattern — a hard reject creates a total brownout; cached-degraded keeps the site usable while fingerprint desync is debugged.
 
 ### 10.2 Worker API (v2 — SWR-friendly, release-keyed caching)
 
@@ -813,8 +907,9 @@ Before entering Phase 4, run a real load test:
 Gate thresholds for Phase 4 entry:
 - p99 warm ≤ 100ms on `/search`.
 - p99 cold ≤ 500ms (accepts D1 binding cold-start).
+- **Cost gate (v2.1 — Dean N-5)**: ≤ 500 D1 row-reads per FTS5 query, measured via Cloudflare D1 analytics on a representative query set. FTS5 with snippet extraction commonly amplifies row-reads 5-20× the logical result count. Missing this gate silently blows the §10.4 cost forecast regardless of latency.
 
-If thresholds missed, fall back to a Worker-local compiled index (corpus is ~20 MB — fits a Worker bundle with zstd) and re-measure. This is the pre-committed escape hatch, not a panicked pivot.
+If ANY of the three gates miss (p99 warm, p99 cold, cost), fall back to a Worker-local compiled index (corpus is ~20 MB — fits a Worker bundle with zstd) and re-measure. This is the pre-committed escape hatch, not a panicked pivot.
 
 ---
 
@@ -852,16 +947,15 @@ Not "one-line revert in corpus.ts." The real contract:
 - Site reads from Worker; `src/data/corpus.json` is retained for 2 releases (fallback path).
 - Rollback, if needed, is a redeploy with `NEXT_PUBLIC_VAULT_FALLBACK=static` — a config change, not a file restore. Exercised once in staging as part of Phase-4 acceptance.
 
-### 11.5 Pre-cutover equivalence testing (runs on every PR, not once)
+### 11.5 Pre-cutover equivalence testing (v2.1 — cost-aware, fixes David N-1 + Chip N-H4)
 
 Before Phase 4 flips production:
-- CI on every PR: `vault build` output vs. `staffml/src/data/corpus.json` must agree on:
-  - Question count (exact integer match).
-  - Question IDs (set equality).
-  - Per-question content hash (using §3.5 canonical hash).
-  - Chain membership (chain graph isomorphism).
+- CI on every PR: `vault build` produces `vault.db` + `release.json`. CI compares the **release_hash** (§3.5 Merkle) against a committed `corpus-equivalence-hash.txt` checksum that was computed from the current `staffml/src/data/corpus.json` at Phase 1 exit.
 - Any mismatch fails the PR. No silent drift accumulates.
+- **Why hash, not byte-diff**: committing the regenerated `corpus.json` and byte-comparing is expensive (28 MB binary diff, prone to spurious failures from PyYAML/Python version drift, creates merge-conflict pain on concurrent PRs — violates M-4). Committing a short `corpus-equivalence-hash.txt` and diffing the Merkle root is O(1) and cheat-proof because content-hash is already canonicalized per §3.5.
+- `corpus-equivalence-hash.txt` is updated once per Phase 2 release (not per PR); PRs that intentionally change corpus content bump this file in the same commit with a rationale comment.
 - This check runs from Phase 1 exit through Phase 4 entry (roughly 4–6 weeks).
+- **CI cost budget**: target ≤ 2 min total for `vault check --strict + build + equivalence-hash + codegen-drift + LSH dedup` on a standard GitHub runner. If it exceeds budget, move to a larger runner class rather than weakening checks. Incremental build caching by content-hash (only rebuild rows for changed YAML) is a Phase 2 follow-up.
 
 ---
 
@@ -966,15 +1060,6 @@ Drafts do **not** reach the published corpus without human review:
 - **`vault-cli` code**: MIT (consistent with other tools in this ecosystem).
 - License decision must be resolved **before Phase 3**; see §15 Open Questions.
 
-### Observability
-- Worker emits structured logs to Cloudflare Analytics.
-- Error tracking: use Sentry or built-in Workers observability.
-- Alert on:
-  - 5xx rate > 1%
-  - p99 latency > 500ms
-  - Daily request count anomalies
-- Weekly review of slow queries → candidate index additions.
-
 ### Collaborator safety
 - External contributions via PR. CI runs `vault check --strict` on every PR.
 - Never merge a PR that fails invariants.
@@ -1000,6 +1085,8 @@ Drafts do **not** reach the published corpus without human review:
   - Pydantic models → `vault-cli/src/vault_cli/models/` (internal use).
   - SQL DDL → `releases/<v>/schema.sql` (applied to D1).
   - TypeScript types → `@staffml/vault-types` package, versioned with the release, consumed by site + worker.
+- **Codegen "who runs it" contract** (v2.1 — Soumith H-NEW-3): PR authors run `vault codegen` locally before committing any LinkML-schema change, and commit the regenerated artifacts in the same PR. CI runs `vault codegen --check` which re-runs codegen in a tempdir and diffs against the committed output — fails the PR on drift, never pushes follow-up commits. This is the "trusted-but-verify" pattern; CI is the gate, not the fixer.
+- **TS package versioning** (v2.1 — Soumith M-NEW-1): `@staffml/vault-types` lives as a workspace package at `interviews/staffml-vault-types/`, referenced via pnpm `workspace:*` protocol in the site + worker `package.json`. No external npm publish. Version follows the vault release (`1.0.0`, `1.0.1`, ...); the workspace protocol ensures site and worker always pick up the current codegen output without a separate publish step.
 - CI fails if committed generated artifacts don't match current LinkML output. "No drift" is structurally enforced, not aspirational.
 
 ### Don't-bypass safeguards
@@ -1022,7 +1109,8 @@ Each phase is a safe stopping point. If priorities shift, pause at a phase bound
 - Write `vault/schema/EVOLUTION.md` — SemVer rules, loader contract, migration mechanics. (Fixes H-1.)
 - Write `vault-cli/docs/JSON_OUTPUT.md` and `EXIT_CODES.md`.
 - CI scaffolding: `.github/workflows/vault-ci.yml` runs `vault check` placeholder (expanded in Phase 1).
-- **Milestone**: `pip install -e vault-cli/ && vault --version` works. Skeleton CI green.
+- **Exemplar-coverage audit** (v2.1 — Chip N-H3): `vault stats --exemplar-coverage` reports which `(track, level, zone)` cells have <3 human-reviewed questions eligible for the `vault/exemplars/` pool. Output to `vault/exemplar-gaps.yaml`. This is a READ-ONLY audit at Phase 0; filling gaps is backlog work that unblocks `vault generate` (Phase 7), not a Phase 0 blocker.
+- **Milestone**: `pip install -e vault-cli/ && vault --version` works. Skeleton CI green. Exemplar gap inventory produced.
 
 ### Phase 1 — Foundation (5 days) — was 3
 - LinkML `question_schema.yaml` + Pydantic codegen + SQL DDL codegen + TS types codegen.
