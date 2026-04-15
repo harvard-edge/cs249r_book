@@ -23,6 +23,22 @@ You are starting the StaffML vault architecture migration. This is a planned, st
 - The user's primary working branch in /Users/VJ/GitHub/MLSysBook is `feat/mitpress-vol1-copyedit-r1` — DO NOT TOUCH.
 - 10 worktrees exist total, one per feature. Keep actions scoped to the staffml worktree.
 
+# FIRST ACTION: create the feature branch
+
+Before Stage 1 reviews, before any doc edits, create the dedicated feature branch
+so ALL work (review integrations, testing spec, eventual implementation) lives
+on one branch instead of polluting `dev`:
+
+```bash
+cd /Users/VJ/GitHub/MLSysBook-staffml
+git pull --ff-only origin dev
+git checkout -b feat/vault-architecture
+```
+
+All review commits (ARCHITECTURE.md v2, v3), testing plan commits (TESTING.md,
+CUTOVER_QA.md), and implementation commits (Phases 0–6) land on this branch.
+Push to origin after first real commit: `git push -u origin feat/vault-architecture`.
+
 # Your task, in three stages
 
 ## STAGE 1 — Plan review (iterative, 2–3 rounds)
@@ -84,7 +100,7 @@ Execute Phases 0 → 6 per ARCHITECTURE.md §14:
 - Phase 6: About page paper prominence (§9)
 
 Rules during autonomous execution:
-- Create fresh feature branch off dev: `git checkout -b feat/vault-architecture`
+- Stay on the feat/vault-architecture branch created at the start (do not branch again).
 - Work only inside: interviews/vault/, interviews/vault-cli/, interviews/staffml/src/lib/corpus.ts, interviews/staffml/src/lib/vault-api.ts, interviews/staffml-vault-worker/, interviews/paper/scripts/, interviews/staffml/src/data/* (deletions).
 - Atomic commits, no Co-Authored-By, descriptive messages, one logical change per commit.
 - After every phase: run full test suite, commit, push, post a phase-complete summary, wait for brief user ack, then proceed.
