@@ -20,6 +20,7 @@
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
   <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/sync-newsletter.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/sync-newsletter.yml?branch=dev&label=Newsletter&logo=buttondown&cacheSeconds=300" alt="Newsletter"></a>
   <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300" alt="Updated">
 </p>
 
