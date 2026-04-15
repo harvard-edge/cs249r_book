@@ -491,21 +491,15 @@ export default function GauntletPage() {
               </span>
             </div>
 
-            {/* Tools — gated by the user's realism choice on the setup screen.
-                Strict   = no tools at all (closest to a real whiteboard)
-                Standard = tools mounted, collapsed by default
-                Open     = tools mounted, expanded by default */}
-            {realism !== "strict" && (
-              <>
-                <HardwareRef defaultOpen={realism === "open"} />
-                <NapkinCalc defaultOpen={realism === "open"} />
-                <AskInterviewer
-                  questionContext={q.scenario}
-                  defaultOpen={realism === "open"}
-                  onAsk={(question) => recordClarification(q.id, question)}
-                />
-              </>
-            )}
+            {/* Tools available in all realism modes. `defaultOpen` still reflects
+                the user's setup choice: Open = expanded, Standard/Strict = collapsed. */}
+            <HardwareRef defaultOpen={realism === "open"} />
+            <NapkinCalc defaultOpen={realism === "open"} />
+            <AskInterviewer
+              questionContext={q.scenario}
+              defaultOpen={realism === "open"}
+              onAsk={(question) => recordClarification(q.id, question)}
+            />
 
             <div className="flex-1 p-5 flex flex-col overflow-y-auto">
               {!showAnswer ? (

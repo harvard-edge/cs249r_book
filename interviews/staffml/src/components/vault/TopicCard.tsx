@@ -19,13 +19,17 @@ export default function TopicCard({ topic, style, isSelected, onClick, compact }
         "w-full text-left rounded-xl border transition-all duration-150 group relative overflow-hidden",
         compact ? "p-3 pt-4" : "p-4 pt-5",
         isSelected
-          ? "bg-surfaceElevated border-borderHighlight shadow-[0_0_0_1px_rgba(255,255,255,0.05)]"
+          ? "bg-surfaceElevated"
           : "bg-surface border-borderSubtle hover:bg-surfaceElevated hover:border-borderHighlight"
       )}
+      style={isSelected ? {
+        borderColor: style.primary,
+        boxShadow: `0 0 0 1px ${style.primary}`,
+      } : undefined}
     >
-      {/* Colored left accent */}
-      <div className="absolute top-2 left-0 bottom-2 w-[3px] rounded-r-full opacity-50"
-        style={{ backgroundColor: style.primary }} />
+      {/* Colored left accent — fully opaque when selected to anchor drawer */}
+      <div className="absolute top-2 left-0 bottom-2 w-[3px] rounded-r-full"
+        style={{ backgroundColor: style.primary, opacity: isSelected ? 1 : 0.5 }} />
 
       {/* Title */}
       <div className="flex items-start justify-between gap-2 mb-2">

@@ -44,7 +44,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
   ];
 
   return (
-    <div className="w-[420px] h-full flex flex-col bg-background">
+    <div className="w-full h-full flex flex-col bg-background">
       {/* Header */}
       <div className="p-5 border-b border-border"
         style={{ background: `linear-gradient(180deg, ${style.primary}08 0%, transparent 100%)` }}>
@@ -65,7 +65,7 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-scroll min-h-0 scrollbar-drawer">
         <AnimatePresence mode="wait">
           {drillLevel ? (
             <motion.div key={`level-${drillLevel}`}
@@ -135,28 +135,51 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                 <p className="text-[14px] text-textSecondary leading-relaxed">{topic.description}</p>
               )}
 
-              {/* Difficulty levels */}
+              {/* Primary CTA — placed above filters (Fitts's Law).
+                  Most users want "drill everything" by default; power
+                  users who want to tune by difficulty can do so below. */}
+              <Link href={`/practice?topic=${topic.id}${trackParam}`}
+                className="flex items-center justify-center gap-2 w-full py-3.5 font-bold rounded-xl text-[14px] transition-all hover:opacity-90 shadow-sm"
+                style={{ backgroundColor: style.primary, color: "#101014" }}>
+                <Target className="w-4 h-4" />
+                Drill All {topic.questionCount} Questions
+              </Link>
+
+              {/* Compact stacked difficulty strip — at-a-glance mix */}
               <div>
-                <SectionDivider label="Difficulty Levels" />
-                <div className="space-y-1.5 mt-3">
+                <div className="flex items-baseline justify-between mb-2">
+                  <span className="text-[11px] font-mono text-textMuted uppercase tracking-wide">Difficulty mix</span>
+                  <span className="text-[11px] text-textTertiary">{topic.questionCount} total</span>
+                </div>
+                <div className="flex h-2 w-full rounded-full overflow-hidden bg-surfaceHover">
                   {LEVEL_IDS.map((level) => {
                     const count = topic.levels[level] || 0;
                     if (count === 0) return null;
                     const pct = (count / topic.questionCount) * 100;
                     const levelDef = LEVEL_DEFS.find(l => l.id === level);
                     return (
+                      <div key={level}
+                        title={`${levelDef?.name || level}: ${count}`}
+                        style={{ width: `${pct}%`, backgroundColor: levelDef?.color || style.primary }} />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Drill by difficulty — secondary path */}
+              <div>
+                <SectionDivider label="Or drill by difficulty" />
+                <div className="space-y-1.5 mt-3">
+                  {LEVEL_IDS.map((level) => {
+                    const count = topic.levels[level] || 0;
+                    if (count === 0) return null;
+                    const levelDef = LEVEL_DEFS.find(l => l.id === level);
+                    return (
                       <button key={level} onClick={() => setDrillLevel(level)}
-                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
+                        className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
                         <LevelBadge level={level} />
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-[13px] font-medium text-textSecondary">{levelDef?.name}</span>
-                            <span className="text-[14px] font-mono font-bold text-textPrimary">{count}</span>
-                          </div>
-                          <div className="h-1.5 bg-surfaceHover rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: levelDef?.color || style.primary }} />
-                          </div>
-                        </div>
+                        <span className="flex-1 text-left text-[13px] font-medium text-textSecondary">{levelDef?.name}</span>
+                        <span className="text-[13px] font-mono font-bold text-textPrimary">{count}</span>
                         <ChevronRight className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0 transition-colors" />
                       </button>
                     );
@@ -164,10 +187,10 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                 </div>
               </div>
 
-              {/* Deep dive — show learning resource before drill */}
+              {/* Deep dive — tertiary "learn first" affordance */}
               {topic.chapterUrl && (
                 <div>
-                  <SectionDivider label="Learn First" />
+                  <SectionDivider label="Learn first" />
                   <a href={safeHref(topic.chapterUrl)} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
                     <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
@@ -180,29 +203,19 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                 </div>
               )}
 
-              {/* Drill all CTA */}
-              <Link href={`/practice?topic=${topic.id}${trackParam}`}
-                className="flex items-center justify-center gap-2 w-full py-3.5 font-bold rounded-xl text-[14px] transition-all hover:opacity-90"
-                style={{ backgroundColor: style.primary, color: "#101014" }}>
-                <Target className="w-4 h-4" />
-                Drill All {topic.questionCount} Questions
-              </Link>
-
-              {/* Tracks */}
-              <div>
-                <SectionDivider label="Available In" />
-                <div className="flex gap-2 flex-wrap mt-3">
-                  {topic.tracks.map((t) => (
-                    <span key={t} className={clsx(
-                      "px-3 py-1.5 rounded-lg text-[13px] font-medium transition-colors",
-                      selectedTrack === t
-                        ? "bg-accentBlue/15 border-2 border-accentBlue text-accentBlue font-bold"
-                        : "bg-surface border border-borderSubtle text-textPrimary"
-                    )}>
-                      {formatTrackName(t)}
-                    </span>
-                  ))}
-                </div>
+              {/* Tracks — inline, compact (not a full section) */}
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                <span className="text-[11px] font-mono text-textMuted uppercase tracking-wide">Available in</span>
+                {topic.tracks.map((t) => (
+                  <span key={t} className={clsx(
+                    "px-2.5 py-1 rounded-md text-[12px] font-medium transition-colors",
+                    selectedTrack === t
+                      ? "bg-accentBlue/15 border border-accentBlue text-accentBlue font-bold"
+                      : "bg-surface border border-borderSubtle text-textSecondary"
+                  )}>
+                    {formatTrackName(t)}
+                  </span>
+                ))}
               </div>
             </motion.div>
           )}

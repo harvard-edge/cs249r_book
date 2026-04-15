@@ -79,14 +79,21 @@ function HomePage() {
     // etc. is treated as an intentional deep link and never redirected.
     // Runs after localStorage reads so SSR can still render the Vault
     // shell without mismatch.
+    // Session guard: once we've bounced to /welcome in this tab, don't
+    // bounce again — otherwise clicking "Vault" in the nav from /welcome
+    // ping-pongs back. Cross-session behavior (show again next tab
+    // open) is preserved because sessionStorage dies with the tab.
     if (attempts.length === 0 && searchParams.toString() === "") {
       let seen = false;
+      let bouncedThisSession = false;
       try {
         seen = localStorage.getItem("staffml_firstrun_welcome") === "1";
+        bouncedThisSession = sessionStorage.getItem("staffml_firstrun_bounced") === "1";
       } catch {
         seen = true; // If localStorage is blocked, assume seen so we don't trap them
       }
-      if (!seen) {
+      if (!seen && !bouncedThisSession) {
+        try { sessionStorage.setItem("staffml_firstrun_bounced", "1"); } catch { /* noop */ }
         router.replace("/welcome");
       }
     }
@@ -494,40 +501,42 @@ function HomePage() {
         </div>
 
         {/* Desktop detail drawer (right-anchored slide-over).
-            Positioned inside the main content flex container so it
-            naturally starts below the header/filter bar.
-            - Width reduced from 480px to 380px so the main track grid
-              stays readable even on a 13" display.
-            - Backdrop scrim removed (was bg-black/30). A transparent
-              click-catcher stays in place so clicking outside still
-              closes the drawer, but the grid is no longer dimmed.
+            - Width 440px: enough room for the drill CTA + filters
+              without crowding the topic grid on 13" displays.
+            - Soft scrim (bg-black/30) recedes the grid so the drawer
+              reads as the primary task, while still showing the
+              source card (anchored via accent border on TopicCard).
             - j/k (and ArrowDown/ArrowUp) sweep between topics without
               closing the drawer — see the keyboard effect above. */}
         <AnimatePresence>
           {selectedTopic && selectedStyle && (
-            <div className="hidden lg:block">
-              {/* Transparent click-catcher — closes the drawer on outside
-                  click without visually dimming the grid. */}
-              <div
-                key="desktop-catcher"
-                className="absolute inset-0 z-40"
-                onClick={() => setSelectedTopic(null)}
-                aria-hidden="true"
-              />
-              <motion.div
-                key="desktop-drawer"
-                initial={{ x: "100%" }}
-                animate={{ x: 0 }}
-                exit={{ x: "100%" }}
-                transition={{ type: "spring", damping: 32, stiffness: 320 }}
-                className="absolute top-0 right-4 z-50 w-[380px] max-w-[92vw] max-h-[calc(100%-1rem)] mt-2 border border-border bg-background shadow-2xl rounded-xl overflow-hidden"
-              >
-                <TopicDetail topic={selectedTopic}
-                  areaName={selectedArea?.name || ""} style={selectedStyle}
-                  selectedTrack={selectedTrack}
-                  onClose={() => setSelectedTopic(null)} />
-              </motion.div>
-            </div>
+            <motion.div
+              key="desktop-scrim"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="hidden lg:block absolute inset-0 z-40 bg-black/30"
+              onClick={() => setSelectedTopic(null)}
+              aria-hidden="true"
+            />
+          )}
+        </AnimatePresence>
+        <AnimatePresence>
+          {selectedTopic && selectedStyle && (
+            <motion.div
+              key="desktop-drawer"
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 32, stiffness: 320 }}
+              className="hidden lg:block absolute top-4 right-4 z-50 w-[440px] max-w-[92vw] h-[min(700px,calc(100%-2rem))] border border-border bg-background shadow-2xl rounded-xl overflow-hidden"
+            >
+              <TopicDetail topic={selectedTopic}
+                areaName={selectedArea?.name || ""} style={selectedStyle}
+                selectedTrack={selectedTrack}
+                onClose={() => setSelectedTopic(null)} />
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
