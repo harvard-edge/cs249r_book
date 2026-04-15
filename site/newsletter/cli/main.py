@@ -20,6 +20,7 @@ from rich.table import Table
 from . import __version__
 from .commands.archive import ArchiveCommand
 from .commands.base import BaseCommand
+from .commands.check import CheckCommand
 from .commands.list import ListCommand
 from .commands.new import NewCommand
 from .commands.push import PushCommand
@@ -34,6 +35,7 @@ from .core.theme import Theme
 COMMANDS: Dict[str, Type[BaseCommand]] = {
     "new":     NewCommand,
     "list":    ListCommand,
+    "check":   CheckCommand,
     "push":    PushCommand,
     "archive": ArchiveCommand,
     "status":  StatusCommand,

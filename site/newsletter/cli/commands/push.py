@@ -10,10 +10,12 @@ from pathlib import Path
 from rich.panel import Panel
 
 from .base import BaseCommand
+from .check import render_report
 from ..core.buttondown import ButtondownError, create_draft, upload_image
 from ..core.config import load_api_key
 from ..core.console import error, info, success
 from ..core.theme import Theme
+from ..core.validate import validate_draft
 
 try:
     import frontmatter
@@ -49,15 +51,28 @@ class PushCommand(BaseCommand):
             action="store_true",
             help="Show what would upload without pushing to Buttondown",
         )
+        parser.add_argument(
+            "--skip-checks",
+            action="store_true",
+            help="Skip the preflight validation (not recommended)",
+        )
 
     def run(self, args: Namespace) -> int:
         if frontmatter is None:
-            error("Install dependencies: pip install python-frontmatter requests rich")
+            error("Install dependencies: pip install -r site/newsletter/requirements.txt")
             return 1
 
         draft_path = self._resolve_draft_path(args.path)
         if draft_path is None:
             return 1
+
+        # Preflight validation. Block the push if any ERROR-severity check fails.
+        if not args.skip_checks:
+            report = validate_draft(draft_path, self.config.env_file)
+            render_report(self.console, report)
+            if not report.ok:
+                error("Preflight failed. Fix the errors above or pass --skip-checks.")
+                return 1
 
         post = frontmatter.load(draft_path)
         title = post.metadata.get("title")
@@ -114,11 +129,27 @@ class PushCommand(BaseCommand):
         self.console.print()
         success("Draft created.")
         self.console.print()
+
+        # Summary: show exactly what landed on Buttondown.
+        uploaded = getattr(self, "_uploaded_images", {})
+        summary_lines = [
+            f"[{Theme.EMPHASIS}]Title[/]    {title}",
+            f"[{Theme.EMPHASIS}]Images[/]   {len(uploaded)} uploaded",
+            f"[{Theme.EMPHASIS}]Email[/]    id={email_id or 'unknown'}",
+        ]
+        self.console.print(Panel(
+            "\n".join(summary_lines),
+            title="Pushed to Buttondown",
+            border_style=Theme.BORDER_SUCCESS,
+            expand=False,
+        ))
+        self.console.print()
         self.console.print(Panel(
             f"[{Theme.EMPHASIS}]{creation_url or 'Check buttondown.com/emails'}[/]\n\n"
-            f"[{Theme.DIM}]Preview the rendering in Buttondown, then send from the UI.[/]",
-            title="Preview & Send",
-            border_style=Theme.BORDER_SUCCESS,
+            f"[{Theme.DIM}]Preview the rendering in Buttondown, then send from the UI.[/]\n"
+            f"[{Theme.DIM}]After sending, run[/] [{Theme.COMMAND}]news archive {draft_path.stem}[/]",
+            title="Next",
+            border_style=Theme.BORDER_DEFAULT,
             expand=False,
         ))
         return 0
@@ -147,6 +178,7 @@ class PushCommand(BaseCommand):
         """Upload every local image and replace its markdown path with the CDN URL."""
         draft_dir = draft_path.parent
         seen: dict[str, str] = {}
+        self._uploaded_images = seen  # expose for post-push summary
 
         def replacement(match: re.Match[str]) -> str:
             alt = match.group(1)
@@ -159,7 +191,7 @@ class PushCommand(BaseCommand):
             self.console.print(f"  [{Theme.DIM}]uploading[/] {rel}")
             cdn_url = upload_image(api_key, resolved)
             seen[local_path] = cdn_url
-            self.console.print(f"  [{Theme.SUCCESS}]->[/] {cdn_url}")
+            self.console.print(f"  [{Theme.SUCCESS}]\u2713[/] {cdn_url}")
             return f"![{alt}]({cdn_url})"
 
         return LOCAL_IMAGE_RE.sub(replacement, body)
