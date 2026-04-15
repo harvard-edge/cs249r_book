@@ -698,4 +698,184 @@ When resuming:
 
 ---
 
+## 18. Review & Iteration Protocol (pre-implementation)
+
+Before ANY code is written, this plan must survive adversarial expert review. The review is iterative — not a single pass. Target: **2 rounds minimum, 3 if round 2 surfaces substantive issues.**
+
+### Reviewer panel
+
+Four reviewers, run in parallel each round. Chosen to cover orthogonal angles:
+
+| Reviewer | Lens | What they'll catch |
+|---|---|---|
+| `expert-chip-huyen` | Production ML & DX | Security gaps, client trust boundaries, prompt-injection surfaces, operational pitfalls |
+| `expert-jeff-dean` | Large-scale systems | Scale, reliability, observability, cost model, concurrency, data integrity |
+| `expert-soumith-chintala` | Framework & API design | CLI ergonomics, API contracts, developer experience, backwards compatibility |
+| `student-david` | Industry user perspective | Will the authoring flow actually feel good? What's confusing? What's missing? |
+
+### Per-round protocol
+
+**Round 1 — "read cold and tell me what's wrong"**
+- Send each reviewer the full ARCHITECTURE.md with explicit brief: identify risks, gaps, bugs, and weaknesses. Rank by severity.
+- Aggregate findings into a single table: {issue, reviewer, severity, proposed fix}.
+- Integrate every `severity: critical` and `severity: high` item into ARCHITECTURE.md v2.
+- `severity: medium` items get addressed OR explicitly deferred with rationale in the doc.
+- `severity: low` items: logged for later, not blocking.
+
+**Round 2 — "does v2 address your concerns?"**
+- Send each reviewer ARCHITECTURE.md v2 PLUS the round-1 findings-table with our responses.
+- Explicit brief: "do our responses resolve your concerns? what did we miss? anything NEW you see now?"
+- If no critical/high issues remain: plan is approved. Stop.
+- If critical/high issues remain: integrate into v3, run round 3.
+
+**Round 3 — "final adversarial pass"** (conditional)
+- Only if round 2 still surfaces critical/high issues.
+- Same reviewers, same protocol.
+- After round 3: any remaining critical/high must be resolved by explicit engineering decision + rationale OR the plan is not ready and needs a larger rework before proceeding.
+
+### Commit discipline
+
+- After each round: commit ARCHITECTURE.md with message `docs(vault): architecture v2 (round-N review integration)`.
+- Review findings table committed alongside as `REVIEWS.md` — durable record of what was raised, what was fixed, what was deferred, why.
+
+### Exit criteria for this stage
+
+1. Zero open critical/high issues across all four reviewers.
+2. All deferred medium issues have written rationale.
+3. REVIEWS.md captures the full iteration history.
+4. ARCHITECTURE.md version stamped in section 0 (status header).
+
+---
+
+## 19. Testing Plan (to be written as `TESTING.md`)
+
+Testing is NOT an afterthought. It's the gate between stages. This section is the *skeleton*; full spec lives in `interviews/vault/TESTING.md` (written before Phase 0 implementation).
+
+### 19.1 Test layers
+
+| Layer | Scope | When it runs | Blocker for |
+|---|---|---|---|
+| **Unit** | Single function, pure logic (validator rules, ID generation, path parsing) | Every commit, via `pytest` | Any PR merging |
+| **Integration** | Multi-component (YAML → vault.db, chain integrity, schema validation across corpus) | Every commit, via `pytest` | Any PR merging |
+| **Contract** | CLI command behavior end-to-end (`vault new`, `vault publish`, etc.) | Every commit, via `pytest` | Phase transitions |
+| **Data-migration** | Current `corpus.json` → YAML files → `vault.db` produces byte-equivalent content per ID | Once at Phase 1 exit | Phase 2 start |
+| **Export parity** | Site + paper agree on counts exactly | Once at Phase 2 exit | Phase 3 start |
+| **Worker contract** | D1 worker endpoints match TypeScript types, handle edge cases | Phase 3, continuous | Phase 4 start |
+| **End-to-end** | Real site fetching from staging D1, full practice/gauntlet flow | Phase 4, pre-cutover | Production cutover |
+| **Smoke** | 50 random question IDs: staging worker vs direct `vault.db` query, byte-identical JSON | Pre-every-production-deploy | Production deploy |
+| **Load** | Worker under realistic traffic (100 req/s sustained, 500 req/s burst) | Phase 4, pre-cutover | Production cutover |
+| **Rollback** | `vault rollback` produces state byte-identical to previous release | Phase 2, continuous | Every deploy |
+
+### 19.2 Test fixtures
+
+- **Test corpus**: 20 frozen questions covering all tracks, levels, zones, including 3 chained sequences. Lives at `vault-cli/tests/fixtures/test-corpus/`. Never changes unless fixture bump is explicit.
+- **Golden vault.db**: expected SQLite output from the test corpus. Byte-comparison against built output is the primary integration test.
+- **Schema drift fixtures**: deliberate broken YAMLs (missing fields, wrong types, invalid chain refs) to assert validator catches each class of error.
+
+### 19.3 CI integration
+
+GitHub Actions workflow `.github/workflows/vault-ci.yml`:
+1. On every PR touching `interviews/vault/` or `interviews/vault-cli/`:
+   - Run `pytest vault-cli/` (all unit + integration + contract tests)
+   - Run `vault check --strict` on the full corpus
+   - Run `vault build` and diff against last committed `vault.db`
+   - Report results as PR status check
+2. Merge-blocked on any red status.
+
+### 19.4 Manual QA checklist (cutover day)
+
+Written as `vault-cli/docs/CUTOVER_QA.md`. Every flow tested manually:
+- [ ] Home page: question count matches manifest
+- [ ] Practice page: load, filter by track, reveal answer, navigate chain, ask tutor
+- [ ] Gauntlet: start session, complete N questions, view post-mortem
+- [ ] Progress: attempts persist, due count correct
+- [ ] About: "Read the paper" visible above fold, BibTeX renders
+- [ ] Command palette: full-text search returns expected results
+- [ ] Network tab: no request for `corpus.json`
+- [ ] Bundle size: confirm practice/page.js < 500 KB
+- [ ] Rollback drill: revert to previous release, site works
+- [ ] Re-apply new release: site works
+
+### 19.5 Observability during rollout
+
+During Phase 4 cutover:
+- Worker request logs → Cloudflare Analytics dashboard
+- Error rate alert: > 1% 5xx over 5 minutes
+- Latency alert: p99 > 500ms sustained
+- Traffic canary: 10% → 50% → 100% with 15-min soak at each level
+- Ability to revert to static-JSON site bundle via one-line code change if red metrics
+
+---
+
+## 20. Autonomous Mode — When and How
+
+After Stages 1 (review) and 2 (testing plan) are gated through, implementation switches to autonomous execution.
+
+### 20.1 Pre-autonomous checklist
+
+Before flipping to autonomous mode, verify:
+- [ ] ARCHITECTURE.md v3+ (or v2 if round 2 clean) committed and pushed
+- [ ] REVIEWS.md committed with full iteration history
+- [ ] TESTING.md committed
+- [ ] CUTOVER_QA.md drafted
+- [ ] Zero open critical/high issues from reviewers
+- [ ] User has explicitly green-lit autonomous execution
+
+### 20.2 Autonomous execution rules
+
+Once in autonomous mode, the operator (future Claude session) executes Phases 0 → 6 with:
+
+1. **Fresh feature branch** off current `dev`: `feat/vault-architecture`.
+2. **Working from** `/Users/VJ/GitHub/MLSysBook-staffml` (the StaffML worktree).
+3. **Commit style** per `.claude/CLAUDE.md`:
+   - No `Co-Authored-By` lines
+   - No automated attribution footers
+   - Atomic commits, one logical change each
+   - Descriptive messages explaining the *why*
+4. **Never force-push.** Never merge to `dev` without explicit user approval.
+5. **Never delete data** without a rollback path in the same commit.
+6. **After every phase**: run full test suite, commit, push, post phase-complete summary.
+
+### 20.3 Checkpoint protocol
+
+At the end of each phase:
+- Summary post: what was built, what was tested, what changed in counts/bundle/latency, what's next.
+- Wait for user ack before starting the next phase. (Brief — single message exchange.)
+- If the user doesn't respond, continue to next phase after noting the unacked checkpoint.
+
+### 20.4 Stop conditions
+
+Stop autonomous execution and ask the user if:
+- A test fails in a way not covered by TESTING.md
+- An invariant check catches something genuinely ambiguous
+- A design decision in ARCHITECTURE.md turns out to be wrong in practice
+- A phase runs long enough that rolling back seems preferable to forward-fixing
+- Anything touches data outside `interviews/vault/`, `interviews/vault-cli/`, `interviews/staffml/`, `interviews/staffml-vault-worker/`, `interviews/paper/scripts/` without being pre-authorized
+- The user asks
+
+### 20.5 Success definition
+
+Autonomous execution is complete when:
+1. Production site serves from D1 (no static `corpus.json` in bundle)
+2. Paper reads from `vault.db` (SQL-driven macros)
+3. Per-file YAML is the sole authoring surface
+4. All tests green
+5. Manual QA checklist fully passed
+6. Zero data loss verified (set equality of question IDs, content hash per ID)
+7. Paper and site agree on all counts by construction
+8. CUTOVER_QA.md all items checked
+9. Monitoring dashboards report healthy for 48 hours post-cutover
+
+---
+
+## 21. Kickoff Prompt (copy-paste into new session)
+
+The exact text the user pastes to launch the next session is maintained in a separate file for ease of copying:
+
+**`interviews/vault/KICKOFF.md`**
+
+Keep that file in sync with this architecture doc. When the plan changes in a way that alters the kickoff instructions, update both.
+
+---
+
 **End of architecture document.**
