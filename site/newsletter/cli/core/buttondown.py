@@ -109,18 +109,50 @@ def create_draft(
 
 
 def list_emails(api_key: str, status: str | None = None) -> list[dict[str, Any]]:
-    """List emails, optionally filtered by status (draft, scheduled, sent)."""
+    """List emails, optionally filtered by status (draft, scheduled, sent).
+
+    Follows Buttondown's pagination (`next` URL) until exhausted so callers
+    get the full history, not just the first page.
+    """
     params = {"status": status} if status else {}
     logger.debug("Listing Buttondown emails (status=%s)", status)
+
+    url: str | None = f"{API_BASE}/emails"
+    results: list[dict[str, Any]] = []
+    first_request = True
+
+    while url:
+        response = requests.get(
+            url,
+            headers=_auth_headers(api_key),
+            params=params if first_request else None,
+            timeout=DEFAULT_TIMEOUT_SECS,
+        )
+        first_request = False
+        if response.status_code >= 400:
+            raise ButtondownError(
+                f"List failed ({response.status_code}): {response.text}"
+            )
+        data = response.json()
+        if isinstance(data, list):
+            results.extend(data)
+            url = None
+        else:
+            results.extend(data.get("results", []))
+            url = data.get("next")
+    return results
+
+
+def get_email(api_key: str, email_id: str) -> dict[str, Any]:
+    """Fetch a single email by its Buttondown id."""
+    logger.debug("Fetching Buttondown email %s", email_id)
     response = requests.get(
-        f"{API_BASE}/emails",
+        f"{API_BASE}/emails/{email_id}",
         headers=_auth_headers(api_key),
-        params=params,
         timeout=DEFAULT_TIMEOUT_SECS,
     )
     if response.status_code >= 400:
         raise ButtondownError(
-            f"List failed ({response.status_code}): {response.text}"
+            f"Get failed ({response.status_code}): {response.text}"
         )
-    data = response.json()
-    return data.get("results", data if isinstance(data, list) else [])
+    return response.json()

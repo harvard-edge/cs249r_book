@@ -21,8 +21,11 @@ from . import __version__
 from .commands.archive import ArchiveCommand
 from .commands.base import BaseCommand
 from .commands.check import CheckCommand
+from .commands.diff import DiffCommand
 from .commands.list import ListCommand
 from .commands.new import NewCommand
+from .commands.open import OpenCommand
+from .commands.pull import PullCommand
 from .commands.push import PushCommand
 from .commands.status import StatusCommand
 from .core.config import Config
@@ -37,7 +40,10 @@ COMMANDS: Dict[str, Type[BaseCommand]] = {
     "list":    ListCommand,
     "check":   CheckCommand,
     "push":    PushCommand,
+    "pull":    PullCommand,
     "archive": ArchiveCommand,
+    "diff":    DiffCommand,
+    "open":    OpenCommand,
     "status":  StatusCommand,
 }
 
