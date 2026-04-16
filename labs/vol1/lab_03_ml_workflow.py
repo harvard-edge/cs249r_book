@@ -206,9 +206,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_stage = mo.ui.slider(
         start=1, stop=6, value=5, step=1,
         label="Discovery stage (1=Problem Definition, 6=Monitoring)",
@@ -228,9 +226,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_cycle_a = mo.ui.slider(
         start=1, stop=336, value=168, step=1,
         label="Team A cycle time (hours)",
@@ -254,9 +250,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_sliders = {
         "data_collect": mo.ui.slider(start=0, stop=20, value=3, step=1,
                                       label="Data Collection (person-months)"),
@@ -285,8 +279,6 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_months = mo.ui.slider(
         start=0, stop=24, value=0, step=1,
         label="Months since production launch",
