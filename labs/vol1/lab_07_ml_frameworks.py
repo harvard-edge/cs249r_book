@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -64,7 +64,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, Engine, H100, ESP32,
         H100_BW_GBS, H100_DISPATCH, H100_RAM_GB, ESP32_RAM_KB,

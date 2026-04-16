@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ async def _():
     GPU_COST_HR = 3.0     # $/GPU-hour cloud pricing
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR, DecisionLog, Hardware, H100, A100, EDGE, H100_RAM_GB, EDGE_RAM_GB
 
 

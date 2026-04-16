@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np,
         make_subplots, mlsysim, DecisionLog, Hardware, H100, A100, EDGE,
