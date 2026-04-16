@@ -632,8 +632,10 @@ def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm
     # Enable gradient tracking for all model parameters.
     # Layers (e.g. Linear) may be created without requires_grad=True,
     # so we set it explicitly here to ensure backward() populates param.grad.
+    # Guard against raw numpy arrays passed by test stubs or non-Tensor params.
     for param in model.parameters():
-        param.requires_grad = True
+        if isinstance(param, Tensor):
+            param.requires_grad = True
 
     # Training state
     self.epoch = 0
