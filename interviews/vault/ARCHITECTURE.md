@@ -213,9 +213,11 @@ details:
     <canonical answer>
   napkin_math: |                        # restricted-Markdown + KaTeX
     <step-by-step arithmetic if applicable>
-  deep_dive:
-    title: "PagedAttention and KV Cache Management"
-    url: "https://mlsysbook.ai/book/chapters/serving"  # scheme must be https:
+  resources:                              # optional; author-curated list
+    - name: "arXiv: Efficient Memory Management for LLM Serving (Kwon et al., 2023)"
+      url: "https://arxiv.org/abs/2309.06180"   # scheme must be https:
+    - name: "vLLM: PagedAttention design doc"
+      url: "https://blog.vllm.ai/2023/06/20/vllm.html"
 
 tags:
   - hardware:a100
@@ -261,7 +263,7 @@ tags:
 - `title`: plaintext (≤120 chars).
 - `scenario`: plaintext only. Validator rejects raw HTML tags, `<script>`, `javascript:`/`data:` URLs.
 - `details.common_mistake` / `details.realistic_solution` / `details.napkin_math`: restricted Markdown (emphasis, inline code, fenced code, lists, links) plus KaTeX `$...$` and `$$...$$` math. Validator runs a CommonMark parser + allowlist pass.
-- `details.deep_dive.url`: scheme must be `https:`. Rejected: `http:`, `javascript:`, `data:`, relative URLs.
+- `details.resources[].url`: scheme must be `https:`. Rejected: `http:`, `javascript:`, `data:`, relative URLs. `details.resources[].name` must be non-empty plaintext.
 - Fields are sanitized at render time on the site (DOMPurify) in addition to validator-time rejection.
 
 *Authors (new — fixes M-15):*
@@ -279,8 +281,9 @@ See the compiler output in `vault-cli/src/vault_cli/compiler.py`. Key tables:
 ```
 questions(id PK, title, topic FK, track, level, zone, status,
           scenario, common_mistake, realistic_solution, napkin_math,
-          deep_dive_title, deep_dive_url, provenance,
-          created_at, last_modified, file_path, content_hash, authors_json)
+          provenance, created_at, last_modified, file_path, content_hash, authors_json)
+
+resources(question_id FK, position, name, url, PK(question_id, position))
 
 chains(id PK, name, topic FK)
 chain_questions(chain_id, question_id FK, position, PK(chain_id, position))
@@ -593,7 +596,7 @@ Every `vault build` and `vault check` runs these. Grouped by speed tier. The fas
 10. Content-format per field (fixes H-6):
     - `scenario`: plaintext only — validator rejects `<`, `>`, `<script`, `javascript:`, `data:`.
     - Markdown fields: CommonMark parse + allowlist pass (no raw HTML).
-    - `details.deep_dive.url`: scheme must match `^https://`.
+    - `details.resources[].url`: scheme must match `^https://`; `name` non-empty.
 
 ### Structural (CI, runs in <30s for 10K files — parallelized)
 11. Every `topic` exists in `taxonomy.yaml`. **(Fixes the 87/79 bug.)**

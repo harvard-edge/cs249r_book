@@ -128,11 +128,15 @@ def parse_md_to_questions(file_path, track, scope):
                             break
                     details['napkin_math'] = ' | '.join(nm_lines) if nm_lines else ''
 
+            # Legacy markdown import: the old '📖 Deep Dive:' single-link format
+            # maps to a one-element resources list under the new schema.
             if '📖 **Deep Dive:**' in full_block:
                 link_part = full_block.split('📖 **Deep Dive:**')[1].split('\n')[0]
                 if '[' in link_part and '](' in link_part:
-                    details['deep_dive_title'] = link_part.split('[')[1].split(']')[0]
-                    details['deep_dive_url'] = link_part.split('(')[1].split(')')[0]
+                    name = link_part.split('[')[1].split(']')[0]
+                    url = link_part.split('(')[1].split(')')[0]
+                    if name and url and url.startswith('https://'):
+                        details.setdefault('resources', []).append({'name': name, 'url': url})
 
             if '> **Options:**' in full_block:
                 options_block = full_block.split('> **Options:**')[1].split('</details>')[0]
