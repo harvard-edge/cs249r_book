@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# ┌─── DEPRECATED ────────────────────────────────────────────────────────────┐
+# │ Pre-YAML-migration script. Manifest is now emitted as a release           │
+# │ artifact by `vault publish <version>` (releases/<v>/release.json).        │
+# │ See ./DEPRECATED.md for the full map.                                     │
+# └───────────────────────────────────────────────────────────────────────────┘
 """Generate vault-manifest.json from corpus and taxonomy data.
 
 Run after any corpus/taxonomy update to version the vault.

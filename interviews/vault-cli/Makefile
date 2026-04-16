@@ -1,9 +1,11 @@
 # Makefile for vault-cli — convenience wrappers over CLI and tests (B.2).
 
 PKG_DIR := $(shell pwd)
-REPO_ROOT := $(shell git rev-parse --show-toplevel 2>/dev/null || echo "$(PKG_DIR)/../..")
+# `git rev-parse --git-path hooks` works correctly in both regular clones
+# and worktrees (where .git is a file pointing at the main repo's hooks dir).
+HOOKS_DIR := $(shell git rev-parse --git-path hooks 2>/dev/null)
 HOOK_SRC := $(PKG_DIR)/scripts/pre_commit_corpus_guard.py
-HOOK_DST := $(REPO_ROOT)/.git/hooks/pre-commit
+HOOK_DST := $(HOOKS_DIR)/pre-commit
 
 .PHONY: install test lint hooks hooks-uninstall help
 
@@ -26,7 +28,10 @@ lint:
 	@mypy src || echo "[mypy] strict is non-blocking at Phase 0"
 
 hooks:
-	@mkdir -p "$(REPO_ROOT)/.git/hooks"
+	@if [ -z "$(HOOKS_DIR)" ]; then \
+		echo "could not resolve git hooks dir; run make from a git checkout"; exit 1; \
+	fi
+	@mkdir -p "$(HOOKS_DIR)"
 	@if [ -e "$(HOOK_DST)" ] && [ ! -L "$(HOOK_DST)" ]; then \
 		echo "refusing to overwrite non-symlink at $(HOOK_DST); remove it first"; \
 		exit 1; \

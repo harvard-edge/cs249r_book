@@ -11,6 +11,7 @@ from rich.table import Table
 
 from vault_cli.compiler import build as compile_build
 from vault_cli.exit_codes import ExitCode
+from vault_cli.legacy_export import emit_legacy_corpus
 from vault_cli.loader import load_all
 
 console = Console()
@@ -32,6 +33,14 @@ def register(app: typer.Typer) -> None:
         ),
         release_id: str = typer.Option("dev", "--release-id", help="Release identifier to stamp."),
         as_json: bool = typer.Option(False, "--json", help="Emit machine-readable summary."),
+        legacy_json: bool = typer.Option(
+            False,
+            "--legacy-json",
+            help="Also regenerate the site-compatible corpus.json at "
+                 "interviews/staffml/src/data/corpus.json from YAML. "
+                 "Required until Phase-4 cutover; closes §11.1 'corpus.json "
+                 "is generated, not authored'.",
+        ),
     ) -> None:
         """Compile all YAML questions under vault/questions/ to a SQLite file.
 
@@ -54,6 +63,15 @@ def register(app: typer.Typer) -> None:
             output=output,
             release_id=release_id,
         )
+
+        if legacy_json:
+            legacy_out = Path("interviews/staffml/src/data/corpus.json")
+            legacy_result = emit_legacy_corpus(vault_dir, loaded, legacy_out)
+            result["legacy_json"] = legacy_result
+            console.print(
+                f"[dim]legacy corpus.json: {legacy_result['count']} questions → "
+                f"{legacy_result['output']}[/dim]"
+            )
 
         if as_json:
             print(json.dumps({

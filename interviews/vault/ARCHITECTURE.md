@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2.3** — Round-4 security+safety review integrated 2026-04-16. Phases 0-6 landed + full Bucket B + 3C/4H/3M/2L security fixes.
+> **Status**: **v2.4** — Phase-1 migration contract fully closed in-repo 2026-04-16. YAML is the sole authoring surface; corpus.json is a generated artifact enforced by pre-commit hook + CI equivalence check.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).
@@ -1294,19 +1294,28 @@ When resuming:
 
 ---
 
-## Appendix: References to current code
+## Appendix: Current state of pre-migration components
 
-| Current component | New home |
+| Legacy component | Post-migration state (v2.4) |
 |---|---|
-| `interviews/vault/corpus.json` (28 MB) | `interviews/vault/questions/**/*.yaml` |
-| `interviews/vault/scripts/generate.py` | `vault-cli/src/vault_cli/commands/generate.py` |
-| `interviews/vault/scripts/export_to_staffml.py` | Gone. Replaced by `vault publish` + `exporters/d1.py`. |
-| `interviews/staffml/scripts/sync-vault.py` | Gone. |
-| `interviews/staffml/scripts/generate-manifest.py` | Built by `vault publish`. |
-| `interviews/paper/scripts/analyze_corpus.py` | Folded into `exporters/paper.py`. |
-| `interviews/paper/scripts/generate_macros.py` | Rewritten in `exporters/paper.py` — SQL-driven. |
-| `interviews/staffml/src/lib/corpus.ts` (static import) | Thin wrapper over `vault-api.ts`. |
-| `interviews/staffml/src/data/corpus.json` | Deleted post-cutover. |
+| `interviews/vault/corpus.json` (28 MB) | **Generated, not authored.** Pre-commit hook refuses direct edits. Retained as pre-split reference snapshot. |
+| `interviews/vault/questions/**/*.yaml` | Sole source of truth. 9,657 files. |
+| `interviews/staffml/src/data/corpus.json` | **Regenerated** by `vault build --legacy-json` from YAML. 9,199 published questions. CI diff-check enforces equivalence. Bundled in site until Phase-4 cutover; removed 2 releases post-cutover per §7.1 retention. |
+| `interviews/vault/scripts/generate.py` | Phase-7 follow-up: `vault generate --topic X --zone Y --level Lz --count N` (see §12). |
+| `interviews/vault/scripts/export_to_staffml.py` | **DEPRECATED** (header added). Replaced by `vault build --legacy-json`. |
+| `interviews/staffml/scripts/sync-vault.py` | **DEPRECATED** (header added). Replaced by `vault build --legacy-json`. |
+| `interviews/staffml/scripts/generate-manifest.py` | **DEPRECATED** (header added). Manifest emitted as release artifact by `vault publish`. |
+| `interviews/paper/scripts/analyze_corpus.py` | **DEPRECATED** (header added). Replaced by `vault export-paper <version>` (SQL over vault.db). |
+| `interviews/paper/scripts/generate_macros.py` | **Rewritten** as thin wrapper over `vault export-paper`. Paper.tex needs no edits — legacy `\num*` namespace preserved alongside new `\staffml*`. |
+| `interviews/staffml/src/lib/corpus.ts` | Static-import path remains live pre-cutover. `corpus-source.ts` + `corpus-vault.ts` + `useVaultQuestion` hook provide the Phase-4 cutover path; components opt in one-at-a-time. |
+| `interviews/vault/scripts/DEPRECATED.md` | New. Maps every legacy script to its replacement. |
+| `interviews/staffml/scripts/DEPRECATED.md` | New. Same for the site side. |
+
+**Migration complete** (in-repo): YAML is authoritative; all downstream
+artifacts (vault.db, corpus.json, macros.tex, corpus_stats.json) regenerate
+deterministically from it via `vault build` + `vault export-paper` +
+`vault build --legacy-json`. Phase-4 cutover (swap site's bundled JSON for
+live D1 reads) is the remaining step, deploy-gated on user action.
 
 ---
 
