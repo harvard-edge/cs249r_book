@@ -20,18 +20,20 @@ import type { Cursor, Env, Manifest, QuestionRow } from "./types";
 // Cold-start memo for schema fingerprint check (per-instance; warm workers skip).
 let schemaOk: boolean | undefined;
 
-async function checkSchemaFingerprint(env: Env): Promise<boolean> {
+async function checkSchemaFingerprint(env: Env, expectedFromDb: string | undefined): Promise<boolean> {
   if (schemaOk !== undefined) return schemaOk;
-  // Fail-closed on placeholder (Chip R3-C1, Dean R3-NH-3): a deploy that
-  // forgot to substitute the real fingerprint MUST enter degraded mode.
-  if (!env.SCHEMA_FINGERPRINT || env.SCHEMA_FINGERPRINT === "PLACEHOLDER-deploy-time") {
+  // Gemini R5-C-3: read expected fingerprint from release_metadata rather
+  // than env var. Compiler emits it at build time; CLI deploys it as part
+  // of release_metadata; worker reads it here. No more wrangler.toml hand-
+  // editing after DDL changes.
+  if (!expectedFromDb) {
+    // No fingerprint in DB → release pipeline didn't emit one, or migration
+    // didn't propagate. Fail closed to degraded mode.
     schemaOk = false;
     return schemaOk;
   }
   try {
     const result = await env.DB.prepare(
-      // Include triggers per ARCHITECTURE.md §10.1: FTS5 adds triggers that
-      // are part of the schema identity.
       "SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).all<{ sql: string | null }>();
     const ddl = (result.results ?? [])
@@ -43,7 +45,7 @@ async function checkSchemaFingerprint(env: Env): Promise<boolean> {
     const hex = Array.from(new Uint8Array(digest))
       .map(b => b.toString(16).padStart(2, "0"))
       .join("");
-    schemaOk = hex === env.SCHEMA_FINGERPRINT;
+    schemaOk = hex === expectedFromDb;
   } catch {
     schemaOk = false;
   }
@@ -61,11 +63,22 @@ function maybeInvalidateSchemaCache(releaseId: string | undefined): void {
   if (!releaseId) return;
   if (lastSeenRelease !== null && lastSeenRelease !== releaseId) {
     schemaOk = undefined;
+    manifestMemo = null;   // force re-read from D1 on release change
   }
   lastSeenRelease = releaseId;
 }
 
+// Gemini R5-H-1: module-level manifest memo (60s TTL). Before this,
+// getManifest hit D1 on every request — including cache-hit requests —
+// which silently blew the §10.4 "~5 D1 reads/session" cost target.
+let manifestMemo: { manifest: Manifest; at: number } | null = null;
+const MANIFEST_TTL_MS = 60_000;
+
 async function getManifest(env: Env): Promise<Manifest> {
+  const now = Date.now();
+  if (manifestMemo && now - manifestMemo.at < MANIFEST_TTL_MS) {
+    return manifestMemo.manifest;
+  }
   const rows = await env.DB.prepare("SELECT key, value FROM release_metadata").all<{
     key: string;
     value: string;
@@ -74,14 +87,16 @@ async function getManifest(env: Env): Promise<Manifest> {
   for (const r of rows.results ?? []) meta[r.key] = r.value;
   const release_id = meta.release_id ?? "unknown";
   maybeInvalidateSchemaCache(release_id);
-  return {
+  const manifest: Manifest = {
     release_id,
     release_hash: meta.release_hash ?? "",
     schema_version: meta.schema_version ?? "1",
     policy_version: meta.policy_version ?? "1",
     published_count: Number.parseInt(meta.published_count ?? "0", 10),
-    schema_fingerprint_ok: await checkSchemaFingerprint(env),
+    schema_fingerprint_ok: await checkSchemaFingerprint(env, meta.schema_fingerprint),
   };
+  manifestMemo = { manifest, at: now };
+  return manifest;
 }
 
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {

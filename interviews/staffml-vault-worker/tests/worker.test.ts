@@ -19,13 +19,14 @@ beforeEach(async () => {
 });
 
 // Minimal mock D1 — behaves like D1Database for the paths we use.
-function mockDB(rows: Record<string, any>[]): D1Database {
+function mockDB(rows: Record<string, any>[], extraMeta: Record<string, string> = {}): D1Database {
   const meta: Record<string, string> = {
     release_id: "1.0.0",
     release_hash: "1b304282774cf9cbc7f28b07ed151bc12041c92610e73809f9f594c199661b23",
     schema_version: "1",
     policy_version: "1",
     published_count: String(rows.length),
+    ...extraMeta,
   };
   return {
     prepare(sql: string) {
@@ -125,7 +126,16 @@ describe("schema-fingerprint degraded mode", () => {
   });
 
   it("real fingerprint value clears the flag", async () => {
-    const env = makeEnv({ SCHEMA_FINGERPRINT: await mockFingerprint() });
+    // Gemini R5-C-3: fingerprint now comes from release_metadata, not env.
+    // Mock DB must return it alongside other metadata rows.
+    const fp = await mockFingerprint();
+    const env: Env = {
+      ...makeEnv(),
+      DB: mockDB([
+        { id: "global-0000", title: "T", topic: "t", track: "global", level: "l1",
+          zone: "recall", status: "published", content_hash: "hash-a" },
+      ], { schema_fingerprint: fp }),
+    };
     const res = await worker.fetch(new Request("https://x/manifest"), env, ctx());
     const body = await res.json() as any;
     expect(body.schema_fingerprint_ok).toBe(true);

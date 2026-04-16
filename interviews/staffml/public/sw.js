@@ -86,13 +86,17 @@ self.addEventListener("activate", (event) => {
       if (persisted && _isAllowedOrigin(persisted)) {
         self.__VAULT_API_ORIGIN = persisted;
       }
-      // Evict any caches that are not the current one; release-change invalidation.
-      const names = await caches.keys();
-      await Promise.all(
-        names
-          .filter(n => n.startsWith(CACHE_PREFIX) && n !== cacheName)
-          .map(n => caches.delete(n)),
-      );
+      // Gemini R5-C-2: persist + restore currentRelease so offline SW wake-ups
+      // find the correct cache. Previously cacheName was '-unknown' until
+      // /manifest succeeded; activate then deleted the real cache on mismatch.
+      const persistedRelease = await idbGet("vault_current_release");
+      if (persistedRelease && typeof persistedRelease === "string") {
+        currentRelease = persistedRelease;
+        cacheName = `${CACHE_PREFIX}${VERSION}-${persistedRelease}`;
+      }
+      // DO NOT prune caches in activate — pruning happens inside
+      // updateReleaseFromManifest() only AFTER we've confirmed the new
+      // release_id online. Offline activate must never destroy valid cache.
     })(),
   );
 });
@@ -111,6 +115,8 @@ async function updateReleaseFromManifest(api) {
     if (manifest.release_id && manifest.release_id !== currentRelease) {
       currentRelease = manifest.release_id;
       cacheName = `${CACHE_PREFIX}${VERSION}-${manifest.release_id}`;
+      // Gemini R5-C-2: persist the release so offline wake-ups can restore it.
+      idbSet("vault_current_release", manifest.release_id);
       const names = await caches.keys();
       await Promise.all(
         names

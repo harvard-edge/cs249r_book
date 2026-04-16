@@ -288,13 +288,51 @@ def register(app: typer.Typer) -> None:
 
     @app.command("tag")
     def tag_cmd(
-        version: str = typer.Argument(...),
+        version: str = typer.Argument(..., callback=lambda v: (_validate_version(v) or v)),
     ) -> None:
-        """git-commit release artifacts and create a v<version> tag."""
+        """git-commit release artifacts and create a v<version> tag.
+
+        Gemini R5-M-1: raises on git failures instead of swallowing. Previously
+        check=False masked "tag already exists", "nothing to commit", merge
+        conflicts — operator saw green output while the release was broken.
+        """
         import subprocess
-        subprocess.run(["git", "add", "interviews/vault/releases"], check=False)
-        subprocess.run(["git", "commit", "-m", f"chore(release): {version}"], check=False)
-        subprocess.run(["git", "tag", f"v{version}"], check=False)
+
+        # git add
+        add_r = subprocess.run(
+            ["git", "add", "interviews/vault/releases"],
+            capture_output=True, text=True, check=False,
+        )
+        if add_r.returncode != 0:
+            console.print(f"[red]git add failed[/red]: {add_r.stderr}")
+            raise typer.Exit(code=ExitCode.IO_ERROR)
+
+        # git commit (nothing-to-commit is OK when re-tagging existing release)
+        commit_r = subprocess.run(
+            ["git", "commit", "-m", f"chore(release): {version}"],
+            capture_output=True, text=True, check=False,
+        )
+        if commit_r.returncode != 0 and "nothing to commit" not in (
+            commit_r.stdout + commit_r.stderr
+        ):
+            console.print(f"[red]git commit failed[/red]: {commit_r.stderr}")
+            raise typer.Exit(code=ExitCode.IO_ERROR)
+
+        # git tag — skip if it already exists at current HEAD; fail otherwise
+        existing = subprocess.run(
+            ["git", "rev-parse", "--verify", f"refs/tags/v{version}"],
+            capture_output=True, text=True, check=False,
+        )
+        if existing.returncode == 0:
+            console.print(f"[yellow]tag v{version} already exists[/yellow]; skipping create")
+        else:
+            tag_r = subprocess.run(
+                ["git", "tag", "-a", f"v{version}", "-m", f"release {version}"],
+                capture_output=True, text=True, check=False,
+            )
+            if tag_r.returncode != 0:
+                console.print(f"[red]git tag failed[/red]: {tag_r.stderr}")
+                raise typer.Exit(code=ExitCode.IO_ERROR)
         console.print(f"[green]tagged[/green] v{version}")
 
     @app.command("publish")

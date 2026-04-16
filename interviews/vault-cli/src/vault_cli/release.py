@@ -122,11 +122,16 @@ def _sql_quote(s: Any) -> str:
 # Tables whose content participates in migrations, and the primary-key columns
 # used to diff rows. Driven by PRAGMA at runtime to tolerate schema evolution
 # without silent column drift (Dean R3-NH-2).
+#
+# release_metadata MUST be in this set (Gemini R5-C-1): without it, the new
+# release_id / release_hash never reach D1 after ``vault ship``, so the worker
+# keeps serving the old release forever.
 _MIGRATION_TABLES = {
     "questions":       ("id",),
     "chains":          ("id",),
     "chain_questions": ("chain_id", "position"),
     "tags":            ("question_id", "tag"),
+    "release_metadata": ("key",),
 }
 
 
@@ -155,8 +160,14 @@ def _dump_table(db: Path, table: str, pk_cols: tuple[str, ...]) -> tuple[list[st
 
 
 def _insert_stmt(table: str, cols: list[str], row: dict[str, Any]) -> str:
-    vals = [_sql_quote(row.get(c)) for c in cols]
-    return f"INSERT OR REPLACE INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)});"
+    # Gemini R5-H-2: only emit columns actually present in ``row``. When we
+    # roll back to a state that predates a new column, emitting an explicit
+    # NULL for that column breaks against future NOT NULL schemas. Omitting
+    # the column lets SQLite apply the column default (or NULL-if-nullable)
+    # cleanly.
+    actual = [c for c in cols if c in row]
+    vals = [_sql_quote(row[c]) for c in actual]
+    return f"INSERT OR REPLACE INTO {table} ({', '.join(actual)}) VALUES ({', '.join(vals)});"
 
 
 def _delete_stmt(table: str, pk_cols: tuple[str, ...], pk: tuple) -> str:

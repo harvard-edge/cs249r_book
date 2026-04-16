@@ -30,6 +30,9 @@ from vault_cli.commands import (
     doctor as doctor_cmd_mod,
 )
 from vault_cli.commands import (
+    dup as dup_cmd_mod,
+)
+from vault_cli.commands import (
     promote as promote_cmd_mod,
 )
 from vault_cli.commands import (
@@ -63,6 +66,7 @@ codegen_cmd_mod.register(app)
 doctor_cmd_mod.register(app)
 diff_cmd_mod.register(app)
 promote_cmd_mod.register(app)
+dup_cmd_mod.register(app)
 
 
 def _version_callback(value: bool) -> None:

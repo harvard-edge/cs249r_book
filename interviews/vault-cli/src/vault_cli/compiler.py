@@ -197,12 +197,30 @@ def build(
             policy_hash=policy_hash,
         )
 
+        # Gemini R5-C-3: schema_fingerprint must be computed here and stored
+        # in release_metadata so the worker's cold-start check reads it from
+        # the DB rather than env.SCHEMA_FINGERPRINT (which required manual
+        # wrangler.toml edits after every DDL change — guaranteed to drift).
+        import hashlib
+        import re
+        ddl_rows = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+        ddl_text = "\n".join(
+            re.sub(r"\s+", " ", (sql or "")).strip()
+            for (sql,) in ddl_rows
+            if sql
+        )
+        schema_fingerprint = hashlib.sha256(ddl_text.encode("utf-8")).hexdigest()
+
         meta = {
             "release_id": release_id,
             "release_hash": rhash,
             "policy_version": str(policy_version(policy)),
             "schema_version": "1",
             "published_count": str(len(released)),
+            "schema_fingerprint": schema_fingerprint,
         }
         cur = conn.cursor()
         for k, v in meta.items():

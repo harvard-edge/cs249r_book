@@ -224,8 +224,11 @@ def _check_applicability(
         return []
     import json
     matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    # Gemini R5-L-1: normalize both sides to lowercase so a hand-maintained
+    # applicable_cells.json that uses "Cloud" / "Edge" still matches the
+    # lowercase-normalized path components in the loaded questions.
     excluded = {
-        (c.get("track"), c.get("topic"))
+        (str(c.get("track", "")).lower(), str(c.get("topic", "")).lower())
         for c in (matrix.get("excluded_cells") or [])
         if isinstance(c, dict)
     }
@@ -233,7 +236,7 @@ def _check_applicability(
         return []
     out: list[InvariantFailure] = []
     for lq in loaded:
-        if (lq.classification.track.value, lq.question.topic) in excluded:
+        if (lq.classification.track.value.lower(), lq.question.topic.lower()) in excluded:
             out.append(
                 _fail(
                     "structural",
@@ -350,6 +353,14 @@ def _scenario_dedup_lsh(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
             band_key = (b,) + tuple(sig[b * rows : (b + 1) * rows])
             buckets[band_key].append(idx)
 
+    # Gemini R5-H-4: load acknowledged pairs so legitimate templates don't
+    # permanently red the nightly pipeline.
+    try:
+        from vault_cli.commands.dup import ack_pairs
+        acked = ack_pairs()
+    except Exception:  # noqa: BLE001 — validator must never crash on ack-read
+        acked = set()
+
     seen: set[tuple[int, int]] = set()
     failures: list[InvariantFailure] = []
     for members in buckets.values():
@@ -361,6 +372,9 @@ def _scenario_dedup_lsh(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
                 if (a, b) in seen:
                     continue
                 seen.add((a, b))
+                pair_key = tuple(sorted((loaded[a].id, loaded[b].id)))
+                if pair_key in acked:
+                    continue   # operator acknowledged as intentional
                 score = jaro_winkler(loaded[a].question.scenario, loaded[b].question.scenario)
                 if score > JW_THRESHOLD:
                     failures.append(
@@ -370,7 +384,8 @@ def _scenario_dedup_lsh(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
                             qid=loaded[a].id,
                             message=(
                                 f"scenario Jaro-Winkler={score:.3f} vs {loaded[b].id!r}; "
-                                "acknowledge with `vault dup --ack` if intentional"
+                                f"acknowledge with `vault dup --ack {loaded[a].id} {loaded[b].id}` "
+                                "if intentional"
                             ),
                         )
                     )
