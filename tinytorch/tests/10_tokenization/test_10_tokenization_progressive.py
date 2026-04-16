@@ -578,10 +578,14 @@ class TestRegressionPrevention:
         # Training level (if available)
         try:
             from tinytorch.core.training import Trainer
+            from tinytorch.core.tensor import Tensor as _Tensor
 
             class DummyModel:
+                def __init__(self):
+                    self._param = _Tensor(np.array([1.0]), requires_grad=True)
+
                 def parameters(self):
-                    return [np.array([1.0])]
+                    return [self._param]
 
             class DummyOptimizer:
                 def __init__(self, params, lr):
