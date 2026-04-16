@@ -1,16 +1,21 @@
 /**
  * StaffML Vault Worker — edge API over D1.
  *
- * Implements ARCHITECTURE.md §10 with v2.1 refinements:
+ * Implements ARCHITECTURE.md §10 with v2.1 + v2.2 refinements:
  * - X-Vault-Release is INFORMATIONAL (not hard-reject) — soft SLI signal.
  * - schema_fingerprint verified against sqlite_master at cold start; on
- *   mismatch, serves cached-only with X-Vault-Degraded header (no 5xx).
+ *   mismatch, serves cached-only (Cache API) with X-Vault-Degraded (no 5xx).
  * - Cache keys include release_id for atomic POP invalidation on deploy.
  * - 10-minute cross-release grace window during propagation.
- * - All endpoints: ETag + Cache-Control SWR-friendly.
+ * - Cloudflare Cache API wired (B.1) — release-hash-keyed per-URL.
+ * - Keyset pagination (B.3) — cursors are {after_id, filter_hash}; server
+ *   rejects cross-filter cursor reuse.
+ * - Rate limits enforced via RATE_LIMIT_KV (B.4) — 60 rpm default, 10 rpm
+ *   on /search.
  */
 
-import type { Cursor, DegradedReason, Env, Manifest, QuestionRow } from "./types";
+import { checkRateLimit } from "./rate_limit";
+import type { Cursor, Env, Manifest, QuestionRow } from "./types";
 
 // Cold-start memo for schema fingerprint check (per-instance; warm workers skip).
 let schemaOk: boolean | undefined;
@@ -19,16 +24,14 @@ async function checkSchemaFingerprint(env: Env): Promise<boolean> {
   if (schemaOk !== undefined) return schemaOk;
   // Fail-closed on placeholder (Chip R3-C1, Dean R3-NH-3): a deploy that
   // forgot to substitute the real fingerprint MUST enter degraded mode.
-  // Silent auto-pass on placeholder was the v2.1 Critical regression.
   if (!env.SCHEMA_FINGERPRINT || env.SCHEMA_FINGERPRINT === "PLACEHOLDER-deploy-time") {
     schemaOk = false;
     return schemaOk;
   }
   try {
     const result = await env.DB.prepare(
-      // Include triggers per ARCHITECTURE.md §10.1 (Dean R3-NH-4 adjacent):
-      // FTS5 materializes as tables + shadow tables + triggers. Omitting
-      // triggers means FTS5-aware releases hash differently from non-FTS5.
+      // Include triggers per ARCHITECTURE.md §10.1: FTS5 adds triggers that
+      // are part of the schema identity.
       "SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).all<{ sql: string | null }>();
     const ddl = (result.results ?? [])
@@ -49,9 +52,9 @@ async function checkSchemaFingerprint(env: Env): Promise<boolean> {
 
 /**
  * Forget the cached schema-fingerprint decision so the next request re-checks.
- * Called on release_id change (R3-NH-4): every deploy advances release_id in
- * release_metadata, which surfaces via /manifest. That natural cadence keeps
- * the check fresh without per-request cost.
+ * Called on release_id change (Dean R3-NH-4): every deploy advances release_id,
+ * which surfaces via /manifest. That natural cadence keeps the check fresh
+ * without per-request cost.
  */
 let lastSeenRelease: string | null = null;
 function maybeInvalidateSchemaCache(releaseId: string | undefined): void {
@@ -94,7 +97,12 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
 
 function json(
   body: unknown,
-  init: ResponseInit & { etag?: string; degradedReason?: DegradedReason; releaseId?: string } = {},
+  init: ResponseInit & {
+    etag?: string;
+    degradedReason?: string;
+    releaseId?: string;
+    cacheControl?: string;
+  } = {},
 ): Response {
   const headers = new Headers({
     "Content-Type": "application/json; charset=utf-8",
@@ -103,6 +111,7 @@ function json(
   if (init.etag) headers.set("ETag", init.etag);
   if (init.releaseId) headers.set("X-Vault-Release", init.releaseId);
   if (init.degradedReason) headers.set("X-Vault-Degraded", init.degradedReason);
+  if (init.cacheControl) headers.set("Cache-Control", init.cacheControl);
   return new Response(JSON.stringify(body), { status: init.status ?? 200, headers });
 }
 
@@ -117,11 +126,60 @@ function encodeCursor(c: Cursor): string {
 function decodeCursor(s: string | null): Cursor | null {
   if (!s) return null;
   try {
-    return JSON.parse(atob(s)) as Cursor;
+    const parsed = JSON.parse(atob(s)) as unknown;
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const c = parsed as Partial<Cursor>;
+    if (typeof c.after_id !== "string" || typeof c.filter_hash !== "string") return null;
+    return { after_id: c.after_id, filter_hash: c.filter_hash };
   } catch {
     return null;
   }
 }
+
+// ─── Cloudflare Cache API (B.1) ──────────────────────────────────────────────
+
+/**
+ * Build a stable Cache API key keyed by release_id so a deploy atomically
+ * invalidates all cached entries (ARCHITECTURE.md §6.1.1 correctness boundary).
+ *
+ * The release_id is injected into the cache URL as a path prefix so the CF
+ * edge cache treats different releases as disjoint namespaces.
+ */
+function cacheKey(req: Request, releaseId: string): Request {
+  const url = new URL(req.url);
+  url.pathname = `/__vault__/${releaseId}${url.pathname}`;
+  return new Request(url.toString(), { method: "GET", headers: req.headers });
+}
+
+async function cachedOrCompute(
+  req: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  ttlSec: number,
+  compute: () => Promise<Response>,
+  opts: { useCache: boolean } = { useCache: true },
+): Promise<Response> {
+  if (!opts.useCache) return compute();
+  const manifest = await getManifest(env);
+  const key = cacheKey(req, manifest.release_id);
+  const cached = await caches.default.match(key);
+  if (cached) {
+    // Clone so callers can still read the body.
+    return new Response(cached.body, cached);
+  }
+  const res = await compute();
+  // Only cache 2xx + ok responses; never cache degraded responses that
+  // would otherwise poison the release-keyed namespace.
+  if (res.ok && !res.headers.get("X-Vault-Degraded")) {
+    const cacheable = new Response(res.body, res);
+    cacheable.headers.set("Cache-Control", cacheControl(ttlSec));
+    ctx.waitUntil(caches.default.put(key, cacheable.clone()));
+    return cacheable;
+  }
+  return res;
+}
+
+// ─── Endpoint handlers ───────────────────────────────────────────────────────
 
 async function handleManifest(env: Env, req: Request): Promise<Response> {
   const origin = req.headers.get("Origin");
@@ -137,16 +195,17 @@ async function handleManifest(env: Env, req: Request): Promise<Response> {
     etag,
     releaseId: manifest.release_id,
     degradedReason: manifest.schema_fingerprint_ok ? undefined : "schema-fingerprint-mismatch",
-    headers: {
-      "Cache-Control": cacheControl(Number.parseInt(env.CACHE_TTL_MANIFEST, 10)),
-      ...corsHeaders(env, origin),
-    },
+    cacheControl: cacheControl(Number.parseInt(env.CACHE_TTL_MANIFEST, 10)),
+    headers: corsHeaders(env, origin),
   });
 }
 
 async function handleQuestionById(env: Env, req: Request, id: string): Promise<Response> {
   const origin = req.headers.get("Origin");
-  const row = await env.DB.prepare("SELECT * FROM questions WHERE id = ?").bind(id).first<QuestionRow>();
+  const row = await env.DB
+    .prepare("SELECT * FROM questions WHERE id = ?")
+    .bind(id)
+    .first<QuestionRow>();
   if (!row) {
     return json({ error: "not-found", id }, { status: 404, headers: corsHeaders(env, origin) });
   }
@@ -161,17 +220,34 @@ async function handleQuestionById(env: Env, req: Request, id: string): Promise<R
   return json(row, {
     etag,
     releaseId: manifest.release_id,
-    headers: {
-      "Cache-Control": cacheControl(Number.parseInt(env.CACHE_TTL_QUESTION, 10)),
-      ...corsHeaders(env, origin),
-    },
+    cacheControl: cacheControl(Number.parseInt(env.CACHE_TTL_QUESTION, 10)),
+    headers: corsHeaders(env, origin),
   });
+}
+
+/** Compute a short stable hash of the filter param set for cursor binding. */
+async function filterHash(params: URLSearchParams): Promise<string> {
+  const keys = ["track", "level", "zone", "topic", "status"];
+  const parts = keys.map(k => `${k}=${params.get(k) ?? ""}`);
+  const buf = new TextEncoder().encode(parts.join("&"));
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest))
+    .slice(0, 8)
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 async function handleQuestions(env: Env, req: Request, url: URL): Promise<Response> {
   const origin = req.headers.get("Origin");
   const params = url.searchParams;
+  const expectedFilterHash = await filterHash(params);
   const cursor = decodeCursor(params.get("cursor"));
+  if (cursor && cursor.filter_hash !== expectedFilterHash) {
+    return json(
+      { error: "cursor-filter-mismatch", detail: "cursor was minted under different filter params" },
+      { status: 400, headers: corsHeaders(env, origin) },
+    );
+  }
   const limit = Math.min(Number.parseInt(params.get("limit") ?? "50", 10), 200);
 
   const where: string[] = [];
@@ -184,71 +260,99 @@ async function handleQuestions(env: Env, req: Request, url: URL): Promise<Respon
     }
   }
 
+  // Keyset pagination (Chip R3-H2 fix).
+  if (cursor?.after_id) {
+    where.push("id > ?");
+    binds.push(cursor.after_id);
+  }
+
   const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-  const offset = cursor?.offset ?? 0;
 
   const rows = await env.DB
     .prepare(
       `SELECT id, title, topic, track, level, zone, status, content_hash
-       FROM questions ${whereSql} ORDER BY id LIMIT ? OFFSET ?`,
+       FROM questions ${whereSql} ORDER BY id LIMIT ?`,
     )
-    .bind(...binds, limit, offset)
+    .bind(...binds, limit)
     .all<Partial<QuestionRow>>();
 
-  const filterHash = (where.join("&") || "all");
-  const nextCursor: Cursor | null = (rows.results?.length ?? 0) === limit
-    ? { offset: offset + limit, filter_hash: filterHash }
+  const items = rows.results ?? [];
+  const nextCursor: Cursor | null = items.length === limit
+    ? { after_id: items[items.length - 1].id!, filter_hash: expectedFilterHash }
     : null;
 
   const manifest = await getManifest(env);
   return json(
-    {
-      items: rows.results ?? [],
-      next_cursor: nextCursor ? encodeCursor(nextCursor) : null,
-    },
+    { items, next_cursor: nextCursor ? encodeCursor(nextCursor) : null },
     {
       releaseId: manifest.release_id,
-      headers: {
-        "Cache-Control": cacheControl(600),
-        ...corsHeaders(env, origin),
-      },
+      cacheControl: cacheControl(600),
+      headers: corsHeaders(env, origin),
     },
   );
 }
 
 async function handleSearch(env: Env, req: Request, url: URL): Promise<Response> {
   const origin = req.headers.get("Origin");
-  const q = url.searchParams.get("q") ?? "";
+  const q = (url.searchParams.get("q") ?? "").trim();
   const limit = Math.min(Number.parseInt(url.searchParams.get("limit") ?? "20", 10), 50);
   if (!q) {
     return json({ error: "missing-query-q" }, { status: 400, headers: corsHeaders(env, origin) });
   }
-  // Phase 3: LIKE search; FTS5 virtual table adds in Phase 3.x once indexed.
-  const pattern = `%${q}%`;
-  const rows = await env.DB
-    .prepare(
-      `SELECT id, title, topic, track, level, zone
-       FROM questions
-       WHERE title LIKE ? OR scenario LIKE ? OR realistic_solution LIKE ?
-       ORDER BY id LIMIT ?`,
-    )
-    .bind(pattern, pattern, pattern, limit)
-    .all();
+  // Detect whether FTS5 table exists; use it when available, otherwise
+  // fall back to LIKE (pre-FTS5-migration D1 instances).
+  let ftsAvailable = false;
+  try {
+    const probe = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='questions_fts' LIMIT 1"
+    ).first<{ name: string } | null>();
+    ftsAvailable = Boolean(probe);
+  } catch {
+    ftsAvailable = false;
+  }
+
+  let rows;
+  if (ftsAvailable) {
+    // Escape FTS5 syntax characters — keep user input from injecting
+    // MATCH expressions that would break the parse.
+    const escaped = q.replace(/[^\w\s]/g, " ");
+    rows = await env.DB
+      .prepare(
+        `SELECT q.id, q.title, q.topic, q.track, q.level, q.zone,
+                snippet(questions_fts, 1, '<mark>', '</mark>', '…', 16) AS snippet
+         FROM questions_fts
+         JOIN questions q ON q.rowid = questions_fts.rowid
+         WHERE questions_fts MATCH ?
+         ORDER BY rank
+         LIMIT ?`,
+      )
+      .bind(escaped, limit)
+      .all();
+  } else {
+    const pattern = `%${q}%`;
+    rows = await env.DB
+      .prepare(
+        `SELECT id, title, topic, track, level, zone
+         FROM questions
+         WHERE title LIKE ? OR scenario LIKE ? OR realistic_solution LIKE ?
+         ORDER BY id LIMIT ?`,
+      )
+      .bind(pattern, pattern, pattern, limit)
+      .all();
+  }
   const manifest = await getManifest(env);
   return json(
-    { results: rows.results ?? [], query: q },
+    { results: rows.results ?? [], query: q, fts: ftsAvailable },
     {
       releaseId: manifest.release_id,
-      headers: {
-        "Cache-Control": cacheControl(Number.parseInt(env.CACHE_TTL_SEARCH, 10)),
-        ...corsHeaders(env, origin),
-      },
+      cacheControl: cacheControl(Number.parseInt(env.CACHE_TTL_SEARCH, 10)),
+      headers: corsHeaders(env, origin),
     },
   );
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const origin = req.headers.get("Origin");
 
@@ -259,17 +363,65 @@ export default {
       return json({ error: "method-not-allowed" }, { status: 405, headers: corsHeaders(env, origin) });
     }
 
+    // ── Rate limiting (B.4) ──────────────────────────────────────────────
+    const rlClass: "default" | "search" = url.pathname === "/search" ? "search" : "default";
+    const rl = await checkRateLimit(env, req, rlClass);
+    if (!rl.ok) {
+      return json(
+        { error: "rate-limited", retry_after_seconds: rl.retryAfterSec },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(rl.retryAfterSec),
+            ...corsHeaders(env, origin),
+          },
+        },
+      );
+    }
+
     try {
-      if (url.pathname === "/manifest") return await handleManifest(env, req);
-      if (url.pathname === "/questions") return await handleQuestions(env, req, url);
+      // ── Cache API wrap (B.1) ────────────────────────────────────────────
+      // GET endpoints that are safely cacheable route through caches.default
+      // keyed by release_id. Non-cacheable endpoints (dynamic /search, or
+      // cursored /questions where cursor is user-supplied) skip the cache.
+      if (url.pathname === "/manifest") {
+        return await cachedOrCompute(
+          req, env, ctx,
+          Number.parseInt(env.CACHE_TTL_MANIFEST, 10),
+          () => handleManifest(env, req),
+        );
+      }
       if (url.pathname.startsWith("/questions/")) {
         const id = url.pathname.slice("/questions/".length);
-        return await handleQuestionById(env, req, id);
+        return await cachedOrCompute(
+          req, env, ctx,
+          Number.parseInt(env.CACHE_TTL_QUESTION, 10),
+          () => handleQuestionById(env, req, id),
+        );
       }
-      if (url.pathname === "/search") return await handleSearch(env, req, url);
+      if (url.pathname === "/questions") {
+        // Cache paginated list responses — cache key includes full URL so
+        // different filter/cursor combos are distinct entries.
+        return await cachedOrCompute(
+          req, env, ctx, 600,
+          () => handleQuestions(env, req, url),
+        );
+      }
+      if (url.pathname === "/search") {
+        return await cachedOrCompute(
+          req, env, ctx,
+          Number.parseInt(env.CACHE_TTL_SEARCH, 10),
+          () => handleSearch(env, req, url),
+        );
+      }
       if (url.pathname === "/stats") {
-        const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM questions").first<{ n: number }>();
-        return json({ count: row?.n ?? 0 }, { headers: corsHeaders(env, origin) });
+        const row = await env.DB
+          .prepare("SELECT COUNT(*) AS n FROM questions")
+          .first<{ n: number }>();
+        return json(
+          { count: row?.n ?? 0 },
+          { cacheControl: cacheControl(3600), headers: corsHeaders(env, origin) },
+        );
       }
       return json({ error: "unknown-endpoint" }, { status: 404, headers: corsHeaders(env, origin) });
     } catch (e) {

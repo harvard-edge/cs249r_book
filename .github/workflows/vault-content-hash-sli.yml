@@ -1,0 +1,122 @@
+name: '🎯 StaffML · 🔍 Content-Hash SLI'
+
+# =============================================================================
+# Hourly cross-language content_hash verification (B.5).
+#
+# Samples 20 random IDs from the latest release's vault.db, fetches the same
+# IDs from the production worker, and re-computes the canonical content_hash
+# in Python from the worker's response fields. Alerts if any mismatch.
+#
+# This replaces the Worker-local cross-language hash path (Chip R3-H5) with
+# a Python GitHub-Actions cron — avoids porting hashing.py canonicalization
+# to TypeScript (which would create a drift-bomb invariant).
+#
+# Triggers:
+#   - workflow_dispatch: manual
+#   - schedule: hourly
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'   # :17 past each hour to avoid top-of-hour stampedes
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sample-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      WORKER_URL: ${{ vars.VAULT_WORKER_URL }}   # e.g., https://staffml-vault.mlsysbook.ai
+      SAMPLE_SIZE: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -e interviews/vault-cli/
+      - name: Verify content-hash parity
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import random
+          import sqlite3
+          import sys
+          import urllib.request
+          from pathlib import Path
+          sys.path.insert(0, "interviews/vault-cli/src")
+          from vault_cli.hashing import content_hash
+
+          worker = os.environ["WORKER_URL"].rstrip("/")
+          sample_size = int(os.environ.get("SAMPLE_SIZE", "20"))
+
+          # Find the latest release vault.db in-repo.
+          releases = sorted(Path("interviews/vault/releases").glob("[0-9]*"))
+          if not releases:
+              sys.exit("no releases under interviews/vault/releases/")
+          latest = releases[-1]
+          db_path = latest / "vault.db"
+          if not db_path.exists():
+              sys.exit(f"no vault.db at {db_path}")
+
+          conn = sqlite3.connect(db_path)
+          conn.row_factory = sqlite3.Row
+          rows = conn.execute("SELECT id FROM questions").fetchall()
+          ids = random.sample([r["id"] for r in rows], min(sample_size, len(rows)))
+
+          mismatches = []
+          for qid in ids:
+              req = urllib.request.Request(f"{worker}/questions/{qid}",
+                                            headers={"User-Agent": "content-hash-sli"})
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  row = json.load(r)
+              # Reconstruct canonical content_hash input from worker response.
+              # Must match vault_cli.hashing.content_hash output.
+              payload = {
+                  "id": row["id"],
+                  "title": row["title"],
+                  "topic": row["topic"],
+                  "status": row["status"],
+                  "scenario": row["scenario"],
+                  "provenance": row["provenance"],
+                  "details": {
+                      "realistic_solution": row["realistic_solution"],
+                  },
+              }
+              if row.get("common_mistake"):
+                  payload["details"]["common_mistake"] = row["common_mistake"]
+              if row.get("napkin_math"):
+                  payload["details"]["napkin_math"] = row["napkin_math"]
+              if row.get("deep_dive_url"):
+                  payload["details"]["deep_dive"] = {
+                      "title": row.get("deep_dive_title", ""),
+                      "url": row["deep_dive_url"],
+                  }
+              expected = content_hash(payload)
+              actual = row.get("content_hash")
+              if expected != actual:
+                  mismatches.append({"id": qid, "expected": expected, "actual": actual})
+
+          if mismatches:
+              print(f"[FAIL] {len(mismatches)}/{len(ids)} content_hash mismatches")
+              for m in mismatches[:5]:
+                  print(f"  {m['id']}: expected {m['expected'][:16]} actual {str(m['actual'])[:16]}")
+              sys.exit(1)
+          print(f"[OK] {len(ids)}/{len(ids)} content_hash samples match production worker")
+          PY
+
+      - name: File issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `content-hash SLI mismatch on ${new Date().toISOString()}`,
+              body: `Hourly content-hash sampling detected a mismatch between the production worker and the release manifest. See workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nThis is a data-plane SLI alert per ARCHITECTURE.md §10.5. Investigate immediately — corpus content may be corrupted at the edge.`,
+              labels: ['vault-sli', 'bug', 'priority-high'],
+            });

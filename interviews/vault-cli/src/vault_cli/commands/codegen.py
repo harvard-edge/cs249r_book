@@ -51,6 +51,11 @@ def register(app: typer.Typer) -> None:
         With --check: assert all three artifacts exist and hash as expected.
         """
         if check:
+            # Phase-1/2: hash-based drift detection. A committed
+            # `codegen-hashes.txt` pins the expected artifact hashes; CI
+            # fails if the live hashes drift. Missing baseline → first-run
+            # auto-record (non-fatal); subsequent runs enforce.
+            baseline = Path("interviews/vault-cli/codegen-hashes.txt")
             missing = [a for a in ARTIFACTS if not a.exists()]
             if missing:
                 console.print(
@@ -59,13 +64,46 @@ def register(app: typer.Typer) -> None:
                 for a in missing:
                     console.print(f"  - {a}")
                 raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
-            # Phase-1: presence + non-empty. Phase-2 will diff against
-            # `linkml-generate-pydantic` / DDL / TS outputs.
-            for a in ARTIFACTS:
-                if a.stat().st_size == 0:
-                    console.print(f"[red]error[/red]: {a} is empty")
-                    raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
-            console.print(f"[green]✓ codegen artifacts present[/green] ({len(ARTIFACTS)} files)")
+
+            current = {str(a): _hash_file(a) for a in ARTIFACTS}
+
+            if not baseline.exists():
+                lines = [f"{h} {p}" for p, h in sorted(current.items())]
+                baseline.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                console.print(
+                    f"[yellow]recorded baseline[/yellow] at {baseline} "
+                    f"({len(ARTIFACTS)} artifacts)"
+                )
+                return
+
+            expected = {}
+            for line in baseline.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                h, p = line.split(None, 1)
+                expected[p] = h
+
+            drift = []
+            for path, actual in current.items():
+                if expected.get(path) != actual:
+                    drift.append((path, expected.get(path), actual))
+            if drift:
+                console.print(f"[red]codegen drift detected[/red] ({len(drift)} file(s)):")
+                for path, exp, act in drift:
+                    console.print(
+                        f"  {path}\n    expected {str(exp)[:16]}… got {act[:16]}…"
+                    )
+                console.print(
+                    "[yellow]If the change is intentional, update "
+                    "`interviews/vault-cli/codegen-hashes.txt` and commit.[/yellow]"
+                )
+                raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
+
+            console.print(
+                f"[green]✓ codegen artifacts unchanged vs baseline[/green] "
+                f"({len(ARTIFACTS)} files)"
+            )
             return
         console.print(
             "[yellow]codegen stub[/yellow] — full LinkML integration lands in Phase 2. "

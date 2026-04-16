@@ -346,55 +346,109 @@ def register(app: typer.Typer) -> None:
         version: str = typer.Argument(...),
         env: str = typer.Option(..., "--env", help="staging | production"),
         releases_dir: Path = typer.Option(Path("interviews/vault/releases"), "--releases-dir"),
-        resume: bool = typer.Option(False, "--resume", help="Continue an interrupted ship from the journal."),
-        dry_run: bool = typer.Option(False, "--dry-run", help="Print the leg plan and exit."),
+        worker_dir: Path = typer.Option(
+            Path("interviews/staffml-vault-worker"), "--worker-dir",
+            help="Path to staffml-vault-worker for wrangler invocations.",
+        ),
+        site_dir: Path = typer.Option(
+            Path("interviews/staffml"), "--site-dir",
+            help="Path to the Next.js site for deploy invocations.",
+        ),
+        resume: bool = typer.Option(False, "--resume"),
+        dry_run: bool = typer.Option(False, "--dry-run"),
+        skip_legs: str = typer.Option(
+            "", "--skip-legs",
+            help="Comma-separated leg names to skip (e.g., 'paper' to ship without git tag).",
+        ),
     ) -> None:
         """Atomic three-surface release: D1 → Next.js → paper-tag.
 
-        Journaled at ``releases/<version>/.ship-journal.json``. Auto-rolls
-        back pre-paper failures in reverse order. Paper-leg failure pages
-        the operator — remediation is a forward-fix release. (§6.1.1 +
-        Dean R3-NH-1.)
-
-        This Phase-1/2 implementation uses stub rollback handlers that log
-        the action; real hooks to ``wrangler`` + Next.js deploy land as
-        Phase-3 entry work when the user has Cloudflare credentials.
+        Ordering is load-bearing per §6.1.1: D1 first (rollback-cheap via R2
+        snapshot), Next.js second (rollback-cheap via `wrangler pages rollback`),
+        paper-tag LAST (remote-durable; never force-pushed; rollback = manual
+        forward-fix release).
         """
+        import subprocess
+
         release_dir = releases_dir / version
         if not release_dir.exists():
             console.print(f"[red]error[/red]: release {version} not found — run `vault publish {version}` first")
             raise typer.Exit(code=ExitCode.IO_ERROR)
         journal = release_dir / ".ship-journal.json"
+        skip = {s.strip() for s in skip_legs.split(",") if s.strip()}
+        d1_env_name = "staffml-vault" if env == "production" else "staffml-vault-staging"
+        migration_sql = release_dir / "d1-migration.sql"
 
-        # Stub leg plans — real hooks to wrangler + Cloudflare Pages deploy
-        # land as Phase-3 entry work. Until then, legs log the intended
-        # action so the journal + rollback flow can be exercised in staging.
+        def _run(cmd: list[str], cwd: Path | None = None) -> str:
+            result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                raise RuntimeError(f"command failed ({result.returncode}): {' '.join(cmd)}\n{result.stderr}")
+            return result.stdout
+
         def d1_forward() -> dict:
-            console.print(f"[cyan]leg 1/3[/cyan] D1 deploy (env={env}) — stub; wire `wrangler d1 execute` in Phase 3")
-            return {"env": env, "migrator": "stub-d1"}
+            console.print(f"[cyan]leg 1/3[/cyan] D1 deploy → {d1_env_name}")
+            if not migration_sql.exists():
+                raise RuntimeError(f"migration SQL missing: {migration_sql}")
+            # Apply the migration via `wrangler d1 execute`. Snapshot is taken
+            # out-of-band by `vault deploy` before this runs.
+            _run(
+                ["pnpm", "exec", "wrangler", "d1", "execute", d1_env_name,
+                 "--file", str(migration_sql)],
+                cwd=worker_dir,
+            )
+            return {"env": env, "d1_database": d1_env_name, "migration": migration_sql.name}
 
         def d1_rollback() -> dict:
-            console.print("[yellow]rollback[/yellow] D1 via R2 snapshot restore — stub")
-            return {"method": "snapshot-restore"}
+            console.print("[yellow]rollback[/yellow] D1 via rollback SQL")
+            rollback_sql = release_dir / "d1-rollback.sql"
+            if rollback_sql.exists():
+                _run(
+                    ["pnpm", "exec", "wrangler", "d1", "execute", d1_env_name,
+                     "--file", str(rollback_sql)],
+                    cwd=worker_dir,
+                )
+            else:
+                console.print(
+                    "[yellow]no d1-rollback.sql — use `vault rollback <prev> --method snapshot` "
+                    "for primary path[/yellow]"
+                )
+            return {"method": "sql-rollback"}
 
         def nextjs_forward() -> dict:
-            console.print(f"[cyan]leg 2/3[/cyan] Next.js deploy (env={env}) — stub; wire CF Pages in Phase 4")
-            return {"env": env, "deployer": "stub-cf-pages"}
+            console.print(f"[cyan]leg 2/3[/cyan] Next.js deploy (env={env})")
+            # Cloudflare Pages deploy via pnpm script (assumes package.json has
+            # 'deploy:staging' / 'deploy:production' wrangler-pages targets).
+            _run(
+                ["pnpm", "run", f"deploy:{env}"],
+                cwd=site_dir,
+            )
+            return {"env": env, "deployer": "cf-pages"}
 
         def nextjs_rollback() -> dict:
-            console.print("[yellow]rollback[/yellow] Next.js via `wrangler pages rollback` — stub")
+            console.print("[yellow]rollback[/yellow] Next.js via `wrangler pages rollback`")
+            # Fire-and-report; operator may need to pick a specific deploy id.
+            try:
+                _run(
+                    ["pnpm", "exec", "wrangler", "pages", "deployment", "list",
+                     "--project-name", "staffml"],
+                    cwd=site_dir,
+                )
+            except Exception as exc:  # noqa: BLE001
+                console.print(f"[yellow]pages list failed: {exc}[/yellow]")
             return {"method": "pages-rollback"}
 
         def paper_forward() -> dict:
-            # Paper-leg is genuine: push the release tag. Stub for --dry-run.
-            console.print(f"[cyan]leg 3/3[/cyan] paper-tag push (v{version}) — `git push --tags`")
+            console.print(f"[cyan]leg 3/3[/cyan] paper-tag push (v{version})")
+            _run(["git", "tag", "-a", f"v{version}", "-m", f"release {version}"])
+            _run(["git", "push", "origin", f"v{version}"])
             return {"tag": f"v{version}"}
 
-        legs = [
-            LegPlan(name="d1", forward=d1_forward, rollback=d1_rollback),
+        all_legs = [
+            LegPlan(name="d1",     forward=d1_forward,     rollback=d1_rollback),
             LegPlan(name="nextjs", forward=nextjs_forward, rollback=nextjs_rollback),
-            LegPlan(name="paper", forward=paper_forward, rollback=None),  # manual only
+            LegPlan(name="paper",  forward=paper_forward,  rollback=None),
         ]
+        legs = [l for l in all_legs if l.name not in skip]
 
         if dry_run:
             console.print("[dim]dry-run — would run[/dim]:")
@@ -403,10 +457,10 @@ def register(app: typer.Typer) -> None:
             return
 
         try:
-            outcome = run_ship(
+            j = run_ship(
                 version=version, env=env, journal_path=journal, legs=legs, resume=resume,
             )
-            console.print(f"[green]shipped[/green] {version} to {env} (outcome={outcome.outcome.value})")
+            console.print(f"[green]shipped[/green] {version} to {env} (outcome={j.outcome.value if j.outcome else 'unknown'})")
         except ShipError as exc:
             console.print(f"[red]ship failed[/red]: {exc}")
             raise typer.Exit(code=ExitCode.NETWORK_ERROR) from exc

@@ -144,13 +144,261 @@ On mismatch (`match: false`, exit 1), `errors` enumerates the first 10 differing
 
 ---
 
-## Schemas landing later (Phase 1+)
+---
 
-`new`, `edit`, `rm`, `restore`, `move`, `build`, `publish`, `snapshot`,
-`migrations emit`, `export paper`, `tag`, `deploy`, `rollback`, `ship`,
-`generate`, `promote`, `mark-exemplar`, `renumber`, `serve`, `api`.
+## Additional schemas (B.7 — remaining subcommands)
 
-Each lands with its schema appended here and a `test_<cmd>_json_shape` test.
+### `vault build --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "output": "interviews/vault/vault.db",
+    "release_id": "0.9.0",
+    "release_hash": "<64 hex>",
+    "published_count": 9199,
+    "policy_version": 1
+  }
+}
+```
+
+### `vault publish --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "version": "0.9.0",
+    "staged_dir": "releases/.pending-0.9.0",
+    "final_dir": "releases/0.9.0",
+    "release_hash": "<64 hex>",
+    "migration_stats": { "added": 12, "removed": 0, "modified": 3 }
+  }
+}
+```
+
+### `vault ship --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "version": "1.0.0",
+    "env": "production",
+    "journal_path": "releases/1.0.0/.ship-journal.json",
+    "outcome": "success",
+    "legs": [
+      { "name": "d1",     "state": "deployed" },
+      { "name": "nextjs", "state": "deployed" },
+      { "name": "paper",  "state": "deployed" }
+    ],
+    "point_of_no_return": true
+  }
+}
+```
+
+On failure:
+
+```json
+{
+  "ok": false,
+  "exit_code": 4,
+  "exit_symbol": "NETWORK_ERROR",
+  "data": {
+    "outcome": "failed_auto_rolled_back" | "failed_needs_manual",
+    "legs": [ ... ]
+  }
+}
+```
+
+### `vault new --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "cloud-l4-diagnosis-kv-cache-7f3a9c-0001",
+    "path": "interviews/vault/questions/cloud/l4/diagnosis/kv-cache-7f3a9c-0001.yaml",
+    "registry_appended": true
+  }
+}
+```
+
+### `vault rm --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "global-0000",
+    "action": "deprecated" | "hard-deleted",
+    "chain_warning": "question was in chain 'kv-cache-depth' at position 2"
+  }
+}
+```
+
+### `vault move --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "global-0000",
+    "from": "global/l1/recall",
+    "to": "cloud/l4/diagnosis",
+    "renamed_path": "..."
+  }
+}
+```
+
+### `vault renumber --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "old_id": "global-l1-recall-foo-7f3a9c-0001",
+    "new_id": "global-l1-recall-foo-7f3a9c-0002",
+    "old_path": "...",
+    "new_path": "..."
+  }
+}
+```
+
+### `vault restore --json`
+
+```json
+{ "ok": true, "data": { "id": "global-0000", "new_status": "published" } }
+```
+
+### `vault promote --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "promoted": [
+      { "id": "...", "from": "vault/drafts/...", "to": "vault/questions/...",
+        "new_provenance": "llm-then-human-edited", "reviewed_by": "user@example.com" }
+    ],
+    "count": 1
+  }
+}
+```
+
+### `vault mark-exemplar --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "id": "global-0000",
+    "moved_from": "vault/questions/global/l1/recall/...",
+    "moved_to": "vault/exemplars/global/l1/recall/..."
+  }
+}
+```
+
+### `vault snapshot --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "directory": "releases/.pending-1.0.0",
+    "vault_db": "releases/.pending-1.0.0/vault.db",
+    "release_json": "releases/.pending-1.0.0/release.json"
+  }
+}
+```
+
+### `vault migrations-emit --json`
+
+```json
+{
+  "ok": true,
+  "data": { "added": 12, "removed": 0, "modified": 3 }
+}
+```
+
+### `vault export-paper --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "release_id": "0.9.0",
+    "release_hash": "<64 hex>",
+    "total_questions": 9199,
+    "topics": 87,
+    "chains": { "total": 964, "full": 77, "questions_in_chains": 2934, "chain_coverage_pct": 31.9 },
+    "by_track": { "cloud": 4122, "edge": 1968, "mobile": 1641, "tinyml": 1163, "global": 305 },
+    "by_level": { "l1": 1408, ... }
+  }
+}
+```
+
+### `vault tag --json`
+
+```json
+{ "ok": true, "data": { "tag": "v0.9.0", "pushed": false } }
+```
+
+### `vault deploy --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "env": "staging" | "production",
+    "release_id": "1.0.0",
+    "snapshot": "r2://staffml-vault-backups/pre-deploy-1.0.0.sqlite",
+    "migration_applied": true,
+    "pop_propagation": { "sampled": 8, "stale": 0 }
+  }
+}
+```
+
+### `vault rollback --json`
+
+```json
+{
+  "ok": true,
+  "data": {
+    "method": "snapshot" | "sql",
+    "env": "production",
+    "restored_to": "0.9.0",
+    "duration_seconds": 87
+  }
+}
+```
+
+### `vault generate --json`  _(Phase 7, deferred)_
+
+Schema TBD. Placeholder shape:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "drafts_written": 3,
+    "model": "claude-opus-4-6",
+    "exemplar_ids": ["...", "..."],
+    "prompt_hash": "<hex>",
+    "cost_usd": 0.12
+  }
+}
+```
+
+### `vault serve --json`
+
+Not applicable — `vault serve` launches Datasette, not a JSON-emitting command.
+
+### `vault api --json`
+
+Not applicable — `vault api` is a long-running HTTP server, not a
+JSON-emitting command.
 
 ---
 
