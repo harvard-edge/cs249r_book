@@ -50,7 +50,13 @@ def _changed_yaml_paths(base: str) -> list[Path]:
     ]
 
 
-def _commit_authors_for_path(path: Path, base: str) -> set[str]:
+def _commit_author_emails_for_path(path: Path, base: str) -> set[str]:
+    """Return commit AUTHOR emails (not committer) for commits touching path.
+
+    Chip R7-L-6: git log %ae is author email. Maintainers rebasing/squashing
+    on behalf of contributors preserve author but change committer — so we
+    intentionally key on author to keep the chain intact.
+    """
     out = _git("log", f"{base}..HEAD", "--format=%ae", "--", str(path))
     return {line.strip() for line in out.splitlines() if line.strip()}
 
@@ -79,13 +85,13 @@ def main() -> int:
         if not isinstance(authors, list):
             failures.append(f"{path}: authors is not a list")
             continue
-        committer_emails = _commit_authors_for_path(path, base)
-        overlap = {a for a in authors if a in committer_emails}
+        commit_author_emails = _commit_author_emails_for_path(path, base)
+        overlap = {a for a in authors if a in commit_author_emails}
         if not overlap:
             failures.append(
                 f"{path}: provenance=llm-then-human-edited but none of the "
-                f"authors {authors!r} matches any commit email "
-                f"{sorted(committer_emails)!r} that touched this file."
+                f"authors {authors!r} matches any commit AUTHOR email "
+                f"{sorted(commit_author_emails)!r} that touched this file."
             )
 
     if failures:

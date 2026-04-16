@@ -256,10 +256,10 @@ def slow_tier(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFa
     """Nightly tier — #21 scenario near-duplicate detection via MinHash/LSH blocking,
     then Jaro-Winkler within candidate pairs (B.9 / §5 invariant 21-22).
     """
-    return _scenario_dedup_lsh(loaded)
+    return _scenario_dedup_lsh(loaded, vault_dir)
 
 
-def _scenario_dedup_lsh(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
+def _scenario_dedup_lsh(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFailure]:
     """LSH-blocked scenario-duplicate detection.
 
     Uses character k-shingles + MinHash signatures + LSH bucketing, then
@@ -353,11 +353,11 @@ def _scenario_dedup_lsh(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
             band_key = (b,) + tuple(sig[b * rows : (b + 1) * rows])
             buckets[band_key].append(idx)
 
-    # Gemini R5-H-4: load acknowledged pairs so legitimate templates don't
-    # permanently red the nightly pipeline.
+    # Gemini R5-H-4 + Chip R7-M-4: pass vault_dir so we find the right
+    # dedup-acks.yaml rather than a CWD-relative guess.
     try:
         from vault_cli.commands.dup import ack_pairs
-        acked = ack_pairs()
+        acked = ack_pairs(vault_dir)
     except Exception:  # noqa: BLE001 — validator must never crash on ack-read
         acked = set()
 

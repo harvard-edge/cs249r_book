@@ -197,19 +197,29 @@ def build(
             policy_hash=policy_hash,
         )
 
-        # Gemini R5-C-3: schema_fingerprint must be computed here and stored
-        # in release_metadata so the worker's cold-start check reads it from
-        # the DB rather than env.SCHEMA_FINGERPRINT (which required manual
-        # wrangler.toml edits after every DDL change — guaranteed to drift).
+        # Gemini R5-C-3 + Chip R7-H-2: schema_fingerprint is computed over
+        # USER-AUTHORED DDL only. Previously hashed all of sqlite_master
+        # including FTS5 auto-generated shadow tables (questions_fts_data,
+        # _idx, _docsize, _content, _config) whose DDL text varies across
+        # SQLite versions. Host Python's SQLite and Cloudflare D1's SQLite
+        # are NOT guaranteed to agree on shadow-table DDL — fingerprint
+        # mismatches permanently, worker pinned to degraded mode.
+        # Fix: filter by name pattern to user-authored objects.
         import hashlib
         import re
         ddl_rows = conn.execute(
-            "SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') "
-            "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            "SELECT name, sql FROM sqlite_master "
+            "WHERE type IN ('table','index','trigger','view') "
+            "AND name NOT LIKE 'sqlite_%' "
+            # Exclude FTS5 shadow tables (SQLite-version-dependent DDL).
+            "AND name NOT IN ('questions_fts_data','questions_fts_idx',"
+            "                 'questions_fts_docsize','questions_fts_content',"
+            "                 'questions_fts_config') "
+            "ORDER BY name"
         ).fetchall()
         ddl_text = "\n".join(
             re.sub(r"\s+", " ", (sql or "")).strip()
-            for (sql,) in ddl_rows
+            for (_name, sql) in ddl_rows
             if sql
         )
         schema_fingerprint = hashlib.sha256(ddl_text.encode("utf-8")).hexdigest()

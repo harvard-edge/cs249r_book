@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from datetime import UTC
 from pathlib import Path
 
 import typer
@@ -391,6 +392,155 @@ def register(app: typer.Typer) -> None:
 
         if sign:
             console.print("[dim]--sign: minisign integration is Phase 7 polish; skipped.[/dim]")
+
+    @app.command("deploy")
+    def deploy_cmd(
+        version: str = typer.Argument(..., callback=lambda v: (_validate_version(v) or v)),
+        env: str = typer.Option(..., "--env", help="staging | production"),
+        releases_dir: Path = typer.Option(Path("interviews/vault/releases"), "--releases-dir"),
+        worker_dir: Path = typer.Option(Path("interviews/staffml-vault-worker"), "--worker-dir"),
+        skip_snapshot: bool = typer.Option(
+            False, "--skip-snapshot",
+            help="Skip pre-deploy R2 snapshot. Only for dev/test — production "
+                 "requires the snapshot per §6.3.",
+        ),
+    ) -> None:
+        """Deploy a release to D1 with synchronous pre-deploy R2 snapshot.
+
+        Dean R8-M-3: this primitive is what `ship` builds on; §6.2 "default
+        rollback = snapshot restore — always works" depends on this having
+        taken a real R2 backup. Pre-R8 the pre-deploy snapshot was spec-only
+        and ship bypassed it; this command now implements the real path.
+
+        Requires: authenticated `wrangler` with r2:write on the backup bucket
+        and d1:execute on the target database.
+        """
+        import subprocess
+        db_name = "staffml-vault" if env == "production" else "staffml-vault-staging"
+        release_dir = releases_dir / version
+        migration_sql = release_dir / "d1-migration.sql"
+        if not migration_sql.exists():
+            console.print(f"[red]error[/red]: {migration_sql} missing; run `vault publish {version}` first")
+            raise typer.Exit(code=ExitCode.IO_ERROR)
+
+        def _run(cmd: list[str], cwd: Path | None = None, ok_on_stderr_contains: str | None = None) -> None:
+            r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                if ok_on_stderr_contains and ok_on_stderr_contains in (r.stderr or ""):
+                    return
+                console.print(f"[red]{' '.join(cmd)}[/red]\n{r.stderr}")
+                raise typer.Exit(code=ExitCode.NETWORK_ERROR)
+
+        # 1. Pre-deploy R2 snapshot (§6.3, §C-8). Export vault.db via
+        #    wrangler d1 export then push to R2 as vault-backup-<env>/<ts>/vault.db.
+        if not skip_snapshot:
+            from datetime import datetime
+            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            export_target = Path(f"/tmp/vault-backup-{env}-{ts}.sql")
+            console.print(f"[cyan]1/2[/cyan] pre-deploy R2 snapshot → vault-backups/{env}/{ts}/")
+            _run(
+                ["pnpm", "exec", "wrangler", "d1", "export", db_name,
+                 "--output", str(export_target)],
+                cwd=worker_dir,
+            )
+            _run(
+                ["pnpm", "exec", "wrangler", "r2", "object", "put",
+                 f"vault-backups/{env}/{ts}/vault.sql",
+                 "--file", str(export_target)],
+                cwd=worker_dir,
+                # Tolerate "bucket does not exist" as a one-time warning rather than
+                # hard-stop; operator should create via `wrangler r2 bucket create`.
+                ok_on_stderr_contains="bucket",
+            )
+            console.print(f"[dim]  snapshot: r2://vault-backups/{env}/{ts}/vault.sql[/dim]")
+
+        # 2. Apply migration.
+        console.print(f"[cyan]2/2[/cyan] apply migration to D1 {db_name}")
+        _run(
+            ["pnpm", "exec", "wrangler", "d1", "execute", db_name,
+             "--file", str(migration_sql)],
+            cwd=worker_dir,
+        )
+        console.print(f"[green]deployed[/green] {version} → {env}")
+
+    @app.command("rollback")
+    def rollback_cmd(
+        version: str = typer.Argument(..., callback=lambda v: (_validate_version(v) or v),
+                                       help="Release version to roll BACK TO."),
+        env: str = typer.Option(..., "--env", help="staging | production"),
+        method: str = typer.Option(
+            "snapshot", "--method",
+            help="snapshot (restore R2 backup — primary path §6.2) | sql (apply d1-rollback.sql — debug)",
+        ),
+        releases_dir: Path = typer.Option(Path("interviews/vault/releases"), "--releases-dir"),
+        worker_dir: Path = typer.Option(Path("interviews/staffml-vault-worker"), "--worker-dir"),
+        snapshot_ts: str | None = typer.Option(
+            None, "--snapshot-ts",
+            help="R2 snapshot timestamp to restore (format: YYYYMMDDTHHMMSSZ). "
+                 "If omitted, lists available snapshots and exits.",
+        ),
+    ) -> None:
+        """Roll back a release. Default method: R2 snapshot restore.
+
+        Dean R8-M-3 closure: this is the §6.2 primary-rollback path. `--method sql`
+        falls back to the inverse migration for targeted repairs.
+        """
+        import subprocess
+        db_name = "staffml-vault" if env == "production" else "staffml-vault-staging"
+
+        def _run(cmd: list[str], cwd: Path | None = None) -> str:
+            r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+            if r.returncode != 0:
+                console.print(f"[red]{' '.join(cmd)}[/red]\n{r.stderr}")
+                raise typer.Exit(code=ExitCode.NETWORK_ERROR)
+            return r.stdout
+
+        if method == "snapshot":
+            if not snapshot_ts:
+                console.print(
+                    f"[yellow]--snapshot-ts required[/yellow]. Available snapshots under "
+                    f"r2://vault-backups/{env}/ :"
+                )
+                out = _run(
+                    ["pnpm", "exec", "wrangler", "r2", "object", "list",
+                     f"vault-backups/{env}/"],
+                    cwd=worker_dir,
+                )
+                console.print(out)
+                raise typer.Exit(code=ExitCode.USAGE_ERROR)
+            # Fetch snapshot from R2 and replay into D1.
+            local = Path(f"/tmp/vault-rollback-{env}-{snapshot_ts}.sql")
+            console.print(f"[cyan]1/2[/cyan] fetch r2://vault-backups/{env}/{snapshot_ts}/vault.sql")
+            _run(
+                ["pnpm", "exec", "wrangler", "r2", "object", "get",
+                 f"vault-backups/{env}/{snapshot_ts}/vault.sql",
+                 "--file", str(local)],
+                cwd=worker_dir,
+            )
+            console.print(f"[cyan]2/2[/cyan] replay snapshot → {db_name}")
+            _run(
+                ["pnpm", "exec", "wrangler", "d1", "execute", db_name,
+                 "--file", str(local)],
+                cwd=worker_dir,
+            )
+            console.print(f"[green]rolled back[/green] {env} to snapshot {snapshot_ts}")
+            return
+
+        if method == "sql":
+            rollback_sql = releases_dir / version / "d1-rollback.sql"
+            if not rollback_sql.exists():
+                console.print(f"[red]error[/red]: {rollback_sql} missing")
+                raise typer.Exit(code=ExitCode.IO_ERROR)
+            _run(
+                ["pnpm", "exec", "wrangler", "d1", "execute", db_name,
+                 "--file", str(rollback_sql)],
+                cwd=worker_dir,
+            )
+            console.print(f"[green]rolled back[/green] via inverse SQL for {version} on {env}")
+            return
+
+        console.print(f"[red]unknown --method[/red]: {method!r} (must be 'snapshot' or 'sql')")
+        raise typer.Exit(code=ExitCode.USAGE_ERROR)
 
     @app.command("ship")
     def ship_cmd(

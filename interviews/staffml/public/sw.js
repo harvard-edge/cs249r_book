@@ -139,21 +139,28 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       await updateReleaseFromManifest(api);
-      // Chip R4-M-3: if manifest hasn't succeeded in >24h, bypass cache
-      // for question/search endpoints so users see live data even when
-      // the release-change detection has been silently failing.
       const manifestStale = lastManifestSuccessMs > 0
         && Date.now() - lastManifestSuccessMs > STALE_MANIFEST_BYPASS_MS;
       const cache = await caches.open(cacheName);
 
+      // Chip R7-H-1: hoist `cached` above the manifestStale gate so the
+      // offline-fallback path at line "if (cached) return cached" actually
+      // has access to the variable. Previously const-scoped inside the if,
+      // which made offline fetch-failure crash with ReferenceError — exactly
+      // when offline-first was supposed to work.
+      let cached = null;
       if (!manifestStale) {
-        const cached = await cache.match(event.request);
+        cached = await cache.match(event.request);
         if (cached) {
           const ageHeader = cached.headers.get("x-sw-cached-at");
           const age = ageHeader ? Date.now() - Number.parseInt(ageHeader, 10) : Infinity;
           if (age < MAX_AGE_MS) return cached;
-          // expired; fall through to revalidate
+          // expired; fall through to revalidate (but keep `cached` as offline fallback)
         }
+      } else {
+        // R4-M-3 bypass path: still grab cached as a last-resort offline
+        // fallback; we just won't return it on the fresh-fetch happy path.
+        cached = await cache.match(event.request);
       }
 
       try {
