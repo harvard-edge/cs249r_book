@@ -100,8 +100,9 @@ def _categorize(subject: str, body: str, default: str) -> list[str]:
     s = subject.lower()
     b = body.lower() if body else ""
 
-    community_kw = ("spotlight", "community update", "show & tell",
-                    "show and tell", "celebration", "live event")
+    community_kw = ("spotlight", "community update", "team newsletter",
+                    "show & tell", "show and tell", "celebration",
+                    "live event")
     handson_kw = ("correction", "update", "resources", "discount",
                   "applications", "kickoff", "kit", "tinytorch")
 
@@ -114,8 +115,13 @@ def _categorize(subject: str, body: str, default: str) -> list[str]:
     return ["essay"] if len(plain) > 1500 else [default]
 
 
-def _detect_author(body: str, fallback: str) -> str:
-    """Pull a guest author out of a 'Written by X' pattern if present."""
+def _detect_author(subject: str, body: str, fallback: str) -> str:
+    """Pull a guest author out of a 'Written by X' pattern if present.
+
+    Community/team posts default to 'MLSysBook Team' when no guest author
+    is named, so a team-authored community newsletter is not mis-attributed
+    to the primary author.
+    """
     text = _strip_html(body) if _is_html(body) else body
     match = re.search(
         r"[Ww]ritten\s+by\s+(?:Professor\s+)?"
@@ -123,7 +129,14 @@ def _detect_author(body: str, fallback: str) -> str:
         r"(?:\s+[A-Z][a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc]+)+)",
         text,
     )
-    return match.group(1).strip() if match else fallback
+    if match:
+        return match.group(1).strip()
+
+    s = subject.lower()
+    if any(kw in s for kw in ("team newsletter", "community update", "community spotlight")):
+        return "MLSysBook Team"
+
+    return fallback
 
 
 def _parse_date(publish_date: str) -> tuple[str, str]:
@@ -145,7 +158,7 @@ def _email_to_markdown(email: dict[str, Any], default_category: str) -> tuple[st
     publish_date = email.get("publish_date", "")
 
     categories = _categorize(subject, body, default_category)
-    author = _detect_author(body, fallback="Vijay Janapa Reddi")
+    author = _detect_author(subject, body, fallback="Vijay Janapa Reddi")
     date_str, year = _parse_date(publish_date)
     slug = _slugify(subject)
     filename = f"{date_str}_{slug}.md"
