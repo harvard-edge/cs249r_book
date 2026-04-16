@@ -12,7 +12,6 @@ artifact) or pushed data into `src/data/corpus.json` (now emitted by
 | `sync-vault.py` | Copied vault/corpus.json → src/data/ with filter | `vault build --legacy-json` emits site-compatible JSON directly |
 | `generate-manifest.py` | Built src/data/vault-manifest.json | Built by `vault publish` as a release artifact |
 | `validate-vault.py` | Sanity check on corpus shape | Covered by `vault check --strict` invariants |
-| `check-deep-dive-links.py` | URL reachability | `vault check --tier slow` (nightly) |
 | `format-napkin-math.py` | One-shot formatter | Obsolete |
 | `sync-periodic-table.mjs` | Unrelated (periodic-table site feature) | Still active — NOT deprecated |
 
