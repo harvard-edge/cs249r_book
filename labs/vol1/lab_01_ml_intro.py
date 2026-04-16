@@ -280,6 +280,57 @@ def _(
 def _(mo, partA_prediction):
     mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
 
+    # Part B widgets
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) Data loading (D_vol/BW) -- weight loading dominates at batch=1": "data",
+            "B) Compute (O/R_peak) -- it is a GPU, compute must dominate":       "compute",
+            "C) Framework overhead -- kernel dispatch is the bottleneck":         "overhead",
+            "D) All three terms are roughly equal":                                "balanced",
+        },
+        label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
+              "term dominates total inference latency?",
+    )
+    return (partB_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partB_prediction):
+    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
+    # Part C widgets
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) ~2x over budget (need a small trim)":                   "2x",
+            "B) ~10x over budget (need significant compression)":        "10x",
+            "C) ~200x over budget (fundamentally infeasible)":           "200x",
+            "D) It fits with INT8 quantization":                         "fits",
+        },
+        label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
+              "What is the ratio of model size to available memory?",
+    )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo, partC_prediction):
+    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
+    # Part D widgets
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) ~100x":            "100x",
+            "B) ~10,000x":         "10000x",
+            "C) ~1,000,000x":      "1000000x",
+            "D) ~1,000,000,000x":  "1000000000x",
+        },
+        label="What is the compute ratio between an H100 GPU and an ESP32 "
+              "microcontroller?",
+    )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(DecisionLog, mo, partD_prediction):
+    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+
     partA_scenario = mo.ui.dropdown(
         options={
             "Rec System: stale training data": "stale_data",
@@ -298,45 +349,9 @@ def _(mo, partA_prediction):
         value="Add more GPUs (Machine)",
         label="Prescribe fix:",
     )
-
-    # Part B widgets
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) Data loading (D_vol/BW) -- weight loading dominates at batch=1": "data",
-            "B) Compute (O/R_peak) -- it is a GPU, compute must dominate":       "compute",
-            "C) Framework overhead -- kernel dispatch is the bottleneck":         "overhead",
-            "D) All three terms are roughly equal":                                "balanced",
-        },
-        label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
-              "term dominates total inference latency?",
-    )
-    return (partA_scenario, partA_fix, partB_prediction)
-
-@app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partB_batch = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )
-
-    # Part C widgets
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) ~2x over budget (need a small trim)":                   "2x",
-            "B) ~10x over budget (need significant compression)":        "10x",
-            "C) ~200x over budget (fundamentally infeasible)":           "200x",
-            "D) It fits with INT8 quantization":                         "fits",
-        },
-        label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
-              "What is the ratio of model size to available memory?",
-    )
-    return (partB_batch, partC_prediction)
-
-@app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partC_target = mo.ui.radio(
         options={
             "H100 (Cloud)": "h100",
@@ -347,24 +362,6 @@ def _(mo, partC_prediction):
         label="Deployment target:",
         inline=True,
     )
-
-    # Part D widgets
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) ~100x":            "100x",
-            "B) ~10,000x":         "10000x",
-            "C) ~1,000,000x":      "1000000x",
-            "D) ~1,000,000,000x":  "1000000000x",
-        },
-        label="What is the compute ratio between an H100 GPU and an ESP32 "
-              "microcontroller?",
-    )
-    return (partC_target, partD_prediction)
-
-@app.cell(hide_code=True)
-def _(DecisionLog, mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_scale = mo.ui.radio(
         options={"Linear scale": "linear", "Log scale": "log"},
         value="Linear scale",
@@ -376,7 +373,7 @@ def _(DecisionLog, mo, partD_prediction):
         placeholder="Based on what I learned in this lab, the most important diagnostic "
                     "question before investing in hardware is..."
     )
-    return (partD_scale, synth_decision_input, synth_decision_ui)
+    return (partA_scenario, partA_fix, partB_batch, partC_target, partD_scale, synth_decision_input, synth_decision_ui)
 
 @app.cell(hide_code=True)
 def _(
