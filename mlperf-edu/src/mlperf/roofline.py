@@ -27,12 +27,27 @@ from typing import Callable, Iterator
 
 SCHEMA_VERSION = "mlperf-edu-roofline/1.0"
 
-# M1 reference platform peaks. These are first-pass heuristics; iter-5.5
-# adds bench/peak_flops_mps.py and bench/peak_bw_mps.py to measure them
-# per-machine. For the iter-5 smoke test these defaults give a usable
-# ridge point.
+# Reference platform peaks. iter-5 used hardcoded M1 defaults; iter-5.5
+# adds bench/measure_peaks.py to measure them per-machine and cache to
+# ~/.mlperf-edu/machine_caps_<hwfp>.json. This module reads from the
+# cache when available and falls back to the defaults below.
 DEFAULT_PEAK_FLOPS = 2.6e12   # M1 8-core GPU fp32, rough
 DEFAULT_PEAK_BW_GBPS = 68.25  # M1 unified memory peak
+
+
+def _machine_caps() -> tuple[float, float]:
+    """Return (peak_FLOPS, peak_BW_GBps) from per-machine cache or defaults."""
+    try:
+        from pathlib import Path as _P
+        cache_dir = _P.home() / ".mlperf-edu"
+        # Find any machine_caps_*.json (caller doesn't need to know the hash).
+        if cache_dir.exists():
+            for cand in cache_dir.glob("machine_caps_*.json"):
+                payload = json.loads(cand.read_text())
+                return float(payload["peak_FLOPS"]), float(payload["peak_BW_GBps"])
+    except Exception:
+        pass
+    return DEFAULT_PEAK_FLOPS, DEFAULT_PEAK_BW_GBPS
 
 # Threshold rules (must match check_taxonomy.py).
 _RIDGE_LOW_MULTIPLIER = 0.5   # bandwidth_bound if intensity < 0.5*ridge
@@ -103,8 +118,8 @@ def measure_roofline(workload_name: str,
                       analytic_bytes: Callable[[], float] | float,
                       n_iter: int = 1,
                       output_dir: str | Path = "roofline",
-                      peak_flops: float = DEFAULT_PEAK_FLOPS,
-                      peak_bw_gbps: float = DEFAULT_PEAK_BW_GBPS,
+                      peak_flops: float | None = None,
+                      peak_bw_gbps: float | None = None,
                       machine_class: str = "apple-m1-16gb",
                       ) -> Iterator[dict]:
     """Wrap a hot loop and emit a roofline sidecar on exit.
@@ -123,6 +138,13 @@ def measure_roofline(workload_name: str,
     """
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if peak_flops is None or peak_bw_gbps is None:
+        cached_flops, cached_bw = _machine_caps()
+        if peak_flops is None:
+            peak_flops = cached_flops
+        if peak_bw_gbps is None:
+            peak_bw_gbps = cached_bw
 
     extra: dict = {}
     _sync()

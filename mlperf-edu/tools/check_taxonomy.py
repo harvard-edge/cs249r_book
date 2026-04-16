@@ -20,6 +20,8 @@ seen.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -108,7 +110,52 @@ def check_regime(name: str, regime: dict) -> tuple[list[str], dict]:
     return errors, values
 
 
+def latest_sidecar_for(workload: str, sidecar_dir: Path) -> dict | None:
+    """Return the most recent roofline sidecar for `workload`, or None."""
+    if not sidecar_dir.exists():
+        return None
+    cands = sorted(sidecar_dir.glob(f"{workload}_*.json"),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    if not cands:
+        return None
+    try:
+        return json.loads(cands[0].read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def verify_against_sidecar(name: str, regime: dict, sidecar: dict) -> list[str]:
+    """Cross-check YAML regime claims against measured sidecar."""
+    errs: list[str] = []
+    measured = sidecar.get("regime_inference", {})
+    for axis_yaml, axis_sidecar in [
+        ("arithmetic_intensity", "axis_arithmetic_intensity"),
+        ("dispatch", "axis_dispatch"),
+    ]:
+        yaml_value = regime.get(axis_yaml, {}).get("value")
+        sidecar_value = measured.get(axis_sidecar)
+        if yaml_value in (None, "unmeasured"):
+            continue
+        if sidecar_value in (None, "unmeasured"):
+            continue
+        if yaml_value != sidecar_value:
+            errs.append(
+                f"{name}.{axis_yaml}: YAML claims '{yaml_value}' but sidecar "
+                f"measured '{sidecar_value}' "
+                f"(rule: {measured.get('rule', 'no rule')})"
+            )
+    return errs
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Lint MLPerf EDU workload taxonomy.")
+    parser.add_argument("--verify-against-sidecars", type=str, default=None,
+                        metavar="DIR",
+                        help="Cross-check YAML regime claims against the latest "
+                             "roofline sidecar in DIR for each workload.")
+    args = parser.parse_args()
+    sidecar_dir = Path(args.verify_against_sidecars) if args.verify_against_sidecars else None
+
     if not WORKLOADS_YAML.exists():
         print(f"FAIL: {WORKLOADS_YAML} not found")
         return 2
@@ -136,6 +183,10 @@ def main() -> int:
             for axis, v in values.items():
                 if v == "unmeasured":
                     unmeasured_axes[axis].append(full_name)
+            if sidecar_dir is not None:
+                sidecar = latest_sidecar_for(name, sidecar_dir)
+                if sidecar is not None:
+                    all_errors.extend(verify_against_sidecar(full_name, body["regime"], sidecar))
             cell = (
                 values.get("working_set"),
                 values.get("arithmetic_intensity"),

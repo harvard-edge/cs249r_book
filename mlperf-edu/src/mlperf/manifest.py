@@ -290,6 +290,15 @@ def verify_provd(manifest_path: str | Path,
                 f"claimed {leaves['source_tree']['git_sha'][:12] if leaves['source_tree']['git_sha'] else 'None'}, "
                 f"current HEAD {actual_git['git_sha'][:12] if actual_git['git_sha'] else 'None'}")
 
+        # Closed-division rejection of dirty trees (Dean's iter-5 sign-off).
+        # Open division allows dirty trees with patch_hash as a courtesy.
+        if (manifest.get("division") == "closed"
+                and leaves["source_tree"].get("git_dirty")):
+            res.add("source_tree.closed_division_clean", False,
+                    "division=closed but submission was generated from a dirty tree "
+                    "(uncommitted changes). Closed-division submissions must come "
+                    "from a clean working tree.")
+
     # Weights.
     w = leaves["weights"]
     if w.get("path") and w.get("sha256"):

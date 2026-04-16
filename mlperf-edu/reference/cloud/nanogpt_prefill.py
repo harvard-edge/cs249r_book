@@ -59,19 +59,48 @@ class NanoGPTPrefill:
         self.batch = batch_size
         self.vocab = model.config["vocab_size"]
 
-    def run(self, n_warmup: int = 3, n_iter: int = 10) -> dict:
+    def run(self, n_warmup: int = 3, n_iter: int = 10,
+             emit_sidecar: bool = True) -> dict:
         device = next(self.model.parameters()).device
         ids = torch.randint(0, self.vocab, (self.batch, self.ctx_len), device=device)
+        n_params = sum(p.numel() for p in self.model.parameters())
+        act_bytes = estimate_activation_bytes(self.model, self.ctx_len, self.batch)
 
         with torch.no_grad():
             for _ in range(n_warmup):
                 self.model(ids)
             _sync()
-            t0 = time.perf_counter()
-            for _ in range(n_iter):
-                self.model(ids)
-            _sync()
-            total = time.perf_counter() - t0
+
+            # Emit a roofline sidecar so the iter-4 taxonomy linter can
+            # verify the YAML's regime claims against measured intensity
+            # and dispatch utilization (iter-5.5 integration).
+            if emit_sidecar:
+                from mlperf.roofline import measure_roofline
+                with measure_roofline(
+                    "nanogpt-prefill",
+                    analytic_flops=lambda: 2 * n_params * self.ctx_len * n_iter,
+                    analytic_bytes=lambda: (n_params * 4 + act_bytes) * n_iter,
+                    n_iter=n_iter,
+                ):
+                    for _ in range(n_iter):
+                        self.model(ids)
+                # measure_roofline already timed; reuse its wall_time below
+                t0 = 0.0
+                total = float(__import__("os").environ.get("_MLPERF_LAST_WALL", "0") or 0.0)
+            else:
+                t0 = time.perf_counter()
+                for _ in range(n_iter):
+                    self.model(ids)
+                _sync()
+                total = time.perf_counter() - t0
+
+            # If we used measure_roofline, recompute wall-time from a quick re-run.
+            if total <= 0.0:
+                t0 = time.perf_counter()
+                for _ in range(n_iter):
+                    self.model(ids)
+                _sync()
+                total = time.perf_counter() - t0
 
         latency = total / n_iter
         return {
@@ -80,9 +109,7 @@ class NanoGPTPrefill:
             "batch_size": self.batch,
             "prefill_latency_s": latency,
             "prefill_tokens_per_sec": self.ctx_len * self.batch / latency,
-            "peak_activation_bytes": estimate_activation_bytes(
-                self.model, self.ctx_len, self.batch
-            ),
+            "peak_activation_bytes": act_bytes,
         }
 
 
