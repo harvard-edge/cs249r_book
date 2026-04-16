@@ -131,16 +131,22 @@ def structural_tier(
                 )
             )
 
-    # #18: provenance metadata consistency
+    # #18: provenance metadata consistency. Only LLM provenances require
+    # generation_meta — `imported` content doesn't have model/prompt
+    # attribution and shouldn't carry fake meta. `human` never requires it.
+    _LLM_PROVENANCES = {"llm-draft", "llm-then-human-edited"}
     for lq in loaded:
-        if lq.question.provenance.value != "human" and lq.question.generation_meta is None:
+        if (
+            lq.question.provenance.value in _LLM_PROVENANCES
+            and lq.question.generation_meta is None
+        ):
             failures.append(
                 _fail(
                     "structural",
                     "provenance-meta",
                     qid=lq.id,
                     path=lq.path,
-                    message="non-human provenance requires generation_meta",
+                    message=f"provenance={lq.question.provenance.value!r} requires generation_meta",
                 )
             )
 
