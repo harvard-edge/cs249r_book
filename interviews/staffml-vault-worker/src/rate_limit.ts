@@ -1,0 +1,64 @@
+/**
+ * Token-bucket rate limiter backed by Workers KV (Chip R3-H4 / ARCHITECTURE.md §10.3).
+ *
+ * One bucket per (IP, endpoint-class) keyed in RATE_LIMIT_KV. Endpoint classes:
+ *   - 'default' : 60 req/min per IP on GET endpoints (overridable via env).
+ *   - 'search'  : 10 req/min per IP on /search (tighter — FTS5 is expensive).
+ *
+ * KV is eventually consistent; bursts across POPs can exceed limits briefly.
+ * That's acceptable for the "prevent abusive scraper blowing D1 budget" goal;
+ * hard enforcement requires Durable Objects (deferred Phase-4 follow-up if
+ * KV-level leak is observed).
+ */
+
+import type { Env } from "./types";
+
+const WINDOW_MS = 60 * 1000;   // 1-minute windows
+const BUCKET_CAP_DEFAULT = 60;
+const BUCKET_CAP_SEARCH = 10;
+
+function clientIp(req: Request): string {
+  return req.headers.get("CF-Connecting-IP")
+      ?? req.headers.get("X-Forwarded-For")?.split(",")[0].trim()
+      ?? "unknown";
+}
+
+function bucketCap(env: Env, className: "default" | "search"): number {
+  if (className === "search") {
+    return Number.parseInt(env.RATE_LIMIT_RPM_SEARCH ?? `${BUCKET_CAP_SEARCH}`, 10);
+  }
+  return Number.parseInt(env.RATE_LIMIT_RPM_DEFAULT ?? `${BUCKET_CAP_DEFAULT}`, 10);
+}
+
+export type RateLimitDecision = { ok: true } | { ok: false; retryAfterSec: number };
+
+export async function checkRateLimit(
+  env: Env,
+  req: Request,
+  className: "default" | "search",
+): Promise<RateLimitDecision> {
+  // If KV is not bound (e.g., local `vault api` shim), open-allow. Production
+  // wrangler.toml must bind RATE_LIMIT_KV — CI + `vault doctor --check
+  // d1-connectivity` surface this.
+  if (!env.RATE_LIMIT_KV) return { ok: true };
+
+  const ip = clientIp(req);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const windowSec = Math.floor(nowSec / 60);
+  const key = `rl:${className}:${ip}:${windowSec}`;
+
+  const existing = await env.RATE_LIMIT_KV.get(key);
+  const count = existing ? Number.parseInt(existing, 10) : 0;
+  const cap = bucketCap(env, className);
+
+  if (count >= cap) {
+    // Next window starts at (windowSec + 1) * 60.
+    const retryAfterSec = ((windowSec + 1) * 60) - nowSec;
+    return { ok: false, retryAfterSec };
+  }
+
+  // Increment. Expiration is the end of the window + 10s slack.
+  const ttl = 60 - (nowSec % 60) + 10;
+  await env.RATE_LIMIT_KV.put(key, String(count + 1), { expirationTtl: ttl });
+  return { ok: true };
+}

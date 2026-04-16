@@ -32,6 +32,7 @@ import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified }
 import StarGate from "@/components/StarGate";
 import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
+import ChainBadge from "@/components/ChainBadge";
 import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
@@ -766,6 +767,16 @@ function PracticePage() {
                         <Flag className="w-3.5 h-3.5" /> Report
                       </a>
                     </div>
+                    {chainInfo && !showAnswer && (
+                      <div className="mb-3">
+                        <ChainBadge
+                          chainId={chainInfo.id}
+                          chainName={chainInfo.name}
+                          position={chainInfo.position + 1}  /* 1-indexed for display */
+                          total={chainInfo.total}
+                        />
+                      </div>
+                    )}
                     <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
                       {current.title}
                     </h2>

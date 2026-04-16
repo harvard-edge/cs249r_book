@@ -975,6 +975,41 @@ Not "one-line revert in corpus.ts." The real contract:
 
 ### 11.5 Pre-cutover equivalence testing (v2.1 — cost-aware, fixes David N-1 + Chip N-H4)
 
+#### Algorithm provenance (v2.2, Soumith R3-F-3)
+
+The equivalence-hash baseline at `interviews/vault/corpus-equivalence-hash.txt`
+is **not** an independent hash of the legacy `corpus.json`. It is the
+`release_hash` that `vault build` produced from the per-question YAML files
+that `split-corpus.py` wrote during the Phase-1 one-shot split. Because the
+split was a deterministic transform from `corpus.json` to YAML (modulo the
+migrations documented in `split_corpus.py`), the baseline hash is a fingerprint
+of the *post-split* state, not of the raw JSON.
+
+That distinction matters when reasoning about what the CI check actually
+proves:
+
+- **What it proves**: post-Phase-1, no PR silently alters a published
+  question's content (scenario, solution, classification, chain-membership).
+  Any edit triggers a different `release_hash` vs the pinned baseline; the PR
+  author must explicitly update `corpus-equivalence-hash.txt` in the same
+  commit with a rationale line. This is the regression-guard value.
+
+- **What it does not prove**: that the new YAML corpus is semantically
+  identical to the original `corpus.json`. That was verified once, at the
+  Phase-1 split milestone, by comparing per-ID content hashes before the
+  baseline was pinned. Re-establishing that comparison post-drift would
+  require re-running `split-corpus.py` against the original `corpus.json` —
+  which we no longer guarantee to preserve once the YAML source of truth
+  is authoritative.
+
+For external verifiers (Zenodo, archival citation) that want to reproduce a
+release hash independently, the canonical path is `vault verify <version>`,
+which rebuilds the Merkle tree from the YAML source at
+`releases/<version>/.../` (historical) or from the git ref (`vault verify
+--git-ref v<version>`, Dean R3-NC-2 fix). `corpus-equivalence-hash.txt` is
+internal-CI infrastructure; external verification goes through the release
+artifacts and the documented canon function in `hashing.py`.
+
 Before Phase 4 flips production:
 - CI on every PR: `vault build` produces `vault.db` + `release.json`. CI compares the **release_hash** (§3.5 Merkle) against a committed `corpus-equivalence-hash.txt` checksum that was computed from the current `staffml/src/data/corpus.json` at Phase 1 exit.
 - Any mismatch fails the PR. No silent drift accumulates.

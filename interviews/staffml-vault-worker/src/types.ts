@@ -8,6 +8,7 @@
 
 export interface Env {
   DB: D1Database;
+  RATE_LIMIT_KV?: KVNamespace;
   CACHE_TTL_MANIFEST: string;
   CACHE_TTL_QUESTION: string;
   CACHE_TTL_SEARCH: string;
@@ -15,6 +16,8 @@ export interface Env {
   CORS_ALLOWLIST: string;
   SCHEMA_FINGERPRINT: string;
   GRACE_WINDOW_SECONDS: string;
+  RATE_LIMIT_RPM_DEFAULT?: string;
+  RATE_LIMIT_RPM_SEARCH?: string;
 }
 
 export interface QuestionRow {
@@ -48,7 +51,13 @@ export interface Manifest {
 }
 
 export interface Cursor {
-  offset: number;
+  /**
+   * Keyset cursor — ``after_id`` is the last row's ``id`` in the previous
+   * page. Server pages by ``WHERE id > after_id ORDER BY id LIMIT N`` so
+   * pagination cost is O(N) per page, not O(offset + N). (Chip R3-H2 fix.)
+   */
+  after_id: string;
+  /** Hash of the filter params at cursor-mint time; server rejects cross-filter reuse. */
   filter_hash: string;
 }
 
