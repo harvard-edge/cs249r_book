@@ -31,21 +31,26 @@ If ANY item is red, **do not proceed**. Fix the underlying issue, re-run the gat
 
 ## 1. Ship the release
 
-- [ ] `vault ship <release> --env staging --canary-percent 10` → green through all canary stages.
+> **Note on canary staging** (R10-F-2 + R11): percentage-based traffic split
+> is not implemented in `vault ship` (deferred to Phase 7 per ARCHITECTURE.md
+> §4.3). Current ship is all-or-nothing at the release-keyed Cache API layer.
+> Soak windows below still apply — they're now at 100% traffic, gated on
+> dashboard-green before advancing from staging to production.
+
+- [ ] `vault ship <release> --env staging` → journal reports all 3 legs DEPLOYED.
 - [ ] `vault smoke-test --env staging --samples 50` post-ship → 0 divergences.
-- [ ] Wait 15 min, observe staging dashboards (Cloudflare Analytics + Grafana).
+- [ ] Soak 15 min OR ≥100 sessions at 100% staging traffic, whichever longer.
 - [ ] All transport SLIs green (5xx <1%, p99 <500ms).
 - [ ] All data-plane SLIs green (row-count parity, content-hash sampling, FTS5 parity, schema_fingerprint).
-- [ ] `vault ship <release> --env production --canary-percent 10`.
+- [ ] `vault ship <release> --env production` → journal reports all 3 legs DEPLOYED.
   - [ ] `.ship-journal.json` written; tail the journal.
-  - [ ] D1 deploy leg: complete.
+  - [ ] D1 deploy leg: complete (R2 snapshot taken pre-migration).
   - [ ] Next.js deploy leg: complete.
-  - [ ] Soak 15 min OR ≥100 sessions at 10%.
-  - [ ] Advance to 50%. Soak 15 min OR ≥100 sessions.
-  - [ ] Advance to 100%. Soak 15 min OR ≥100 sessions.
   - [ ] Paper-tag push leg: complete (last).
   - [ ] `point_of_no_return: true` in journal.
+- [ ] Soak 15 min OR ≥100 sessions post-production-ship.
 - [ ] `vault smoke-test --env production --samples 100` → 0 divergences.
+- [ ] If any SLI reds during soak: `vault rollback <prev-release> --env production --method snapshot --snapshot-ts <ts>` (§6.2 primary path).
 
 ---
 

@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2.5** — Round-5 Gemini holistic review integrated 2026-04-16. 9 cross-file findings (3C/4H/1M/1L) closed. Final pre-deploy state.
+> **Status**: **v2.6** — 11 rounds of adversarial review complete; stability declared after R11 with 3 consecutive 0-Critical rounds. ~120 findings closed across R1–R11. Final pre-deploy state.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).

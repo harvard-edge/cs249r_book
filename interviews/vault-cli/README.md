@@ -54,7 +54,7 @@ vault verify 1.0.0 [--git-ref v1.0.0]             # academic-citability round-tr
 vault diff 0.9.0 1.0.0 --classify                 # cosmetic|semantic|structural
 vault deploy 1.0.0 --env staging                  # D1 migration + snapshot + POP probe
 vault rollback <v> --env production [--method snapshot|sql]
-vault ship 1.0.0 --env production [--canary-percent N] [--resume] [--skip-legs paper]
+vault ship 1.0.0 --env production [--resume] [--skip-legs paper]
 vault promote <id> | --all-drafts                 # drafts → published with provenance bump
 ```
 
