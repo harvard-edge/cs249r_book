@@ -465,15 +465,17 @@ vault rollback <version> --env (staging|production) [--method (snapshot|sql)]
         deploy. Fast, always works. (Fixes C-1 as primary rollback.)
     --method sql: applies d1-rollback.sql. Useful for debugging, not primary path.
 
-vault ship <version> --env production [--dry-run] [--canary-percent N] [--resume]
+vault ship <version> --env production [--dry-run] [--resume] [--skip-legs <legs>]
     Top-level atomic-release verb. Coordinates D1 deploy + Next.js deploy + paper
         git push with pinned NEXT_PUBLIC_VAULT_RELEASE=<version>. Writes a journal
         at releases/<version>/.ship-journal.json recording each leg's state; --resume
         detects interrupted ships and continues from the last successful leg.
         (Fixes C-4 and Round-2 convergence: Chip N-C1, Dean N-1, Soumith H-NEW-1.)
-    --canary-percent: partial-rollout Cloudflare Worker version; soaks until ≥100
-        sessions observed per step OR 15 min, whichever is later. (Tunes to actual
-        traffic at small DAU — fixes David N-5.)
+    --canary-percent: DEFERRED to Phase 7 (Soumith R10-F-2). Cloudflare Workers
+        does not expose percentage-based traffic-split for non-enterprise tenants;
+        implementing it properly requires either Argo or a custom routing layer.
+        Current ship is all-or-nothing at the release-keyed Cache API layer. The
+        §6.1 traffic-canary language below documents intent for Phase 7.
     Keeps primitives `deploy` + Next.js deploy exposed for power users who need
         to deviate.
     See §6.1.1 for the commit/rollback protocol (ordering, journal schema, partial-

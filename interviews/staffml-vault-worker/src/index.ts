@@ -18,23 +18,41 @@ import { checkRateLimit } from "./rate_limit";
 import type { Cursor, Env, Manifest, QuestionRow } from "./types";
 
 // Cold-start memo for schema fingerprint check (per-instance; warm workers skip).
+// Chip R7-M-3 + Gemini R9: soft-fail (transient D1 error) gets a 5min retry
+// window; hard-fail (wrong fingerprint from release_metadata) stays sticky
+// until release rollover invalidates schemaOk.
 let schemaOk: boolean | undefined;
+let schemaCheckedAt = 0;
+const SCHEMA_RECHECK_MS = 5 * 60 * 1000;
+
+// Chip R7-M-5: memoized FTS5 presence probe (reset on release change).
+let ftsProbed: boolean | undefined;
 
 async function checkSchemaFingerprint(env: Env, expectedFromDb: string | undefined): Promise<boolean> {
+  if (schemaOk === false && Date.now() - schemaCheckedAt > SCHEMA_RECHECK_MS) {
+    schemaOk = undefined;   // re-check after backoff window
+  }
   if (schemaOk !== undefined) return schemaOk;
-  // Gemini R5-C-3: read expected fingerprint from release_metadata rather
-  // than env var. Compiler emits it at build time; CLI deploys it as part
-  // of release_metadata; worker reads it here. No more wrangler.toml hand-
-  // editing after DDL changes.
+  schemaCheckedAt = Date.now();
+
   if (!expectedFromDb) {
-    // No fingerprint in DB → release pipeline didn't emit one, or migration
-    // didn't propagate. Fail closed to degraded mode.
     schemaOk = false;
     return schemaOk;
   }
   try {
+    // Chip R7-H-2 + Gemini R9-C-1: FTS5 shadow tables
+    // (questions_fts_data/idx/docsize/content/config) have auto-generated DDL
+    // that differs across SQLite versions (host Python vs Cloudflare D1).
+    // Must mirror the compiler.py filter exactly or fingerprint permanently
+    // mismatches, pinning the worker to degraded mode forever.
     const result = await env.DB.prepare(
-      "SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      "SELECT sql FROM sqlite_master " +
+      "WHERE type IN ('table','index','trigger','view') " +
+      "AND name NOT LIKE 'sqlite_%' " +
+      "AND name NOT IN ('questions_fts_data','questions_fts_idx'," +
+      "                 'questions_fts_docsize','questions_fts_content'," +
+      "                 'questions_fts_config') " +
+      "ORDER BY name"
     ).all<{ sql: string | null }>();
     const ddl = (result.results ?? [])
       .map(r => (r.sql ?? "").replace(/\s+/g, " ").trim())
@@ -63,7 +81,9 @@ function maybeInvalidateSchemaCache(releaseId: string | undefined): void {
   if (!releaseId) return;
   if (lastSeenRelease !== null && lastSeenRelease !== releaseId) {
     schemaOk = undefined;
-    manifestMemo = null;   // force re-read from D1 on release change
+    ftsProbed = undefined;   // Chip R7-M-5: FTS5 presence can change across releases
+    // Chip R7-L-7: don't null manifestMemo — 60s TTL handles rollover, and
+    // nulling mid-write caused concurrent-request stampedes on D1.
   }
   lastSeenRelease = releaseId;
 }
@@ -336,17 +356,22 @@ async function handleSearch(env: Env, req: Request, url: URL): Promise<Response>
       { status: 400, headers: corsHeaders(env, origin) },
     );
   }
-  // Detect whether FTS5 table exists; use it when available, otherwise
-  // fall back to LIKE (pre-FTS5-migration D1 instances).
-  let ftsAvailable = false;
-  try {
-    const probe = await env.DB.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='questions_fts' LIMIT 1"
-    ).first<{ name: string } | null>();
-    ftsAvailable = Boolean(probe);
-  } catch {
-    ftsAvailable = false;
+  // Chip R7-M-5 + Gemini R9: memoized FTS5 probe at module level.
+  // Previously probed sqlite_master on every /search request — 1 D1 row-read
+  // per search, directly undoing R5-H-1's manifest-memo cost fix.
+  // ftsProbed resets on release_id change (FTS5 presence only changes across
+  // releases).
+  if (ftsProbed === undefined) {
+    try {
+      const probe = await env.DB.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='questions_fts' LIMIT 1"
+      ).first<{ name: string } | null>();
+      ftsProbed = Boolean(probe);
+    } catch {
+      ftsProbed = false;
+    }
   }
+  const ftsAvailable = ftsProbed;
 
   let rows;
   if (ftsAvailable) {

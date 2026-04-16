@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import UTC
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -23,6 +24,104 @@ from vault_cli.release import (
     snapshot as snapshot_release,
 )
 from vault_cli.ship import LegPlan, ShipError, run_ship
+
+# Soumith R10-F-1: extracted helpers shared between `deploy_cmd` and
+# `ship_cmd`'s d1 leg. Previously ship bypassed deploy's R2-snapshot step
+# entirely; composition now goes through these helpers so snapshots are
+# taken whether the operator runs `vault deploy` directly or `vault ship`.
+
+def _d1_db_name(env: str) -> str:
+    return "staffml-vault" if env == "production" else "staffml-vault-staging"
+
+
+def _run_wrangler(
+    cmd: list[str],
+    cwd: Path,
+    *,
+    ok_on_stderr_contains: str | None = None,
+) -> str:
+    """Run a wrangler invocation; raise on non-zero unless the specific
+    benign stderr substring is present."""
+    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        if ok_on_stderr_contains and ok_on_stderr_contains in (r.stderr or ""):
+            return r.stdout
+        raise RuntimeError(f"{' '.join(cmd)} failed:\n{r.stderr or r.stdout}")
+    return r.stdout
+
+
+def _take_r2_snapshot(env: str, worker_dir: Path) -> str:
+    """Export D1 to a SQL dump and push to R2. Returns the snapshot timestamp."""
+    db_name = _d1_db_name(env)
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    export_target = Path(f"/tmp/vault-backup-{env}-{ts}.sql")
+    _run_wrangler(
+        ["pnpm", "exec", "wrangler", "d1", "export", db_name,
+         "--output", str(export_target)],
+        cwd=worker_dir,
+    )
+    _run_wrangler(
+        ["pnpm", "exec", "wrangler", "r2", "object", "put",
+         f"vault-backups/{env}/{ts}/vault.sql",
+         "--file", str(export_target)],
+        cwd=worker_dir,
+        ok_on_stderr_contains="bucket",
+    )
+    return ts
+
+
+def _apply_d1_migration(env: str, worker_dir: Path, migration_sql: Path) -> None:
+    _run_wrangler(
+        ["pnpm", "exec", "wrangler", "d1", "execute", _d1_db_name(env),
+         "--file", str(migration_sql)],
+        cwd=worker_dir,
+    )
+
+
+def _do_deploy(
+    version: str,
+    env: str,
+    release_dir: Path,
+    worker_dir: Path,
+    *,
+    skip_snapshot: bool = False,
+) -> dict:
+    """Take the R2 snapshot (unless skipped) then apply the migration.
+
+    Shared by `deploy_cmd` and `ship_cmd`. Returns metadata for journaling.
+    """
+    migration_sql = release_dir / "d1-migration.sql"
+    if not migration_sql.exists():
+        raise FileNotFoundError(
+            f"{migration_sql} missing; run `vault publish {version}` first"
+        )
+    result: dict = {"env": env, "d1_database": _d1_db_name(env)}
+    if not skip_snapshot:
+        ts = _take_r2_snapshot(env, worker_dir)
+        result["snapshot_ts"] = ts
+    _apply_d1_migration(env, worker_dir, migration_sql)
+    return result
+
+
+def _ensure_tag(version: str) -> str:
+    """Create v<version> tag if missing; return status.
+
+    Soumith R10-F-3: shared between `tag_cmd` and `ship_cmd.paper_forward`
+    so the skip-if-exists logic doesn't drift between two implementations.
+    """
+    existing = subprocess.run(
+        ["git", "rev-parse", "--verify", f"refs/tags/v{version}"],
+        capture_output=True, text=True, check=False,
+    )
+    if existing.returncode == 0:
+        return "exists"
+    r = subprocess.run(
+        ["git", "tag", "-a", f"v{version}", "-m", f"release {version}"],
+        capture_output=True, text=True, check=False,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f"git tag failed: {r.stderr}")
+    return "created"
 
 # Chip R4-L-1: version-string validator. Enforced at entry of every command
 # that accepts a ``version`` argument so maintainer typos (e.g., ``1..0``,
@@ -407,60 +506,31 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Deploy a release to D1 with synchronous pre-deploy R2 snapshot.
 
-        Dean R8-M-3: this primitive is what `ship` builds on; §6.2 "default
-        rollback = snapshot restore — always works" depends on this having
-        taken a real R2 backup. Pre-R8 the pre-deploy snapshot was spec-only
-        and ship bypassed it; this command now implements the real path.
+        Dean R8-M-3 + Soumith R10-F-1: this primitive + `_do_deploy()`
+        helper is now shared with `vault ship`'s d1 leg. §6.2's "default
+        rollback = snapshot restore — always works" depends on this
+        having taken a real R2 backup; ship now uses the same code path
+        so the snapshot is guaranteed.
 
         Requires: authenticated `wrangler` with r2:write on the backup bucket
         and d1:execute on the target database.
         """
-        import subprocess
-        db_name = "staffml-vault" if env == "production" else "staffml-vault-staging"
         release_dir = releases_dir / version
-        migration_sql = release_dir / "d1-migration.sql"
-        if not migration_sql.exists():
-            console.print(f"[red]error[/red]: {migration_sql} missing; run `vault publish {version}` first")
-            raise typer.Exit(code=ExitCode.IO_ERROR)
-
-        def _run(cmd: list[str], cwd: Path | None = None, ok_on_stderr_contains: str | None = None) -> None:
-            r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
-            if r.returncode != 0:
-                if ok_on_stderr_contains and ok_on_stderr_contains in (r.stderr or ""):
-                    return
-                console.print(f"[red]{' '.join(cmd)}[/red]\n{r.stderr}")
-                raise typer.Exit(code=ExitCode.NETWORK_ERROR)
-
-        # 1. Pre-deploy R2 snapshot (§6.3, §C-8). Export vault.db via
-        #    wrangler d1 export then push to R2 as vault-backup-<env>/<ts>/vault.db.
-        if not skip_snapshot:
-            from datetime import datetime
-            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            export_target = Path(f"/tmp/vault-backup-{env}-{ts}.sql")
-            console.print(f"[cyan]1/2[/cyan] pre-deploy R2 snapshot → vault-backups/{env}/{ts}/")
-            _run(
-                ["pnpm", "exec", "wrangler", "d1", "export", db_name,
-                 "--output", str(export_target)],
-                cwd=worker_dir,
-            )
-            _run(
-                ["pnpm", "exec", "wrangler", "r2", "object", "put",
-                 f"vault-backups/{env}/{ts}/vault.sql",
-                 "--file", str(export_target)],
-                cwd=worker_dir,
-                # Tolerate "bucket does not exist" as a one-time warning rather than
-                # hard-stop; operator should create via `wrangler r2 bucket create`.
-                ok_on_stderr_contains="bucket",
-            )
-            console.print(f"[dim]  snapshot: r2://vault-backups/{env}/{ts}/vault.sql[/dim]")
-
-        # 2. Apply migration.
-        console.print(f"[cyan]2/2[/cyan] apply migration to D1 {db_name}")
-        _run(
-            ["pnpm", "exec", "wrangler", "d1", "execute", db_name,
-             "--file", str(migration_sql)],
-            cwd=worker_dir,
-        )
+        try:
+            if not skip_snapshot:
+                console.print(f"[cyan]1/2[/cyan] pre-deploy R2 snapshot → vault-backups/{env}/")
+            else:
+                console.print("[yellow]--skip-snapshot[/yellow]: no R2 backup will be taken")
+            console.print(f"[cyan]2/2[/cyan] apply migration to D1 {_d1_db_name(env)}")
+            result = _do_deploy(version, env, release_dir, worker_dir, skip_snapshot=skip_snapshot)
+        except FileNotFoundError as exc:
+            console.print(f"[red]error[/red]: {exc}")
+            raise typer.Exit(code=ExitCode.IO_ERROR) from exc
+        except RuntimeError as exc:
+            console.print(f"[red]deploy failed[/red]: {exc}")
+            raise typer.Exit(code=ExitCode.NETWORK_ERROR) from exc
+        if "snapshot_ts" in result:
+            console.print(f"[dim]  snapshot: r2://vault-backups/{env}/{result['snapshot_ts']}/vault.sql[/dim]")
         console.print(f"[green]deployed[/green] {version} → {env}")
 
     @app.command("rollback")
@@ -577,8 +647,7 @@ def register(app: typer.Typer) -> None:
             raise typer.Exit(code=ExitCode.IO_ERROR)
         journal = release_dir / ".ship-journal.json"
         skip = {s.strip() for s in skip_legs.split(",") if s.strip()}
-        d1_env_name = "staffml-vault" if env == "production" else "staffml-vault-staging"
-        migration_sql = release_dir / "d1-migration.sql"
+        d1_env_name = _d1_db_name(env)
 
         def _run(cmd: list[str], cwd: Path | None = None) -> str:
             result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
@@ -587,17 +656,12 @@ def register(app: typer.Typer) -> None:
             return result.stdout
 
         def d1_forward() -> dict:
-            console.print(f"[cyan]leg 1/3[/cyan] D1 deploy → {d1_env_name}")
-            if not migration_sql.exists():
-                raise RuntimeError(f"migration SQL missing: {migration_sql}")
-            # Apply the migration via `wrangler d1 execute`. Snapshot is taken
-            # out-of-band by `vault deploy` before this runs.
-            _run(
-                ["pnpm", "exec", "wrangler", "d1", "execute", d1_env_name,
-                 "--file", str(migration_sql)],
-                cwd=worker_dir,
-            )
-            return {"env": env, "d1_database": d1_env_name, "migration": migration_sql.name}
+            # Soumith R10-F-1: ship's d1 leg now goes through _do_deploy so
+            # the R2 snapshot is taken as part of shipping. Previously ship
+            # bypassed the snapshot, which nulled §6.2's "default rollback
+            # = snapshot restore" contract.
+            console.print(f"[cyan]leg 1/3[/cyan] D1 deploy (with R2 snapshot) → {d1_env_name}")
+            return _do_deploy(version, env, release_dir, worker_dir, skip_snapshot=False)
 
         def d1_rollback() -> dict:
             console.print("[yellow]rollback[/yellow] D1 via rollback SQL")
@@ -639,27 +703,19 @@ def register(app: typer.Typer) -> None:
             return {"method": "pages-rollback"}
 
         def paper_forward() -> dict:
+            # Soumith R10-F-3: use the shared _ensure_tag helper so this
+            # doesn't drift vs tag_cmd's implementation.
             console.print(f"[cyan]leg 3/3[/cyan] paper-tag push (v{version})")
-            # Chip R4-L-2: pre-check tag existence so "tag already exists"
-            # is diagnosed before point-of-no-return, not as a cryptic
-            # paper-leg failure that pages the operator.
-            exists = subprocess.run(
-                ["git", "rev-parse", "--verify", f"refs/tags/v{version}"],
+            status = _ensure_tag(version)
+            # Push whatever tag now exists (newly created or pre-existing).
+            remote = subprocess.run(
+                ["git", "ls-remote", "--tags", "origin", f"v{version}"],
                 capture_output=True, text=True, check=False,
             )
-            if exists.returncode == 0:
-                # Tag exists locally; check if it's already pushed.
-                remote = subprocess.run(
-                    ["git", "ls-remote", "--tags", "origin", f"v{version}"],
-                    capture_output=True, text=True, check=False,
-                )
-                if remote.stdout.strip():
-                    return {"tag": f"v{version}", "status": "already-pushed-skipped"}
-                _run(["git", "push", "origin", f"v{version}"])
-                return {"tag": f"v{version}", "status": "pushed-existing-tag"}
-            _run(["git", "tag", "-a", f"v{version}", "-m", f"release {version}"])
+            if remote.stdout.strip():
+                return {"tag": f"v{version}", "status": f"{status}-already-pushed"}
             _run(["git", "push", "origin", f"v{version}"])
-            return {"tag": f"v{version}", "status": "created-and-pushed"}
+            return {"tag": f"v{version}", "status": f"{status}-and-pushed"}
 
         all_legs = [
             LegPlan(name="d1",     forward=d1_forward,     rollback=d1_rollback),
