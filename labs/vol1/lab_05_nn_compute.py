@@ -238,9 +238,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_context = mo.ui.radio(
         options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
         value="Cloud GPU (H100)",
@@ -278,9 +276,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_context = mo.ui.radio(
         options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
         value="Mobile NPU (iPhone)",
@@ -308,9 +304,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_width = mo.ui.slider(
         start=32, stop=2048, value=128, step=32, label="Hidden layer width",
     )
@@ -330,8 +324,6 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_depth = mo.ui.slider(
         start=3, stop=50, value=20, step=1, label="Network depth (layers)",
     )
