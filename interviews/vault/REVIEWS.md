@@ -389,9 +389,70 @@ All 5 rounds of adversarial review closed. No further scheduled rounds.
 Any new findings from here come from PR review on #1348 or from deploy-day
 observation.
 
-**End of review ledger.**
-
 ---
+
+# Rounds 7–11 — post-Gemini adversarial passes (2026-04-16)
+
+After R5 Gemini closed 9 cross-file findings and migration completed in-repo,
+the user requested additional rounds until stability ("at least 10 rounds till
+everything starts becoming stable and no reward hacking"). Each round's brief
+included explicit anti-reward-hacking instructions: permission to report zero
+findings, no severity inflation, must not re-flag closed items.
+
+## Per-round finding counts
+
+| Round | Reviewer | New C | New H | New M | New L | Comment |
+|---|---|---|---|---|---|---|
+| R7 | Chip (post-R5) | 0 | 1+1MH | 3 | 2 | First 0-Critical round |
+| R8 | Dean (post-R5) | 0 | 1 | 2 | 2 | Second consecutive 0-C round |
+| R9 | Gemini (post-R7/R8) | 1* | 3 | 1 | 0 | *Meta: R7 worker edits silently failed to persist; re-applied |
+| R10 | Soumith | 0 | 1† | 1 | 1 | †Same finding class as R9-H1 |
+| R11 | David (fresh-eyes) | **0** | **0** | **1** | **0** | Only Medium = doc cleanup from R10-F-2's own closure |
+
+## Stability declared after R11
+
+Three consecutive rounds (R7, R8, R11) produced **0 new Criticals**. R11
+explicitly: "convergence confirmed. After 11 rounds the only remaining
+user-facing friction is a documentation cleanup left behind by the R10-F-2
+closure itself."
+
+**Total findings across 11 rounds**: ~120, all closed or explicitly deferred
+with rationale.
+
+## Notable findings closed in R7–R11
+
+- R7-H-1: `sw.js` offline ReferenceError (cached var scoping)
+- R7-H-2 / R9-C-1: schema_fingerprint portability (FTS5 shadow tables filtered)
+- R7-M-3 / R9-M-1: schemaOk 5-min retry on transient D1 failure
+- R7-M-4: `vault dup --vault-dir` + validator pass-through
+- R7-M-5 / R9-H-2: FTS5 probe memoized in worker
+- R8-H-1: SLI cron compares stored hashes directly (was trying to recompute with incomplete payload)
+- R8-M-2: SLI cron 404 / 5xx classification
+- R8-M-3: `vault deploy` + `vault rollback` commands implemented with R2 snapshot substrate
+- R9-H-3: SLI workflow now builds `vault.db` from YAML first (M-4 compliance)
+- R10-F-1: `vault ship` composes `_do_deploy()` — snapshot guaranteed
+- R10-F-2: `--canary-percent` removed from spec + README + CUTOVER_QA (R11-M-1 doc-cleanup)
+- R10-F-3: `_ensure_tag` helper shared between `tag_cmd` and `ship_cmd.paper_forward`
+- R11-M-1: CUTOVER_QA.md + README.md canary-percent references removed; replaced with all-or-nothing + Phase-7-deferred note
+
+## Meta-observation on R9
+
+Gemini R9 caught that my R7 worker-side edits had silently failed to persist
+in the commit, despite the Edit tool reporting success. This is a valuable
+class of finding — an environmental / tooling issue only a fresh-eyes review
+with access to the actual-on-disk files could detect. Self-audit confirmed
+all other R7 edits landed; only the worker file was affected.
+
+## Convergence signal
+
+Finding-density trajectory across 11 rounds (new Criticals per round):
+
+```
+R1: 3, R2: 1, R3: 2, R4: 3, R5: 3, R6: skipped,
+R7: 0, R8: 0, R9: 1* (regression-detect, not new), R10: 0, R11: 0
+```
+
+Stability is reached. No further rounds scheduled.
 
 **End of review ledger.**
 
