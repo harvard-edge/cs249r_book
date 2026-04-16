@@ -211,9 +211,7 @@ def _(mo):
 
 # ─── CELL 5: Part A controls + Part A reflection + Part B prediction ─────────
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     a1_qps = mo.ui.slider(start=10, stop=1000, value=100, step=10, label="Queries per second (QPS)")
     a1_cost_query = mo.ui.slider(start=0.001, stop=0.05, value=0.01, step=0.001, label="Cost per query ($)")
     a1_weeks = mo.ui.slider(start=1, stop=52, value=26, step=1, label="Deployment duration (weeks)")
@@ -245,9 +243,7 @@ def _(mo, partA_prediction):
 
 # ─── CELL 6: Part B controls + Part B reflection ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     a2_model_size = mo.ui.dropdown(
         options={"7B (32L, 4096H)": (7, 32, 4096), "70B (80L, 8192H)": (70, 80, 8192), "175B (96L, 12288H)": (175, 96, 12288)},
         value="70B (80L, 8192H)",
@@ -276,9 +272,7 @@ def _(mo, partB_prediction):
 
 # ─── CELL 6b: Part C prediction + controls ─────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_reflection):
-    mo.stop(partB_reflection.value is None, mo.md("**Complete Part B reflection to unlock Part C.**"))
-
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) 1.5x -- modest improvement over static batching": "A",
@@ -305,9 +299,7 @@ def _(mo, partB_reflection):
 
 # ─── CELL 6c: Part D prediction + controls ─────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_reflection):
-    mo.stop(partC_reflection.value is None, mo.md("**Complete Part C reflection to unlock Part D.**"))
-
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) 200 replicas of FP16 with static batching -- brute force": "A",
