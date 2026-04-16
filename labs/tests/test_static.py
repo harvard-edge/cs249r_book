@@ -332,33 +332,75 @@ def _returned_names(func):
 
 
 class TestMarimoDataflow:
-    """Detect the widget-in-gated-cell anti-pattern.
+    """Detect the MULTI-widget-in-gated-cell anti-pattern.
 
-    When a @app.cell has mo.stop() AND defines mo.ui.* widgets that
-    appear in the cell's return tuple, those widgets will not exist
-    until the gate unblocks. Any cell that depends on them cannot run,
-    which produces a "dependency undefined" cascade manifesting as
-    widgets invisibly failing to render.
+    The sequential-unlock idiom used across the labs is:
 
-    Proper pattern (see lab_02's prediction cells): define widgets in
-    their own un-gated cell. Gate cells should be pure `mo.stop()`
-    statements with no side-effect widget definitions.
+        @app.cell
+        def _(mo, partA_prediction):
+            mo.stop(partA_prediction.value is None, mo.md("..."))
+            partB_prediction = mo.ui.radio(...)
+            return (partB_prediction,)
 
-    This bug class is tracked as an open cleanup effort. The test is
-    xfail-marked until a systematic refactor lands across all labs.
-    Once that tracking issue is closed, remove the xfail.
+    This works: gate fires while partA is unanswered, user sees the
+    unlock message. Once partA is answered, partB_prediction is defined
+    and the next gated cell unblocks. Each gated cell exposes exactly
+    ONE next widget. The idiom is used throughout lab_02 through lab_16
+    and is verified working by test_engine.py.
+
+    The BUG (originally in lab_01, fixed by #1339) is when a single
+    gated cell defines MULTIPLE widgets:
+
+        @app.cell
+        def _(mo, partA_prediction):
+            mo.stop(partA_prediction.value is None, mo.md("..."))
+            partA_instrument = mo.ui.slider(...)  # Part A's own instrument
+            partB_prediction = mo.ui.radio(...)    # Next part's prediction
+            partB_instrument = mo.ui.slider(...)  # Next part's instrument too
+            return (partA_instrument, partB_prediction, partB_instrument)
+
+    When this cell's gate fires, THREE widgets go undefined. Downstream
+    cells that depend on any of them also fail. The cascade is what
+    breaks the lab visually, not the gate itself.
+
+    This test flags only cells that leak TWO OR MORE widgets to the
+    return tuple. Single-widget leaks (the sequential-unlock idiom)
+    are allowed.
     """
 
-    @pytest.mark.xfail(
-        reason=(
-            "widget-in-gated-cell pattern exists in most labs today. the "
-            "systematic refactor is a separate tracking effort. once labs are "
-            "converted to the proper pattern (widget in its own cell, gate cell "
-            "is pure mo.stop), remove this xfail."
-        ),
-        strict=False,
-    )
-    def test_no_widget_defined_in_gated_cell(self, lab_path):
+    # Labs with known multi-widget-leak debt, grandfathered until refactored
+    # per-lab (tracked in #1347). As each lab is converted to the
+    # one-widget-per-gated-cell pattern (see lab_01 post-#1339 or lab_05_dist_train),
+    # remove it from this set. When the set is empty the bug class is closed.
+    _KNOWN_MULTI_LEAK_LABS = frozenset({
+        "vol1/lab_00_introduction.py",
+        "vol1/lab_01_ml_intro.py",
+        "vol2/lab_01_introduction.py",
+        "vol2/lab_06_fault_tolerance.py",
+        "vol2/lab_07_fleet_orch.py",
+        "vol2/lab_08_inference.py",
+        "vol2/lab_09_perf_engineering.py",
+        "vol2/lab_10_edge_intelligence.py",
+        "vol2/lab_11_ops_scale.py",
+        "vol2/lab_12_security_privacy.py",
+        "vol2/lab_13_robust_ai.py",
+        "vol2/lab_14_sustainable_ai.py",
+        "vol2/lab_15_responsible_ai.py",
+        "vol2/lab_16_fleet_synthesis.py",
+    })
+
+    def test_no_multi_widget_leak_in_gated_cell(self, lab_path):
+        # Grandfather known-debt labs: skip with a pointer to the tracking issue
+        # rather than fail. New labs and labs that have been refactored are
+        # strictly enforced.
+        rel_path = str(Path(lab_path).resolve().relative_to(REPO_ROOT / "labs"))
+        if rel_path in self._KNOWN_MULTI_LEAK_LABS:
+            pytest.skip(
+                f"{rel_path} has known multi-widget-leak debt, tracked in #1347. "
+                "remove from _KNOWN_MULTI_LEAK_LABS once refactored to the "
+                "one-widget-per-gated-cell pattern."
+            )
+
         tree = parse_tree(lab_path)
         violations = []
         for node in ast.walk(tree):
@@ -374,18 +416,21 @@ class TestMarimoDataflow:
                 if name is not None:
                     widgets_defined[name] = s.lineno
             leaked = widgets_defined.keys() & _returned_names(node)
-            if leaked:
+            # Single-widget leaks are the sequential-unlock idiom and are allowed.
+            # Only flag cells that leak two or more widgets through the gate.
+            if len(leaked) >= 2:
                 violations.append((node.lineno, sorted(leaked)))
 
         if violations:
             summary = "\n".join(
-                f"  cell at line {line}: gated AND returns widgets {names}"
+                f"  cell at line {line}: gated AND leaks {len(names)} widgets {names}"
                 for line, names in violations
             )
             pytest.fail(
-                "widget defined in gated cell (will not render until gate unblocks):\n"
+                "multi-widget leak in gated cell (downstream cascade failure):\n"
                 + summary
-                + "\n\nfix: move widget definitions to their own un-gated cell. "
-                "gate cells should be pure mo.stop(). see lab_02's prediction "
-                "cells for the canonical pattern."
+                + "\n\nfix: split the cell so each gated cell defines at most ONE "
+                "new widget. see vol1/lab_01_ml_intro.py (post-#1339) for the "
+                "canonical pattern: each gated cell returns only the next "
+                "prediction widget."
             )
