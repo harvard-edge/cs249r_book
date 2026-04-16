@@ -199,9 +199,7 @@ def _(
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partA_prec = mo.ui.dropdown(
@@ -222,9 +220,7 @@ def _(mo, partA_pred):
     return (partB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_quant = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="INT8", label="Quantization level")
@@ -249,11 +245,9 @@ def _(mo, partB_pred):
     return (partC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
+def _(mo):
 
     # ── Part D widgets ────────────────────────────────────────────────────────
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_pred = mo.ui.radio(
         options={
             "A) Preprocessing (35% -- largest non-inference)": "preprocess",
@@ -267,9 +261,7 @@ def _(mo, partC_pred):
     return (partD_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_preprocess = mo.ui.slider(start=5, stop=50, value=35, step=5,
                                      label="Preprocessing (%)")
     partD_inference = mo.ui.slider(start=5, stop=60, value=40, step=5,

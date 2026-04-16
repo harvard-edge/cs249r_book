@@ -230,9 +230,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_arch = mo.ui.radio(
         options={"MLP (no structure)": "mlp", "CNN 3x3": "cnn3", "CNN 5x5": "cnn5"},
         value="MLP (no structure)", label="Architecture:", inline=True,
@@ -255,9 +253,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_seq_len = mo.ui.slider(
         start=512, stop=131072, value=4096, step=512, label="Sequence length (tokens)",
     )
@@ -279,9 +275,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_depth = mo.ui.slider(
         start=2, stop=128, value=64, step=2, label="Depth (layers)",
     )

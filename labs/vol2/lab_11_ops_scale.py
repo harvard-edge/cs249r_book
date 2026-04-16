@@ -269,9 +269,7 @@ def _(mo):
 
 # ─── CELL 5: Part B prediction + Part B controls ─────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_pred = mo.ui.number(
         start=1000, stop=10_000_000, value=None, step=1000,
         label=(
@@ -288,9 +286,7 @@ def _(mo, pA_pred):
 
 # ─── CELL 6: Part C prediction + Part C controls ─────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_pred = mo.ui.radio(
         options={
             "A: 100+ models": "A",
@@ -313,9 +309,7 @@ def _(mo, pB_pred):
 
 # ─── CELL 7: Part D prediction + Part D controls ─────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_pred = mo.ui.radio(
         options={
             "A: ~6 minutes": "A",
@@ -336,7 +330,7 @@ def _(mo, pC_pred):
 
 # ─── CELL 8: Part E controls + Synthesis decision log ────────────────────────
 @app.cell(hide_code=True)
-def _(DecisionLog, mo, pD_pred):
+def _(DecisionLog, mo):
     mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
 
     pE_models = mo.ui.slider(start=10, stop=500, value=100, step=10, label="Model count")

@@ -186,9 +186,7 @@ def _(COLORS, H100_TDP_W, H100_TFLOPS_FP16, JETSON_TDP_W, JETSON_TFLOPS, apply_p
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_weeks = mo.ui.slider(start=0, stop=26, value=0, step=1,
                                 label="Weeks since deployment")
     partA_drift_rate = mo.ui.slider(start=0.005, stop=0.05, value=0.02, step=0.005,
@@ -207,9 +205,7 @@ def _(mo, partA_pred):
     return (partB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_retrain_cost = mo.ui.slider(start=1000, stop=50000, value=10000, step=1000,
                                        label="Retraining cost ($)")
     partB_drift_cost = mo.ui.slider(start=100, stop=5000, value=500, step=100,
@@ -228,9 +224,7 @@ def _(mo, partB_pred):
     return (partC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_cloud_cost = mo.ui.slider(start=500, stop=10000, value=1000, step=500,
                                      label="Cloud retrain cost ($)")
     partC_edge_cost = mo.ui.slider(start=10000, stop=500000, value=100000, step=10000,

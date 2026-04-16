@@ -185,9 +185,7 @@ def _(COLORS, H100_TDP_W, JETSON_TDP_W, apply_plotly_theme, go, math, mo, np):
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_base_a = mo.ui.slider(start=5, stop=50, value=30, step=5,
                                  label="Group A base rate (%)")
     partA_base_b = mo.ui.slider(start=5, stop=50, value=10, step=5,
@@ -208,9 +206,7 @@ def _(mo, partA_pred):
     return (partB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_target_gap = mo.ui.slider(start=0, stop=20, value=5, step=1,
                                      label="Target FPR gap (pp)")
     partB_method = mo.ui.dropdown(
@@ -231,9 +227,7 @@ def _(mo, partB_pred):
     return (partC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_features = mo.ui.slider(start=10, stop=200, value=50, step=10,
                                    label="Number of features")
     partC_method = mo.ui.dropdown(

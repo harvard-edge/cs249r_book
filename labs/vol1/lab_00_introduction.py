@@ -309,9 +309,7 @@ def _(check1, mo):
 # ─── CONCEPT 2: PHYSICAL CONSTRAINTS PARTITION DEPLOYMENT ─────────────────────
 
 @app.cell
-def _(check1, mo):
-    mo.stop(check1.value is None)
-
+def _(mo):
     mo.vstack([
         mo.md("---"),
         mo.md("""
@@ -384,7 +382,7 @@ def _(check1, mo):
 # ─── CHECK 2 (multi-select) ────────────────────────────────────────────────────
 
 @app.cell
-def _(check1, mo):
+def _(mo):
     mo.stop(check1.value is None)
 
     model_size = mo.ui.checkbox(

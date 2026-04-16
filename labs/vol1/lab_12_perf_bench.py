@@ -224,9 +224,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_speedup = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Inference speedup (x)")
     pA_serial = mo.ui.slider(start=5, stop=80, value=45, step=5, label="Non-inference fraction (%)")
 
@@ -243,9 +241,7 @@ def _(mo, pA_pred):
     return (pB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_time = mo.ui.slider(start=0, stop=600, value=0, step=10, label="Time (seconds)")
     pB_ambient = mo.ui.slider(start=20, stop=45, value=35, step=1, label="Ambient temp (C)")
     pB_cooling = mo.ui.dropdown(
@@ -266,9 +262,7 @@ def _(mo, pB_pred):
     return (pC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     pC_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},

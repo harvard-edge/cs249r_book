@@ -273,9 +273,7 @@ def _(mo):
 
 # ─── WIDGET CELL 2: Part A controls + Part B prediction ──────────────────────
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_epsilon = mo.ui.slider(start=0.1, stop=10.0, value=1.0, step=0.1, label="Epsilon")
     pA_N = mo.ui.slider(start=10, stop=10000, value=1000, step=10, label="Dataset size (N)")
 
@@ -297,9 +295,7 @@ def _(mo, pA_pred):
 
 # ─── WIDGET CELL 3: Part C prediction ────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_pred = mo.ui.radio(
         options={
             "A: ~900 tok/s -- overhead is small": "A",
@@ -317,9 +313,7 @@ def _(mo, pB_pred):
 
 # ─── WIDGET CELL 4: Part C controls + Part D prediction ─────────────────────
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_mig = mo.ui.checkbox(label="MIG Isolation (-15%)", value=True)
     pC_monitor = mo.ui.checkbox(label="Monitoring (+1.5ms/req)", value=True)
     pC_output = mo.ui.checkbox(label="Output Perturbation (+1.0ms/req)", value=True)
@@ -340,9 +334,7 @@ def _(mo, pC_pred):
 
 # ─── WIDGET CELL 5: Part D controls ─────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_queries = mo.ui.slider(start=100, stop=100_000, value=10_000, step=100,
                               label="Daily query volume")
     pD_eps_q = mo.ui.slider(start=0.001, stop=0.1, value=0.01, step=0.001,

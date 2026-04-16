@@ -213,9 +213,7 @@ def _(mo):
 
 # ─── CELL 5: PART A REFLECTION + PART B PREDICTION WIDGETS ──────────────────
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_reflection = mo.ui.radio(
         options={
             "A) Double the checkpoint frequency to protect against failures": "A",
@@ -240,9 +238,7 @@ def _(mo, partA_prediction):
 
 # ─── CELL 6: PART B CONTROLS + SYNTHESIS WIDGETS ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     a2_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model size (B params)")
     a2_cluster_gpus = mo.ui.slider(start=100, stop=25000, value=1000, step=100, label="Cluster GPUs")
     a2_storage = mo.ui.dropdown(
@@ -265,9 +261,7 @@ def _(mo, partB_prediction):
 
 # ─── CELL 6b: PART C WIDGETS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_reflection):
-    mo.stop(partB_reflection.value is None, mo.md("**Complete Part B reflection to unlock Part C.**"))
-
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) 10 seconds -- NVMe is fast": "A",
@@ -294,9 +288,7 @@ def _(mo, partB_reflection):
 
 # ─── CELL 6c: PART D WIDGETS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_reflection):
-    mo.stop(partC_reflection.value is None, mo.md("**Complete Part C reflection to unlock Part D.**"))
-
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) 1 replica -- just restart the failed one": "A",

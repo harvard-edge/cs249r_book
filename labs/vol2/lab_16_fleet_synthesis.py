@@ -274,9 +274,7 @@ def _(mo):
 
 # ─── CELL 5: Part B prediction + Part B sliders ──────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_pred = mo.ui.number(
         start=0.01, stop=1000, value=100, step=1,
         label="10,000 GPUs, each with 10,000-hour MTBF. What is the cluster MTBF (hours)?",
@@ -289,9 +287,7 @@ def _(mo, partA_pred):
 
 # ─── CELL 6: Part C prediction + Part C sliders ──────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_pred = mo.ui.radio(
         options={
             "A) No effect -- they are independent": "independent",
@@ -312,9 +308,7 @@ def _(mo, partB_pred):
 
 # ─── CELL 7: Part D prediction + Part D controls ─────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_refl = mo.ui.radio(
         options={
             "A) Yes -- fairness overhead for communication efficiency": "yes_trade",

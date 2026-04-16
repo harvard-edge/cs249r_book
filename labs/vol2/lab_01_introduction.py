@@ -259,9 +259,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_fleet_size = mo.ui.slider(
         start=100, stop=25000, value=1000, step=100,
         label="Fleet size (GPUs)",
@@ -285,9 +283,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_gpu_count = mo.ui.slider(
         start=1, stop=1024, value=256, step=1, label="Number of GPUs",
     )
@@ -318,9 +314,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_params = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Model params (B)")
     partC_tokens = mo.ui.slider(start=10, stop=10000, value=200, step=10, label="Training tokens (B)")
 
@@ -338,9 +332,7 @@ def _(mo, partC_prediction):
     return (partD_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_comm_frac = mo.ui.slider(start=0.01, stop=0.50, value=0.20, step=0.01, label="Communication fraction (r)")
     partD_n_gpus = mo.ui.slider(start=1, stop=512, value=64, step=1, label="Number of GPUs")
     partD_overlap = mo.ui.slider(start=0, stop=80, value=0, step=10, label="Overlap (%)")
