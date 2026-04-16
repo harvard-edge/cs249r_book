@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-r2-41059
+title: K8s Pod Failure Semantics for Distributed Training
+topic: container-orchestration
+status: published
+provenance: imported
+scenario: A 32-GPU training job running as a Kubeflow PyTorchJob has one worker pod killed by the OOM
+  killer (memory limit exceeded). The other 31 pods are still running. What happens next, and how should
+  the PyTorchJob be configured to handle this correctly?
+details:
+  realistic_solution: 'Chain of events: (1) Pod killed by OOM killer → container exits with code 137.
+    (2) The 31 remaining ranks call the next NCCL collective (e.g., AllReduce) and block waiting for rank
+    from the dead pod. (3) After NCCL_TIMEOUT (default 30 min), all 31 ranks throw TimeoutError and crash.
+    (4) PyTorchJob controller detects failed workers. Configuration for correct handling: (a) Set restartPolicy:
+    OnFailure in the PyTorchJob spec. When any worker fails, the PyTorchJob controller restarts ALL workers
+    (not just the failed one) because NCCL communicators must be re-initialized with all ranks. (b) Enable
+    elastic training: set elasticPolicy.minReplicas and maxReplicas. With TorchElastic, surviving workers
+    detect the failure via the rendezvous mechanism, checkpoint, and re-form with available ranks. (c)
+    Set NCCL_ASYNC_ERROR_HANDLING=1 or use torch.distributed''s init_process_group with timeout parameter
+    to fail fast instead of waiting 30 minutes. (d) Fix the root cause: increase memory limits (likely
+    the DataLoader or activation checkpointing needed), or reduce batch size to fit in the memory limit.
+    (e) Always set resources.limits.memory generously for training pods — OOM during training is always
+    worse than wasting memory.'
+  common_mistake: Expecting the 31 remaining pods to continue training. Without the crashed rank, NCCL
+    operations will hang at the next collective, and all 31 pods will eventually hit NCCL timeout (wasting
+    31 GPUs for up to 30 minutes).
+  napkin_math: 'OOM → 31 pods idle for 30 min (NCCL timeout) = 15.5 GPU-hours wasted. With NCCL_ASYNC_ERROR_HANDLING:
+    fail in ~1 min = 0.5 GPU-hours. With elastic: 0 GPU-hours (surviving ranks continue).'
+last_modified: '2026-04-02'

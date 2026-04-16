@@ -1,0 +1,29 @@
+schema_version: 1
+id: mobile-fill-01749
+title: Data Validation Gate Memory Bottleneck
+topic: data-quality-validation
+status: published
+provenance: imported
+scenario: A mobile pipeline implements a strict data quality gate using an INT8 autoencoder to detect
+  sensor anomalies before passing data to the main perception model. Both models run sequentially on the
+  Qualcomm Hexagon NPU (Snapdragon 8 Gen 3) using its 45 TOPS INT8 compute. The autoencoder has 200MB
+  of weights, and the main model has 1GB. They share the 16 GB LPDDR5X memory (64 GB/s max bandwidth)
+  with the CPU and GPU. During concurrent GPU UI rendering, the system misses the 33.3ms deadline for
+  30fps video, even though NPU compute utilization is under 10%. Analyze why the data validation gate
+  causes this failure.
+details:
+  realistic_solution: The bottleneck is strictly memory-bound, caused by sequentially swapping the validation
+    and main models in and out of the NPU's local SRAM. Because it is a heterogeneous SoC, the GPU's UI
+    rendering consumes a significant portion of the shared memory bandwidth. The solution is to either
+    fuse the data quality gate into the main model's early layers or keep both models persistently resident
+    in RAM to avoid per-frame swapping penalties.
+  common_mistake: Candidates often focus purely on the NPU's 45 TOPS INT8 compute capacity and assume
+    the bottleneck is computational, or they assume the NPU has exclusive access to the 64 GB/s memory
+    bandwidth without accounting for the heterogeneous SoC architecture where the GPU and CPU compete
+    for the shared LPDDR5X pool.
+  napkin_math: Total weights swapped per frame = 200MB (validator) + 1000MB (main) = 1.2GB. Theoretical
+    shared LPDDR5X bandwidth = 64 GB/s. Assuming the CPU/GPU consume ~50% of the shared bandwidth for
+    concurrent UI rendering, the NPU receives ~32 GB/s. Weight loading time per frame = 1.2 GB / 32 GB/s
+    = 0.0375 seconds = 37.5ms. Since 37.5ms > 33.3ms (the 30fps frame budget), the system drops frames
+    purely due to memory I/O before the 45 TOPS compute even begins.
+last_modified: '2026-04-01'

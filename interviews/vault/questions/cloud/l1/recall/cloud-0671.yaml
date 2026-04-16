@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-0671
+title: The Multi-Modal Token Starvation
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: You are serving a multi-modal model (like LLaVA). A user uploads a 4K image and asks, 'What
+  is this?' The image is encoded into 4,000 visual tokens by the Vision Encoder. The LLM then begins decoding
+  text. During the text decode phase, the GPU utilization is at 4%. Your manager asks you to optimize
+  the Vision Encoder to fix this. Why is the manager focusing on the wrong part of the stack?
+details:
+  realistic_solution: 'The manager is wrong because the bottleneck is in the autoregressive text decode
+    phase, not the vision encoder. The vision encoder runs once, is compute-bound, and processes 4000
+    visual tokens in parallel — it''s fast. But text generation is autoregressive: each token requires
+    reading the full 140GB of weights plus the 4000-token visual KV-cache from HBM. At 3 TB/s bandwidth,
+    that''s ~47ms per token, yielding only ~3 TFLOPS of compute utilization (0.3% of the H100''s peak).
+    The GPU is memory-bound during decode regardless of how the visual tokens were produced. Optimizing
+    the encoder won''t help.'
+  common_mistake: '"4,000 tokens is too many, the Vision Encoder needs to be compressed." While a smaller
+    encoder helps, it doesn''t solve why the *text decode phase* is running at 4% utilization.'
+  napkin_math: Decoding 1 token requires reading 140GB of FP16 weights (70B params) + 2GB for the 4K visual
+    KV-cache. On an H100 (3.35 TB/s), reading 142GB takes 142GB / 3.35TB/s = 42.4ms. The compute is 2
+    * 70B = 140 GFLOPs. 140 GFLOPs / 0.0424s = 3.3 TFLOPS. Against the H100's peak 989 TFLOPS, utilization
+    is 3.3 / 989 = 0.33%. Memory bandwidth completely bottlenecks decode!
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

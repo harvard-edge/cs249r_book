@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-gen-eval-0122
+title: K8s Network Architecture for PyTorch DDP
+topic: container-orchestration
+status: published
+provenance: imported
+scenario: 'You are designing a Kubernetes architecture for distributed training across 8 nodes, each with
+  8x A100 GPUs (312 TFLOPS FP16) and one InfiniBand NDR port (50 GB/s). You must choose a networking architecture
+  for the PyTorch DDP pods. Option A: Use Multus CNI with the SR-IOV device plugin to attach the InfiniBand
+  virtual function directly, enabling RDMA. Option B: Use standard Calico CNI overlay over a secondary
+  100 Gbps (12.5 GB/s) Ethernet network. The training step takes 450ms (150ms forward, 300ms backward)
+  and requires an all-reduce of 6 GB of gradients, which DDP overlaps with the backward pass.'
+details:
+  realistic_solution: Option A (Multus + SR-IOV) is the vastly superior design. By utilizing Multus to
+    expose the InfiniBand interface directly to the pod, you enable RDMA and bypass the Kube-proxy/CNI
+    overhead. With the 50 GB/s bandwidth of NDR, the gradient synchronization finishes faster than the
+    backward pass, completely hiding the network latency. This maximizes the utilization of the expensive
+    A100 GPUs, whereas Option B would leave them idle while waiting for network transfers.
+  common_mistake: Candidates often incorrectly add the total network transfer time to the total compute
+    time, failing to account for PyTorch DDP's ability to overlap communication with the backward pass.
+    They may also overlook the CPU overhead and lack of RDMA support in standard K8s CNI overlays.
+  napkin_math: 'Backward pass time = 300 ms.
+
+    Option A (InfiniBand NDR): Transfer time = 6 GB / 50 GB/s = 0.12s (120 ms). Since 120 ms < 300 ms,
+    communication is fully hidden. Total step time = 450 ms.
+
+    Option B (100 Gbps Ethernet): Transfer time = 6 GB / 12.5 GB/s = 0.48s (480 ms). Exposed network time
+    = 480 ms - 300 ms = 180 ms.
+
+    Total step time = 450 ms + 180 ms = 630 ms.
+
+    Option B increases step time by 40% (630ms vs 450ms), drastically reducing cluster efficiency.'
+last_modified: '2026-04-01'

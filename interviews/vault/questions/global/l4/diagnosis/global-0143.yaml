@@ -1,0 +1,29 @@
+schema_version: 1
+id: global-0143
+title: Chunked Prefill Latency Spikes
+topic: latency-decomposition
+status: published
+provenance: imported
+scenario: Serving Mixtral 8x7B on 2xH100s, your decode TPOT is a stable 30ms. To prevent long prompts
+  (up to 16k tokens) from blocking decodes, you enable chunked prefill with a chunk size of 4096 tokens.
+  P99 TTFT improves, but active decode requests suddenly experience severe jitter, with TPOT repeatedly
+  spiking to 120ms whenever a chunked prefill is processed alongside them.
+details:
+  realistic_solution: The latency spikes are caused by co-scheduling a heavily compute-bound task (the
+    4096-token prefill chunk) with memory-bound tasks (the decode steps). While chunked prefill prevents
+    a massive 16k token prefill from stalling the system for seconds, a 4096-token chunk still represents
+    a massive dense matrix multiplication. The GPU's Streaming Multiprocessors (SMs) become completely
+    saturated executing the prefill GEMMs. Because the decode tokens are batched together with this prefill
+    chunk, they must wait for the entire prefill chunk's forward pass to complete before the next iteration
+    can begin. To fix this, the chunk size must be tuned down (e.g., to 512 or 1024 tokens) to balance
+    the compute saturation with the strict TPOT latency SLA.
+  common_mistake: Thinking the chunk size is too small and causing attention overhead, or that the KV
+    cache is fragmenting.
+  napkin_math: Mixtral 8x7B active parameters per token = ~14B. FLOPs for a 4096 token prefill chunk =
+    2 * 14B * 4096 = ~114 TFLOPs. On H100 (assuming ~989 TFLOPS achievable BF16 compute), this prefill
+    chunk takes exactly 114 / 1000 = 114ms to compute. Because the decode step (which only takes 30ms
+    of memory-bound work) is fused in the same execution engine step as the prefill chunk, the decode
+    tokens are delayed by the 114ms prefill execution, resulting in the observed 120ms TPOT spikes.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

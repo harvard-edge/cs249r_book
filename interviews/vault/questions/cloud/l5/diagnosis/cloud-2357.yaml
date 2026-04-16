@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2357
+title: Root Causing NVSwitch MoE Contention
+topic: data-parallelism
+status: published
+provenance: imported
+scenario: On a single 8x H100 node with a 900 GB/s bidirectional NVSwitch, an MoE model with 8 experts
+  processes a batch. The intra-node All-to-All dispatch phase takes 8ms instead of the theoretical 1.1ms.
+  `nvidia-smi nvlink` shows GPU 0 hitting 100% Rx utilization, while GPUs 1-7 show only 15% Tx utilization.
+details:
+  realistic_solution: The root cause is severe load imbalance in expert assignment, leading to NVSwitch
+    port contention. In this MoE configuration, the gating network routes an overwhelmingly large percentage
+    of the batch's tokens to the expert residing on GPU 0. While the NVSwitch has massive aggregate bandwidth,
+    each individual GPU is limited to its physical ingress link (450 GB/s unidirectional for H100). GPUs
+    1-7 are all trying to send data to GPU 0 simultaneously, bottlenecking on GPU 0's Rx port. The solution
+    is to implement an auxiliary load-balancing loss function in the model training to penalize unbalanced
+    expert assignment, or enforce strict expert capacity limits (token dropping) to guarantee uniform
+    traffic distribution.
+  common_mistake: Assuming the NVSwitch is faulty or thermally throttling, or that NCCL is misusing PCIe
+    instead of NVLink.
+  napkin_math: Total batch size = 4GB (0.5GB per GPU). If perfectly balanced, GPU 0 receives 1/8th from
+    7 GPUs = ~0.43GB. Time = 0.43GB / 450 GB/s = 0.95ms. If highly unbalanced (e.g., 85% of tokens go
+    to GPU 0), GPU 0 receives 3.4GB. Time = 3.4GB / 450 GB/s = 7.5ms. This perfectly matches the observed
+    ~8ms latency.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-crit-20054
+title: Parallel Draft and Target Execution Scheduling
+topic: speculative-decoding
+status: published
+provenance: imported
+scenario: 'In standard speculative decoding, draft generation and target verification are serial: draft
+  runs, then target verifies. On a 4x H100 system with the target using TP=4 and a 1B draft, design a
+  pipelining scheme that overlaps draft generation of round N+1 with target verification of round N.'
+details:
+  realistic_solution: 'Approach: use GPU-0 for both draft (when target is verifying) since during target
+    verification with TP=4, each GPU runs 1/4 of the work — GPU-0 has spare SM capacity. Target verification
+    at batch=1: each GPU uses ~30% of SMs (memory-bound). Draft on GPU-0: 1B model needs ~5% of SMs. Can
+    coexist. Pipeline: Round N: [Draft_N generates K tokens] -> [Target verifies K tokens (GPU 0-3) |
+    Draft_N+1 generates K tokens (GPU-0, different stream)] -> [Accept/reject N, Draft_N+1 ready]. Timing:
+    target verify = 42ms. Draft K=5 = 5ms. Draft finishes within verification window. But: draft generation
+    for round N+1 must use SPECULATIVE tokens from round N (not yet confirmed). If round N rejects at
+    position 3, draft N+1''s tokens from position 4+ are invalid. Fix: run draft N+1 from the last confirmed
+    position (conservative) or speculatively assume full acceptance (optimistic, requires rollback). Optimistic
+    approach: 80% of the time no rollback needed (alpha=0.80). 20% of time: wasted 5ms of draft compute.'
+  common_mistake: Thinking you can simply run draft and target in parallel on the same GPUs. CUDA streams
+    on the same GPU share compute resources, so concurrent kernels would compete for SMs and memory bandwidth,
+    slowing both.
+  napkin_math: 'Serial: 42ms (verify) + 5ms (draft) = 47ms/round. Pipelined: 42ms (verify overlapped with
+    5ms draft) = 42ms/round. Savings: 5ms/round = 10.6%. With rollback: 0.2 x 5ms waste = 1ms avg. Net:
+    42ms vs 46ms = 8.7% improvement.'
+last_modified: '2026-04-01'

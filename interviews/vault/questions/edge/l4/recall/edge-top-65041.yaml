@@ -1,0 +1,31 @@
+schema_version: 1
+id: edge-top-65041
+title: On-Device LoRA Inference with INT4 Weight Quantization
+topic: model-adaptation-systems
+status: published
+provenance: imported
+scenario: An edge device runs a 7B base model quantized to INT4 (AWQ) with a BF16 LoRA adapter. Inference
+  shows the LoRA dequantize-compute-requantize pattern adds 35% latency overhead per layer. Optimize the
+  adapter computation.
+details:
+  realistic_solution: 'Three optimization approaches: (1) Merge and requantize: merge the LoRA adapter
+    into the base weight matrix offline (W_merged = W_base + B*A), then requantize the merged matrix to
+    INT4. Zero inference overhead. Downside: cannot hot-swap adapters without full requantization. (2)
+    Separate INT8 LoRA: quantize the LoRA matrices to INT8. LoRA matrices are small (r × d = 8 × 4096
+    = 32K values per matrix), INT8 quantization error is negligible at this scale. Perform LoRA computation
+    in INT8, accumulate in INT32, cast to BF16 for output. (3) Fused kernel: write a custom kernel that
+    fuses dequantize + base matmul + LoRA addition into a single pass, avoiding materialization of the
+    dequantized matrix. This approach is used in llama.cpp GGML kernels for LoRA with quantized base.'
+  common_mistake: Keeping the LoRA computation in BF16 while the base model runs in INT4. The type mismatch
+    requires dequantizing the base weight matrix to BF16 for the LoRA addition, then performing the combined
+    computation, tripling memory bandwidth requirement for the base weights.
+  napkin_math: 'Per-layer base matmul: d_in * d_out = 4096 * 4096 = 16.8M values. INT4: 8.4MB per weight
+    matrix. BF16: 33.6MB. Dequantizing to BF16: 4× memory bandwidth increase for base weights. LoRA add:
+    r * d = 8 * 4096 = 32K values × 2 bytes = 64KB BF16 (two matrices: A is [r, d_in] = 32K values, B
+    is [d_out, r] = 32K values, total 64K values = 128KB per layer). LoRA compute overhead vs base: 2
+    * seq_len * d * r / (2 * seq_len * d * d) = r/d = 8/4096 = 0.2%. The 35% overhead is entirely from
+    dequantization. Fused kernel eliminates dequantize: base matmul bandwidth returns to INT4 rates (4×
+    reduction), latency overhead drops from 35% to ~2%.'
+last_modified: '2026-04-02'
+tags:
+- scope:Intermediate

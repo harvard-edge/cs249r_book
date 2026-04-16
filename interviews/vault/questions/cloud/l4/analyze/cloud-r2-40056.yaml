@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-r2-40056
+title: PCIe Bandwidth Bottleneck for GPUDirect RDMA
+topic: rdma-transport
+status: published
+provenance: imported
+scenario: An H100 SXM GPU has 3.35 TB/s HBM3 bandwidth but connects to its ConnectX-7 NIC via PCIe Gen5
+  x16, which provides 64 GB/s per direction. For GPUDirect RDMA transfers, analyze where the bottleneck
+  lies and calculate the maximum achievable AllReduce throughput when the PCIe bus is shared between NIC
+  traffic and CPU data transfers.
+details:
+  realistic_solution: 'PCIe Gen5 x16: raw bandwidth = 63 GB/s per direction (32 GT/s × 16 lanes × 128b/130b
+    encoding). Effective after TLP overhead: ~57 GB/s (10% overhead for headers, ACKs, flow control credits).
+    On H100 SXM: each GPU has a dedicated PCIe Gen5 x16 link to its ConnectX-7 NIC (no sharing with other
+    devices). However, NCCL also uses PCIe for: (1) GDRCopy small message transfers (control plane), (2)
+    NVSwitch management traffic. Under AllReduce with GPUDirect RDMA: GPU VRAM → PCIe → NIC → wire. Max
+    throughput = min(HBM bandwidth for DMA read, PCIe bandwidth, NIC line rate) = min(3350, 57, 50) =
+    50 GB/s (NIC line rate). The PCIe link is NOT the bottleneck — the 400Gbps NIC (50 GB/s) is. But with
+    8 rails per H100 node: 8 × 50 = 400 GB/s aggregate NIC bandwidth vs 8 × 57 = 456 GB/s aggregate PCIe
+    bandwidth. PCIe has only 14% headroom above NIC bandwidth. If any PCIe link experiences degradation
+    (Gen5 → Gen4 fallback halves bandwidth to 32 GB/s), that rail becomes PCIe-bottlenecked and AllReduce
+    throughput drops on that rail by 36%.'
+  common_mistake: Assuming PCIe Gen5 x16 provides 64 GB/s of usable RDMA bandwidth. In practice, PCIe
+    bandwidth is shared with other devices (NVMe SSDs, CPU memory access via UPI), and PCIe TLP (Transaction
+    Layer Packet) overhead consumes ~5-10% of raw bandwidth.
+  napkin_math: 'Single rail: HBM (3350 GB/s) → PCIe (57 GB/s) → NIC (50 GB/s). Bottleneck: NIC. 8 rails:
+    PCIe total = 456 GB/s, NIC total = 400 GB/s. Headroom: 56 GB/s (14%). MI300X comparison: HBM (5300
+    GB/s) → PCIe Gen5 (57 GB/s) → NIC (50 GB/s). Same bottleneck, but MI300X''s larger HBM generates more
+    data to move, making the PCIe bottleneck more painful for checkpoint saves.'
+last_modified: '2026-04-02'

@@ -1,0 +1,29 @@
+schema_version: 1
+id: edge-exp2-anal-0339
+title: Unified Memory Contention in High-Frequency Edge Ingestion
+topic: streaming-ingestion
+status: published
+provenance: imported
+scenario: You have a real-time sensor ingestion pipeline running on an NVIDIA Jetson Orin (32 GB LPDDR5,
+  275 TOPS INT8, 60W TDP, Ampere GPU + DLA accelerator). The system ingests uncompressed LiDAR point clouds
+  at 20Hz. When you increase the ingestion rate to 60Hz, the pipeline experiences unpredictable latency
+  spikes and frame drops. However, telemetry shows the Ampere GPU and DLA are at only 30% utilization,
+  and the system is drawing 40W (well below the 60W TDP limit). Explain why these latency spikes occur
+  despite having plenty of compute and thermal headroom.
+details:
+  realistic_solution: The bottleneck is memory bandwidth contention on the unified 32 GB LPDDR5 memory.
+    The Jetson Orin shares a single memory pool across the CPU, GPU, DLA, and I/O controllers. High-frequency
+    uncompressed data ingestion forces the memory controller to constantly service I/O writes and CPU
+    preprocessing reads, which competes directly with the GPU/DLA trying to fetch weights and activations.
+    This contention causes memory queuing delays, leading to latency spikes even when the 275 TOPS compute
+    capacity is mostly idle.
+  common_mistake: Candidates often assume the compute units are thermal throttling or suggest optimizing
+    the model to use INT8 on the DLA. They ignore the explicitly stated 40W power draw and low utilization,
+    failing to consider the memory architecture of the device.
+  napkin_math: Assume one uncompressed LiDAR frame is 30 MB. At 60Hz, raw ingestion is 30 MB * 60 = 1.8
+    GB/s of writes. If the CPU normalizes the data (1.8 GB/s read + 1.8 GB/s write) and the GPU/DLA reads
+    it for inference (1.8 GB/s read), that is 7.2 GB/s of continuous memory traffic just for the data
+    payload. Add in the OS, driver overhead, and the 275 TOPS INT8 compute engines constantly fetching
+    model weights and intermediate activations from the same 32 GB LPDDR5 pool, and the bursty nature
+    of the traffic saturates the memory controller queues, causing stalling.
+last_modified: '2026-04-01'

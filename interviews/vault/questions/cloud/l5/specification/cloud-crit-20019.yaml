@@ -1,0 +1,24 @@
+schema_version: 1
+id: cloud-crit-20019
+title: FlashAttention Backward Pass Memory Savings for Training
+topic: flash-attention
+status: published
+provenance: imported
+scenario: You are training a 13B model on 8x A100-80GB with seq_len=8192, micro_batch=2, 40 layers, 40
+  heads, head_dim=128. Standard attention stores the full N x N attention matrix for the backward pass.
+  Compute the activation memory saved by FlashAttention's recomputation strategy and determine if this
+  enables a larger batch size.
+details:
+  realistic_solution: 'Standard attention stores S = softmax(QK^T/sqrt(d)) per layer: 8192^2 x 2B x 40
+    heads x 2 micro_batch = 40 x 2 x 8192^2 x 2 = 80 x 128MB = 10GB per layer. Across 40 layers: 400GB
+    — impossible on 8 GPUs (max 640GB, but model + optimizer already use ~400GB). FlashAttention stores
+    only Q, K, V, O and softmax log-sum-exp (8192 x 4B per head): per layer = 4 x 8192 x 128 x 2B x 40
+    x 2 + 8192 x 4B x 40 x 2 = 640MB + 2.5MB ≈ 643MB per layer. Total: 40 x 643MB = 25.1GB. Savings: 400GB
+    - 25.1GB = 374.9GB. This easily allows batch_size=4 instead of 2. Recomputation cost: ~33% more attention
+    FLOPs in backward, but attention is typically 15-20% of total training FLOPs, so net overhead is ~5-7%.'
+  common_mistake: Thinking FlashAttention's recomputation slows training significantly. The recomputation
+    cost is small because attention is compute-bound with FlashAttention, and the memory savings often
+    allow larger batch sizes that improve GPU utilization.
+  napkin_math: 'Standard: 8192^2 x 2B x 80 per layer = 10GB. 40 layers = 400GB. Flash: 643MB x 40 = 25GB.
+    Savings: 375GB. Enables 2x batch size at 5-7% compute overhead.'
+last_modified: '2026-04-01'

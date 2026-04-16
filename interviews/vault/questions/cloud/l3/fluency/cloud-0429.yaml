@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-0429
+title: The GPU Utilization Paradox
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: 'Your team rents 64 A100 GPUs to train a large vision model. After a month, the cloud bill arrives:
+  ~$92,000. You pull the utilization logs and discover average GPU compute utilization was 23%. The team
+  swears the training loop is optimized. Where did 77% of your GPU-hours go?'
+details:
+  realistic_solution: 'The GPU is idle because the *surrounding infrastructure* can''t feed it fast enough.
+    In production ML systems, the model code is roughly 5% of the system (per Google''s "Hidden Technical
+    Debt" paper). The other 95% — data ingestion, preprocessing, feature extraction, checkpointing, logging,
+    and gradient synchronization — creates the actual bottleneck. Common culprits: CPU-bound image decoding
+    (8 CPU cores can''t decode fast enough for 8 GPUs), slow NFS reads during shuffling, synchronous checkpointing
+    that stalls all GPUs every N steps, and Python GIL contention in the data loader.'
+  common_mistake: '"The model isn''t big enough to saturate the GPUs" or "We need to increase the batch
+    size." Both assume the bottleneck is inside the training loop — it''s not.'
+  napkin_math: '64 A100 GPUs at $2/GPU-hour × 720 hours/month = $92,160/month. At 23% utilization, only
+    $21,197 of compute is productive — $70,963/month wasted on idle silicon. Root cause analysis: a vision
+    model training step on A100 with batch=64 runs in ~200ms. Data pipeline must deliver 64 decoded images
+    per 200ms per GPU = 320 images/sec/GPU. For 64 GPUs: 20,480 images/sec total. At ~600 KB/image (224×224×3×FP32):
+    12.3 GB/s of decoded data. If NFS delivers 2 GB/s and JPEG decode is CPU-limited to 5,000 images/sec
+    across available CPU cores, GPUs are starved (5,000/20,480 = 24.4% — matching the observed 23% utilization).
+    Fix: NVIDIA DALI for GPU-accelerated decoding + local NVMe staging. Cost of fix: ~$5,000/month in
+    NVMe storage. Savings: ~$71K/month.'
+chain:
+  id: cloud-chain-100
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

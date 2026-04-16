@@ -1,0 +1,27 @@
+schema_version: 1
+id: mobile-0792
+title: The INT8 KV Cache Penalty
+topic: quantization-fundamentals
+status: published
+provenance: imported
+scenario: To fit a 4B model in 4GB of mobile RAM, you quantize the KV cache from FP16 to INT8, successfully
+  saving 600MB. However, you observe that decode latency increases from 35ms per token to 55ms per token,
+  and overall NPU utilization drops from 80% to 50%.
+details:
+  realistic_solution: The latency increase is caused by the lack of native INT8-to-FP16 mixed-precision
+    attention support on the mobile NPU. To perform the attention mechanism, the inference engine must
+    insert an explicit dequantization kernel that reads the INT8 KV cache, casts it back to FP16, and
+    writes it to an intermediate buffer in SRAM (or DRAM) before the actual attention kernel can run.
+    This extra kernel launch, combined with the intermediate memory round-trip on every single decode
+    step, adds pure latency overhead that stalls the NPU.
+  common_mistake: Assuming INT8 memory fetches are slower than FP16 memory fetches.
+  napkin_math: 'For a 4B model, assume 36 layers, 8 KV heads (GQA), head_dim=128. With a 1000-token context:
+    INT8 KV cache per layer = 2 × 8 × 128 × 1000 × 1 byte = 2 MB. Total across 36 layers = 72 MB (INT8),
+    vs 144 MB (FP16) — saving ~72 MB, though the scenario''s 600 MB savings implies a longer context or
+    larger head config. Dequantization overhead per layer: read 2 MB (INT8) + write 4 MB (FP16 intermediate)
+    = 6 MB. At 30 GB/s LPDDR bandwidth: 0.2 ms per layer. Across 36 layers: 7.2 ms. Kernel launch overhead
+    on mobile (~0.2 ms per extra dequant kernel × 36 layers): ~7.2 ms. Total added latency ≈ 14–20 ms
+    per token, explaining the increase from 35 ms to 55 ms.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

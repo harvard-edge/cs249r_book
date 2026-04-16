@@ -1,0 +1,33 @@
+schema_version: 1
+id: tinyml-exp2-diag-0205
+title: Diagnosing WDT Resets During Peak BLE Transmissions
+topic: graceful-degradation
+status: published
+provenance: imported
+scenario: A vibration monitoring device built on the Nordic nRF5340 is deployed in a factory. The device
+  runs a continuous anomaly detection model on the 128 MHz application core, while the 64 MHz network
+  core handles BLE 5.3 communications. Recently, the devices have started experiencing intermittent Watchdog
+  Timer (WDT) resets. Log analysis reveals these resets exclusively correlate with periods of high wireless
+  interference where BLE packet retries spike, even though the vibration model's input data rate and complexity
+  remain constant. The system was designed to be fail-operational but lacks an explicit degradation ladder.
+details:
+  realistic_solution: The root cause is a lack of quality-of-service (QoS) shedding and backpressure handling
+    between the two cores. During high BLE interference, the 64 MHz network core slows down its processing
+    of outbound telemetry. Because the app core lacks a graceful degradation strategy, it continues running
+    the full inference model and pushing results into the inter-core communication (IPC) queues. Once
+    the 256 KB SRAM allocated for IPC queues fills up, the app core's telemetry push function blocks indefinitely,
+    eventually starving the idle thread and triggering the WDT. A proper degradation ladder would monitor
+    IPC queue depth and gracefully fallback to a cheaper thresholding model that logs locally rather than
+    transmitting.
+  common_mistake: Candidates often misdiagnose this as the BLE stack stealing CPU cycles from the inference
+    task, forgetting that the Nordic nRF5340 utilizes physically separate application and network cores.
+    They might also incorrectly suggest an out-of-memory (OOM) error without addressing why it results
+    in a WDT timeout rather than an allocation fault.
+  napkin_math: Assume the model runs at 10 Hz on the 128 MHz app core, generating a 250-byte inference
+    payload per cycle (2.5 KB/sec). The IPC queue in the shared 256 KB SRAM is configured to 2 KB to save
+    memory for the model. Under normal conditions, the 64 MHz net core clears this instantly via BLE 5.3.
+    During severe interference, if the net core stalls transmission for just 800 ms (0.8 seconds), the
+    2 KB IPC queue fills completely (8 inferences * 250 bytes = 2000 bytes). The 9th inference at t=900ms
+    blocks the app core. If the WDT timeout is 1.5 seconds, the system resets shortly after, confirming
+    the absence of a fail-safe degradation trigger at 80% queue capacity.
+last_modified: '2026-04-01'

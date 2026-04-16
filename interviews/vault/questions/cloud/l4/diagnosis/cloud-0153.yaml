@@ -1,0 +1,38 @@
+schema_version: 1
+id: cloud-0153
+title: The Cannibalistic Batching Strategy
+topic: batching-strategies
+status: published
+provenance: imported
+scenario: Your team runs a serverless LLM API that autoscales based on pending requests. The current batching
+  strategy waits up to 400ms to form a large batch to maximize H100 utilization and TPOT, which is key
+  to keeping costs low. However, users are complaining about high and unpredictable TTFT. You observe
+  that during spiky traffic, the system scales up aggressively but the new instances show low initial
+  utilization. Analyze the fundamental tension between the batching strategy's goal (high TPOT) and the
+  user-perceived latency (TTFT). Why is the batching strategy cannibalizing its own efficiency?
+details:
+  realistic_solution: The system is working at cross-purposes. The batching algorithm's long timeout artificially
+    inflates the queue waiting time to build large batches for high TPOT. This long wait time is precisely
+    what users perceive as bad TTFT. Worse, it's also what triggers the autoscaler. The autoscaler sees
+    a long queue and spins up a new, expensive H100 instance, which *itself* then sits mostly idle, also
+    waiting up to 400ms to form *its own* large batch. The batching strategy is actively creating the
+    latency that leads to inefficient scaling. The solution is dynamic or adaptive batching. When the
+    request queue is short, the system should use a very short timeout and small batch size to prioritize
+    TTFT. When the queue grows long (indicating high sustained load), the timeout and target batch size
+    should increase to shift priority to maximizing TPOT and system throughput. This aligns the batching
+    strategy with the current system state, providing low latency at low load and high throughput at high
+    load.
+  common_mistake: Suggesting a simple tweak like 'just shorten the batching timeout.' This is a temporary
+    fix that doesn't address the core, systemic conflict. A shorter timeout will improve TTFT but decrease
+    batch size, cratering throughput, increasing costs per token, and potentially causing the autoscaler
+    to trigger even more aggressively, leading to a fleet of under-utilized, expensive GPUs.
+  napkin_math: 13B model in FP16 = 26GB. H100 memory bandwidth = 3.35TB/s. Memory reading time per token
+    (TPOT for BS=1) = 26GB / 3.35TB/s = 7.76ms. With a 5ms fixed overhead, 1 token takes ~12.8ms. Waiting
+    400ms allows forming a batch of 400ms / 12.8ms ≈ 31 requests. However, 400ms queueing delay dominates
+    the 13ms execution, causing user complaints despite high utilization.
+chain:
+  id: cloud-chain-062
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

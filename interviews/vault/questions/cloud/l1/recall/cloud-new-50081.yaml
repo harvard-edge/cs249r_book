@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-new-50081
+title: Communication Overlap in Context-Parallel Long-Sequence Training
+topic: communication-computation-overlap
+status: published
+provenance: imported
+scenario: You train a model with 128K context length using context parallelism (splitting the sequence
+  across 8 GPUs). Each GPU holds 16K tokens. During attention, each GPU needs KV from all other GPUs (for
+  full bidirectional attention). The KV exchange via AllGather takes 25ms per layer, while local attention
+  compute takes 15ms. Communication dominates. Design an overlap strategy specific to context parallelism.
+details:
+  realistic_solution: 'Ring attention overlap: (1) Instead of AllGather (all KV at once), use a ring-based
+    P2P pattern. GPU i sends its KV to GPU i+1 while receiving from GPU i-1. (2) As soon as GPU i receives
+    KV from GPU j, it computes the attention between its local queries and GPU j''s keys/values. (3) This
+    overlaps KV transfer with partial attention computation: while computing attention on KV from GPU
+    0, receive KV from GPU 1 in the background. (4) For causal models: GPU i only needs KV from GPUs 0..i
+    (earlier sequence positions). GPU 7 needs KV from all 7 others, but GPU 0 needs none. Average communication:
+    (0+1+...+7)/8 = 3.5 rounds per GPU. (5) Total: 7 ring steps x max(transfer_step, compute_step). Transfer
+    per step: 25ms/7 = 3.6ms. Compute per step: attention on 16K x 16K chunk ~2ms. Overlap: max(3.6, 2)
+    x 7 = 25.2ms. Without overlap: 25 + 15 = 40ms.'
+  common_mistake: Treating context parallelism KV exchange as a monolithic AllGather. Since attention
+    is causal in many models, not all GPU pairs need to exchange KV at the same time.
+  napkin_math: 'Overlap saves: 40 - 25.2 = 14.8ms per layer. 96 layers: 1420ms saved per step. At 5-second
+    step time: 28% speedup. Ring attention is the key technique that makes 128K+ context training feasible.'
+last_modified: '2026-04-02'

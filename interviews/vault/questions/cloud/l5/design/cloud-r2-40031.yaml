@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-r2-40031
+title: Gradient All-to-All for Expert Parallelism
+topic: gradient-synchronization
+status: published
+provenance: imported
+scenario: A Mixture-of-Experts (MoE) model with 128 experts distributed across 128 MI300X GPUs uses All-to-All
+  communication for token routing. Each GPU holds 1 expert and routes tokens to the correct expert on
+  another GPU. With a batch of 4096 tokens and top-2 routing, each GPU must send ~64 tokens (each 4KB
+  with hidden dim 2048 in FP16) to each of the 128 GPUs. Design the All-to-All communication pattern and
+  compare its bandwidth requirements to AllReduce.
+details:
+  realistic_solution: 'Per GPU: sends 64 tokens × 4KB = 256KB to each of 128 GPUs = 32MB total outbound.
+    Receives 32MB total inbound (assuming balanced routing). Total All-to-All data: 128 GPUs × 32MB =
+    4GB network traffic (vs AllReduce of 2 × 127/128 × D for gradient of size D). With 400Gbps NIC: each
+    GPU''s 32MB transfer takes 32MB / 50GB/s = 640μs (if bandwidth is fully utilized). However, All-to-All
+    creates 128 concurrent small flows (256KB each) per GPU — these are mice flows that are latency-bound,
+    not bandwidth-bound. Per-flow transfer: 256KB / 50GB/s = 5.12μs serialization + 5μs RTT = 10.12μs.
+    With NCCL''s pipelining: overlap all 128 flows, total ≈ 640μs. This happens twice per MoE layer (forward
+    dispatch + backward combine). For a model with 4 MoE layers: 4 × 2 × 640μs = 5.12ms of All-to-All
+    per iteration. With MI300X''s 192GB HBM, expert weights fit entirely in memory (each expert ~100MB
+    for a 13B-equivalent model), so no swapping overhead.'
+  common_mistake: Treating All-to-All like AllReduce. AllReduce is symmetric (same data from all sources
+    combined), while All-to-All is a permutation (different data to different destinations). All-to-All
+    creates uniform traffic across all paths but has no reduction phase, so total data volume scales as
+    O(N²) with GPU count.
+  napkin_math: 'All-to-All for MoE: 128 × 32MB = 4GB total. AllReduce for 2GB gradients: 2 × 127/128 ×
+    2GB = 3.97GB total. Similar volume, but All-to-All has 128² = 16,384 individual flows vs Ring AllReduce''s
+    128 flows. This makes All-to-All much harder to schedule but easier to parallelize since flows are
+    independent.'
+last_modified: '2026-04-02'

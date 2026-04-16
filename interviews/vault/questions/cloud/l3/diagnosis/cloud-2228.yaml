@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2228
+title: The Object Store Training Anti-Pattern
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: A team stores their 10 TB training dataset as 50 million individual JPEG files in an S3-compatible
+  object store. During training, each GPU worker fetches individual files randomly. They observe that
+  data loading saturates at 500 samples/sec per worker despite having 100 Gbps network links, and the
+  S3 API request costs are adding up unnecessarily over hundreds of experiments. What is the root cause,
+  and how should they restructure the data?
+details:
+  realistic_solution: 'Object stores like S3 have high per-request latency (~20-50ms for a GET) and charge
+    per API call. At 500 samples/sec, the worker is issuing 500 HTTP GET requests per second. Each request
+    incurs DNS resolution, TLS handshake (amortized), HTTP overhead, and S3''s internal metadata lookup.
+    The 20ms per-request latency with 500 concurrent requests saturates the client''s connection pool,
+    not the bandwidth. The fix: pack training samples into large sequential files (TFRecord, WebDataset
+    tar files, or Parquet). A single 1 GB tar file containing 5,000 samples requires 1 GET request instead
+    of 5,000, reducing API calls by 5,000x and enabling sequential streaming at full bandwidth. Additionally,
+    use a local NVMe cache to avoid repeated S3 reads across epochs.'
+  common_mistake: Blaming network bandwidth. 100 Gbps = 12.5 GB/s, and at 200 KB per JPEG, 500 samples/sec
+    is only 100 MB/s — nowhere near saturating the link. The bottleneck is not bandwidth but request overhead.
+  napkin_math: '50M files × ($0.0004 / 1000 GETs) = $20 per full epoch in API costs. Across hundreds of
+    experiments, this translates to thousands of dollars wasted. After packing into 10,000 tar files:
+    10,000 × ($0.0004 / 1000) = $0.004 per epoch. Throughput with packed files: one 1 GB sequential read
+    at 12.5 GB/s = 80ms for 5,000 samples = 62,500 samples/sec — a 125× improvement.'
+last_modified: '2026-04-01'
+tags:
+- scope:Data Storage

@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-cell-10001
+title: Designing a Gradient Checkpointing Segment Strategy for a 70B Model on A100
+topic: activation-memory
+status: published
+provenance: imported
+scenario: Your team is fine-tuning a 70B parameter dense Transformer (96 layers, H=8192, FFN=4× H) on
+  8× A100 80 GB GPUs using tensor parallelism degree 8. With fp16 weights and Adam optimizer in fp32,
+  model and optimizer states consume approximately 52 GB per GPU. You have roughly 28 GB remaining per
+  GPU for activations. Design a gradient checkpointing strategy that keeps peak activation memory under
+  28 GB while minimizing re-computation overhead.
+details:
+  realistic_solution: 'Use selective checkpointing: checkpoint attention score tensors (the O(S²) terms)
+    at every layer while retaining MLP activations. For S=2048, H=8192, B=2 per GPU: attention scores
+    are 2×64×2048²×2 B ≈ 1 GB per layer. Discarding and recomputing these across 96 layers saves ~96 GB
+    per GPU while the single-attention recompute adds only ~5% extra FLOPs per backward pass. Combine
+    with activation offloading for the residual stream to PCIe host memory during the forward pass for
+    layers not in the current backward window.'
+  common_mistake: Applying uniform layer-level checkpointing without considering that attention score
+    tensors scale as O(S²) and dominate activation memory at long sequences, while MLP layers scale as
+    O(S) and checkpoint much more cheaply per byte saved.
+  napkin_math: '28 GB budget: model fp16 = 70B×2 = 140 GB / 8 GPUs = 17.5 GB. Adam states = 70B×12/8 =
+    105 GB/8 = 13.1 GB. Wait — 17.5+13.1 = 30.6 GB already exceeds 28 GB free, so mixed-precision Adam
+    (fp16 moments) is required first, freeing ~6.5 GB. Attention score checkpoint savings: 64 heads ×
+    2048² × 2 B × 96 layers / 8 (TP) ≈ 6.4 GB/GPU saved per segment of 12 layers.'
+last_modified: '2026-04-01'
+tags:
+- scope:8-GPU tensor-parallel training on A100; excludes pipeline parallelism and data parallelism dimensions.

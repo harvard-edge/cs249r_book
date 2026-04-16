@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-sus-62024
+title: Disaggregated Serving Cost Model
+topic: disaggregated-serving
+status: published
+provenance: imported
+scenario: 'Build a cost model for a disaggregated serving deployment at 10,000 requests/hour, 70B FP16
+  model, mixed workload (50% short: 256 input/64 output; 50% long: 2048 input/512 output). GPU costs:
+  H100 at $3.50/hr, MI300X at $4.50/hr. Determine the optimal prefill (H100) to decode (MI300X) pool ratio
+  that minimizes cost while meeting TTFT < 200 ms and TPOT < 50 ms. Show all work.'
+details:
+  realistic_solution: 'Step 1: Characterize load. 10k req/hr = 2.78 req/s. Short: 1.39 req/s × 256 input
+    = 356 tok/s prefill, 1.39 × 64 = 89 tok/s decode. Long: 1.39 × 2048 = 2847 tok/s prefill, 1.39 × 512
+    = 711 tok/s decode. Total: prefill = 3203 tok/s, decode = 800 tok/s. Step 2: Capacity per GPU. H100
+    prefill: 200k tok/s per GPU (compute-bound, 70B, mixed lengths). Required prefill GPUs at 75% util:
+    3203 / (200k × 0.75) = 0.021 GPUs — trivially 1 GPU handles this load. MI300X decode: 37.8 tok/s per
+    sequence, concurrent sequences = 135 per MI300X. At 800 tok/s and 512 avg output (0.78 s per sequence):
+    concurrent sequences = 800 × 0.78 = 624 sequences. MI300X needed: 624/135 = 4.6 → 5 MI300X at 75%
+    util. Step 3: Cost. 1 H100 × $3.50/hr + 5 MI300X × $4.50/hr = $3.50 + $22.50 = $26/hr. Cost per request:
+    $26/hr / 10k req/hr = $0.0026/request. Validate SLOs: TTFT for long (2048 tok): 2048/200k = 10.2 ms
+    << 200 ms. TPOT: 5 MI300X serving 624 sequences: step time = 140 GB / 5.3 TB/s = 26.4 ms < 50 ms.
+    Both SLOs met.'
+  common_mistake: Optimizing GPU count without accounting for the fact that prefill and decode have different
+    utilization bounds — decode at 90%+ utilization causes queuing latency explosions, so you must size
+    to 70-80% utilization.
+  napkin_math: 'Prefill load: 3203 tok/s. H100 prefill capacity: 200k tok/s. GPUs needed: ceil(3203/150k)
+    = 1 (at 75% util: 150k tok/s). Decode load: 800 tok/s output. Average decode time per request (short):
+    64 tok × 26.4 ms/tok = 1.69 s; (long): 512 × 26.4 ms = 13.5 s. Concurrent sequences at steady state
+    (Little''s Law): λ × W. Short: 1.39 × 1.69 = 2.3. Long: 1.39 × 13.5 = 18.8. Total: 21 concurrent sequences.
+    MI300X holds 135 sequences. 1 MI300X is sufficient at this load! Cost: 1 H100 + 1 MI300X = $3.50 +
+    $4.50 = $8/hr = $0.0008/request. Scale: at 100k req/hr (27.8 req/s), concurrent sequences = 210 →
+    2 MI300X; 10 H100 prefill. Cost: 10×$3.50 + 2×$4.50 = $44/hr.'
+last_modified: '2026-04-02'
+tags:
+- scope:Disaggregated Serving

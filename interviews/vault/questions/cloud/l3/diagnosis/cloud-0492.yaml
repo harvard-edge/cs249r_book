@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0492
+title: The Distributed Training Stall
+topic: interconnect-topology
+status: published
+provenance: imported
+scenario: You are a Staff ML Systems Engineer diagnosing a training job for a 175B parameter LLM using
+  FP16. The setup uses 8-way tensor parallelism within each H100 node and data parallelism across nodes.
+  You observe that scaling from 1 to 2 nodes yields an excellent 1.8x speedup, but scaling further to
+  4 nodes only provides a 1.2x additional speedup (for a total of 2.16x). Your profiler indicates that
+  the `AllReduce` collective is taking up the vast majority of step time at the 4-node scale. Given that
+  the nodes are connected with a 400 Gbps InfiniBand NDR network, use your systems knowledge to diagnose
+  the most likely bottleneck.
+details:
+  realistic_solution: The correct diagnosis is that the cross-node InfiniBand network is completely saturated
+    by the `AllReduce` operation. For data parallelism, the gradients for all 175B parameters must be
+    synchronized across all nodes at every training step. The sheer size of these gradients overwhelms
+    the network bandwidth, causing the scaling efficiency to plummet as more nodes are added. The excellent
+    initial 1.8x speedup happens because with only two nodes, some communication patterns can be more
+    localized. But at four nodes, the all-to-all nature of `AllReduce` hits the physical limits of the
+    interconnect, and this communication time dominates the entire training step, per Amdahl's Law.
+  common_mistake: Engineers often misattribute scaling bottlenecks. They might blame the on-node interconnect
+    (like PCIe or NVLink) when the problem is actually the cross-node fabric, or they might underestimate
+    the sheer volume of data that needs to be synchronized for large models. Another common error is confusing
+    network bandwidth units (Gbps vs GB/s), leading to an incorrect estimate of the bottleneck.
+  napkin_math: 1. **Calculate Gradient Size:** A 175B parameter model using FP16 (2 bytes/parameter) requires
+    `175e9 * 2 bytes = 350 GB` of memory for the gradients.
+chain:
+  id: cloud-chain-279
+  position: 1
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

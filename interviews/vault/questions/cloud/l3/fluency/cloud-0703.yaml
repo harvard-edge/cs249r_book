@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-0703
+title: 'The Multi-Node Scaling Cliff: Data Parallelism'
+topic: data-parallelism
+status: draft
+provenance: imported
+scenario: You are an ML Systems Engineer diagnosing a customer's distributed training job. They are training
+  a 70B parameter model using a standard FSDP strategy across two H100 nodes (16 GPUs total). They report
+  that single-node training on 8 GPUs is fast, but scaling to two nodes causes a massive slowdown. Profiling
+  tools show that `All-Reduce` latency has spiked dramatically. Your nodes use NVLink 4.0 for intra-node
+  communication and a 400 Gbps InfiniBand NDR fabric for inter-node communication. Based on this, diagnose
+  the most likely bottleneck that is causing the scaling cliff.
+details:
+  realistic_solution: The bottleneck is the inter-node InfiniBand network. The bandwidth of the link between
+    the two servers is an order of magnitude smaller than the aggregate bandwidth of the NVLink fabric
+    within a single server. During an `All-Reduce` operation, the gradients for the 70B parameters must
+    be synchronized across all 16 GPUs. The portion of this communication that must traverse the inter-node
+    link is limited by InfiniBand's much lower bandwidth compared to NVLink.
+  common_mistake: Engineers often underestimate the staggering difference between on-node and off-node
+    interconnect bandwidths. They may blame a more complex software issue (e.g., framework implementation,
+    NCCL bugs) or misidentify the bottleneck as PCIe, without first performing a simple bandwidth calculation
+    which often reveals the physical network as the obvious limiting factor.
+  napkin_math: 70B FP32 gradients = 280GB. Intra-node, All-Reduce uses NVLink (900 GB/s). Inter-node,
+    it falls back to InfiniBand NDR (50 GB/s). For 16 GPUs, data transferred per GPU is 2 * (15/16) *
+    280GB = 525GB. Across 50 GB/s IB, this step takes 525 / 50 = 10.5 seconds. This massive 18x bandwidth
+    drop from NVLink causes the scaling bottleneck.
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

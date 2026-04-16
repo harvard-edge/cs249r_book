@@ -1,0 +1,34 @@
+schema_version: 1
+id: mobile-exp2-real-0180
+title: Video Segmentation Memory Sizing on Exynos 2400
+topic: memory-pressure-management
+status: published
+provenance: imported
+scenario: We are deploying a real-time video segmentation model on the Samsung Exynos 2400 NPU to support
+  a background blur feature during high-resolution video calls. While the NPU delivers a capable 34.7
+  TOPS, it shares 12 GB of LPDDR5X memory with the CPU, GPU, and ISP, resulting in severe memory pressure
+  and bandwidth contention. During peak camera and modem usage, the OS aggressively evicts processes,
+  so our inference footprint must strictly stay within a 500 MB budget to avoid Out-Of-Memory (OOM) crashes.
+  How would you design the memory management strategy, address fragmentation, and size the buffers to
+  ensure stable execution?
+details:
+  realistic_solution: A robust solution involves pre-allocating a static memory arena for all intermediate
+    tensors offline, completely eliminating fragmentation and dynamic allocation overhead at runtime.
+    To safely operate within the shared memory environment, we must use int8 quantization to reduce the
+    footprint and implement in-place operations wherever possible. Furthermore, to leverage the dual-core
+    NPU without exceeding the 500 MB budget, we should carefully size a ping-pong buffer system that bounds
+    the maximum memory watermark during pipeline parallelism.
+  common_mistake: Candidates often assume the full 12 GB LPDDR5X is available and ignore the shared nature
+    of unified memory across the ISP, CPU, and GPU during a system-heavy task like a video call. They
+    frequently rely on dynamic allocation for intermediate tensors, which leads to memory fragmentation,
+    unpredictable peak watermarks, and inevitable OS-level eviction when the ISP or GPU spikes memory
+    usage.
+  napkin_math: Assume a 1080p (1920x1080) input at 3 channels in int8 is roughly 6.2 MB. A 40M parameter
+    model quantized to int8 consumes 40 MB. The largest intermediate tensor, typically right after the
+    first convolution at 1/2 resolution (960x540) with 128 channels in int8, requires 960 * 540 * 128
+    bytes = 66.3 MB. To utilize the Exynos 2400's dual-core NPU efficiently via pipeline parallelism,
+    we need ping-pong buffering for these activations, doubling the peak requirement to ~132.6 MB. Adding
+    40 MB for weights and ~10 MB for I/O yields a peak static memory arena of roughly 183 MB. This safely
+    fits the 500 MB budget, leaving over 300 MB of headroom to absorb ISP/GPU memory spikes and prevent
+    OS eviction.
+last_modified: '2026-04-01'

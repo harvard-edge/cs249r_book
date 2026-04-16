@@ -1,0 +1,31 @@
+schema_version: 1
+id: tinyml-exp-eval-0074
+title: Evaluating Distillation Strategies for Ethos-U55
+topic: knowledge-distillation
+status: published
+provenance: imported
+scenario: 'We are deploying an audio keyword spotting model on an ARM Cortex-M7 + Ethos-U55 (Corstone-300)
+  system. The teacher model is a large transformer with 96% accuracy but requires 1.5MB of SRAM, exceeding
+  our strict 512 KB shared SRAM limit. We have two student optimization proposals: Proposal A uses strict
+  logit-matching distillation into a fully INT8 MobileNet-style architecture to map entirely to the NPU.
+  Proposal B uses intermediate feature-matching distillation into a custom CNN with partial FP32 execution
+  on the M7 for ''critical path'' accuracy, followed by INT8 on the U55. Which approach is better suited
+  for this specific hardware and why?'
+details:
+  realistic_solution: Proposal A is the correct choice. The Ethos-U55 is highly optimized for INT8 operations
+    and can execute up to 512 MACs/cycle. A fully INT8 student model ensures the entire inference graph
+    runs on the NPU, maximizing throughput and keeping the memory footprint small. Proposal B's FP32 layers
+    would force execution to fall back to the 480 MHz Cortex-M7, drastically increasing latency and blowing
+    past the 512 KB SRAM constraint since FP32 features take 4x the memory of INT8.
+  common_mistake: Candidates often choose Proposal B, assuming that retaining FP32 for certain layers
+    preserves the teacher's feature representations better. They fail to realize that the M7 and U55 share
+    the 512 KB SRAM, and moving FP32 activations back and forth causes severe memory thrashing and NPU
+    pipeline stalls.
+  napkin_math: Let's assume an intermediate feature map of 64×64×16. In Proposal B (FP32), this tensor
+    requires 64 × 64 × 16 × 4 bytes = 262,144 bytes = exactly 256 KB. This consumes exactly half of the
+    512 KB shared SRAM, leaving little room for weights, I/O buffers, or the RTOS. In Proposal A (INT8),
+    the same tensor requires 64 × 64 × 16 × 1 byte = 65,536 bytes = exactly 64 KB. Furthermore, processing
+    1 million MACs on the U55 (assuming an average 256 MACs/cycle utilization at 480 MHz) takes ~8.1 microseconds,
+    whereas falling back to the Cortex-M7 without DSP extensions for the same FP32 operations would take
+    at least two orders of magnitude longer.
+last_modified: '2026-04-01'

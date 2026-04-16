@@ -1,0 +1,56 @@
+schema_version: 1
+id: edge-0054
+title: The Camera VSync Tearing
+topic: real-time-deadlines
+status: published
+provenance: imported
+scenario: 'Your edge device runs a conveyor belt defect detector. The camera captures at 60 FPS (16.6ms).
+  The ML model takes 12ms. You write a loop: `capture_frame() -> run_inference() -> trigger_actuator()`.
+  Sometimes the actuator hits the target perfectly; other times it misses by exactly 16.6ms. Why is your
+  latency violently oscillating between 12ms and 28ms?'
+details:
+  realistic_solution: 'You are suffering from VSync and Frame Buffer Polling Misalignment. The camera
+    produces frames at a fixed 60 FPS cadence — a new frame appears in the buffer every 16.6ms. Your code
+    calls `capture_frame()` which reads the *latest available* frame from the buffer. The timing depends
+    on when the previous iteration finished:
+
+
+    Fast path (12.1ms total): If inference finishes and `capture_frame()` is called just *after* the next
+    VSync, a fresh frame is in the buffer (e.g., 0.1ms old). Total latency: 0.1ms stale + 12ms inference
+    + actuator = ~12.1ms.
+
+
+    Slow path (28.5ms total): If `capture_frame()` is called just *before* a VSync boundary, it retrieves
+    the previous frame, which has been sitting in the buffer for 16.5ms. Total latency: 16.5ms stale +
+    12ms inference + actuator = ~28.5ms.
+
+
+    The oscillation occurs because even tiny timing jitter pushes the `capture_frame()` call to either
+    side of the VSync boundary, causing the latency to jump by exactly one frame period.
+
+
+    Fix: Use a double-buffered, interrupt-driven capture pipeline. Have the camera DMA write frames into
+    a ring buffer asynchronously, and use an interrupt to wake the inference thread immediately when a
+    new frame is fully written. This locks the inference loop to the VSync cadence.'
+  common_mistake: '"The NPU is taking varying amounts of time." NPUs are highly deterministic; the inference
+    time is fixed at 12ms.'
+  napkin_math: 'Frame interval = 16.6ms. Inference = 12ms. Actuator = ~0.1ms.
+
+
+    Timeline analysis:
+
+    - Frame N arrives at T=0. Next frame at T=16.6ms.
+
+    - If capture_frame() is called at T=16.5ms, it retrieves Frame N, which is already 16.5ms old. Inference
+    adds 12ms. Total latency from the event = 16.5 + 12 = 28.5ms.
+
+    - If called just 0.2ms later at T=16.7ms, it retrieves Frame N+1, which is only 0.1ms old. Total latency
+    = 0.1 + 12 = 12.1ms.
+
+    - A tiny 0.2ms shift in loop timing around the VSync boundary causes a 16.4ms jump in visual latency.'
+chain:
+  id: edge-chain-188
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:Realtime Pipeline

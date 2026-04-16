@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-1573
+title: Diagnosing Mixed-Precision OOM Failures
+topic: mixed-precision-training
+status: published
+provenance: imported
+scenario: A machine learning team transitions a 7B parameter causal language model from standard FP32
+  training to FP16 Mixed-Precision training on a single node of 8x 80GB A100 GPUs, aiming to increase
+  their batch size. They use PyTorch DDP and the AdamW optimizer. To their surprise, immediately after
+  initializing the model and optimizer (before the first forward pass), the script crashes with a CUDA
+  Out of Memory (OOM) error. Diagnose why the static memory footprint increased when moving to 'reduced'
+  precision.
+details:
+  realistic_solution: Identify that standard mixed-precision actually increases the parameter memory footprint
+    from 16 bytes/param to potentially 20 bytes/param (if FP32 gradient accumulators are used). To resolve
+    the OOM on 80GB GPUs, the team must shard the optimizer states across the 8 GPUs using ZeRO Stage
+    1 or PyTorch FSDP.
+  common_mistake: Candidates often assume mixed-precision halves all memory requirements (from 4 bytes
+    to 2 bytes per parameter), failing to account for the FP32 master weights and FP32 optimizer states
+    required to prevent gradient update underflow.
+  napkin_math: 'FP32 Training: (4B weights + 4B grads + 4B momentum + 4B variance) = 16 bytes/param ×
+    7B = 112 GB total. Mixed-Precision Training: (2B FP16 weights + 2B FP16 grads + 4B FP32 master weights
+    + 4B FP32 momentum + 4B FP32 variance) = 16 bytes/param × 7B = 112 GB total. Memory footprint is the
+    SAME for parameter states. The OOM is likely caused by: (a) framework-level FP32 gradient accumulators
+    adding 4 bytes/param (→ 20 bytes/param, 140 GB), or (b) larger batch sizes enabled by faster FP16
+    compute, increasing activation memory. The solution must address which factor applies.'
+chain:
+  id: cloud-chain-258
+  position: 2
+created_at: '2026-03-23T23:38:33.820582'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

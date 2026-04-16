@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-2408
+title: KV Cache Quantization Sinks
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: A 70B parameter LLM deployed for document Q&A uses INT4 weights and an INT8 KV cache to support
+  32K context windows on an 8xA100 node. For prompts under 1,000 tokens, retrieval accuracy is 95%. However,
+  when prompts exceed 8,000 tokens, the model begins hallucinating and repeating phrases. TBT remains
+  stable at 25ms. Disabling the INT8 KV cache and reverting to FP16 fixes the issue but halves the max
+  concurrency. What causes this long-context degradation?
+details:
+  realistic_solution: The symptom points to accumulated quantization error interacting with 'attention
+    sinks'. In autoregressive LLMs, the first few tokens act as attention sinks, accumulating massive
+    activation magnitudes. Furthermore, RoPE causes phase shifts that vary wildly across context length.
+    Static or per-tensor INT8 quantization of the KV cache forces these massive outlier sink tokens to
+    dictate the quantization scale for the entire sequence. As the context grows to 8K tokens, the subtle
+    relative differences between the thousands of normal tokens are destroyed by the coarse resolution
+    dictated by the sink tokens. The fix is to use per-channel (per-head) asymmetric quantization, or
+    better, keep the first ~4 tokens (attention sinks) in FP16 while quantizing the rest of the KV cache
+    to INT8.
+  common_mistake: Assuming RoPE (Rotary Position Embeddings) degrades at long contexts, requiring fine-tuning,
+    when the issue is actually quantization error accumulation.
+  napkin_math: '70B model with 64 layers, 8 KV heads, 128 head dim. At 8K tokens: 2 (K+V) * 64 layers
+    * 8 heads * 128 dim * 8000 tokens * 1 byte = ~1 GB per sequence in INT8. If the sink token has magnitude
+    50.0 and normal tokens are 0.1, an INT8 step size of 50/127 = 0.39 completely zeros out the normal
+    tokens.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-new-50096
+title: Cross-Mesh Communication Overlap in 3D Parallelism
+topic: communication-computation-overlap
+status: published
+provenance: imported
+scenario: 'Your 512-GPU training uses 3D parallelism: TP=8 (intra-node NVLink), PP=8 (inter-node IB),
+  DP=8 (inter-node IB). Each parallelism dimension has different communication patterns, bandwidths, and
+  overlap opportunities. Design the complete overlap schedule for one training step.'
+details:
+  realistic_solution: 'Coordinated overlap schedule: (1) Within each pipeline stage''s forward/backward:
+    TP AllReduce runs on NVLink (900 GB/s), does not compete with IB traffic. Overlap TP AllReduce with
+    per-layer compute — always hidden (<5% of layer time). (2) Between pipeline stages: PP activation
+    transfers use IB. Schedule them to not overlap with DP AllReduce on the same IB links. (3) DP gradient
+    AllReduce: overlaps with backward compute within each stage. Use IB during backward, while PP is idle
+    (PP only transfers between forward and backward). (4) Key insight: PP transfers happen at forward/backward
+    boundaries. DP AllReduce happens during backward. These naturally stagger: PP sends activation at
+    boundary, then DP AllReduce runs during the stage''s backward pass on different IB ports. (5) Remaining
+    contention: PP backward activation transfers overlap with DP AllReduce. Solution: dedicate separate
+    IB rails for PP and DP traffic.'
+  common_mistake: 'Optimizing each parallelism dimension''s overlap independently. The three communication
+    patterns interact: DP AllReduce and PP activation transfer share the IB fabric, so they can contend
+    if scheduled simultaneously.'
+  napkin_math: 'Per step: TP comm: 192 AllReduces x 0.28ms = 54ms (all hidden by NVLink). PP comm: 7 activation
+    transfers x 5ms = 35ms (hidden by compute). DP comm: 100ms AllReduce (hidden by 200ms backward). Total
+    exposed communication with proper scheduling: ~0ms. Without coordination: 35 + 50 = 85ms exposed due
+    to IB contention.'
+last_modified: '2026-04-02'

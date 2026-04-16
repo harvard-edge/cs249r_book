@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2355
+title: Root Causing NVLink P2P Fallback
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: A 4x GPU LLM inference node utilizing Tensor Parallelism (TP=4) exhibits 50ms latency per token
+  instead of the expected 15ms. Nsight Systems profiling reveals that intra-node AllGather operations
+  are capping at approximately 24 GB/s, drastically lower than the hardware's 300 GB/s NVLink bandwidth
+  capability.
+details:
+  realistic_solution: The root cause is that PCIe Access Control Services (ACS) or IOMMU is enabled in
+    the host BIOS, which prevents true Peer-to-Peer (P2P) memory access over NVLink. When the GPU driver
+    detects that P2P is blocked by the IOMMU/ACS, NCCL silently falls back to routing traffic through
+    the CPU root complex over PCIe, or uses a slow shared-memory staging approach. To fix this, you must
+    disable ACS in the server BIOS, ensure IOMMU is configured correctly (e.g., `iommu=pt` in GRUB), and
+    verify the topology using `nvidia-smi topo -m` to confirm the NVLink connections show 'NV' instead
+    of 'PHB' (PCIe Host Bridge).
+  common_mistake: Assuming NCCL is misconfigured and blindly setting NCCL_P2P_DISABLE=1, forcing slower
+    communication.
+  napkin_math: 'NVLink bandwidth: 300 GB/s per GPU. PCIe Gen4 x16 unidirectional: ~16 GB/s (bidirectional
+    ~24-30 GB/s effective). For a 1GB AllGather payload: NVLink transfer time = 1GB / 300 GB/s = 3.3ms.
+    PCIe fallback transfer time = 1GB / 24 GB/s = 41.6ms. The difference is ~38ms, perfectly accounting
+    for the latency jump from 15ms to 50ms per token.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

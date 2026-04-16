@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-1689
+title: Diagnosing PCIe DataLoader Bottlenecks
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: Your team is training a high-resolution vision model on a node with 8x NVIDIA A100 GPUs and
+  a dual-socket AMD EPYC CPU. GPU utilization is hovering around 55%. Profiling shows the PCIe Gen4 x16
+  bus is heavily underutilized, yet CPU utilization is pegged at 100% across all data loading workers.
+  The training loop explicitly uses `images = batch.to(device, non_blocking=True)` to overlap compute
+  with data transfers, but the main thread is still blocking on the transfer. Why is the CPU bottlenecked,
+  and how do you achieve true asynchronous transfers?
+details:
+  realistic_solution: Set `pin_memory=True` in the PyTorch DataLoader. This allocates the batch in page-locked
+    (pinned) memory, allowing the GPU's DMA engine to fetch data directly over PCIe without CPU intervention.
+    This eliminates the blocking host-side memory copy and enables `non_blocking=True` to successfully
+    overlap the host-to-device transfer with the previous batch's GPU computation.
+  common_mistake: Assuming that setting `non_blocking=True` guarantees an asynchronous host-to-device
+    transfer. Candidates miss that if the host tensor is in pageable (swappable) memory, the CPU must
+    still perform a synchronous, blocking copy to a temporary pinned staging buffer before the GPU can
+    safely DMA the data.
+  napkin_math: 'For a 1GB batch with pageable memory: CPU copy to staging buffer at ~40GB/s DRAM bandwidth
+    takes ~25ms (completely blocking the CPU). Then DMA transfer at ~25GB/s PCIe bandwidth takes ~40ms.
+    With pinned memory: CPU copy time is 0ms. The DMA transfer handles the 1GB in ~40ms strictly in the
+    background via the PCIe controller, recovering 25ms of CPU time per batch and allowing full pipeline
+    overlap.'
+chain:
+  id: cloud-chain-298
+  position: 2
+created_at: '2026-03-24T00:19:25.200115'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

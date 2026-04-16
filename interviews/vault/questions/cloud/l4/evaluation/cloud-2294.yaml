@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-2294
+title: Real-Time Aggregates Latency Tradeoff
+topic: latency-decomposition
+status: published
+provenance: imported
+scenario: 'Your fraud detection system has a strict 50ms p99 latency SLA (Inference: 25ms, API/Routing:
+  10ms, leaving 15ms for Feature Retrieval). You must add a critical feature: ''user transaction amount
+  z-score over the last 30 days''. An active user averages 1,000 transactions/month (approx 50KB of raw
+  event data). You are evaluating two feature computation architectures: (A) On-the-fly: Store raw events
+  in a Redis list, fetch all 50KB at inference, and compute the z-score in the serving API. (B) Streaming:
+  Use Flink to maintain sliding window aggregates (count, sum, sum_of_squares) and continuously overwrite
+  the pre-computed z-score in Redis. Analyze the latency decomposition and systemic tradeoffs of both
+  approaches.'
+details:
+  realistic_solution: 'Approach A (On-the-fly) decomposes latency into: Redis lookup (1-2ms) + Network
+    transfer of 50KB (approx 4-8ms at p99 depending on network topology and Redis serialization) + CPU
+    JSON parsing and math (5-10ms). Total feature latency approaches 10-20ms, frequently violating the
+    15ms budget at p99. However, it requires no streaming infrastructure and avoids write-amplification.
+    Approach B (Streaming) decomposes latency into: Redis lookup of a single pre-computed float (1ms)
+    + Network transfer of 8 bytes (<1ms) + CPU parsing (<1ms). Total latency is ~2ms, safely within budget.
+    The systemic tradeoff is architectural complexity: Flink must maintain massive state (30-day windows
+    for millions of users) and write to Redis on every transaction. The optimal tradeoff is often a Hybrid
+    (Lambda) architecture: Pre-compute daily batch rollups (sum, count, sum_squares) stored in Redis,
+    and only fetch today''s raw events (average ~33 events, <2KB) on-the-fly to compute the final delta,
+    yielding 3-4ms latency while eliminating Flink state.'
+  common_mistake: Assuming on-the-fly compute only adds CPU latency and ignoring the p99 network I/O cost
+    of fetching 50KB of raw events per request.
+  napkin_math: 'On-the-fly latency: Fetching 50KB over 10Gbps takes ~0.04ms theoretical, but Redis RESP
+    protocol serialization + TCP overhead at p99 adds ~5ms. CPU parsing 1000 JSON events = ~8ms. Total
+    = ~13ms (extremely tight for 15ms budget). Streaming write load: 10M active users * 33 tx/day = 330M
+    tx/day = ~3,800 writes/sec to Redis (easily handled). Flink state size for 30 days raw events: 10M
+    users * 50KB = 500GB state (expensive memory requirement).'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

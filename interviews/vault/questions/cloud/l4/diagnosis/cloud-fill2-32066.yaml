@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-fill2-32066
+title: 'MoE Batch Size Scaling: Sparsity Advantage Vanishes'
+topic: mixture-of-experts
+status: published
+provenance: imported
+scenario: You serve Mixtral 8×7B (46.7B params, top-2) on 2 H100s with TP=2. At batch size 1, you achieve
+  45 tok/s. At batch size 64, throughput is 900 tok/s but per-token latency increases to 71ms (from 22ms
+  at BS=1). A dense 13B model on the same hardware shows only 30% latency increase from BS=1 to BS=64.
+  Why does MoE's latency scale worse with batch size?
+details:
+  realistic_solution: 'At batch size 1 with top-2: only 2 of 8 experts are activated per layer. Weight
+    reads per layer = shared attention + 2 expert MLPs ≈ 13B params = 26 GB FP16. At batch size 64 with
+    top-2: 128 expert assignments statistically guarantee all 8 experts are activated (P(any expert unused)
+    = (7/8)^128 ≈ 10^-8). Weight reads per layer = shared attention + ALL 8 expert MLPs = 46.7B params
+    = 93.4 GB FP16. The MoE''s HBM read volume grows 3.6× from BS=1 to BS=64, while a dense model''s weight
+    reads stay constant regardless of batch size (13B = 26 GB always). This is the fundamental MoE inference
+    challenge: sparsity is a per-token property, but batching aggregates across tokens, and statistical
+    coverage means all experts are needed. Mitigation: expert offloading (keep cold experts on CPU, hot-swap
+    as needed), but PCIe bandwidth limits this approach. Or quantize to INT4 (46.7B × 0.5B = 23.4 GB)
+    to fit the full model in fast HBM.'
+  common_mistake: Blaming the router computation scaling. The router is negligible even at large batch
+    sizes. The issue is that MoE's memory bandwidth advantage disappears as batch size grows because all
+    experts get activated.
+  napkin_math: 'BS=1: MoE reads 26 GB weights. Dense reads 26 GB. Equal. BS=64: MoE reads 93.4 GB (all
+    experts). Dense reads 26 GB. MoE reads 3.6× more. At 3.35 TB/s per H100 (×2 TP): MoE weight read =
+    93.4 / 6.7 = 13.9ms. Dense = 26 / 6.7 = 3.9ms. 3.6× latency gap from bandwidth alone.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving

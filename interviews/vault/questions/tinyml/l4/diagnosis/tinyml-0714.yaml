@@ -1,0 +1,86 @@
+schema_version: 1
+id: tinyml-0714
+title: MCU Flash Wear Monitoring
+topic: mcu-compute-constraints
+status: published
+provenance: imported
+scenario: Your fleet of 5,000 ESP32-based environmental monitors logs inference results to flash. The
+  devices are designed for a 10-year deployment. The MCU has 64 KB reserved for logging. Flash is rated
+  for 100,000 P/E cycles. How does the ML inference output rate (classifications per second) drive the
+  flash write rate, and how do you design a circular buffer sized to the model's output cadence to stay
+  within the flash endurance budget?
+details:
+  realistic_solution: 'The ML model''s output cadence dictates the flash wear. If the model runs at 1
+    Hz and you write its output (64 bytes: timestamp, class, confidence vector) synchronously, you are
+    forcing the flash controller to erase and rewrite an entire flash sector (e.g., 4 KB) 1 time a second.
+    This massive write amplification will destroy the flash quickly.'
+  common_mistake: '"Flash has 100,000 write cycles — that''s plenty for 10 years." This assumes perfect
+    wear leveling and ignores the write amplification caused by the ML model''s high-frequency output.'
+  napkin_math: 'ML output: 64 bytes. Inference rate: 1 Hz. Daily data: 64 × 86,400 = 5.53 MB/day.
+
+
+    ### Naive Approach: Write Every Inference
+
+    - Flash sector size: 4 KB (typical for ESP32)
+
+    - Each 64-byte write triggers a full 4 KB sector erase+write (write amplification = 64×)
+
+    - Sector erases per day: 86,400 writes / (4096 / 64 entries per sector) = 86,400 / 64 = 1,350 sector
+    erases/day
+
+    - But if writing to the same sector sequentially and only erasing when full: 86,400 × 64 bytes = 5.4
+    MB/day
+
+    - Sectors consumed per day: 5,400,000 / 4096 = 1,318 sector writes/day
+
+    - Available flash: 64 KB = 16 sectors
+
+    - Circular buffer wraps: 1,318 / 16 = ~82 full rotations/day
+
+    - P/E cycles per sector per day: **82 cycles/day**
+
+    - P/E cycles over 10 years: 82 × 365 × 10 = **299,300 cycles**
+
+    - Flash endurance: 100,000 cycles → **Flash dies in ~3.3 years** (100,000 / 82 / 365)
+
+
+    ### Solution: RAM Buffer with Batched Writes
+
+    - Buffer 64 entries in RAM before writing (64 × 64 bytes = 4 KB = 1 sector)
+
+    - Write frequency: 1 sector write every 64 seconds
+
+    - Sector erases per day: 86,400 / 64 = 1,350 sector writes/day
+
+    - Circular buffer over 16 sectors: 1,350 / 16 = ~84 P/E cycles/day per sector
+
+    - Still too fast. Need to reduce further.
+
+
+    ### Solution: Aggregate + Compress
+
+    - Instead of logging every inference, log 1-minute summaries: dominant class, confidence stats, anomaly
+    count
+
+    - Summary size: 32 bytes. Writes per day: 1,440
+
+    - Sectors per day: (1,440 × 32) / 4096 = 11.25 sector writes/day
+
+    - Over 16 sectors: 11.25 / 16 = 0.7 P/E cycles/sector/day
+
+    - Over 10 years: 0.7 × 3,650 = **2,555 cycles** — well within 100,000 limit ✓
+
+
+    ### Design Rule
+
+    Flash lifetime = endurance / (daily_writes × years × 365 / sectors).
+
+    For 10-year life with 100K endurance and 16 sectors: max **~27 sector writes/sector/day** → max ~27
+    × 16 = 432 sector writes/day → buffer at least 200 inferences per write (86,400 / 432 ≈ 200). Summarization
+    at 1-minute granularity achieves this comfortably.'
+chain:
+  id: tinyml-chain-017
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

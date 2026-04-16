@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-cell-13188
+title: 'Transformer Cost Realization: Size Activation Memory for LLM Training'
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: 'Concretely calculate peak activation memory for training GPT-3 (175B params, 96 layers, hidden=12288,
+  FFN=49152, heads=96, seq=2048, batch=1) on H100 (80GB). Without gradient checkpointing: all layer activations
+  stored. With checkpointing: only layer inputs. Determine if either fits and whether model parallelism
+  is required.'
+details:
+  realistic_solution: 'Per-layer activation (without checkpointing): QKV: batch*seq*hidden*3*2 = 1*2048*12288*3*2=150.99MB.
+    Attention scores: heads*seq^2*2=96*2048^2*2=805.3MB. FFN up+gate: batch*seq*FFN_dim*2*2=1*2048*49152*2*2=784.4MB.
+    LN inputs: 2*batch*seq*hidden*2=100.66MB. Total per layer: ~1841MB. 96 layers: 96*1841MB=172.2GB >>
+    80GB H100. With checkpointing: store layer input only. Per layer: batch*seq*hidden*2=2048*12288*2=48MB.
+    96 layers: 4.6GB. Fits! But: model weights at BF16: 175B*2=350GB. Single H100 (80GB) can''t hold weights.
+    Need TP=8+ to shard model.'
+  common_mistake: Calculating activation memory per layer only for attention without including FFN intermediates,
+    and not multiplying by number of layers for the total stack.
+  napkin_math: 'Activation per layer (BF16, no checkpointing): attention intermediates=150.99+805.3=956MB.
+    FFN intermediates=784MB. Total≈1841MB. 96 layers=172GB. OOM. With checkpointing: input only=1*2048*12288*2=48MB/layer.
+    96*48=4.61GB. Fits memory. But weights: 175B*2=350GB >> 80GB. Even with checkpointing: need 4-8 H100s
+    for weights. TP=8: 350/8=43.75GB weights per device. Plus activations: 4.61/8=576MB (if split by batch).
+    Total per H100: 43.75+0.576+optimizer_shard≈50+GB. With ZeRO-3 optimizer sharding: fits in 80GB.'
+last_modified: '2026-04-01'

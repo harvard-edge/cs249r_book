@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-2354
+title: Diagnosing PCIe NUMA Mismatch
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: You deploy a ResNet-50 training job on a dual-socket server with 8x A100 GPUs. GPUs 0-3 achieve
+  1500 images/s each, but GPUs 4-7 consistently drop to 700 images/s, limiting total throughput to 8800
+  img/s instead of the expected 12000 img/s. GPU utilization on 4-7 fluctuates wildly between 40-60%.
+  The PyTorch dataloader uses 64 CPU workers configured with default settings.
+details:
+  realistic_solution: The root cause is a NUMA (Non-Uniform Memory Access) topology mismatch. By default,
+    the OS may spawn all 64 dataloader CPU workers on NUMA node 0. GPUs 0-3 are attached to CPU 0's PCIe
+    root complex, enjoying direct PCIe Gen4 x16 bandwidth. However, GPUs 4-7 are attached to CPU 1. Data
+    fetched by workers on CPU 0 must traverse the inter-socket UPI (Ultra Path Interconnect) link to reach
+    CPU 1 before going to GPUs 4-7. The UPI link is bottlenecked by the heavy cross-traffic. The solution
+    is to use `numactl` or PyTorch's `DataLoader` affinity settings to pin workers 0-31 to NUMA node 0
+    for GPUs 0-3, and workers 32-63 to NUMA node 1 for GPUs 4-7.
+  common_mistake: Assuming the GPUs 4-7 are thermally throttling or defective, leading to a hardware swap.
+  napkin_math: 1500 img/s * 3MB/img = 4.5 GB/s per GPU. 4 GPUs = 18 GB/s. A typical UPI link delivers
+    ~20 GB/s real-world throughput. If 4 GPUs pull 18 GB/s across the UPI link simultaneously, it saturates,
+    causing the host-device transfer for GPUs 4-7 to drop to ~8.4 GB/s (equivalent to 700 img/s * 3MB
+    * 4 GPUs).
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

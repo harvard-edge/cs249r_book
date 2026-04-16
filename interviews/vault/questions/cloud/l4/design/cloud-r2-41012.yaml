@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-r2-41012
+title: Embedding Table Parallelism Strategy
+topic: model-tensor-parallelism
+status: published
+provenance: imported
+scenario: A large language model has a vocabulary of 128K tokens with hidden_dim=12288. The embedding
+  table is 128K × 12288 × 2B = 3 GB in BF16. With TP=8, describe two valid strategies to parallelize the
+  embedding table and their tradeoffs.
+details:
+  realistic_solution: 'Strategy 1 — Vocabulary Parallelism (Megatron default): Split the embedding table
+    along the vocabulary dimension. Each GPU holds 128K/8 = 16K rows of shape [16K, 12288] = 384 MB. For
+    a given token ID, only the GPU owning that vocabulary range does a lookup; others output zeros. An
+    AllReduce sums across GPUs to produce the final embedding. Pros: Memory efficient, matches output
+    layer (which reuses embedding weights). Cons: AllReduce for every forward pass on embeddings. Strategy
+    2 — Column Parallelism on embeddings: Split along hidden_dim. Each GPU holds [128K, 12288/8] = [128K,
+    1536] = 384 MB. Every GPU does a lookup (all rows are local), producing a partial embedding. An AllGather
+    reconstructs the full hidden_dim. Pros: No GPU is idle during lookup. Cons: Does not align with the
+    output projection''s parallelism. Megatron uses Strategy 1 because the output linear layer (logits
+    = hidden @ embed.T) naturally shares the same vocabulary partition, eliminating an extra communication
+    step.'
+  common_mistake: Assuming the embedding table must be replicated on all GPUs. This wastes memory and
+    is unnecessary since each token only accesses one row.
+  napkin_math: 'Embedding table: 128K × 12288 × 2B = 3 GB. Per GPU with TP=8: 384 MB. Replicated: 3 GB
+    × 8 = 24 GB wasted cluster-wide.'
+last_modified: '2026-04-02'

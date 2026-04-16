@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-0737
+title: The NVLink Domain Boundary
+topic: collective-communication
+status: published
+provenance: imported
+scenario: You're running tensor-parallel inference for a 70B model across 8 GPUs in a DGX H100. All-reduce
+  latency is 15μs. Your team wants to scale to 16 GPUs by adding a second DGX node. After connecting them,
+  the all-reduce latency jumps to 150μs — a 10x increase — even though you're using 400 Gbps InfiniBand.
+  What physical boundary did you cross?
+details:
+  realistic_solution: 'You crossed the NVLink domain boundary. Inside a single DGX H100, 8 GPUs are connected
+    via NVLink with 900 GB/s bisection bandwidth and ~1-2μs latency — the GPUs share a flat, switch-less
+    memory fabric (NVSwitch). The moment you add a 9th GPU on a different node, communication must traverse:
+    GPU → NVLink → NIC → InfiniBand switch → NIC → NVLink → GPU. Each hop adds latency. InfiniBand''s
+    one-way latency is ~1-2μs per hop, but the full software stack (NCCL → libibverbs → RDMA → remote
+    NCCL) adds 50-100μs of overhead. For tensor parallelism, which requires an all-reduce after every
+    layer, this latency is catastrophic.'
+  common_mistake: '"InfiniBand is slow" or "We need to tune the network." 400 Gbps InfiniBand has excellent
+    bandwidth, but the issue is latency, not throughput.'
+  napkin_math: '70B model with 80 layers. Tensor-parallel all-reduce per layer: ~2 MB payload. Intra-node
+    (NVLink): $2\text{ MB} / 900\text{ GB/s} + 1.5\mu s \approx 4\mu s$ per layer. Inter-node (IB): $2\text{
+    MB} / 50\text{ GB/s} + 100\mu s \approx 140\mu s$ per layer. Over 80 layers: intra-node total = $320\mu
+    s$, inter-node total = $11.2\text{ ms}$. The inter-node path adds 35× more communication time. This
+    is why tensor parallelism stays within a node and pipeline parallelism goes across nodes.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

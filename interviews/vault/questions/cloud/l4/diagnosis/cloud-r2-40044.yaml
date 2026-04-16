@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-r2-40044
+title: Gradient Synchronization Under Stragglers
+topic: gradient-synchronization
+status: published
+provenance: imported
+scenario: In your 1024-H100 synchronous training job, 3 GPUs consistently finish their backward pass 15ms
+  later than the other 1021 GPUs. This 15ms straggler delay adds to every iteration because AllReduce
+  is a barrier. Over a 24-hour training run with 200ms iterations, quantify the total wasted GPU-hours
+  and propose a mitigation that doesn't sacrifice gradient quality.
+details:
+  realistic_solution: 'Impact: 15ms straggler delay per 200ms iteration = 7.5% overhead. Over 24 hours:
+    24h × 1024 GPUs × 7.5% = 1843 GPU-hours wasted. At ~$3/GPU-hour (cloud H100): $5,529 wasted. Iterations
+    per day: 24×3600/0.2 = 432,000. Total straggler time: 432K × 15ms = 6,480 seconds = 1.8 hours of pure
+    waiting per GPU. Mitigations: (1) Bounded staleness (BSP): allow the 3 stragglers to contribute their
+    gradients from the previous iteration (staleness=1) while the majority proceed. This bounds the wait
+    to 0ms with negligible convergence impact for τ=1. (2) Gradient predicting: the 3 straggler GPUs use
+    their momentum buffer to estimate the current gradient (gradient = previous_gradient + momentum_correction).
+    Error < 5% for τ=1. (3) Root cause fix: investigate why 3 GPUs are slow — common causes: thermal throttling
+    (check GPU temp > 83°C), ECC memory remapping (check nvidia-smi -q | grep Remapped), or PCIe bandwidth
+    degradation. Often, simply replacing the 3 GPUs eliminates 1843 GPU-hours of waste.'
+  common_mistake: Accepting the straggler penalty as unavoidable in synchronous training. While true that
+    AllReduce waits for the slowest GPU, there are techniques to bound the straggler impact without switching
+    to async SGD.
+  napkin_math: '1024 GPUs × 15ms/200ms = 76.8 GPU-iterations wasted per iteration. 432K iterations/day
+    × 76.8 = 33.2M GPU-iterations/day wasted. At 200ms each: 33.2M × 0.2s = 6.64M seconds = 1843 GPU-hours.
+    Cost at $3/hr: $5,529/day. 3 replacement GPUs at $30K each = $90K — pays for itself in 16 days of
+    training.'
+last_modified: '2026-04-02'

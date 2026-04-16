@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0709
+title: The Data Parallelism Scaling Efficiency
+topic: 3d-parallelism
+status: published
+provenance: imported
+scenario: You benchmark a 3B model training on A100 GPUs. Going from 1 to 8 GPUs (single node, NVLink)
+  gives 7.6× speedup — nearly linear. Going from 8 to 64 GPUs (8 nodes, InfiniBand 400 Gbps) gives only
+  5.2× speedup instead of 8×. What explains the sub-linear scaling, and at what GPU count does adding
+  more GPUs actually hurt throughput?
+details:
+  realistic_solution: The communication-to-computation ratio determines scaling efficiency. Compute per
+    GPU stays constant (same per-GPU batch size). But AllReduce communication grows with the number of
+    nodes (more hops, higher latency). At 8 GPUs (intra-node), AllReduce uses NVLink at 600 GB/s with
+    ~1 μs latency — communication is negligible. At 64 GPUs (inter-node), AllReduce crosses InfiniBand
+    at 50 GB/s with ~5 μs per hop — communication becomes significant. The crossover point where adding
+    GPUs hurts is when AllReduce time exceeds the compute time saved by adding one more GPU.
+  common_mistake: '"Sub-linear scaling means we need faster networking." While network bandwidth matters,
+    the real issue is the communication-to-computation ratio changing as you scale — even infinite bandwidth
+    can''t fix latency-bound collectives.'
+  napkin_math: '3B model, FP16 gradients = 6 GB. Compute per step per GPU: ~200 ms. **8 GPUs (NVLink):**
+    Ring AllReduce = $2 \times 6\text{GB} \times 7/8 / 450\text{GB/s} = 23.3\text{ ms}$ (using 450 GB/s
+    unidirectional per link; NVLink''s 600 GB/s is bidirectional). Scaling efficiency: $200/(200+23.3)
+    = 89.6\%$ → 8 × 0.896 = **7.16×** (close to observed 7.6× with compute-comm overlap). **64 GPUs (IB):**
+    Ring AllReduce = $2 \times 6\text{GB} \times 63/64 / 50\text{GB/s} = 236\text{ ms}$ (using 50 GB/s
+    per direction; IB NDR 400 Gbps is full-duplex). Efficiency: $200/(200+236) = 45.9\%$ → 8 × 0.459 =
+    **3.67×** over 8 GPUs (the real system uses hierarchical AllReduce to achieve the observed 5.2×, performing
+    intra-node reduction first over fast NVLink, then a much smaller inter-node reduction over IB). **Break-even
+    point:** when AllReduce time = compute time. At ~64 GPUs without hierarchical AR, AllReduce already
+    exceeds compute — hierarchical collectives are essential at scale.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

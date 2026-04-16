@@ -1,0 +1,44 @@
+schema_version: 1
+id: edge-0597
+title: The Night-Blind Edge Model
+topic: real-time-deadlines
+status: published
+provenance: imported
+scenario: 'You are the lead ML systems engineer on a self-driving truck''s perception team. To meet the
+  strict 33ms per-frame deadline, you''ve quantized your primary object detection transformer model from
+  FP16 to INT8 for deployment on a Jetson AGX Orin. During daytime validation runs, the INT8 model''s
+  mAP is within 1% of the FP16 baseline, and latency is excellent. However, in night-time road tests,
+  a critical failure emerges: the model completely fails to detect pedestrians who are directly illuminated
+  by the truck''s own high-beam headlights. It''s not a slight drop in accuracy; the bounding boxes simply
+  vanish. The system works perfectly for pedestrians under ambient street lighting. Your team''s initial
+  suggestion is to ''add more headlight-illuminated images to the calibration dataset and re-quantize''.
+  Assess the validity of this approach and predict the precise, non-linear failure mechanism that is making
+  your model ''night-blind''.'
+details:
+  realistic_solution: 'The root cause is catastrophic activation overflow, likely in intermediate layers
+    using modern activation functions like GELU or Swish. Unlike ReLU which is naturally clipped at 0,
+    these functions have a wide, unbounded positive range. The calibration dataset, dominated by daytime
+    images, established a ''typical'' activation dynamic range (e.g., values from -10 to +20). The INT8
+    scaling factor was derived from this range. However, the intense, localized brightness of headlights
+    on a pedestrian creates massive, outlier activation values (e.g., +200) in early-to-mid layers of
+    the vision transformer. When these values are passed through the INT8 quantization function, they
+    are clipped to the maximum representable value (127). All information about the texture and shape
+    of the pedestrian within the headlight glare is lost; the network just ''sees'' a saturated, maxed-out
+    value. This is a non-linear failure: the layer becomes blind. The correct solution is not just more
+    data, but mixed-precision quantization. One must profile the activation ranges of each layer, identify
+    the layers with massive dynamic ranges, and keep those specific, sensitive layers in FP16 while quantizing
+    the rest to INT8. Simply adding more data might slightly expand the calibration range but could still
+    lead to clipping and won''t protect against even brighter, unforeseen lighting conditions.'
+  common_mistake: Blaming the calibration dataset alone. A junior engineer would say, 'The calibration
+    set wasn't representative.' This is true, but it's not the root cause. The L5 insight is to identify
+    *why* the calibration data failed and which specific part of the model is vulnerable. Simply adding
+    more data might not solve the problem if the underlying activation distribution is fundamentally unsuited
+    for uniform INT8 quantization.
+  napkin_math: Let's assume a GELU activation layer in the vision model. From the daytime calibration
+    set, we find the activation range for this layer is `min = -8.0`, `max = +22.0`.
+chain:
+  id: edge-chain-146
+  position: 5
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

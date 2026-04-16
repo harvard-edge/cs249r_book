@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-r2-42038
+title: Topology-Aware AllReduce Algorithm Selection
+topic: interconnect-topology
+status: draft
+provenance: imported
+scenario: 'Your 128-GPU cluster has a 2-level topology: 8 GPUs per node connected by NVLink (900 GB/s),
+  16 nodes connected by InfiniBand NDR (400 Gbps = 50 GB/s). Compare ring AllReduce, hierarchical AllReduce,
+  and NCCL''s tree AllReduce for a 2 GB gradient buffer. Which algorithm minimizes total AllReduce time?'
+details:
+  realistic_solution: 'Flat ring AllReduce: 128 GPUs in a single ring. Bottleneck = InfiniBand at 50 GB/s.
+    Time = 2 × 2 GB × 127/128 / 50 GB/s = 80ms. This is terrible because NVLink (900 GB/s) is wasted —
+    all data traverses IB links. Hierarchical AllReduce: (1) Intra-node reduce-scatter on NVLink: 2 GB
+    × 7/8 / 900 GB/s = 1.94ms. Result: 250 MB per GPU. (2) Inter-node AllReduce on IB: 16 nodes, each
+    GPU 0 does ring AllReduce of 250 MB: 2 × 250 MB × 15/16 / 50 GB/s = 9.38ms. (3) Intra-node all-gather
+    on NVLink: 250 MB × 7/8 / 900 GB/s = 0.24ms. Total: 1.94 + 9.38 + 0.24 = 11.56ms. NCCL tree: binary
+    tree with 7 levels, latency = 7 × (2 GB / 128 / bandwidth). Effective: ~15ms due to pipelining. Hierarchical
+    wins by 7× over flat ring and 1.3× over tree.'
+  common_mistake: Using a flat ring AllReduce that ignores the topology. A ring across 128 GPUs treats
+    NVLink and InfiniBand hops identically, bottlenecking on the slowest link (InfiniBand at 50 GB/s)
+    even for intra-node transfers.
+  napkin_math: 'Flat ring: 2 × 2 GB × 127/128 / 50 GB/s = 80ms. Hierarchical: intra-node = 1.94ms + inter-node
+    = 9.38ms + broadcast = 0.24ms = 11.56ms. Speedup: 80/11.56 = 6.9×. Tree (7 levels): 2 GB / 128 GPUs
+    × 7 × 2 / min(900, 50) = pipelined ~15ms. Hierarchical is optimal for 2-level topology. NCCL auto-selects
+    hierarchical when topology is detected.'
+last_modified: '2026-04-02'

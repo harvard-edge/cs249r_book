@@ -1,0 +1,29 @@
+schema_version: 1
+id: edge-exp-anal-0011
+title: Drift Detection Bottleneck on Dataflow Edge
+topic: distribution-drift-detection
+status: published
+provenance: imported
+scenario: A pedestrian detection model runs on a Hailo-8 dataflow accelerator (26 TOPS INT8, 2.5W) attached
+  to a smart city camera. Because the Hailo-8 has no local DRAM, it streams data directly from host memory.
+  To detect data drift, the engineering team enabled continuous Population Stability Index (PSI) monitoring
+  on an intermediate feature map layer. However, enabling this drift detection causes the per-frame inference
+  latency to spike from 10ms to 45ms, even though the host CPU utilization remains low. Why does extracting
+  this metric cause such a severe latency degradation on this specific hardware architecture?
+details:
+  realistic_solution: The latency spike occurs because extracting an intermediate feature map forces the
+    Hailo-8 to interrupt its efficient, fused dataflow pipeline to stream massive intermediate activations
+    back to host memory over the PCIe bus. Without local DRAM to buffer these tensors, the compute pipeline
+    stalls. Drift detection should instead be performed purely on the low-dimensional final output predictions
+    or by asynchronously sampling raw input frames on the host CPU.
+  common_mistake: Candidates often assume the 26 TOPS INT8 compute capacity is insufficient to calculate
+    the PSI metric, or that the host CPU is bottlenecked. They fail to analyze the architectural constraints
+    of a dataflow accelerator lacking local DRAM, missing the fact that extracting intermediate tensors
+    completely disrupts the highly pipelined host-to-chip memory interface.
+  napkin_math: A 10ms baseline inference implies a 100 FPS throughput capability. If an intermediate feature
+    map has dimensions of 128x128x64 in INT8, it consumes exactly 1,048,576 bytes (~1 MB). At 100 FPS,
+    this requires 100 MB/s of continuous off-chip write bandwidth back to the host. Because the Hailo-8
+    relies on streaming from host memory to achieve its 26 TOPS at 2.5W without local DRAM, forcing an
+    off-chip write breaks the fused layer execution. If the resulting pipeline stall and host-memory synchronization
+    adds 35ms of overhead per frame, the total latency becomes 10ms + 35ms = 45ms.
+last_modified: '2026-04-01'

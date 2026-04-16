@@ -1,0 +1,27 @@
+schema_version: 1
+id: edge-0881
+title: Paged Attention Fragmentation Stalls
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: You deploy a 4-bit quantized 7B LLM on a Jetson Orin Nano (8GB unified memory). PagedAttention
+  is enabled to handle concurrent requests from smart home sensors. Page size is set to 512 tokens. Under
+  moderate load (8 concurrent sensors sending short 50-token queries), the system hits OOM, swaps to eMMC,
+  and generation stalls for over 5 seconds.
+details:
+  realistic_solution: The root cause is severe internal fragmentation within the PagedAttention memory
+    manager. Because the page size is statically set to 512 tokens, every new sequence—even a tiny 50-token
+    query—allocates a full 512-token block. For an 8GB device running a ~4GB model and ~1GB OS overhead,
+    only about 3GB is available for the KV cache. The 512-token page size wastes 90% of the allocated
+    memory for 50-token requests. The solution is to reduce the block size to 16 or 32 tokens, which drastically
+    reduces internal fragmentation. This allows the system to comfortably fit dozens of concurrent short
+    requests within the 3GB KV-cache budget without triggering OS-level swapping.
+  common_mistake: Assuming 8GB is completely insufficient for a 7B model and attempting to further quantize
+    the model to 2-bit.
+  napkin_math: 'Orin Nano 8GB. Page size: 512 tokens. 1 token KV (7B model, 32L, 32H, 128D) = 2 * 32 *
+    32 * 128 * 2B = 524 KB. One 512-token page = 512 * 524 KB = 268 MB. 8 concurrent sensors sending 50
+    tokens each. Allocated: 8 * 268 MB = 2.14 GB. Actually used: 8 * 50 * 524 KB = 209 MB. Wasted memory
+    = 1.93 GB (90% waste).'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

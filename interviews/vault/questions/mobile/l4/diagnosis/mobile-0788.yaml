@@ -1,0 +1,28 @@
+schema_version: 1
+id: mobile-0788
+title: The Context Length Latency Spike
+topic: attention-scaling
+status: published
+provenance: imported
+scenario: A local mobile chat app runs a 2B parameter model using a mobile GPU. Decode latency is perfectly
+  stable at 35ms/token. However, exactly when the conversation history reaches 1024 tokens, decode latency
+  instantly jumps to 110ms/token and remains there. Device thermals are normal and there is no OS memory
+  paging.
+details:
+  realistic_solution: The step-function increase in latency is caused by a hardware-specific FlashAttention
+    tile size limit. Mobile GPUs have strictly limited threadgroup shared memory (e.g., 32KB per workgroup).
+    The FlashAttention kernel is heavily optimized to keep the K and V blocks in this fast SRAM. At exactly
+    1024 tokens, the required tile size for the sequence length exceeds the maximum shared memory allocation
+    for the shader. The inference engine's fallback mechanism silently switches to a standard, unoptimized
+    attention kernel, which requires O(N) reads and writes to the slower LPDDR5 DRAM for every single
+    token generated.
+  common_mistake: Assuming the device ran out of RAM and started swapping to flash storage, which would
+    cause a much more erratic latency profile.
+  napkin_math: "For a standard head dimension of 64 (FP16): 1024 tokens * 64 dim * 2 bytes = 128KB. If\
+    \ the GPU's max shared memory is 32KB, the tile cannot fit. \nStandard Attention Memory Traffic at\
+    \ 1025 tokens: Read K (1025*64*2 = 131KB), Read V (131KB), Write Logits (1025*2 = 2KB) = ~264KB per\
+    \ head, per layer, per token. Across 32 layers and 8 heads, this is ~67MB of DRAM traffic per token\
+    \ just for attention, bottlenecking the GPU."
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

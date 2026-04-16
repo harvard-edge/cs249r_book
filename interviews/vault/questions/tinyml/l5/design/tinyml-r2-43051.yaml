@@ -1,0 +1,29 @@
+schema_version: 1
+id: tinyml-r2-43051
+title: Arena Planning for Multi-Model Deployment
+topic: tensor-arena-planning
+status: published
+provenance: imported
+scenario: 'Your ESP32-S3 (240 MHz, 512 KB SRAM, 8 MB PSRAM) runs 3 models sequentially in a pipeline:
+  voice activity detection (VAD, 15 KB arena), keyword spotting (KWS, 85 KB arena), and intent classification
+  (IC, 120 KB arena). Currently, each model has its own arena — total 220 KB of SRAM reserved. Design
+  a shared arena strategy that minimizes total SRAM usage.'
+details:
+  realistic_solution: 'Two strategies depending on execution model: (1) Strictly sequential (no overlap):
+    allocate one arena of max(15, 85, 120) = 120 KB. Each model runs to completion, then the next model
+    reuses the same arena memory. Savings: 220 → 120 KB (45% reduction). Simple and safe. (2) Pipelined
+    (VAD runs continuously while KWS/IC execute on triggers): VAD arena must be persistent (15 KB). KWS
+    and IC never run simultaneously (KWS triggers IC). Shared arena for KWS+IC: max(85, 120) = 120 KB.
+    Total: 15 + 120 = 135 KB. Implementation: partition the arena buffer at compile time: uint8_t arena[135
+    KB]; VAD uses arena[0..15KB], KWS/IC share arena[15KB..135KB]. (3) Aggressive: VAD is tiny enough
+    to run from a separate static buffer. KWS and IC share the main arena with double-buffering — KWS
+    writes its output to a small handoff buffer (1 KB) before IC takes over the arena.'
+  common_mistake: Allocating 120 KB (the maximum) and assuming all models can share it. This works for
+    sequential execution but fails to account for overlap — if VAD triggers KWS while VAD is still processing
+    the next audio frame, both arenas must be live simultaneously.
+  napkin_math: 'Separate arenas: 15 + 85 + 120 = 220 KB (43% of SRAM). Sequential shared: 120 KB (23%
+    of SRAM). Pipelined: 135 KB (26% of SRAM). Savings: 220 - 135 = 85 KB freed for audio buffers, feature
+    extraction, and application logic. Audio buffer needs: 16 kHz × 16-bit × 1 second = 32 KB. Feature
+    extraction (MFCC): 40 coefficients × 49 frames × 4 bytes = 7.84 KB. With shared arena: 512 - 135 -
+    32 - 8 = 337 KB available. Comfortable.'
+last_modified: '2026-04-02'

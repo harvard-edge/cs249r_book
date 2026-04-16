@@ -1,0 +1,33 @@
+schema_version: 1
+id: tinyml-0716
+title: Execute-in-Place vs Copy-to-SRAM for Model Weights
+topic: mcu-compute-constraints
+status: published
+provenance: imported
+scenario: Your TinyML model has 500 KB of INT8 weights stored in on-chip flash on an STM32H7 (Cortex-M7,
+  480 MHz, 1 MB SRAM, 2 MB flash). The default CMSIS-NN implementation reads weights directly from flash
+  via XIP (execute-in-place). A colleague suggests copying all 500 KB of weights to SRAM before inference
+  for faster access. Flash read latency is ~5 wait states at 480 MHz (~10ns effective), while SRAM is
+  zero-wait-state (~2ns). Should you copy to SRAM?
+details:
+  realistic_solution: 'Selective SRAM copy beats both full XIP and full copy. The M7''s ART accelerator
+    caches sequential flash reads, so small layers (<16KB weights) already hit the D-cache at 95% — copying
+    them to SRAM wastes memory for minimal gain. Large layers (>16KB) thrash the 16KB D-cache at only
+    20% hit rate. Copy only the 5 large layers (350KB) to SRAM: inference drops from 70ms (full XIP) to
+    37.5ms (1.87x speedup) using 350KB SRAM (35%). Full SRAM copy achieves identical 37.5ms but wastes
+    500KB (50%). The copy itself costs ~0.5ms via DMA — negligible. Profile per-layer cache hit rates
+    to identify which layers benefit from SRAM placement.'
+  common_mistake: '"SRAM is 5× faster than flash, so copying weights to SRAM gives a 5× inference speedup."
+    This ignores the M7''s ART Accelerator (flash prefetch cache), the sequential access pattern of weight
+    reads, and the cost of the copy itself.'
+  napkin_math: 'Model: 500 KB weights, 20 layers. Small layers (weights < 16 KB): 15 layers, 150 KB total,
+    D-cache hit rate ~95%. Large layers (weights > 16 KB): 5 layers, 350 KB total, D-cache hit rate ~20%.
+    Flash XIP inference: small layers at ~2ns effective + large layers at ~10ns effective. Blended: 15
+    layers x 2ms + 5 layers x 8ms = 70ms. Selective SRAM copy (large layers only): copy 350 KB to SRAM,
+    then 15 layers x 2ms + 5 layers x 1.5ms = 37.5ms. Speedup: 70 / 37.5 = **1.87x**. SRAM cost: 350 KB
+    (of 1 MB) = 35%. Full SRAM copy: all layers at ~2ns -> 15 x 2ms + 5 x 1.5ms = 37.5ms (same speedup,
+    but costs 500 KB SRAM = 50%). Selective copy gives the same speedup at 30% less SRAM cost (350 KB
+    vs 500 KB).'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

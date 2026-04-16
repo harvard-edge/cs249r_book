@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0781
+title: Multi-Turn Gemini LLM Serving with PagedAttention
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: We are scaling the backend for Gemini Advanced, specifically focusing on multi-turn, long-context
+  conversations (up to 1M tokens). Our current inference clusters are bottlenecked by HBM capacity, not
+  compute, due to severe KV cache fragmentation. Design an inference serving architecture that optimizes
+  KV cache allocation and request routing across a TPU v5p pod to maximize batch size and throughput without
+  violating our 2-second time-to-first-token (TTFT) SLA.
+details:
+  realistic_solution: Implement a centralized Block Manager utilizing PagedAttention. The KV cache is
+    divided into fixed-size physical blocks (e.g., 16 tokens per block) allocated non-contiguously in
+    HBM, eliminating internal fragmentation.
+  common_mistake: Relying on static, contiguous memory allocation based on the maximum possible sequence
+    length (1M tokens) per request. Candidates also often miss the routing aspect, sending multi-turn
+    requests to random TPU hosts, causing the system to redundantly recompute the KV cache for the entire
+    chat history on every single turn.
+  napkin_math: '- **KV Size per Token:** 128 layers * 16 KV heads * 128 dim * 2 bytes (BF16) * 2 (K+V)
+    = ~1 MB per token! | - **Max Context:** 1M tokens = **1 TB of KV Cache per request**. | - **TPU v5p
+    Limits:** 95GB HBM per chip. A 256-chip pod has ~24 TB HBM. | - **Without PagedAttention:** Reserving
+    1TB statically means maximum pod concurrency is exactly 24 concurrent users, regardless of actual
+    current turn length. | - **With PagedAttention & Routing:** Average active context might be 100k tokens
+    (100GB). PagedAttention allows dynamic allocation, increasing concurrency to `24TB / 100GB = 240 concurrent
+    users` per pod (a 10x throughput increase). Prefix caching shared system prompts (say 10k tokens)
+    across all 240 users saves another 2.4TB of HBM.'
+chain:
+  id: cloud-chain-424
+  position: 5
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

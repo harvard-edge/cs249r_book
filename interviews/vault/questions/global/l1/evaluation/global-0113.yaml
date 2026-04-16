@@ -1,0 +1,34 @@
+schema_version: 1
+id: global-0113
+title: MoE vs Dense Arithmetic Intensity
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: You are replacing a 30B parameter dense LLM with an 8x10B Mixture of Experts (MoE) model. The
+  MoE model routes each token to 2 experts, resulting in roughly 20B active parameters per token. Since
+  20B < 30B, the MoE model requires fewer FLOPs per token. However, during serving at a batch size of
+  64, the MoE model's decode throughput (tokens/sec) is 30% lower than the dense model on the same hardware.
+  Why?
+details:
+  realistic_solution: The bottleneck is the drastic reduction in effective Arithmetic Intensity. In a
+    dense model, the 30B parameters are loaded from HBM once and applied to all 64 tokens in the batch.
+    In the MoE model, tokens route to different experts. To process the batch, the hardware must load
+    the weights for all activated experts. At batch size 64, it is highly probable that almost all experts
+    (80B parameters total) are activated by at least one token. Therefore, the system loads ~80B parameters
+    from HBM to do the math for 64 tokens, whereas the dense model loads 30B parameters for 64 tokens.
+    The MoE model's arithmetic intensity is significantly lower, pushing it further down the memory-bound
+    slope of the Roofline model. The hardware spends more time waiting for HBM reads, resulting in lower
+    throughput despite fewer total FLOPs.
+  common_mistake: Blaming the routing network's compute overhead or network communication latency without
+    analyzing the memory bandwidth degradation.
+  napkin_math: 'Dense 30B: Batch size 64. Weights read = 60GB (FP16). FLOPs = 2 * 30B * 64 = 3.84 TFLOPs.
+    Intensity I = 3.84e12 / 60e9 = 64 FLOPs/byte. MoE 8x10B (2 active): Batch size 64. Assume all 8 experts
+    are hit across the batch. Weights read = 160GB (80B params). FLOPs = 2 * 20B * 64 = 2.56 TFLOPs. Intensity
+    I = 2.56e12 / 160e9 = 16 FLOPs/byte. The MoE model requires 2.6x more memory bandwidth per step, reducing
+    throughput by ~30-60% depending on HBM limits.'
+chain:
+  id: global-chain-014
+  position: 1
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

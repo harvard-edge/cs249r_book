@@ -1,0 +1,28 @@
+schema_version: 1
+id: edge-cell-13084
+title: 'Edge Systolic Array Optimization: Fix Memory-Bound Conv on Hailo-8'
+topic: systolic-dataflow
+status: published
+provenance: imported
+scenario: 'A Hailo-8 (26 TOPS INT8, 2.5W, 6GB/s internal BW) achieves only 3 TOPS effective throughput
+  (11.5% MFU) on a custom CNN. Profiling shows 72% of time in 1x1 pointwise convolutions with very low
+  arithmetic intensity. Diagnose the bottleneck and quantify the improvement from two optimization strategies:
+  (1) channel grouping (group size=4), (2) increasing input spatial resolution to amortize weight loading.'
+details:
+  realistic_solution: '1x1 PW conv: AI = FLOPs/BW = 2*N*H*W*Cin*Cout / (H*W*(Cin+Cout) + Cin*Cout) bytes.
+    For small spatial (H=W=7), Cin=512, Cout=1024: FLOPs=2*49*512*1024=51.4M. BW=49*(512+1024)+512*1024=75K+0.5MB=0.575MB.
+    AI=51.4M/0.575MB=89.4. Ridge=4333. Improvement from strategy 1 (groups=4): FLOPs/4=12.9M, BW: weights=512*1024/4=131K,
+    activation same=75K. Total=206K. AI=12.9M/206K=62.6. Worse! Groups reduce both FLOPs and weight BW
+    proportionally → AI unchanged or worse. Strategy 2 (H=W=28): FLOPs=2*784*512*1024=824M. Weights=0.5MB
+    same. Activation=784*(512+1024)=1.2MB. AI=824M/1.7MB=485. Better! 5.4x improvement.'
+  common_mistake: Trying to reduce compute (TOPS) instead of reducing memory bandwidth (the actual bottleneck)
+    for memory-bound operations, or applying group convolution which reduces FLOPs but also reduces weight
+    bytes proportionally (doesn't improve AI).
+  napkin_math: 'Baseline (7x7): AI=89.4, time=0.575MB/6GB/s=0.096ms. FPS=1/0.096ms=10,417. Group=4: AI=62.6,
+    time=0.206MB/6GB/s=0.034ms. FPS=29,411. Faster! But quality may drop. H=28 (no change, just measuring
+    larger context): AI=485, time=1.7MB/6GB/s=0.283ms. FPS=3534. Slower (larger spatial). Strategy 2 improves
+    AI but increases absolute time. Real fix: fuse multiple PW convs. Two fused 1x1s at 7x7: FLOPs=2*51.4M=102.8M,
+    BW = 75K (shared input) + 0.5MB + 0.5MB (two weight) + 75K (output) = 1.15MB. AI=102.8M/1.15MB=89.4
+    same. To improve AI: increase batch size. Batch=64: weight amortized, AI grows 64x → 89.4*64=5721
+    > 4333 ridge. Compute bound!'
+last_modified: '2026-04-01'

@@ -1,0 +1,31 @@
+schema_version: 1
+id: tinyml-exp2-mast-0262
+title: Cross-Hierarchy Tensor Arena for ESP32-S3
+topic: tensor-arena-planning
+status: published
+provenance: imported
+scenario: You are deploying an audio keyword spotting and speaker verification dual-head model on an ESP32-S3
+  (240 MHz dual-core Xtensa, 512 KB SRAM, 8 MB PSRAM, vector extensions for INT8). The model requires
+  750 KB of intermediate activation memory at its peak (during a shared attention block) and 1.2 MB of
+  INT8 weights. Since the peak activation memory strictly exceeds the 512 KB internal SRAM (which must
+  also share space with the OS and WiFi/BLE stack), standard flat tensor arena allocation fails. Design
+  a custom static memory planner and operator schedule that partitions the tensor arena across SRAM and
+  PSRAM to ensure real-time execution.
+details:
+  realistic_solution: The optimal architecture splits the tensor arena into a fast-tier (SRAM) and slow-tier
+    (PSRAM). The static planner schedules operators such that memory-bound INT8 vector operations have
+    their working tensors pinned to SRAM. The 750 KB peak is mitigated by tiling the attention block,
+    slicing the sequence dimension so that only a 250 KB chunk is in SRAM at any given time. The 1.2 MB
+    of weights remain mapped in Flash/PSRAM, using the second Xtensa core or DMA to prefetch upcoming
+    tiles into SRAM.
+  common_mistake: Candidates often simply allocate the entire flat tensor arena in the 8 MB PSRAM to solve
+    the capacity issue, ignoring the massive latency penalty of PSRAM cache misses. Alternatively, they
+    fail to account for the SRAM required by the ESP-IDF OS and WiFi/BLE stacks, assuming the full 512
+    KB is available for ML.
+  napkin_math: Total SRAM = 512 KB. The ESP-IDF OS and WiFi/BLE stack consume ~160 KB, leaving ~352 KB
+    for the SRAM tensor arena. Peak memory = 750 KB. If placing the flat arena entirely in PSRAM (Octal
+    SPI @ ~80 MB/s), an operation reading and writing 750 KB generates 1.5 MB of bus traffic, taking 18.75
+    ms per layer just in memory transfer, destroying real-time budgets. By tiling the 750 KB activation
+    into three 250 KB chunks, the active tile fits within the 352 KB SRAM budget. The 240 MHz Xtensa core
+    with INT8 vector extensions can then process the 250 KB tile at full speed without PSRAM thrashing.
+last_modified: '2026-04-01'

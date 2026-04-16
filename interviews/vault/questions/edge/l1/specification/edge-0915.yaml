@@ -1,0 +1,25 @@
+schema_version: 1
+id: edge-0915
+title: Smart Camera Zero-Copy Pipeline
+topic: encoder-decoder-tradeoffs
+status: published
+provenance: imported
+scenario: A smart camera pipeline processes 12MP (4000x3000) frames. The Image Signal Processor (ISP)
+  outputs YUV420. The CPU converts this to RGB (takes 18ms), copies it to the NPU's reserved memory (takes
+  12ms), and the NPU runs inference (takes 10ms). Total latency is 40ms, failing the 33ms (30fps) requirement.
+details:
+  realistic_solution: The architecture is bottlenecked by inefficient memory movement and format conversions
+    across the memory hierarchy (ISP -> Main RAM -> CPU Cache -> Main RAM -> NPU RAM). The solution is
+    a zero-copy, edge-native pipeline. First, allocate a contiguous dmabuf (Direct Memory Access buffer)
+    shared between the ISP and NPU MMUs. Configure the ISP to write the YUV420 frames directly into this
+    buffer. Second, retrain the NPU model to natively ingest YUV420 channels, or add a hardware-accelerated
+    1x1 convolution at the start of the NPU graph to handle the YUV-to-RGB conversion, completely bypassing
+    the CPU and extra RAM roundtrips.
+  common_mistake: Multi-threading the CPU's YUV to RGB conversion, which might speed up compute but still
+    incurs the massive 12ms memory copy penalty.
+  napkin_math: 12MP in RGB = 36MB. CPU copying 36MB at 3 GB/s DMA takes 12ms. YUV420 is 1.5 bytes/pixel
+    = 18MB. By skipping the CPU conversion and copy, we save 30ms, bringing latency from 40ms down to
+    10ms.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

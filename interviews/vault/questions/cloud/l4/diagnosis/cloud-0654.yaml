@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-0654
+title: The NCCL NVLink Deadlock
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: You are running Data Parallel training on a single 8-GPU DGX node. GPU 0 crashes due to a faulty
+  memory bank. You rewrite the host script to exclude GPU 0 and launch the job on GPUs 1 through 7. The
+  job starts, but the NCCL AllReduce immediately hangs indefinitely. Why does a 7-GPU topology fail on
+  a DGX?
+details:
+  realistic_solution: 'NCCL''s AllReduce algorithms (ring, tree) assume a specific number of participants
+    that matches the physical NVLink topology. The DGX NVLink mesh is wired as a fully-connected graph
+    among 8 GPUs. Removing GPU 0 breaks the ring — GPU 7''s NVLink port that connected to GPU 0 is now
+    a dead link. NCCL tries to route through it, gets no response, and hangs waiting for the missing peer.
+    Even if NCCL detects only 7 GPUs, an odd number cannot form a balanced ring, causing the collective
+    to deadlock. The fix: either replace the faulty GPU or use NCCL_ALGO=TREE with explicit topology exclusion.'
+  common_mistake: '"The batch size must be divisible by the number of GPUs." While math divisibility is
+    a common issue, it would throw a shape mismatch error, not hang the network.'
+  napkin_math: A standard AllReduce on 8 GPUs via NVLink (900 GB/s) takes ~20ms. If forced to fallback
+    to PCIe Gen4 routing through the CPU root complex to bypass a dead GPU, the bandwidth drops to ~32
+    GB/s, taking ~560ms. A 28x slowdown, effectively ruining the node.
+chain:
+  id: cloud-chain-444
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

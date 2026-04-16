@@ -1,0 +1,38 @@
+schema_version: 1
+id: cloud-2125
+title: Designing Around Non-Differentiable Operations
+topic: roofline-analysis
+status: published
+provenance: imported
+scenario: You are building an ML system that must include discrete decision steps (e.g., hard token selection
+  in a mixture-of-experts router, or discrete action selection in a reinforcement learning policy). These
+  operations have zero gradients almost everywhere, breaking standard backpropagation. Design an approach
+  that enables end-to-end training, and analyze the systems cost of your solution.
+details:
+  realistic_solution: 'Three approaches with increasing systems complexity: (1) Straight-Through Estimator
+    (STE): use discrete forward, continuous backward (pass gradients through argmax as if it were identity).
+    Cost: zero additional compute. Limitation: biased gradient estimates, can cause training instability.
+    (2) Gumbel-Softmax relaxation: replace discrete sampling with a continuous approximation using Gumbel
+    noise + temperature-controlled softmax. Forward: sample from Gumbel-Softmax (differentiable). Cost:
+    one extra softmax per discrete decision + Gumbel noise generation. Memory: stores the full probability
+    distribution (E-dimensional for E experts) per token for backward. For MoE with 64 experts and 2048
+    tokens: 64 * 2048 * 4 bytes = 0.5 MB per layer (negligible). But temperature annealing adds a hyperparameter
+    and can cause mode collapse. (3) REINFORCE / policy gradient: treat the discrete operation as a stochastic
+    node. Gradient = reward * log_prob_gradient. Cost: requires multiple forward passes for variance reduction
+    (baseline computation). Memory: must store log probabilities and rewards. Systems cost: 2-5x forward
+    passes for acceptable variance, making training 2-5x slower. In practice, MoE routers use top-k with
+    STE or auxiliary load-balancing losses that operate on the continuous logits before the discrete argmax,
+    avoiding the gradient problem entirely while adding only a small loss computation.'
+  common_mistake: 'Suggesting to simply ''make everything continuous'' without understanding the fundamental
+    tension: discrete decisions are needed for routing efficiency (MoE) or combinatorial optimization,
+    but break the differentiable computational graph.'
+  napkin_math: For an MoE router with E=64 experts and D=4096, calculating logits takes 2 * 4096 * 64
+    = 524K FLOPs per token. Straight-Through Estimator (STE) adds 0 FLOPs but biases gradients. Gumbel-Softmax
+    requires 64 random samples + exp/log ops (~2K FLOPs, negligible). REINFORCE needs multiple rollouts,
+    increasing full model forward passes (huge on A100 at 312 TFLOPS). Aux loss is the standard fix.
+chain:
+  id: cloud-chain-453
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

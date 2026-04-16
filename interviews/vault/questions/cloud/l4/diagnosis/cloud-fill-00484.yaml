@@ -1,0 +1,40 @@
+schema_version: 1
+id: cloud-fill-00484
+title: H100 Mixed-Precision Training Instability and Performance Diagnosis
+topic: mixed-precision-training
+status: published
+provenance: imported
+scenario: A large language model training job on an NVIDIA H100 (80 GB HBM3, 989 TFLOPS FP16 dense, 3.35
+  TB/s memory bandwidth, 700W TDP) is encountering stability issues. After enabling mixed-precision training
+  using FP16, the model occasionally diverges or produces NaN values during the backward pass. The team
+  observes that while GPU utilization appears high, the training throughput does not consistently achieve
+  the expected 989 TFLOPS for FP16 dense operations. Additionally, they suspect that data loading might
+  be bottlenecking the 3.35 TB/s HBM3 memory bandwidth at certain stages. How would you diagnose the root
+  cause of these stability and performance issues, considering the specific hardware capabilities and
+  characteristics of the H100?
+details:
+  realistic_solution: Implement dynamic loss scaling, adjusting the scale factor based on runtime gradient
+    statistics to prevent underflow. Leverage framework-provided Automatic Mixed Precision (AMP) utilities
+    (e.g., PyTorch AMP, TensorFlow mixed_precision) which are optimized for H100 architecture. Profile
+    the training loop (e.g., with NVIDIA Nsight Systems or PyTorch Profiler) to identify bottlenecks,
+    especially focusing on memory access patterns to ensure optimal utilization of the 3.35 TB/s HBM3
+    bandwidth. Analyze kernel-level performance to confirm Tensor Core usage for FP16 dense operations
+    and identify any fallback to FP32 or non-optimized kernels. Consider strategic use of BF16 for components
+    where dynamic range is critical and FP16 underflow is persistent, as H100 offers strong BF16 support.
+    Ensure data loading and preprocessing are highly optimized to feed the GPU efficiently.
+  common_mistake: Neglecting proper loss scaling or using an incorrect fixed scaling factor, leading to
+    gradient underflow/overflow in FP16 during backpropagation. Another common mistake is not analyzing
+    gradient distributions to identify operations particularly sensitive to FP16 precision, or failing
+    to optimize data pipelines to saturate the HBM3 bandwidth, thereby underutilizing the H100's compute
+    capabilities. Incorrectly assuming that all parts of a model benefit equally from FP16 or BF16 without
+    profiling.
+  napkin_math: Given 989 TFLOPS (FP16 dense), this means 989 × 10^12 FP16 floating-point operations per
+    second. If a typical matrix multiplication `C = A @ B` requires `2 * M * K * N` FLOPs, we can estimate
+    the theoretical operations/sec. For memory bandwidth of 3.35 TB/s, if FP16 data is 2 bytes per element,
+    the H100 can theoretically move `3.35 × 10^12 / 2` elements per second. Compare this theoretical throughput
+    to observed data movement. For loss scaling, if an unscaled gradient is `1e-8` and an FP16 minimum
+    normal value is approximately `6 × 10^-8`, a loss scale factor of `65536` (2^16) would scale the gradient
+    to `6.5536 × 10^-4`, which is well within FP16 representable range. However, if unscaled gradients
+    consistently fall below `minimum_FP16_representable_value / loss_scale_factor`, underflow will occur,
+    leading to zero gradients and training instability.
+last_modified: '2026-04-01'

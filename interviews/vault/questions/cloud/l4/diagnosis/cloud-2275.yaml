@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-2275
+title: The torch.compile Graph Break Cascade
+topic: graph-compilation
+status: published
+provenance: imported
+scenario: 'You apply `torch.compile()` to your custom 7B transformer and expect a 2× inference speedup
+  based on published benchmarks. Instead, you see only a 1.1× improvement. The compilation log shows 47
+  graph breaks. The model uses dynamic control flow (`if token_count > max_len: truncate()`), custom Python
+  logging inside the forward pass, and calls a third-party tokenizer library within the model. What is
+  a graph break, why did you get 47 of them, and how do you systematically eliminate them to recover the
+  expected speedup?'
+details:
+  realistic_solution: 'A graph break is where TorchDynamo (the Python bytecode tracer) encounters an operation
+    it cannot represent in the FX graph, forcing a fallback to eager mode. Your 47 breaks come from three
+    sources: (1) Data-dependent control flow (`if token_count > max_len`) — the tracer cannot statically
+    resolve the branch. Fix: use `torch.cond()` or guard with `torch._dynamo.mark_dynamic()`. (2) Python
+    side effects (logging inside forward) — I/O operations cannot be captured in a computational graph.
+    Fix: move logging outside the compiled region or use `torch._dynamo.allow_in_graph()`. (3) Third-party
+    library calls (tokenizer) — opaque Python functions break tracing. Fix: move tokenizer outside the
+    compiled function boundary. Priority: eliminate breaks in the hot path first. The 47 breaks likely
+    fragment the model into ~48 tiny subgraphs, each compiled independently — no cross-subgraph fusion
+    is possible. Reducing to 0 breaks allows the entire model to be one fused graph.'
+  common_mistake: Treating graph breaks as harmless warnings. Each graph break forces torch.compile to
+    exit the compiled region, fall back to Python eager execution, then re-enter compilation — destroying
+    the fusion and memory planning benefits across break boundaries.
+  napkin_math: 'Expected: 1 compiled graph, full operator fusion, ~2× speedup. Actual: 48 subgraphs. Average
+    subgraph: ~3 operators (150 total / 48). Per-subgraph fusion benefit: minimal (need 5+ operators to
+    amortize compile overhead). Cross-subgraph dispatch overhead: 48 × ~30μs = 1.4ms added. If baseline
+    inference is 15ms, the overhead alone eats 10% of runtime — turning a 2× speedup into 1.1×.'
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

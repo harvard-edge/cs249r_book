@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-top-65078
+title: Social Graph Embedding Update Frequency for Friend-Aware Rec
+topic: recommendation-systems-engineering
+status: published
+provenance: imported
+scenario: 'A social recommendation system incorporates friend activity into item scores: items liked by
+  friends score higher. The social graph has 1B users with avg 200 friends each. Friend-aware scoring
+  at request time requires loading friend activity lists. Design the architecture for 10K QPS at P99 <
+  50ms.'
+details:
+  realistic_solution: 'Pre-aggregated social signals: (1) Offline aggregation job (hourly): for each user
+    U, compute a compact social signal vector: weighted sum of friend item embeddings clicked in last
+    24h. Result: one 128-dim vector per user (social_embedding). Size: 1B users * 128 * 4B = 512GB. Store
+    in distributed key-value store (RocksDB or Redis cluster). (2) At serving time: single lookup for
+    user''s social_embedding (1 Redis GET, 1ms). Use social_embedding as an additional input feature to
+    the ranking model — no per-friend lookup needed. (3) Real-time social signal (for high-recency): maintain
+    a streaming counter of friend activity in last 1 hour. Flink job aggregates Kafka events per user.
+    Serves ''recent_friend_activity_count'' as a scalar feature. Lookup: 1ms. (4) Total social feature
+    latency: 2ms for pre-aggregated embedding + recency count. Fits within 50ms budget. Trade-off: social
+    embedding is hourly stale. For friend-based freshness: use real-time recency signal to boost content
+    where recent_friend_activity_count > 0.'
+  common_mistake: 'Loading full friend activity lists at request time from a graph database. For a user
+    with 200 friends, this requires 200 graph traversals + activity lookups, which at 1ms per traversal
+    = 200ms sequential, or with parallelism: 10ms+ for 200 async calls. Both violate the 50ms budget.'
+  napkin_math: 'Social embedding storage: 1B users * 128 * 4B = 512GB. Redis cluster at 16GB per node:
+    32 nodes for 512GB. At 10K QPS, 1 lookup per request: 10K GET/sec per Redis cluster. Redis handles
+    100K+ GET/sec single node: well within 10K QPS across 32 nodes. Latency: P99 Redis GET = 1ms (including
+    network RTT on same rack). Hourly aggregation job: 1B users * 200 friends * 1 event/hour = 200B events/hour.
+    Flink at 10M events/sec: 200B / 3600 / 10M = 5.6 hours to process 1B users. Too slow for hourly refresh
+    — need to parallelize Flink job to 100 workers: 3.4 minutes. Feasible.'
+last_modified: '2026-04-02'
+tags:
+- scope:Advanced

@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-0480
+title: The Two-Node Scaling Wall
+topic: collective-communication
+status: published
+provenance: imported
+scenario: You are training a 70B parameter LLM using data parallelism across two servers, each with 8
+  H100 GPUs. You observe a near-linear speedup when scaling from 1 to 8 GPUs on a single server, but only
+  a 1.2x speedup when scaling from one server (8 GPUs) to two servers (16 GPUs). Your profiler indicates
+  that the `All-Reduce` collective for gradient synchronization is the major bottleneck. Given the nodes
+  are connected with 400 Gbps InfiniBand NDR, diagnose the most likely cause of this poor scaling.
+details:
+  realistic_solution: The bottleneck is the InfiniBand network connecting the two servers. While NVLink
+    provides extremely high bandwidth (900 GB/s per GPU) for communication *within* a single server (explaining
+    the good single-node scaling), the communication *between* the two servers is limited by the much
+    lower InfiniBand bandwidth. The `All-Reduce` operation requires every GPU to exchange gradients with
+    every other GPU. Once you cross the server boundary, that traffic must go over the comparatively slow
+    InfiniBand link, creating a scaling wall.
+  common_mistake: Engineers often conflate different interconnects. They might blame the on-server link
+    (NVLink) when the problem is clearly the between-server link (InfiniBand), or they might not appreciate
+    the orders-of-magnitude performance difference between them. Another common mistake is assuming all
+    network communication is the same, ignoring the performance benefits of RDMA over standard TCP/IP.
+  napkin_math: Data Parallelism for a 70B FP16 model (140GB) requires a 280GB ring all-reduce. On 1 server
+    (NVLink 900 GB/s), this takes 280 / 900 = 0.31s. Across 2 servers (IB NDR 50 GB/s), crossing the boundary
+    takes 280 / 50 = 5.6s. If compute takes 6s, the 5.6s network wait ruins DP scaling.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

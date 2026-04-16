@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2356
+title: Diagnosing RoCEv2 PFC Storms in MoE
+topic: congestion-control
+status: published
+provenance: imported
+scenario: You are training a Mixture of Experts (MoE) model across 32 nodes (256 GPUs) connected via a
+  400Gbps RoCEv2 fabric. During the All-to-All expert routing phase, the entire cluster's network throughput
+  periodically drops to near zero for 3-5 seconds, causing massive timeouts and NCCL watchdog crashes.
+  Network utilization otherwise peaks at 80%.
+details:
+  realistic_solution: The root cause is an RDMA Incast leading to a Priority Flow Control (PFC) storm.
+    During the MoE All-to-All phase, 255 GPUs simultaneously send data to a single GPU's Top-of-Rack (ToR)
+    switch port. This massive microburst instantly overflows the switch's ingress buffers. Because RoCEv2
+    relies on lossless Ethernet, the switch emits PFC pause frames back to the sender ports. If the congestion
+    control (DCQCN) reacts too slowly, the pause frames propagate up the spine switches, creating a 'PFC
+    storm' that completely halts fabric traffic (head-of-line blocking). The solution is to aggressively
+    tune DCQCN parameters to react to Explicit Congestion Notification (ECN) earlier, lowering the ECN
+    marking threshold, and implementing hierarchical All-to-All to reduce the incast degree.
+  common_mistake: Increasing the NCCL timeout duration to mask the crashes without addressing the network
+    halt.
+  napkin_math: Incast from 255 GPUs sending 100KB chunks simultaneously = 25.5MB of data hitting one switch
+    port in microseconds. A typical 400G ToR switch has ~32MB of shared buffer pool. A single incast event
+    consumes almost the entire buffer, triggering PFC thresholds (usually set around 5-10MB per queue)
+    instantly.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

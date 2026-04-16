@@ -1,0 +1,29 @@
+schema_version: 1
+id: edge-0496
+title: The Autonomous Vehicle PCIe Stall
+topic: memory-mapped-inference
+status: published
+provenance: imported
+scenario: You are an ML Systems Engineer on an autonomous vehicle team, tasked with diagnosing a latency
+  regression. Your perception stack runs on a powerful GPU connected to the host CPU via a PCIe Gen5 x16
+  bus. After upgrading to a new high-resolution camera, your end-to-end 'photon-to-prediction' latency
+  jumped to 42ms, missing the hard 33ms real-time deadline.
+details:
+  realistic_solution: The most likely cause is the `cudaMemcpy` call is operating on standard pageable
+    host memory. Before the PCIe DMA engine can transfer the data to the GPU, the CPU must first perform
+    a blocking copy of the entire 200MB frame from its initial pageable buffer into a pinned host buffer.
+    This extra CPU-bound copy dominates the overall transfer time. The correct solution is to ensure the
+    camera driver writes its data directly into a pre-allocated pinned memory region, enabling a 'zero-copy'
+    path where the GPU's DMA engine can read the data directly without the intermediate CPU copy.
+  common_mistake: Engineers often blame the hardware bandwidth itself, assuming the bus is saturated.
+    They calculate the theoretical transfer time, see it's low, and get confused. They forget that GPU
+    drivers require data to be in special 'pinned' (non-pageable) memory for Direct Memory Access (DMA).
+    If the data isn't, the CPU must first perform a synchronous copy into a pinned staging buffer, which
+    is hidden inside the `cudaMemcpy` call and adds significant latency.
+  napkin_math: Frame size = 200MB. CPU pageable to pinned memory copy speed is ~10 GB/s. Blocking CPU
+    copy time = 200MB / 10GB/s = 20ms. The actual PCIe Gen4 x16 transfer (32 GB/s) takes only 200MB /
+    32GB/s = 6.25ms. The blocking CPU copy creates a massive 20ms latency overhead before the DMA even
+    starts.
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

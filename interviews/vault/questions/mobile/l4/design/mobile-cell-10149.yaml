@@ -1,0 +1,27 @@
+schema_version: 1
+id: mobile-cell-10149
+title: Optimize MobileNetV2 expansion ratio for Snapdragon 8 Gen 3 Hexagon HTP memory
+topic: cnn-efficient-design
+status: published
+provenance: imported
+scenario: MobileNetV2 with expansion ratio t=6 achieves 72ms on Snapdragon 8 Gen 3 using TFLite GPU delegate,
+  but only 4ms on Hexagon HTP. The HTP version hits a memory spike at the bottleneck_2_expand layer (input
+  56×56×32, output 56×56×192). You need to reduce peak activation memory to prevent HTP SRAM overflow
+  while maintaining >72% top-1 accuracy.
+details:
+  realistic_solution: 'Apply non-uniform expansion ratios: early stages (large spatial dims, 56×56 and
+    28×28) use t=4; later stages (14×14 and 7×7) keep t=6. Memory for bottleneck_2: t=6 → 56×56×192×1B
+    = 602KB. At t=4 → 56×56×128×1B = 401KB. Total peak reduction: from ~1.5MB to ~0.9MB across early stages.
+    Hexagon HTP SRAM: 8MB — the single activation still fits! Actual problem may be multi-buffering for
+    pipeline. Check QNN profiler: if HTP is double-buffering (input + output in SRAM simultaneously),
+    peak = 602 + 602 = 1.2MB. Use t=5 as compromise: 56×56×160×1B = 501KB × 2 = 1MB.'
+  common_mistake: Reducing the expansion ratio uniformly across all layers from t=6 to t=4, which reduces
+    accuracy by ~1.5pp unnecessarily; the memory spike only occurs in early large-spatial layers and can
+    be addressed with selective expansion ratio reduction.
+  napkin_math: 'Hexagon HTP SRAM: ~8MB. MV2 peak activation without double-buffer: 56×56×192 = 602KB.
+    With t=4: 56×56×128 = 401KB. Memory savings: 201KB. Double-buffer: 602 × 2 = 1.2MB for t=6, still
+    fits in 8MB with room for weights (3.4M params = 3.4MB INT8). Total with t=6: 3.4MB weights + 1.2MB
+    activations = 4.6MB < 8MB. No actual overflow! Investigate profiler: the 4ms might be the optimized
+    path already. Check if spike is transient (FFT buffer) not persistent. Actual fix may be in QNN context
+    memory management.'
+last_modified: '2026-04-01'

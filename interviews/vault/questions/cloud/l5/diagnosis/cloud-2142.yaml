@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-2142
+title: The Silent Feature Pipeline Failure
+topic: data-pipeline-engineering
+status: published
+provenance: imported
+scenario: Your production recommendation model's conversion rate has been slowly declining over 3 weeks
+  — from 4.2% to 3.1%. No model retraining has occurred. No code changes were deployed. All monitoring
+  dashboards (GPU utilization, serving latency, error rate) show green. Walk through a systematic debugging
+  process to identify the root cause, given that you suspect a feature pipeline issue.
+details:
+  realistic_solution: 'Systematic feature pipeline diagnosis: **Step 1 — Feature distribution drift detection**:
+    For each of the model''s 300 features, compute the KL divergence between the current serving distribution
+    and the training distribution. Flag features with KL > 0.1. **Step 2 — Identify the broken feature**:
+    You find that ''user_category_affinity'' has shifted dramatically: it was a float in [0, 1] during
+    training but is now showing values clustered at exactly 0.0 for 40% of users. **Step 3 — Trace the
+    pipeline**: The feature is computed by a Spark job that joins user clickstream data with a category
+    taxonomy table. The taxonomy table was updated 3 weeks ago — a schema migration renamed a column.
+    The Spark job didn''t fail; the LEFT JOIN now returns NULL for 40% of rows, and the NULL-to-default
+    coercion produces 0.0. **Step 4 — Root cause confirmation**: The timeline matches: schema migration
+    → 3 weeks ago → conversion decline started. **Step 5 — Fix**: (a) Fix the JOIN to use the new column
+    name, (b) backfill the feature for the last 3 weeks, (c) add schema validation tests to the feature
+    pipeline CI, (d) add distribution monitoring alerts for all features.'
+  common_mistake: Retraining the model immediately. If the root cause is a broken feature pipeline, retraining
+    on corrupted features will just learn the corrupted distribution — the decline continues.
+  napkin_math: 'Feature importance of ''user_category_affinity'': top-5 feature contributing ~8% of model''s
+    predictive power. With 40% of users seeing a zeroed feature, the model loses significant signal for
+    those users. Observed conversion drop: 4.2% to 3.1% = 1.1 percentage points absolute, or a 26% relative
+    decline. Revenue impact at $10M monthly revenue: 26% relative conversion drop * $10M = $2.6M/month
+    in lost revenue. Over 3 weeks: ~$2.0M total lost. The fix (correcting the JOIN + backfilling) should
+    restore conversion within 1-2 days as the feature pipeline recovers.'
+last_modified: '2026-04-01'
+tags:
+- scope:Data Engineering

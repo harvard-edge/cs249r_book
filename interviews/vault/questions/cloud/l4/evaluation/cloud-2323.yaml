@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-2323
+title: MoE Router Logit Overflow in FP16
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: You are training an 8x22B Mixture of Experts (MoE) model using FP16. After 2,000 steps, the
+  evaluation loss spikes, and profiling shows that all tokens are suddenly being routed uniformly to all
+  experts, destroying the sparsity. The routing mechanism uses a standard linear layer followed by a Softmax
+  over the 8 experts.
+details:
+  realistic_solution: The issue is FP16 numeric overflow in the router logits. As the network gains confidence,
+    the magnitude of the router's pre-softmax logits grows. When a logit exceeds FP16's maximum representable
+    value (65504), it overflows to Infinity. If multiple experts get an Infinity logit (or if the implementation
+    subtracts the max, resulting in Inf - Inf = NaN), the resulting softmax outputs NaNs or uniform probabilities
+    (if NaNs are masked to 1/N). The architectural requirement is to cast the input to the router layer
+    to FP32 before the linear projection, ensuring the logits and subsequent softmax are computed in FP32,
+    preventing overflow and preserving sharp routing decisions.
+  common_mistake: Assuming the load balancing loss coefficient is too high, forcing the network into a
+    perfectly uniform distribution to minimize auxiliary loss.
+  napkin_math: Router linear layer computes X * W. If X values are ~100 and W values grow to ~700, X*W
+    = 70,000. Since 70,000 > 65504, it becomes Inf in FP16. Softmax([Inf, Inf, 0, 0]) evaluates to [NaN,
+    NaN, 0, 0] or uniform depending on the kernel's NaN handling.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-1338
+title: Silent Failures in Traced Dynamic Control Flow
+topic: graph-compilation
+status: published
+provenance: imported
+scenario: 'An ML engineer deploys a PyTorch NLP router model on NVIDIA T4 GPUs. The `forward()` method
+  contains data-dependent control flow: `if x.size(1) <= 128: x = fast_path(x) else: x = deep_path(x)`.
+  To minimize Python GIL overhead for serving, the team compiles the model using `torch.jit.trace` with
+  a dummy input tensor of shape `[16, 64]`. In production, when sequences of length 256 are passed, the
+  latency drops suspiciously to ~3ms (expected >25ms for the deep path) and prediction accuracy degrades
+  significantly. Crucially, the system throws no runtime exceptions or shape errors. Diagnose the root
+  cause.'
+details:
+  realistic_solution: Diagnose that `torch.jit.trace` only records the operations executed by the specific
+    tracing input. Since the dummy input (seq=64) took the `fast_path`, the `if` condition was baked in
+    as a constant `True`. All production inputs, regardless of sequence length, now execute `fast_path`,
+    producing garbage outputs for long sequences that should have taken `deep_path`. The fix is to use
+    `torch.jit.script` (which performs static analysis of all branches) or `torch.cond` for data-dependent
+    control flow.
+  common_mistake: Candidates often assume `torch.jit.trace` performs static analysis of the Python AST
+    to capture all branches, or they believe the framework will automatically re-trace when input shapes
+    change. Tracing by definition records only one execution path.
+  napkin_math: Tracing with input [16, 64] evaluates `64 <= 128` as `True`, recording only `fast_path`
+    (~2 GFLOPs). A production input of [16, 256] should trigger `deep_path` (~40 GFLOPs, taking ~25ms).
+    Instead, it enters the traced graph, bypasses the missing conditional logic, and blindly executes
+    `fast_path` scaled to the new sequence length (approx 4x compute = 8 GFLOPs). Processing 8 GFLOPs
+    on a T4 takes ~3ms, perfectly explaining the mysterious latency drop and garbage outputs.
+chain:
+  id: cloud-chain-173
+  position: 2
+created_at: '2026-03-23T22:38:22.111363'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

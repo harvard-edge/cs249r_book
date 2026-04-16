@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-sus-60010
+title: Managing gradient accumulation with mixed precision and autocast on MI300X
+topic: autograd-computational-graphs
+status: published
+provenance: imported
+scenario: You are training a 13B model on MI300X (192GB, 5.3TB/s) with gradient accumulation over 8 micro-batches
+  to simulate an effective batch size of 512. You use torch.cuda.amp.autocast() for BF16 training. Gradients
+  are exploding and loss is NaN after ~1000 steps.
+details:
+  realistic_solution: 'For BF16 on MI300X/ROCm: do not use GradScaler — BF16 has 8 exponent bits and doesn''t
+    need dynamic loss scaling. For gradient accumulation: call optimizer.step() only after all micro-batches,
+    use with autocast(device_type=''cuda'', dtype=torch.bfloat16). Check if MI300X ROCm driver requires
+    autocast(device_type=''hip''). Clip gradients with torch.nn.utils.clip_grad_norm_(model.parameters(),
+    max_norm=1.0) before optimizer.step().'
+  common_mistake: Calling scaler.step() and scaler.update() after every micro-batch instead of after the
+    full accumulation. With FP16 (not BF16), gradient scaling must be skipped during accumulation steps.
+    With BF16 on MI300X (no need for loss scaling), teams still copy FP16 patterns and introduce scaling
+    artifacts.
+  napkin_math: 'BF16 range: ±3.4×10³⁸ (same as FP32). FP16 range: ±65504. Loss values of O(1), gradients
+    of O(0.01): FP16 needs scaling to avoid underflow; BF16 does not. Gradient accumulation over 8 steps
+    scales gradients by 8× — with FP16 loss scaling of 65536, effective scale = 65536×8 = 524288, potentially
+    causing overflow.'
+last_modified: '2026-04-02'
+tags:
+- scope:single-machine

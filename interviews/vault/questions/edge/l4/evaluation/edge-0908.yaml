@@ -1,0 +1,29 @@
+schema_version: 1
+id: edge-0908
+title: Edge GPU LLM KV Cache Thrashing
+topic: safety-certification
+status: published
+provenance: imported
+scenario: You are deploying an 8-billion parameter LLM on a Jetson AGX Orin (64GB unified memory, 204
+  GB/s bandwidth) for a local coding assistant. Token generation is heavily bandwidth-bound, achieving
+  only 8 tokens/sec. The model weights take 8GB (INT8). The KV cache for a 4096-token context takes about
+  1GB. The GPU has an 8MB L2 cache. Profiling shows massive L2 cache thrashing during the attention phase
+  of decode.
+details:
+  realistic_solution: 'During auto-regressive decoding, the attention mechanism must read the entire KV
+    cache from DRAM for every single generated token. Even though the 1GB KV cache easily fits in the
+    64GB unified memory, it is vastly larger than the 8MB L2 cache. This causes a complete L2 cache eviction
+    on every token step, forcing the GPU to pull the 1GB cache across the 204 GB/s memory bus repeatedly.
+    The solution requires algorithmic-hardware co-design: implement Grouped Query Attention (GQA) or Multi-Query
+    Attention (MQA) combined with KV cache quantization (INT8/INT4) or Flash-Decoding. By reducing the
+    size of the KV cache by 4-8x, you lower the DRAM bandwidth requirement per token step, and using Flash-Decoding
+    splits the KV cache across thread blocks to maximize SRAM reuse, significantly improving tokens/sec.'
+  common_mistake: Quantizing the model weights further to INT4, which won't fix the attention phase bottleneck.
+  napkin_math: 'Weights: 8GB read per token. KV Cache: 1GB read per token. Total read per token = 9GB.
+    Max theoretical throughput = 204 GB/s / 9 GB/token = 22.6 tokens/sec. Actual is 8 due to overhead.
+    If we use GQA (8x reduction in KV) + INT8 KV (2x reduction), KV cache drops to 1GB / 16 = 62.5 MB.
+    Now memory read per token is ~8.06 GB. Max throughput rises to 204 / 8.06 = 25.3 tokens/sec, and L2
+    thrashing is mitigated for the KV portion.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

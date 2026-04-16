@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-r2-40030
+title: Hierarchical AllReduce Design for Multi-Rack Clusters
+topic: gradient-synchronization
+status: published
+provenance: imported
+scenario: You are specifying the AllReduce topology for a 512-H100 cluster with 64 nodes (8 GPUs each)
+  across 8 racks (8 nodes per rack). Intra-node NVLink bandwidth is 900 GB/s, intra-rack Ethernet is 400Gbps
+  per NIC, and inter-rack bandwidth is 8 × 400Gbps per rack (3.2 Tbps). Specify the hierarchical AllReduce
+  stages and the algorithm for each level.
+details:
+  realistic_solution: 'Three-level hierarchy: Level 1 (Intra-node, 8 GPUs, NVLink 900 GB/s): Use NCCL''s
+    NVLink-optimized ring AllReduce. Each node reduces 8 GPUs'' gradients to a single result. Time for
+    2GB: 2 × 7/8 × 2GB / 900GB/s = 3.9ms. Level 2 (Intra-rack, 8 nodes, 400Gbps RoCE): One GPU per node
+    participates in inter-node AllReduce within the rack. Use ring AllReduce over RoCE. Data size: 2GB
+    (already reduced). Time: 2 × 7/8 × 2GB / 50GB/s = 70ms. Level 3 (Inter-rack, 8 racks, 8×400Gbps):
+    One GPU per rack participates in inter-rack AllReduce. Use ring with 8 participants. Time: 2 × 7/8
+    × 2GB / 50GB/s = 70ms (same as level 2, assuming one NIC per rack representative). Then broadcast
+    results back down: Level 2 broadcast: 7/8 × 2GB / 50GB/s = 35ms. Level 1 broadcast: 7/8 × 2GB / 900GB/s
+    = 1.9ms. Total: 3.9 + 70 + 70 + 35 + 1.9 = 180.8ms. Optimization: use multiple NICs per node (8 rails)
+    for level 2 and 3, reducing inter-node time by 8×. With 8 rails: Level 2 = 70/8 = 8.75ms, Level 3
+    = 70/8 = 8.75ms, broadcast = 35/8 = 4.4ms. Total: 3.9 + 8.75 + 8.75 + 4.4 + 1.9 = 27.7ms.'
+  common_mistake: Using a flat ring across all 512 GPUs, which forces 512 AllReduce steps over the slowest
+    link (inter-rack). Hierarchical AllReduce reduces the number of cross-rack communications from O(N)
+    to O(1) by aggregating locally first.
+  napkin_math: 'Flat ring (512 GPUs): 2 × 511/512 × 2GB / 50GB/s = 79.8ms (limited by slowest 400G link
+    for all 511 steps). Hierarchical (3 levels, 8 rails): 27.7ms. Speedup: 2.88×. The win comes from reducing
+    cross-rack steps from 511 to 7 (just the 8-rack ring).'
+last_modified: '2026-04-02'

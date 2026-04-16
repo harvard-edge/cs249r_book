@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-sus-60018
+title: Autograd graph capture for CUDA graphs on A100 for inference acceleration
+topic: autograd-computational-graphs
+status: published
+provenance: imported
+scenario: You are deploying a GPT-2 XL inference service on A100 (312 TFLOPS, 2TB/s). At batch=1, the
+  model achieves only 40% GPU utilization because kernel launch overhead dominates. CUDA graphs can replay
+  a pre-captured sequence of kernels without Python overhead. You need to implement CUDA graph capture
+  for autoregressive generation.
+details:
+  realistic_solution: 'Pre-allocate a fixed-size KV cache tensor (max_seq_len × n_heads × d_head × 2 bytes
+    × n_layers) and use in-place writes via slice assignment: kv_cache[:, :, :, :cur_len] = new_kv. This
+    keeps tensor addresses static. Capture the single-step decode function (not the full generation loop)
+    using torch.cuda.graph.capture(). The Python loop over positions remains outside the graph. Validate
+    with torch.cuda.check_error() after warmup.'
+  common_mistake: Attempting to capture CUDA graphs for the full autoregressive loop, including the KV
+    cache update. CUDA graphs require static tensor shapes and memory addresses. The KV cache grows with
+    each token, changing tensor shapes, making the naive approach fail with CUDA_ERROR_ILLEGAL_ADDRESS
+    or incorrect results.
+  napkin_math: 'GPT-2 XL (1.5B params) single-token decode: without CUDA graphs ≈ 15ms (kernel launch
+    overhead dominates at batch=1). With CUDA graphs ≈ 3ms (5× speedup). KV cache for max_len=2048: 2048
+    × 25 layers × 16 heads × 64 dim × 2 (K+V) × 2 bytes = 200MB — static allocation is fine on A100.'
+last_modified: '2026-04-02'
+tags:
+- scope:single-machine
