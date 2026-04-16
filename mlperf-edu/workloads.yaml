@@ -1,24 +1,13 @@
-# =============================================================================
-# MLPerf EDU: Benchmark Workload Registry
-#
-# Each workload maps to an official MLPerf division with a scaled-down proxy
-# model, real dataset, and verified quality target.
-#
-# Quality targets are empirically verified on Apple M1 MPS.
-# =============================================================================
-
 suites:
-  # -----------------------------------------------------------
-  # CLOUD DIVISION
-  # Language modeling, recommendation, generative AI
-  # -----------------------------------------------------------
   cloud:
     nanogpt-train:
       model: nanogpt-12m
       params: 11.1M
-      params_note: "Char-level vocab=128 (TinyShakespeare uses 65 unique chars). Earlier README/paper figures of 85.9M and 124.4M reflected a vocab=50,257 BPE config that was never reachable from the char-level data; iteration 1 reconciled the model to its actual effective size."
+      params_note: Char-level vocab=128 (TinyShakespeare uses 65 unique chars). Earlier README/paper figures of 85.9M and
+        124.4M reflected a vocab=50,257 BPE config that was never reachable from the char-level data; iteration 1 reconciled
+        the model to its actual effective size.
       dataset: tinyshakespeare
-      dataset_source: "Karpathy (2015), character-level, 1.1MB, shipped in repo"
+      dataset_source: Karpathy (2015), character-level, 1.1MB, shipped in repo
       quality_target:
         metric: cross_entropy_loss
         value: 2.3
@@ -27,15 +16,29 @@ suites:
         val_loss: 2.205
         epochs: 25
         time_seconds: 89
-        baseline_note: "Loss curves carry over from the prior 30.3M-with-wasted-vocab config because only the 65 active token embeddings ever updated; needs re-verification on the cleaned 11M model in a follow-up iteration."
+        baseline_note: Loss curves carry over from the prior 30.3M-with-wasted-vocab config because only the 65 active token
+          embeddings ever updated; needs re-verification on the cleaned 11M model in a follow-up iteration.
       scenario: single_stream
-      provenance: "Vaswani et al. 2017 (Transformer); maps to MLPerf Training GPT-3/LLaMA"
-
+      provenance: Vaswani et al. 2017 (Transformer); maps to MLPerf Training GPT-3/LLaMA
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 67108864
+          note: "Per-layer activation peak ~12 MB at B=16 T=64; weights ~46 MB streamed once per epoch. Falls in the 6-48\
+            \ MB grey band; exact classification depends on batch and depends on caching behavior \u2014 measure with cache-miss\
+            \ counters."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 120
+          classification_rule: weights reused across all tokens in a batch
+        dispatch:
+          value: unmeasured
+          note: Training-loop dispatch needs a roofline-emitter run; logged for iter 5.
     nano-moe-train:
       model: nano-moe-12m
       params: 17.4M
       dataset: tinyshakespeare
-      dataset_source: "Karpathy (2015), character-level, 1.1MB, shipped in repo"
+      dataset_source: Karpathy (2015), character-level, 1.1MB, shipped in repo
       quality_target:
         metric: cross_entropy_loss
         value: 0.05
@@ -45,92 +48,160 @@ suites:
         epochs: 25
         time_seconds: 158
       scenario: single_stream
-      provenance: "Shazeer et al. 2017 (MoE); 8 experts, top-2 routing"
-
+      provenance: Shazeer et al. 2017 (MoE); 8 experts, top-2 routing
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 20971520
+          note: "17M params, top-2 routing. ~21 MB per-step is in the 6-48 MB grey band; conditional compute pattern complicates\
+            \ cache modeling \u2014 measure."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 80
+          classification_rule: active expert MLPs reuse weights across batch
+        dispatch:
+          value: unmeasured
+          note: Routing/gating may push to dispatch_bound at small batch; needs measurement.
     micro-dlrm-train:
       model: micro-dlrm-1m
       params: 23K
-      working_set_regime: cache_resident
-      regime_note: "Active embedding tables (943×8 + 1682×8 + 21×8 ≈ 21KB) fit in L1 on every modern laptop. Use this variant to study the DLRM *architectural pattern* (sparse-gather + dense-MLP) in isolation from memory bottlenecks. Pair with micro-dlrm-dram-train (iter 2) to observe the bottleneck transition that production DLRM exhibits."
       dataset: movielens-100k
-      dataset_source: "Harper & Konstan (2015), MovieLens-100K, 100K ratings from 943 users × 1682 movies; ships in data/movielens/"
+      dataset_source: "Harper & Konstan (2015), MovieLens-100K, 100K ratings from 943 users \xD7 1682 movies; ships in data/movielens/"
       quality_target:
         metric: accuracy
-        value: 0.70
+        value: 0.7
       verified_baseline:
         train_loss: 0.58
         val_loss: 0.61
         accuracy: 0.71
         epochs: 25
         time_seconds: 5
-        note: "23K params; embedding tables (943×8 + 1682×8 ≈ 21KB) fit in L1 cache"
+        note: "23K params; embedding tables (943\xD78 + 1682\xD78 \u2248 21KB) fit in L1 cache"
       scenario: server
-      provenance: "Naumov et al. 2019 (DLRM); maps to MLPerf Training DLRM"
-
+      provenance: Naumov et al. 2019 (DLRM); maps to MLPerf Training DLRM
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 21504
+          note: 943x8 + 1682x8 + 21x8 ~ 21 KB embedding tables fit in L1 trivially.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 1.0
+          classification_rule: sparse gather is 0 FLOPs; only the small MLP contributes
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.05
+          observation_source: iter-2 smoke_dlrm_dram.py probe; cache variant is dispatch-bound at any realistic batch size
     micro-dlrm-dram-train:
       model: micro-dlrm-dram-1m
       params: 512M
       trainable_params: 23K
-      working_set_regime: dram_bound
-      virtual_table_bytes: 2147483648   # 2,000,000 rows × 256 dim × 4 bytes = 2 GB
-      llc_capacity_factor: 170          # ~170x M1's 12 MB LLC; required so per-batch byte transfer (8 MB at B=8192) dominates PyTorch's ~50 us per-call dispatch overhead. With m_spa<128 the dispatch overhead masks the bandwidth signal — production DLRM uses 64-512 dim embeddings for the same reason.
-      smoke_test_result: "iter-2 host: 4.16x end-to-end, 3.27x pure lookup vs cache variant (B=8192, M-series CPU)"
-      regime_note: "Hash-mapped virtual embedding table sized to exceed L3 by ~20x. Same MovieLens data and MLP topology as micro-dlrm-train; only the embedding access pattern changes. Run BOTH variants under identical harness settings to observe the bottleneck transition that defines production-scale DLRM. Quality target is intentionally lower (0.65 vs 0.70) to budget for the ~5pp accuracy cost of hash collisions; use `working_set_regime` to condition harness behavior, not the workload name."
+      virtual_table_bytes: 2147483648
+      llc_capacity_factor: 170
       dataset: movielens-100k
-      dataset_source: "Harper & Konstan (2015) — same dataset as micro-dlrm-train"
+      dataset_source: "Harper & Konstan (2015) \u2014 same dataset as micro-dlrm-train"
       quality_target:
         metric: accuracy
         value: 0.65
       verified_baseline:
-        baseline_note: "Awaiting first verification run on iter-2 harness."
+        baseline_note: Awaiting first verification run on iter-2 harness.
       scenario: server
-      provenance: "Naumov et al. 2019 (DLRM) + Weinberger et al. 2009 (hashing trick); production-realistic memory access pattern at laptop scale"
-
+      provenance: Naumov et al. 2019 (DLRM) + Weinberger et al. 2009 (hashing trick); production-realistic memory access pattern
+        at laptop scale
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 67108864
+          note: 2M-row x 256-dim virtual table = 2 GB total; per-step working set ~64 MB at B=8192 with random hashing
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.5
+          classification_rule: one MAC per loaded float; sparse gather dominates
+        dispatch:
+          value: device_saturated
+          utilization: 0.6
+          achieved_bw_gbps: 40.0
+          observation_source: 'iter-2 smoke_dlrm_dram.py: m_spa=256 explicitly chosen to clear PyTorch''s ~50us dispatch floor'
     nanogpt-prefill:
       model: nanogpt-12m
       shared_checkpoint: nanogpt-train
       params: 11.5M
-      compute_regime: compute_bound
-      regime_note: "Single forward over ctx_len tokens. Weights are reused across all tokens, giving high arithmetic intensity (~289 FLOPs/byte at ctx=1792). Should sit on the compute side of the M-series roofline (ridge ~30 FLOP/byte fp32). Pair with nanogpt-decode (same checkpoint) to observe the prefill-vs-decode split."
       default_context_len: 1792
-      smoke_test_result: "iter-3 host (M-series, MPS): prefill 13.0 ms at ctx=1792, ~138K tok/s, intensity 289 FLOPs/byte"
       scenario: offline
-      provenance: "GPT-2 prefill regime; corresponds to MLPerf Inference 'prompt processing' phase"
-
+      provenance: GPT-2 prefill regime; corresponds to MLPerf Inference 'prompt processing' phase
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 96468992
+          note: "Per-layer attention scores tensor (1792x1792 per head, 6 heads, fp32) is 19.3M floats = 77 MB alone \u2014\
+            \ well past the 4*LLC = 48 MB threshold. The cited 96 MB also includes Q/K/V and FFN activations."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 289
+          classification_rule: weights reused across ctx_len=1792 tokens; well past M1 ridge of 30
+        dispatch:
+          value: device_saturated
+          utilization: 0.55
+          observation_source: iter-3 smoke_nanogpt_phases.py; prefill latency 13ms over 1792 tokens
     nanogpt-decode:
       model: nanogpt-12m
       shared_checkpoint: nanogpt-train
       params: 11.5M
-      compute_regime: bandwidth_bound
-      regime_note: "Per-step KV-cache stream from DRAM dominates. Each decode step appends 1 token's K,V and re-reads the entire cached K,V. Arithmetic intensity is ~0.5 FLOPs/byte at ctx=1792, three orders of magnitude below prefill. Wall-clock measurement on MPS shows ~4 GB/s achieved BW (well below M1's 68 GB/s peak), revealing PyTorch's per-kernel dispatch overhead at small per-step compute -- itself a teaching moment about when dispatch overhead dominates the bandwidth signal."
       default_prefill_ctx: 1792
       default_decode_steps: 64
-      kv_bytes_per_token: 18432   # 2 * n_layer(6) * n_head(6) * head_dim(64) * 4 bytes
-      smoke_test_result: "iter-3 host (M-series, MPS): TTFT 668 ms, ITL median 8.5 ms (p99 22.9 ms), 117 tok/s, intensity ratio prefill/decode = 578x"
+      kv_bytes_per_token: 18432
       scenario: server
-      provenance: "GPT-2 autoregressive decode; the regime that dominates LLM serving cost in production (vLLM, TensorRT-LLM, TGI all built around this)"
-
+      provenance: GPT-2 autoregressive decode; the regime that dominates LLM serving cost in production (vLLM, TensorRT-LLM,
+        TGI all built around this)
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 34603008
+          note: 32 MB KV cache stream per step lands in the 6-48 MB grey band. Empirically the achieved BW (4 GB/s vs 68 GB/s
+            peak) suggests DRAM streaming dominates, but per-step working set technically classifies as ambiguous on this
+            axis. Real bottleneck is on Axis C.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.5
+          classification_rule: one new token through all weights + full KV reread; 0.5 FLOP/byte
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.059
+          achieved_bw_gbps: 4.01
+          observation_source: iter-3 smoke_nanogpt_phases.py on M-series MPS; the canonical dispatch_bound case
     micro-diffusion-train:
       model: micro-diffusion-32px
       params: 2.0M
       dataset: cifar10
-      dataset_source: "Krizhevsky (2009), auto-download via torchvision, 170MB"
+      dataset_source: Krizhevsky (2009), auto-download via torchvision, 170MB
       quality_target:
         metric: mse_loss
         value: 0.002
       verified_baseline:
         train_loss: 0.002
-        val_loss: 0.000
+        val_loss: 0.0
         epochs: 20
         time_seconds: 41
       scenario: offline
-      provenance: "Ho et al. 2020 (DDPM); U-Net denoising autoencoder"
-
+      provenance: Ho et al. 2020 (DDPM); U-Net denoising autoencoder
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 8388608
+          note: "2M-param U-Net on CIFAR-10 32x32; ~8 MB per-step in the grey band \u2014 measure."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 70
+          classification_rule: dense convs on small images, weights reused across batch
+        dispatch:
+          value: unmeasured
+          note: Conv kernel sizes likely large enough but verify
     micro-gnn-train:
       model: micro-gnn
       params: 5.6K
       dataset: cora
-      dataset_source: "Sen et al. (2008), Cora citation network (2708 nodes, 7 classes, 5429 edges); auto-download; synthetic fallback available for offline use"
+      dataset_source: Sen et al. (2008), Cora citation network (2708 nodes, 7 classes, 5429 edges); auto-download; synthetic
+        fallback available for offline use
       quality_target:
         metric: test_accuracy
         value: 0.78
@@ -140,15 +211,26 @@ suites:
         test_accuracy: 0.816
         epochs: 50
         time_seconds: 2
-        note: "81.6% matches Kipf & Welling (2017) published result on Cora"
+        note: 81.6% matches Kipf & Welling (2017) published result on Cora
       scenario: single_stream
-      provenance: "Kipf & Welling 2017 (GCN); maps to MLPerf Training GNN"
-
+      provenance: Kipf & Welling 2017 (GCN); maps to MLPerf Training GNN
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 204800
+          note: Cora has 2708 nodes, 5429 edges; full graph fits in L1
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 2.0
+          classification_rule: sparse adjacency multiply has very low arithmetic intensity
+        dispatch:
+          value: unmeasured
+          note: Per-step kernels are microscopic; very likely dispatch_bound but needs measurement
     micro-bert-train:
       model: micro-bert
       params: 432K
       dataset: sst2
-      dataset_source: "Socher et al. (2013), Stanford Sentiment Treebank binary, 67K train / 872 val; ships in data/sst2/"
+      dataset_source: Socher et al. (2013), Stanford Sentiment Treebank binary, 67K train / 872 val; ships in data/sst2/
       quality_target:
         metric: val_accuracy
         value: 0.78
@@ -157,15 +239,26 @@ suites:
         val_accuracy: 0.77
         epochs: 15
         time_seconds: 45
-        note: "Character-level tokenization; 77% on real SST-2 with 0.5M-param model"
+        note: Character-level tokenization; 77% on real SST-2 with 0.5M-param model
       scenario: single_stream
-      provenance: "Devlin et al. 2019 (BERT); bidirectional transformer for NLU"
-
+      provenance: Devlin et al. 2019 (BERT); bidirectional transformer for NLU
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 4194304
+          note: 432K params, short SST-2 sequences
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 80
+          classification_rule: bidirectional attention reuses weights across batch
+        dispatch:
+          value: unmeasured
     micro-lstm-train:
       model: micro-lstm
       params: 51K
       dataset: etth1
-      dataset_source: "Zhou et al. (2021, AAAI Informer), ETTh1 hourly electricity transformer temps, 17K observations; ships in data/etth1/"
+      dataset_source: Zhou et al. (2021, AAAI Informer), ETTh1 hourly electricity transformer temps, 17K observations; ships
+        in data/etth1/
       quality_target:
         metric: val_mse
         value: 0.13
@@ -174,15 +267,26 @@ suites:
         val_loss: 0.17
         epochs: 30
         time_seconds: 20
-        note: "Classic overfitting pattern — val MSE plateaus at epoch 5 then rises"
+        note: "Classic overfitting pattern \u2014 val MSE plateaus at epoch 5 then rises"
       scenario: single_stream
-      provenance: "Hochreiter & Schmidhuber 1997 (LSTM); time-series forecasting"
-
+      provenance: Hochreiter & Schmidhuber 1997 (LSTM); time-series forecasting
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 524288
+          note: 51K params, 96-step horizon
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 4.0
+          classification_rule: sequential per-timestep matmuls have low intensity
+        dispatch:
+          value: unmeasured
+          note: Sequential timesteps invite dispatch overhead; likely dispatch_bound, verify
     micro-rl-train:
       model: micro-rl
       params: 17K
       dataset: cartpole_local
-      dataset_source: "Pure-Python CartPole environment; physics from OpenAI Gym spec, no download"
+      dataset_source: Pure-Python CartPole environment; physics from OpenAI Gym spec, no download
       quality_target:
         metric: avg_episode_reward
         value: 195
@@ -190,20 +294,27 @@ suites:
         avg_reward: 9.5
         episodes: 500
         time_seconds: 1
-        note: "REINFORCE is high-variance by design — pedagogical value in showing RL difficulty"
+        note: "REINFORCE is high-variance by design \u2014 pedagogical value in showing RL difficulty"
       scenario: single_stream
-      provenance: "Williams 1992 (REINFORCE); policy gradient on classic control"
-
-  # -----------------------------------------------------------
-  # EDGE DIVISION
-  # Image classification under latency constraints
-  # -----------------------------------------------------------
+      provenance: Williams 1992 (REINFORCE); policy gradient on classic control
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 65536
+          note: 17K params, tiny actor-critic
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 2.0
+          classification_rule: env step in Python dominates; nn forward is microscopic
+        dispatch:
+          value: unmeasured
+          note: Almost certainly dispatch_bound; verify
   edge:
     resnet18-train:
       model: resnet18
       params: 11.2M
       dataset: cifar100
-      dataset_source: "Krizhevsky (2009), auto-download via torchvision, 170MB; cached locally after first download"
+      dataset_source: Krizhevsky (2009), auto-download via torchvision, 170MB; cached locally after first download
       quality_target:
         metric: top1_accuracy
         value: 0.36
@@ -213,54 +324,82 @@ suites:
         accuracy: 0.363
         epochs: 25
         time_seconds: 64
-        note: "36.3% after 25 epochs; systems tuning (augmentation, schedule) reaches 50%+"
+        note: 36.3% after 25 epochs; systems tuning (augmentation, schedule) reaches 50%+
       scenario: single_stream
-      provenance: "He et al. 2016 (ResNet); FULLY LOCAL implementation — no torchvision.models dependency"
-
+      provenance: "He et al. 2016 (ResNet); FULLY LOCAL implementation \u2014 no torchvision.models dependency"
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 48234496
+          note: "11.2M params; activations + weights ~46 MB at B=64. Just under 4*LLC threshold; classification depends on\
+            \ whether activations stream or stay resident \u2014 measure."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 120
+          classification_rule: standard convs, well-studied compute-bound regime
+        dispatch:
+          value: unmeasured
     mobilenetv2-train:
       model: mobilenetv2
       params: 2.4M
       dataset: cifar100
-      dataset_source: "Krizhevsky (2009), auto-download via torchvision, 170MB; cached locally after first download"
+      dataset_source: Krizhevsky (2009), auto-download via torchvision, 170MB; cached locally after first download
       quality_target:
         metric: top1_accuracy
-        value: 0.40
+        value: 0.4
       verified_baseline:
         epochs: 15
         time_seconds: 60
-        note: "Inverted residual architecture with depthwise separable convolutions"
+        note: Inverted residual architecture with depthwise separable convolutions
       scenario: single_stream
-      provenance: "Sandler et al. 2018 (MobileNetV2); FULLY LOCAL — no torchvision.models dependency"
-
-  # -----------------------------------------------------------
-  # TINY DIVISION
-  # Keyword spotting, anomaly detection, person detection (MCU-scale)
-  # -----------------------------------------------------------
+      provenance: "Sandler et al. 2018 (MobileNetV2); FULLY LOCAL \u2014 no torchvision.models dependency"
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 10485760
+          note: "2.4M params, depthwise-separable convs; 10 MB per-step in grey band \u2014 measure."
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 12
+          classification_rule: depthwise convs have notoriously low arithmetic intensity
+        dispatch:
+          value: unmeasured
+          note: Despite 'edge' label, MobileNetV2 is mostly memory-bound, not compute-bound
   tiny:
     dscnn-kws-train:
       model: dscnn-kws
       params: 20K
       dataset: speech_commands_v2
-      dataset_source: "Warden (2018), auto-download via torchaudio, ~2GB"
+      dataset_source: Warden (2018), auto-download via torchaudio, ~2GB
       quality_target:
         metric: top1_accuracy
-        value: 0.90
+        value: 0.9
       verified_baseline:
         train_loss: 0.916
         val_loss: 1.026
         accuracy: 0.712
         epochs: 10
         time_seconds: 51
-        note: "71.2% after 10 epochs on 12-class (10 keywords + unknown + silence)"
+        note: 71.2% after 10 epochs on 12-class (10 keywords + unknown + silence)
       max_model_size_kb: 100
       scenario: offline
-      provenance: "Zhang et al. 2017 (Hello Edge); maps to MLPerf Tiny KWS"
-
+      provenance: Zhang et al. 2017 (Hello Edge); maps to MLPerf Tiny KWS
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 2097152
+          note: 20K params + 40x101 spectrogram inputs
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 70
+          classification_rule: moderate intensity from spectrogram convs
+        dispatch:
+          value: unmeasured
     anomaly-ae-train:
       model: anomaly-ae
       params: 0.3M
       dataset: mnist
-      dataset_source: "LeCun et al. 1998, auto-download via torchvision, 12MB"
+      dataset_source: LeCun et al. 1998, auto-download via torchvision, 12MB
       quality_target:
         metric: reconstruction_mse
         value: 0.04
@@ -269,16 +408,27 @@ suites:
         val_loss: 0.065
         epochs: 20
         time_seconds: 5
-        note: "Val loss intentionally higher — anomalous digits have high recon error"
+        note: "Val loss intentionally higher \u2014 anomalous digits have high recon error"
       max_model_size_kb: 32
       scenario: offline
-      provenance: "MLPerf Tiny AD benchmark; Koizumi et al. 2019 (ToyADMOS architecture)"
-
+      provenance: MLPerf Tiny AD benchmark; Koizumi et al. 2019 (ToyADMOS architecture)
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 2097152
+          note: 0.3M params FC autoencoder on MNIST
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 80
+          classification_rule: dense matmuls dominate
+        dispatch:
+          value: unmeasured
     wake-vision-vww:
       model: wake-vision-vww
       params: 8.5K
       dataset: wake_vision
-      dataset_source: "Banbury et al. 2024 (CVPR), HuggingFace Harvard-Edge/Wake-Vision, 6GB; 5K pedagogical subset with CIFAR-10 proxy fallback"
+      dataset_source: Banbury et al. 2024 (CVPR), HuggingFace Harvard-Edge/Wake-Vision, 6GB; 5K pedagogical subset with CIFAR-10
+        proxy fallback
       quality_target:
         metric: binary_accuracy
         value: 0.85
@@ -290,67 +440,121 @@ suites:
         time_seconds: 10
       max_model_size_kb: 16
       scenario: offline
-      provenance: "Banbury et al. 2024 (Wake Vision, CVPR); maps to MLPerf Tiny VWW"
-
-  # -----------------------------------------------------------
-  # AGENT DIVISION (Novel Contribution)
-  # Systems performance of agentic AI pipelines
-  # -----------------------------------------------------------
+      provenance: Banbury et al. 2024 (Wake Vision, CVPR); maps to MLPerf Tiny VWW
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 524288
+          note: 8.5K-param micro-CNN
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 80
+          classification_rule: small but compute-dense
+        dispatch:
+          value: unmeasured
+          note: Tiny model may push dispatch overhead per step; verify
   agent:
     nano-rag-agent:
       model: nano-rag-agent
       params: 20.1M
       dataset: react_traces
-      dataset_source: "Structured multi-step reasoning traces; ReAct format"
+      dataset_source: Structured multi-step reasoning traces; ReAct format
       quality_target:
         metric: retrieval_accuracy
-        value: 0.80
+        value: 0.8
       metrics:
-        - retrieve_latency_ms
-        - generate_latency_ms
-        - queries_per_second
+      - retrieve_latency_ms
+      - generate_latency_ms
+      - queries_per_second
       scenario: server
-      provenance: "Lewis et al. 2020 (RAG); measures retrieval vs generation bottleneck"
-
+      provenance: Lewis et al. 2020 (RAG); measures retrieval vs generation bottleneck
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 88080384
+          note: 'Generation phase: 20M-param decode (~80 MB activations + weights re-read) + retrieval index lookup.'
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: generation is decode (bw-bound); retrieval is index gather
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
+          observation_source: 'composite workload: decode + retrieval, both small-kernel'
     nano-codegen-agent:
       model: nano-codegen-agent
       params: 13.7M
       dataset: mbpp
-      dataset_source: "Austin et al. 2021 (MBPP); 20 curated Python problems with unit tests"
+      dataset_source: Austin et al. 2021 (MBPP); 20 curated Python problems with unit tests
       quality_target:
         metric: pass_at_1
         value: 0.15
       metrics:
-        - iterations_to_correct
-        - tokens_per_attempt
-        - context_growth_factor
+      - iterations_to_correct
+      - tokens_per_attempt
+      - context_growth_factor
       scenario: server
-      provenance: "Chen et al. 2021 (Codex); measures iterative retry cost"
-
+      provenance: Chen et al. 2021 (Codex); measures iterative retry cost
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 60817408
+          note: 13.7M-param iterative regeneration; per-step working set ~55 MB exceeds 4*LLC.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: iterative decode loop
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
     nano-react-agent:
       model: nano-react-agent
       params: 13.7M
       dataset: react_traces
-      dataset_source: "Structured multi-step reasoning traces; ReAct format"
+      dataset_source: Structured multi-step reasoning traces; ReAct format
       quality_target:
         metric: trace_accuracy
-        value: 0.60
+        value: 0.6
       metrics:
-        - steps_to_answer
-        - reasoning_latency_per_step_ms
-        - tool_dispatch_latency_ms
+      - steps_to_answer
+      - reasoning_latency_per_step_ms
+      - tool_dispatch_latency_ms
       scenario: server
-      provenance: "Yao et al. 2023 (ReAct); measures multi-step reasoning + tool use"
-
-    # (Optional / Bonus workload — not part of the core 16 in the paper)
+      provenance: Yao et al. 2023 (ReAct); measures multi-step reasoning + tool use
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 60817408
+          note: "13.7M-param multi-step reasoning; iter-2 found this still uses non-KV-cache forward \u2014 current 58 MB\
+            \ number assumes the (broken) recompute path; will shrink once iter-7 lands KV-cache."
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: ReAct decode loop
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
+          note: To be patched in iter-7 to use KV-cache path; regime values may shift
     nano-toolcall-agent:
       model: nano-toolcall-agent
       params: 13.7M
       dataset: react_traces
-      dataset_source: "Structured multi-step reasoning traces; ReAct format"
+      dataset_source: Structured multi-step reasoning traces; ReAct format
       metrics:
-        - classification_latency_ms
-        - json_validity_rate
-        - queries_per_second
+      - classification_latency_ms
+      - json_validity_rate
+      - queries_per_second
       scenario: server
-      provenance: "Schick et al. 2024 (Toolformer); measures structured output generation"
+      provenance: Schick et al. 2024 (Toolformer); measures structured output generation
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 60817408
+          note: Bonus workload (not in core 16); structured output generation
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: tool-call decode
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
