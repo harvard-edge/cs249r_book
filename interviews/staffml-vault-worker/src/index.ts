@@ -85,14 +85,22 @@ async function getManifest(env: Env): Promise<Manifest> {
 }
 
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {
-  const allowed = (env.CORS_ALLOWLIST || "").split(",");
-  const ok = origin && allowed.includes(origin);
-  return {
-    "Access-Control-Allow-Origin": ok ? origin : allowed[0] || "*",
+  // Fail-closed on empty/missing env var (Chip R4-H-2): a misconfigured
+  // deploy that blanked CORS_ALLOWLIST must NOT silently flip to wildcard.
+  // Emit no Access-Control-Allow-Origin header; browsers enforce deny.
+  const raw = (env.CORS_ALLOWLIST || "").trim();
+  const allowed = raw ? raw.split(",").map(s => s.trim()).filter(Boolean) : [];
+  const base: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, If-None-Match, X-Vault-Release",
     Vary: "Origin",
   };
+  if (allowed.length === 0) return base;   // no ACAO header — deny by omission
+  if (origin && allowed.includes(origin)) {
+    base["Access-Control-Allow-Origin"] = origin;
+  }
+  // If origin didn't match, still emit no ACAO — browsers deny.
+  return base;
 }
 
 function json(
@@ -292,12 +300,21 @@ async function handleQuestions(env: Env, req: Request, url: URL): Promise<Respon
   );
 }
 
+const MAX_SEARCH_Q_CHARS = 100;
+
 async function handleSearch(env: Env, req: Request, url: URL): Promise<Response> {
   const origin = req.headers.get("Origin");
-  const q = (url.searchParams.get("q") ?? "").trim();
+  const qRaw = (url.searchParams.get("q") ?? "").trim();
   const limit = Math.min(Number.parseInt(url.searchParams.get("limit") ?? "20", 10), 50);
-  if (!q) {
+  if (!qRaw) {
     return json({ error: "missing-query-q" }, { status: 400, headers: corsHeaders(env, origin) });
+  }
+  // Chip R4-C-1 hardening: cap query length (prevents NEAR/OR DoS).
+  if (qRaw.length > MAX_SEARCH_Q_CHARS) {
+    return json(
+      { error: "query-too-long", max_chars: MAX_SEARCH_Q_CHARS },
+      { status: 400, headers: corsHeaders(env, origin) },
+    );
   }
   // Detect whether FTS5 table exists; use it when available, otherwise
   // fall back to LIKE (pre-FTS5-migration D1 instances).
@@ -313,9 +330,27 @@ async function handleSearch(env: Env, req: Request, url: URL): Promise<Response>
 
   let rows;
   if (ftsAvailable) {
-    // Escape FTS5 syntax characters — keep user input from injecting
-    // MATCH expressions that would break the parse.
-    const escaped = q.replace(/[^\w\s]/g, " ");
+    // Chip R4-C-1 hardening: reject FTS5 operator keywords (NEAR/AND/OR/NOT)
+    // in raw input — the char-class strip keeps them intact as bare words.
+    // Then wrap the whole user term in a PHRASE literal so anything that
+    // survived becomes a literal to match, not an operator.
+    if (/\b(NEAR|AND|OR|NOT)\b/i.test(qRaw)) {
+      return json(
+        { error: "reserved-token-in-query" },
+        { status: 400, headers: corsHeaders(env, origin) },
+      );
+    }
+    const sanitized = qRaw
+      .replace(/[^\w\s]/g, " ")          // strip FTS5 operator chars
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!sanitized) {
+      return json({ results: [], query: qRaw, fts: true },
+                  { headers: corsHeaders(env, origin) });
+    }
+    // Wrap as a phrase literal. Double any embedded " per FTS5 syntax
+    // (defensive; we already stripped non-word chars).
+    const phrase = `"${sanitized.replace(/"/g, '""')}"`;
     rows = await env.DB
       .prepare(
         `SELECT q.id, q.title, q.topic, q.track, q.level, q.zone,
@@ -326,10 +361,10 @@ async function handleSearch(env: Env, req: Request, url: URL): Promise<Response>
          ORDER BY rank
          LIMIT ?`,
       )
-      .bind(escaped, limit)
+      .bind(phrase, limit)
       .all();
   } else {
-    const pattern = `%${q}%`;
+    const pattern = `%${qRaw}%`;
     rows = await env.DB
       .prepare(
         `SELECT id, title, topic, track, level, zone
@@ -425,8 +460,12 @@ export default {
       }
       return json({ error: "unknown-endpoint" }, { status: 404, headers: corsHeaders(env, origin) });
     } catch (e) {
+      // Chip R4-H-2: never echo exception detail to clients — can leak SQL
+      // fragments, D1 internals, etc. Log to console for tail visibility,
+      // return generic message.
+      console.error("worker-internal-error", { path: url.pathname, error: String(e) });
       return json(
-        { error: "internal", detail: String(e) },
+        { error: "internal" },
         { status: 500, headers: corsHeaders(env, origin) },
       );
     }

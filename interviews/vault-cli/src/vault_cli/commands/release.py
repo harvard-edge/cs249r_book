@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sqlite3
 from pathlib import Path
 
 import typer
 from rich.console import Console
+
+# Chip R4-L-1: version-string validator. Enforced at entry of every command
+# that accepts a ``version`` argument so maintainer typos (e.g., ``1..0``,
+# ``HEAD``) don't cascade into weird on-disk layouts or git-tag names.
+_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$")
+
+
+def _validate_version(version: str) -> None:
+    if not _VERSION_RE.match(version):
+        raise typer.BadParameter(
+            f"version {version!r} does not match semver form X.Y.Z[-prerelease]; "
+            f"refusing to proceed."
+        )
 
 from vault_cli.compiler import build as compile_build
 from vault_cli.exit_codes import ExitCode
@@ -59,7 +73,8 @@ def register(app: typer.Typer) -> None:
     ) -> None:
         """Emit forward + inverse SQL migrations between two releases."""
         prev = releases_dir / from_version / "vault.db"
-        new = releases_dir / ("." + f".pending-{to_version}").replace("..", ".") / "vault.db"
+        # Chip R4-M-2: cleaned up dead-code pending-path band-aid.
+        new = releases_dir / f".pending-{to_version}" / "vault.db"
         # Fall back: new release might already be at final path (re-emitting).
         if not new.exists():
             new = releases_dir / to_version / "vault.db"
@@ -82,7 +97,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("export-paper")
     def export_paper_cmd(
-        version: str = typer.Argument(...),
+        version: str = typer.Argument(..., callback=lambda v: (_validate_version(v) or v)),
         releases_dir: Path = typer.Option(Path("interviews/vault/releases"), "--releases-dir"),
         paper_dir: Path = typer.Option(Path("interviews/paper"), "--paper-dir"),
     ) -> None:
@@ -439,9 +454,26 @@ def register(app: typer.Typer) -> None:
 
         def paper_forward() -> dict:
             console.print(f"[cyan]leg 3/3[/cyan] paper-tag push (v{version})")
+            # Chip R4-L-2: pre-check tag existence so "tag already exists"
+            # is diagnosed before point-of-no-return, not as a cryptic
+            # paper-leg failure that pages the operator.
+            exists = subprocess.run(
+                ["git", "rev-parse", "--verify", f"refs/tags/v{version}"],
+                capture_output=True, text=True, check=False,
+            )
+            if exists.returncode == 0:
+                # Tag exists locally; check if it's already pushed.
+                remote = subprocess.run(
+                    ["git", "ls-remote", "--tags", "origin", f"v{version}"],
+                    capture_output=True, text=True, check=False,
+                )
+                if remote.stdout.strip():
+                    return {"tag": f"v{version}", "status": "already-pushed-skipped"}
+                _run(["git", "push", "origin", f"v{version}"])
+                return {"tag": f"v{version}", "status": "pushed-existing-tag"}
             _run(["git", "tag", "-a", f"v{version}", "-m", f"release {version}"])
             _run(["git", "push", "origin", f"v{version}"])
-            return {"tag": f"v{version}"}
+            return {"tag": f"v{version}", "status": "created-and-pushed"}
 
         all_legs = [
             LegPlan(name="d1",     forward=d1_forward,     rollback=d1_rollback),
@@ -467,7 +499,7 @@ def register(app: typer.Typer) -> None:
 
     @app.command("verify")
     def verify_cmd(
-        version: str = typer.Argument(...),
+        version: str = typer.Argument(..., callback=lambda v: (_validate_version(v) or v)),
         releases_dir: Path = typer.Option(Path("interviews/vault/releases"), "--releases-dir"),
         vault_dir: Path = typer.Option(Path("interviews/vault"), "--vault-dir"),
         from_source: bool = typer.Option(

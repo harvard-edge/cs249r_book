@@ -207,16 +207,28 @@ def register(app: typer.Typer) -> None:
         (David R3-H1 authoring-UX fix).
         """
         # Path may not exist if we're editing a file that failed to load (e.g.,
-        # because it has an injected error block). Look by both loaded and raw path.
+        # because it has an injected error block). Look by both loaded-match and
+        # by parsing each candidate's ``id:`` field directly.
         loaded, _ = load_all(vault_dir)
         match = next((lq for lq in loaded if lq.id == question_id), None)
         if match:
             target_path = match.path
         else:
-            # Search raw filesystem for <topic>-<hash>-<seq>.yaml with a matching id field.
+            # Chip R4-M-1 fix: parse each YAML's `id:` field for an EXACT match
+            # rather than substring-matching the file body (which could open the
+            # wrong file if the id appears in a chain reference elsewhere).
+            # Strip any prior validation-error header comments so bypassed
+            # files still parse.
             target_path = None
+            import re as _re
+            id_re = _re.compile(r"^\s*id:\s*['\"]?([A-Za-z0-9._-]+)['\"]?\s*$", _re.MULTILINE)
             for p in (vault_dir / "questions").rglob("*.yaml"):
-                if question_id in p.read_text(encoding="utf-8", errors="ignore"):
+                try:
+                    text = p.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                m = id_re.search(text)
+                if m and m.group(1) == question_id:
                     target_path = p
                     break
             if target_path is None:

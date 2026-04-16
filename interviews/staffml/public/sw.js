@@ -24,6 +24,11 @@ let cacheName = `${CACHE_PREFIX}${VERSION}-unknown`;
 // under the §6.1.1 10-minute grace window.
 const MANIFEST_POLL_MS = 5 * 60 * 1000;
 let lastManifestCheckMs = 0;
+// Chip R4-M-3: if the manifest hasn't succeeded in > 24h, don't blindly
+// serve from cache forever — bypass cache on question/search endpoints so
+// users see current data even if stale-cache was valid.
+let lastManifestSuccessMs = 0;
+const STALE_MANIFEST_BYPASS_MS = 24 * 60 * 60 * 1000;
 
 // Persist the API origin in IDB so SW restarts don't lose it (Chip R3-H3).
 // Otherwise a cold tab opened offline hits a no-op fetch handler.
@@ -75,8 +80,12 @@ self.addEventListener("activate", (event) => {
       await self.clients.claim();
       // Rehydrate the API origin from IDB so a cold wake-up can serve cached
       // responses before any page posts SET_VAULT_API_ORIGIN (Chip R3-H3).
+      // Re-validate against the allowlist in case a compromised earlier
+      // session poisoned the IDB entry (Chip R4-C-2 defense-in-depth).
       const persisted = await idbGet("vault_api_origin");
-      if (persisted) self.__VAULT_API_ORIGIN = persisted;
+      if (persisted && _isAllowedOrigin(persisted)) {
+        self.__VAULT_API_ORIGIN = persisted;
+      }
       // Evict any caches that are not the current one; release-change invalidation.
       const names = await caches.keys();
       await Promise.all(
@@ -98,6 +107,7 @@ async function updateReleaseFromManifest(api) {
     const res = await fetch(`${api}/manifest`, { cache: "no-store" });
     if (!res.ok) return;
     const manifest = await res.json();
+    lastManifestSuccessMs = Date.now();
     if (manifest.release_id && manifest.release_id !== currentRelease) {
       currentRelease = manifest.release_id;
       cacheName = `${CACHE_PREFIX}${VERSION}-${manifest.release_id}`;
@@ -123,14 +133,21 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       await updateReleaseFromManifest(api);
+      // Chip R4-M-3: if manifest hasn't succeeded in >24h, bypass cache
+      // for question/search endpoints so users see live data even when
+      // the release-change detection has been silently failing.
+      const manifestStale = lastManifestSuccessMs > 0
+        && Date.now() - lastManifestSuccessMs > STALE_MANIFEST_BYPASS_MS;
       const cache = await caches.open(cacheName);
 
-      const cached = await cache.match(event.request);
-      if (cached) {
-        const ageHeader = cached.headers.get("x-sw-cached-at");
-        const age = ageHeader ? Date.now() - Number.parseInt(ageHeader, 10) : Infinity;
-        if (age < MAX_AGE_MS) return cached;
-        // expired; fall through to revalidate
+      if (!manifestStale) {
+        const cached = await cache.match(event.request);
+        if (cached) {
+          const ageHeader = cached.headers.get("x-sw-cached-at");
+          const age = ageHeader ? Date.now() - Number.parseInt(ageHeader, 10) : Infinity;
+          if (age < MAX_AGE_MS) return cached;
+          // expired; fall through to revalidate
+        }
       }
 
       try {
@@ -156,9 +173,59 @@ self.addEventListener("fetch", (event) => {
 
 // Site posts the API origin on registration; SW persists it so a later
 // cold-wake-up (especially offline) survives without the page's help.
-self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "SET_VAULT_API_ORIGIN") {
-    self.__VAULT_API_ORIGIN = event.data.origin;
-    idbSet("vault_api_origin", event.data.origin);
+//
+// Hardened per Chip R4-C-2: without these checks, any page on the same
+// scope (including a compromised third-party script) could repoint the SW
+// to exfiltrate every vault request. Every one of these checks must pass.
+
+// Build-time allowlist of acceptable API origins. These match CORS_ALLOWLIST
+// in wrangler.toml and the production/staging worker hostnames.
+const VAULT_API_ALLOWLIST = [
+  "https://staffml-vault.mlsysbook.ai",
+  "https://staffml-vault-staging.mlsysbook.ai",
+  // Local dev shim only valid when SW origin is localhost; enforced below.
+  "http://localhost:8002",
+  "http://127.0.0.1:8002",
+];
+
+function _isAllowedOrigin(origin) {
+  if (!origin || typeof origin !== "string") return false;
+  if (!VAULT_API_ALLOWLIST.includes(origin)) return false;
+  // localhost API origins are only permissible when the SW itself lives on
+  // localhost (dev environment). Block them on production hosts.
+  if (origin.startsWith("http://localhost") || origin.startsWith("http://127.0.0.1")) {
+    const swOrigin = self.location.origin;
+    if (!swOrigin.startsWith("http://localhost") && !swOrigin.startsWith("http://127.0.0.1")) {
+      return false;
+    }
   }
+  return true;
+}
+
+self.addEventListener("message", (event) => {
+  // 1. Source must be a same-origin window client, not another worker or
+  //    cross-origin document.
+  if (!event.source || !("url" in event.source)) return;
+  let sourceOrigin;
+  try {
+    sourceOrigin = new URL(event.source.url).origin;
+  } catch {
+    return;
+  }
+  if (sourceOrigin !== self.location.origin) return;
+
+  // 2. Message must be our specific protocol shape.
+  if (!event.data || event.data.type !== "SET_VAULT_API_ORIGIN") return;
+  const origin = event.data.origin;
+
+  // 3. Origin must be in the build-time allowlist.
+  if (!_isAllowedOrigin(origin)) return;
+
+  // 4. Refuse to overwrite once set to a different value without an explicit
+  //    reset — prevents a late-loading compromised script from repointing a
+  //    session that's already bound.
+  if (self.__VAULT_API_ORIGIN && self.__VAULT_API_ORIGIN !== origin) return;
+
+  self.__VAULT_API_ORIGIN = origin;
+  idbSet("vault_api_origin", origin);
 });

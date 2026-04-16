@@ -179,7 +179,13 @@ def _check_taxonomy_dag(vault_dir: Path) -> list[InvariantFailure]:
 
     # Detect cycle via DFS with 3-color marking.
     WHITE, GRAY, BLACK = 0, 1, 2
-    color: dict[str, int] = {n: WHITE for n in graph}
+    # Chip R4-H-4: include pure-target nodes (never appear as edge.source)
+    # so DFS traversal through them doesn't implicitly create WHITE
+    # entries with wrong semantics mid-walk.
+    all_nodes = set(graph)
+    for nbrs in graph.values():
+        all_nodes.update(nbrs)
+    color: dict[str, int] = {n: WHITE for n in all_nodes}
 
     def visit(node: str, stack: list[str]) -> list[str] | None:
         color[node] = GRAY
@@ -265,9 +271,15 @@ def _scenario_dedup_lsh(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
     K = 5
     NUM_HASHES = 64
     JW_THRESHOLD = 0.95
+    # Chip R4-H-4: cap scenario length before shingling to prevent a malicious
+    # 256KB-scenario YAML from blowing the nightly-CI budget. 8000 chars is
+    # well past the signal floor for near-duplicate detection.
+    MAX_SHINGLE_LEN = 8000
 
     def shingles(text: str, k: int = K) -> set[str]:
         t = " ".join(text.split())
+        if len(t) > MAX_SHINGLE_LEN:
+            t = t[:MAX_SHINGLE_LEN]
         if len(t) <= k:
             return {t}
         return {t[i : i + k] for i in range(len(t) - k + 1)}

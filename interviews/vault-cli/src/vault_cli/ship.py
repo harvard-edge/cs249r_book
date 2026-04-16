@@ -137,10 +137,28 @@ def run_ship(
       the earlier legs once we've advertised the release upstream.
     - ``--resume`` starts from the first non-DEPLOYED leg.
     """
-    # Load or create journal.
+    # Load or create journal. Hardened per Chip R4-C-3: a journal from a
+    # different version MUST NOT be resumed against the current version —
+    # that would publish a mixed-release state.
     if resume and journal_path.exists():
         j = ShipJournal.load(journal_path)
+        if j.version != version:
+            raise ShipError(
+                f"journal at {journal_path} is for version {j.version!r}, not {version!r}. "
+                f"Delete it explicitly if you want to restart, or invoke --resume "
+                f"with the matching version."
+            )
+        if j.env != env:
+            raise ShipError(
+                f"journal env {j.env!r} doesn't match ship env {env!r}. "
+                f"Refusing to cross environments."
+            )
     else:
+        if journal_path.exists() and not resume:
+            raise ShipError(
+                f"ship-journal already exists at {journal_path}; "
+                f"pass --resume to continue or delete the file to restart."
+            )
         j = ShipJournal(version=version, env=env, started_at=_now(),
                         legs=[Leg(name=p.name) for p in legs])
         j.write(journal_path)

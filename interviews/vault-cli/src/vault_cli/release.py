@@ -102,11 +102,20 @@ def _sql_quote(s: Any) -> str:
     every caller here (corpus content authored via maintainer-approved flow,
     not external untrusted input). Do not reuse this helper for dialects
     other than SQLite.
+
+    Chip R4-H-1: Python ``bool`` is a subclass of ``int``, so ``isinstance(True, int)``
+    is True — we must handle bool BEFORE the numeric branch to avoid emitting
+    ``True``/``False`` (Python repr) as SQL tokens.
     """
     if s is None:
         return "NULL"
+    if isinstance(s, bool):
+        return "1" if s else "0"
     if isinstance(s, (int, float)):
         return str(s)
+    if isinstance(s, (bytes, bytearray)):
+        # SQLite BLOB literal.
+        return "X'" + bytes(s).hex() + "'"
     return "'" + str(s).replace("'", "''") + "'"
 
 
