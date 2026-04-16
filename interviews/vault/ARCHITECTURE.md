@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2.1** — Round-2 adversarial review integrated 2026-04-15. Pre-Phase-0.
+> **Status**: **v2.2** — Round-3 adversarial review integrated 2026-04-16. Phases 0-6 landed.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).
@@ -31,6 +31,32 @@
 > - **Canary DAU-adjusted (David N-5)**: soak = max(15 min, ≥100 sessions observed). §4.3.
 > - **`vault renumber` + `vault mark-exemplar` added to CLI surface (David N-9)**.
 > - **Removed duplicate Observability subsection in §13**. Cleanup only.
+>
+> **Changelog v2.1 → v2.2** (Round-3 convergent + individual findings, all fixed in code):
+> - **Schema-fingerprint placeholder fail-closed** (Chip R3-C1 / Dean R3-NH-3): worker refuses to auto-pass when `SCHEMA_FINGERPRINT="PLACEHOLDER-deploy-time"`; sets degraded mode instead. Triggers now included in DDL hash.
+> - **SW manifest polling throttled** (Chip R3-C2): TTL capped at 5 min per SW instance (was per-fetch).
+> - **SW API origin persisted in IDB** (Chip R3-H3): rehydrated on `activate` event; cold offline wake-ups now serve cached content.
+> - **`emit_migrations` covers all 4 tables** (Dean R3-NC-1): PRAGMA-driven column introspection across `questions`, `chains`, `chain_questions`, `tags`. Rollback-symmetry test extended.
+> - **`row_values` PRAGMA-driven** (Dean R3-NH-2): eliminates hardcoded-column-order drift.
+> - **`vault verify --git-ref`** (Dean R3-NC-2): reconstructs release from `git archive <ref>` into a tempdir — enables verification of historical releases without HEAD contamination.
+> - **`vault ship` implemented** (Dean R3-NH-1): journaled coordinator at `releases/<v>/.ship-journal.json` with §6.1.1 ordering + auto-rollback matrix + `--resume`; 4 unit tests covering happy path, pre-paper failure, paper-leg-manual, resume-after-interruption.
+> - **§7.1 + §10.2 doc contradiction fixed** (Soumith R3-F-1): both sections now align with §6.1.1 — X-Vault-Release is informational SLI, correctness boundary is release-keyed Cache API.
+> - **Hash-stability test tightened** (Soumith R3-F-4): nested-dict key-order fixture added.
+> - **`vault edit` failure-UX fix** (David R3-H1): validation failure injects YAML comment block at top of file, re-opens up to `--retries=3` times; no more terminal tracebacks mid-authoring.
+> - **`vault move` enforces contract** (David R3-H2): refuses dirty tree, chained question, excluded-cell per applicability matrix.
+> - **`vault new` appends registry + git rebase** (David R3-H3): `id-registry.yaml` append-only; pre-allocation `git pull --rebase` to reduce collision rate.
+> - **`authors:` auto-populated from `git config user.email`** (David R3-H4 / M-15).
+> - **`vault renumber` command implemented** (David R3-N-2): post-rebase seq-bump + git-mv + id-field update + registry append. No longer spec-only.
+> - **`vault mark-exemplar` command implemented** (David R3-N-9): provenance + `human_reviewed_at` gate enforced; refuses LLM-only; `git mv` into `vault/exemplars/`.
+> - **CONTRIBUTING.md quickstart aligned** (David R3-H5): dropped `doctor`/`stats` references from Phase-0 quickstart; clarified phase gating.
+> - **FTS5 virtual table + sync triggers in DDL** (B.5): `questions_fts` keeps in sync via AFTER-INSERT/UPDATE/DELETE triggers. Worker `/search` can upgrade from LIKE to MATCH in Phase-3.x.
+> - **`vault stats` CLI + Prometheus mode** (B.8): live scorecard over vault.db, `--format-prometheus` for scrape.
+> - **`vault codegen --check`** (B.7): presence + non-empty verification of codegen artifacts; full LinkML wiring Phase-2 follow-up.
+> - **Makefile `hooks` target** (B.2): `make hooks` symlinks `pre_commit_corpus_guard.py` into `.git/hooks/pre-commit`.
+> - **`check_registry_append_only.py`** (B.3): CI script diffing registry against base branch; rejects reordered or removed lines.
+> - **Paper `generate_macros.py` rewritten as `vault export-paper` wrapper** (B.1): 66-line macros.tex emits BOTH `\staffml*` and legacy `\num*` namespaces so paper.tex needs no edits. Paper and site agree by construction (closes §20.5 #2 + #7).
+> - **LICENSE files added**: CC-BY-4.0 for `vault/questions/` corpus, MIT for `vault-cli/` code.
+> - **Known-deferred** (accepted engineering decisions, listed in REVIEWS.md §R3 for Phase-3-entry gates): Cache API wiring, circuit-breaker half-open, rate-limit KV, cross-language content_hash (moved to Python GitHub Action path), worker vitest, LSH scenario dedup.
 
 ---
 
@@ -701,7 +727,7 @@ const client = new VaultClient(API, {
   release: RELEASE,
   retry: { attempts: 3, backoff: 'exponential', jitter: true },
   circuitBreaker: { failThreshold: 5, resetMs: 30_000 },
-  headers: { 'X-Vault-Release': RELEASE },  // worker rejects mismatch (C-4)
+  headers: { 'X-Vault-Release': RELEASE },  // advisory — correctness via release-keyed Cache API (§6.1.1)
 });
 ```
 
@@ -843,7 +869,7 @@ GET  /stats                                          TTL 1h
 
 - Cursor pagination uses opaque `{offset, filter_hash}` tokens — clients never construct cursors.
 - Default order: `ORDER BY id` for stable pagination.
-- All responses carry `X-Vault-Release`; client rejects cross-release responses. (Fixes C-4 skew detection.)
+- All responses carry `X-Vault-Release`; mismatch vs bundled release is an **informational SLI signal only** (§6.1.1, Soumith F-1). Correctness boundary is the release-keyed Cache API key, not the header — a new `release_id` atomically invalidates all cached entries, so a client pinned to a stale `NEXT_PUBLIC_VAULT_RELEASE` still reads current data. This eliminates local-dev friction and SWR-revalidation brownout.
 
 **Admin endpoint removed (fixes H-10)**: the v1 `POST /admin/release` cache-bust endpoint is not shipped in phases 0–6. Release-triggered cache invalidation happens via release-keyed cache keys (new `release_id` ⇒ all old keys miss). If a manual bust is needed, operator runs `wrangler` from an authenticated CLI, not a public HTTP endpoint. If a public admin surface is ever required later, it gates via Cloudflare Access (zero-trust identity), not a static bearer token, and audit-logs every call with `{identity, ip, action}` to a separate D1 table.
 

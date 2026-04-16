@@ -21,14 +21,18 @@ pip install -e vault-cli/[dev]
 vault --version
 pytest vault-cli/tests/
 
-# 3. Explore the corpus
-vault doctor
-vault stats
+# 3. Phase-aware explore
+#    At Phase 0 only --version/--help exist. At Phase 1 the corpus is split
+#    and `build` / `check` work end-to-end. At Phase 2+, `stats` / `verify`
+#    / `export-paper` exist. See §Phase-by-phase scope at the bottom of this
+#    file for exactly which subcommands are live at your checkout.
+vault --help                # always works — shows subcommands live at your phase
 
-# 4. Run the local API shim (Phase 3+; stub in Phase 0–1)
+# 4. Run the local API shim (requires a prior `vault build` so there's a vault.db)
 #    Serves the Worker endpoint surface from a local vault.db so you don't
-#    need a Cloudflare account to develop the site.
-vault api --port 8002 &
+#    need a Cloudflare account to develop the site. Available from Phase 1 onward.
+vault build                                      # produces interviews/vault/vault.db
+vault api --db interviews/vault/vault.db --port 8002 &
 
 # 5. Run the site against your local API
 cd staffml/

@@ -279,5 +279,49 @@ All other Round-1 and Round-2 items are closed in the plan. Implementation may p
 
 ---
 
+---
+
+# Round 3 — v2.1 reviewed, v2.2 patched (2026-04-16)
+
+Round 3 launched on the user's "proceed with 2" green-light. All four reviewers re-read v2.1 plus the code that landed (Phases 0-6). Verdicts:
+
+| Reviewer | Verdict | New Critical | New High | Dominant theme |
+|---|---|---|---|---|
+| Chip | YELLOW | 2 | 5 | Worker code introduced regressions vs spec (placeholder bypass, SW manifest spam) |
+| Dean | YELLOW | 2 | 4 | Spec-vs-code gap: `emit_migrations` questions-only, `vault ship` missing, verify-from-source broken |
+| Soumith | GREEN (conditions) | 1 | 2 | Doc contradiction (§7.1/§10.2 still said "reject mismatch"); breaker semantics |
+| David | YELLOW→GREEN | 0 | 5 | Authoring commands documented but not fully implemented (edit UX, move refusals, new registry) |
+
+**Convergent items** (≥2 reviewers, Critical/High):
+- SCHEMA_FINGERPRINT placeholder silent bypass (Chip C1, Dean NH-3). **FIXED in v2.2**.
+- SW fetches `/manifest` on every request (Chip C2). **FIXED in v2.2**.
+- SW loses API origin on restart (Chip H3). **FIXED in v2.2**.
+- `emit_migrations` only diffs questions table (Dean NC-1). **FIXED in v2.2** (all 4 tables via PRAGMA).
+- `row_values` hardcoded column list (Dean NH-2). **FIXED in v2.2** (PRAGMA-driven).
+- `vault verify --from-source` rebuilds from HEAD, breaking historical citation (Dean NC-2). **FIXED in v2.2** (`--git-ref`).
+- `vault ship` composed command unimplemented (Dean NH-1). **FIXED in v2.2** (journaled, tested).
+- Doc contradiction — §7.1/§10.2 still said X-Vault-Release hard-reject (Soumith F-1). **FIXED in v2.2**.
+- Hash-stability test undertested (Soumith F-4). **FIXED in v2.2** (nested-dict fixture).
+- David's authoring-contract gaps (H1-H4). **FIXED in v2.2** (edit failure-UX re-open, move refusals, new registry-append + git rebase, authors auto-populate).
+- `vault renumber` + `vault mark-exemplar` spec-only (David N-2, N-9). **FIXED in v2.2**.
+
+**Explicitly deferred to Phase-3-entry** (accepted engineering decision):
+- Cache API wiring in Worker (Chip H1) — marked as Phase-3-entry gate.
+- Circuit-breaker half-open semantics (Soumith F-2) — documented as Phase-4 improvement; current naive impl ships with known limitation noted inline.
+- Cursor `filter_hash` validation + keyset pagination (Chip H2) — Phase-3-entry gate.
+- Rate limiting via RATE_LIMIT_KV (Chip H4) — Phase-3-entry gate.
+- Cross-language content_hash verification (Chip H5) — path chosen: data-plane SLI becomes a Python GitHub Action rather than a Worker cron; documented in TESTING.md.
+- Equivalence-hash algorithm documentation (Soumith F-3) — pragmatic framing: the `split-corpus.py` → Merkle path IS the algorithm, documented in §11.5 as "regression guard post-split." Revisit if external verifier ever needs to reproduce from raw `corpus.json`.
+- Full per-command JSON schemas for all 19 subcommands (B.10) — 5 schemas documented; rest land as commands mature.
+- Worker vitest suite (B.9) — deferred until D1 staging exists (Phase-3 work).
+- Remaining structural invariants (applicability matrix validation, LSH scenario-dedup) — tracked; not blockers for Phase-1/2.
+
+**v2.2 changelog**: see ARCHITECTURE.md header.
+
+**Round 3 decision**: GREEN for Phase-0/1/2 autonomous execution (landed). YELLOW for Phase-3/4 — deploy gates listed explicitly above and in CUTOVER_QA.md §0.
+
+---
+
 **End of review ledger.**
+
 
