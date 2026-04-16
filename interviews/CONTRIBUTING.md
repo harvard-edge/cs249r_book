@@ -159,6 +159,24 @@ External contributions to `vault/questions/` become feasible at Phase 1 exit.
 
 ---
 
+## License
+
+The corpus under `interviews/vault/` is licensed **CC-BY-NC-4.0** — see
+[`vault/questions/LICENSE`](vault/questions/LICENSE). Summary:
+
+- **Share and adapt for non-commercial purposes** with attribution.
+- **Commercial use** (training a paid product on the corpus, selling access,
+  building paid services around it) requires separate written permission
+  from the copyright holders. Contact: `vjreddi@g.harvard.edu`.
+- Contributions to the corpus are assumed to be offered under the same
+  CC-BY-NC-4.0 terms. Do not submit content you are not entitled to license
+  this way.
+
+The `interviews/vault-cli/` tooling is a separate artifact; its license is
+unchanged from the repository's historical state.
+
+---
+
 ## Asking for help
 
 - Architecture questions → read [`vault/ARCHITECTURE.md`](vault/ARCHITECTURE.md).

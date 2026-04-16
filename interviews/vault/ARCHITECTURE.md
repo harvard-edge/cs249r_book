@@ -1207,7 +1207,7 @@ Each phase is a safe stopping point. If priorities shift, pause at a phase bound
 
 Recommendations are v2's proposed defaults. User confirmation required for items marked **BLOCKS PHASE N**.
 
-1. **Corpus license**. **Recommend CC-BY-4.0** (permits citation and reuse with attribution; norms for open research datasets). `vault-cli` code: MIT. **BLOCKS PHASE 3** — external contributor PRs cannot be accepted without resolving this. (L-10.)
+1. **Corpus license**. **DECIDED (2026-04-16): CC-BY-NC-4.0** for the corpus — non-commercial use only, attribution required. Commercial use requires separate written permission. LICENSE file at `interviews/vault/questions/LICENSE`. `vault-cli` license is intentionally left at its historical status (not relicensed as part of this work). Rationale: the questions are curated, costly-to-produce content; the author's concern is preventing commercial reuse (e.g., a vendor training a paid product on the corpus without permission). CC-BY-NC-4.0 matches that intent while still permitting research citation.
 2. **DOI registration**. Recommend Zenodo integration per major release; each release gets a citable DOI tied to `release_hash`. Resolve before first "v1.0.0" release.
 3. **Draft approval model**. Recommend: maintainer self-approve for Phase 0–6; 2-reviewer model for external PRs starting in Phase 7. Documented in `CONTRIBUTING.md`.
 4. **Student data policy**. Per-user progress is Phase 7+ (separate feature, not in critical path). When added: GDPR/CCPA review; privacy policy update; data-deletion UX.
