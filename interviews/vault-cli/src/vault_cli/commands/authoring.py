@@ -11,7 +11,7 @@ import hashlib
 import os
 import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -21,7 +21,7 @@ from rich.console import Console
 from vault_cli.exit_codes import ExitCode
 from vault_cli.loader import load_all
 from vault_cli.models import Level, Question, Track, Zone
-from vault_cli.paths import classification_from_path, path_for_question, Classification
+from vault_cli.paths import Classification, path_for_question
 from vault_cli.yaml_io import dump_str, load_file
 
 console = Console()
@@ -31,7 +31,7 @@ APPLICABILITY_PATH = Path("interviews/vault/data/applicable_cells.json")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _short_hash(title: str) -> str:
@@ -141,13 +141,13 @@ def register(app: typer.Typer) -> None:
 
         # §3.3: git pull --rebase on the registry before allocation.
         if not skip_rebase:
-            try:
+            import contextlib
+            with contextlib.suppress(FileNotFoundError):
+                # FileNotFoundError means git isn't installed — fine for offline dev.
                 subprocess.run(
                     ["git", "pull", "--rebase", "--autostash", "origin"],
                     check=False, capture_output=True,
                 )
-            except FileNotFoundError:
-                pass  # not in a git repo
 
         # Allocate seq by scanning existing files in the cell.
         cell_dir = path_for_question(vault_dir, classification, "").parent

@@ -8,9 +8,8 @@ Soumith L-NEW-1; CI enforces).
 
 from __future__ import annotations
 
-import shutil
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -42,7 +41,7 @@ def _promote_one(draft_path: Path, vault_dir: Path, reviewed_by: str) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
 
     data = load_file(draft_path)
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
     data["status"] = "published"
     data["last_modified"] = now
     if data.get("provenance") == "llm-draft":

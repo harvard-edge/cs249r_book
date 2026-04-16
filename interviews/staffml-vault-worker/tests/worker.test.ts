@@ -8,8 +8,15 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import worker from "../src/index";
 import type { Env } from "../src/types";
+
+// Reset the worker module between tests so module-level state
+// (schema-fingerprint memoization, release-id cache) doesn't leak.
+let worker: typeof import("../src/index").default;
+beforeEach(async () => {
+  vi.resetModules();
+  worker = (await import("../src/index")).default;
+});
 
 // Minimal mock D1 — behaves like D1Database for the paths we use.
 function mockDB(rows: Record<string, any>[]): D1Database {

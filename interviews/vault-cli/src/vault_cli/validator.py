@@ -11,10 +11,8 @@ This module is the engine; tier selection and reporting are in
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from vault_cli.loader import LoadedQuestion
 from vault_cli.paths import is_lowercase, vault_questions_root

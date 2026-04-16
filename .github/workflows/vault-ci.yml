@@ -1,18 +1,17 @@
 name: '🎯 StaffML · 🔎 Vault CI'
 
 # =============================================================================
-# Vault CI — package validation + invariant checks
+# Vault CI — package validation + invariant checks + release-hash regression.
 # =============================================================================
 #
-# Phase 0 scope (current):
-#   - Lint + type-check + unit/smoke tests for vault-cli.
-#   - Exemplar-coverage audit runs on corpus.json → exemplar-gaps.yaml diff.
-#
-# Phase 1+ additions (incremental):
-#   - vault check --strict (fast + structural invariant tiers).
+# Reflects the full post-Bucket-B state:
+#   - ruff + mypy + pytest on vault-cli.
+#   - vault check --strict on the full corpus.
 #   - vault build + release_hash equivalence vs corpus-equivalence-hash.txt.
-#   - vault codegen --check (LinkML ↔ Pydantic/DDL/TS drift).
-#   - Rollback-symmetry property test on release commits.
+#   - vault codegen --check (hash-based shared-types drift guard).
+#   - Registry append-only check vs base ref.
+#   - Exemplar-coverage audit staleness check.
+#   - Worker vitest (staffml-vault-worker/tests) on worker-path PRs.
 #
 # Referenced from: interviews/vault/ARCHITECTURE.md §19.3, TESTING.md §4.1.
 # =============================================================================
@@ -23,24 +22,27 @@ on:
       - 'interviews/vault/**'
       - 'interviews/vault-cli/**'
       - 'interviews/staffml-vault-worker/**'
+      - 'interviews/staffml-vault-types/**'
       - '.github/workflows/vault-ci.yml'
   push:
     branches: [dev]
     paths:
       - 'interviews/vault/**'
       - 'interviews/vault-cli/**'
+      - 'interviews/staffml-vault-worker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: validate vault-cli
+  python:
+    name: vault-cli (python)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # deep clone so append-only check has base ref
 
       - name: Set up Python (PINNED for hash stability)
         uses: actions/setup-python@v5
@@ -61,15 +63,66 @@ jobs:
       - name: Lint (ruff)
         run: ruff check interviews/vault-cli/src interviews/vault-cli/tests
 
-      - name: Type-check (mypy)
+      - name: Type-check (mypy, non-blocking)
         run: mypy interviews/vault-cli/src
-        continue-on-error: true  # mypy strict in Phase 0 is noisy; enforce in Phase 1
+        continue-on-error: true   # strict enforcement is a Phase-2 gate
 
-      - name: Unit / smoke tests
+      - name: pytest (unit + integration + contract)
         run: pytest interviews/vault-cli/tests/ -v
 
-      - name: Exemplar-coverage audit (Phase 0 artifact)
+      - name: vault check --strict (corpus invariants)
+        run: vault check --strict --vault-dir interviews/vault
+
+      - name: vault build + release_hash regression guard
         run: |
-          python interviews/vault-cli/scripts/exemplar_coverage_audit.py
+          vault build --vault-dir interviews/vault --release-id regression-ci
+          EXPECTED=$(cat interviews/vault/corpus-equivalence-hash.txt | tr -d '\n')
+          ACTUAL=$(python3 -c "
+          import sqlite3
+          conn = sqlite3.connect('interviews/vault/vault.db')
+          print(conn.execute(\"SELECT value FROM release_metadata WHERE key='release_hash'\").fetchone()[0])
+          ")
+          if [ "$EXPECTED" != "$ACTUAL" ]; then
+            echo "::error::release_hash drift: expected=$EXPECTED actual=$ACTUAL"
+            echo "If the change is intentional, update corpus-equivalence-hash.txt in the same commit."
+            exit 1
+          fi
+          echo "release_hash stable: $ACTUAL"
+
+      - name: vault codegen --check (LinkML/Pydantic/DDL/TS drift)
+        run: vault codegen --check
+
+      - name: id-registry append-only invariant
+        run: python3 interviews/vault-cli/scripts/check_registry_append_only.py
+
+      - name: Exemplar-coverage audit staleness
+        run: |
+          python3 interviews/vault-cli/scripts/exemplar_coverage_audit.py
           git diff --exit-code interviews/vault/exemplar-gaps.yaml \
             || { echo "::error::exemplar-gaps.yaml is stale; re-run audit and commit"; exit 1; }
+
+  worker:
+    name: staffml-vault-worker (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: interviews/staffml-vault-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml-vault-worker/package-lock.json
+
+      - name: Install worker deps (frozen)
+        run: npm ci
+
+      - name: tsc typecheck
+        run: npx tsc --noEmit
+
+      - name: vitest (worker contract tests)
+        run: npx vitest run

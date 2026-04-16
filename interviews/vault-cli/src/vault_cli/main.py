@@ -12,14 +12,30 @@ from rich.console import Console
 from vault_cli._version import __version__
 from vault_cli.commands import (
     authoring,
-    build as build_cmd_mod,
-    check as check_cmd_mod,
-    codegen as codegen_cmd_mod,
-    diff_cmd as diff_cmd_mod,
-    doctor as doctor_cmd_mod,
-    promote as promote_cmd_mod,
-    release as release_cmd_mod,
     serve_api,
+)
+from vault_cli.commands import (
+    build as build_cmd_mod,
+)
+from vault_cli.commands import (
+    check as check_cmd_mod,
+)
+from vault_cli.commands import (
+    codegen as codegen_cmd_mod,
+)
+from vault_cli.commands import (
+    diff_cmd as diff_cmd_mod,
+)
+from vault_cli.commands import (
+    doctor as doctor_cmd_mod,
+)
+from vault_cli.commands import (
+    promote as promote_cmd_mod,
+)
+from vault_cli.commands import (
+    release as release_cmd_mod,
+)
+from vault_cli.commands import (
     stats as stats_cmd_mod,
 )
 from vault_cli.exit_codes import ExitCode

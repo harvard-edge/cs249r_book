@@ -7,13 +7,11 @@ Exit 0 if all green; 1 if any red.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import sqlite3
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,7 +21,6 @@ from rich.table import Table
 
 from vault_cli.exit_codes import ExitCode
 from vault_cli.loader import load_all
-from vault_cli.yaml_io import load_file
 
 console = Console()
 
@@ -143,6 +140,7 @@ def _check_content_hash_sample(vault_dir: Path) -> CheckResult:
     if not db_path.exists():
         return CheckResult("content-hash-sample", "skip", "no vault.db — run `vault build`")
     import random
+
     from vault_cli.hashing import content_hash
     from vault_cli.loader import load_all as _loadall
     loaded, _ = _loadall(vault_dir)

@@ -20,11 +20,11 @@ a live site.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 
 class LegState(str, Enum):
@@ -85,7 +85,7 @@ class ShipJournal:
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: Path) -> "ShipJournal":
+    def load(cls, path: Path) -> ShipJournal:
         d = json.loads(path.read_text(encoding="utf-8"))
         j = cls(version=d["version"], env=d["env"], started_at=d["started_at"])
         for leg_d in d["legs"]:
@@ -105,7 +105,7 @@ class ShipJournal:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 @dataclass

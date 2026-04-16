@@ -20,7 +20,7 @@ def test_all_legs_succeed(tmp_path: Path) -> None:
     j = run_ship(version="1.0.0", env="staging", journal_path=journal, legs=legs)
     assert j.outcome is ShipOutcome.SUCCESS
     assert j.point_of_no_return is True
-    assert [l.state for l in j.legs] == [LegState.DEPLOYED] * 3
+    assert [leg.state for leg in j.legs] == [LegState.DEPLOYED] * 3
     assert calls == ["d1", "nextjs", "paper"]
 
 

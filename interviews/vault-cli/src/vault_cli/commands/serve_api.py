@@ -26,7 +26,8 @@ console = Console()
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-    return {k: row[k] for k in row.keys()}
+    # sqlite3.Row iterates as VALUES, not keys; coerce explicitly.
+    return dict(row)
 
 
 class _VaultAPIHandler(BaseHTTPRequestHandler):

@@ -167,7 +167,12 @@ async function cachedOrCompute(
   compute: () => Promise<Response>,
   opts: { useCache: boolean } = { useCache: true },
 ): Promise<Response> {
-  if (!opts.useCache) return compute();
+  // Graceful degradation when the CF Cache API isn't available (Node test
+  // env, vault-api local shim, or a runtime regression) — always compute
+  // and skip caching. Prevents crashing the handler on missing globals.
+  if (!opts.useCache || typeof caches === "undefined" || !caches?.default) {
+    return compute();
+  }
   const manifest = await getManifest(env);
   const key = cacheKey(req, manifest.release_id);
   const cached = await caches.default.match(key);
@@ -377,7 +382,7 @@ async function handleSearch(env: Env, req: Request, url: URL): Promise<Response>
   }
   const manifest = await getManifest(env);
   return json(
-    { results: rows.results ?? [], query: q, fts: ftsAvailable },
+    { results: rows.results ?? [], query: qRaw, fts: ftsAvailable },
     {
       releaseId: manifest.release_id,
       cacheControl: cacheControl(Number.parseInt(env.CACHE_TTL_SEARCH, 10)),

@@ -4,12 +4,24 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import sqlite3
 from pathlib import Path
 
 import typer
 from rich.console import Console
+
+from vault_cli.compiler import build as compile_build
+from vault_cli.exit_codes import ExitCode
+from vault_cli.loader import load_all
+from vault_cli.release import (
+    atomic_rename,
+    emit_migrations,
+    update_latest_symlink,
+)
+from vault_cli.release import (
+    snapshot as snapshot_release,
+)
+from vault_cli.ship import LegPlan, ShipError, run_ship
 
 # Chip R4-L-1: version-string validator. Enforced at entry of every command
 # that accepts a ``version`` argument so maintainer typos (e.g., ``1..0``,
@@ -23,20 +35,6 @@ def _validate_version(version: str) -> None:
             f"version {version!r} does not match semver form X.Y.Z[-prerelease]; "
             f"refusing to proceed."
         )
-
-from vault_cli.compiler import build as compile_build
-from vault_cli.exit_codes import ExitCode
-from vault_cli.hashing import hash_of_canonical_yaml, release_hash
-from vault_cli.loader import load_all
-from vault_cli.policy import load_policy
-from vault_cli.release import (
-    atomic_rename,
-    emit_migrations,
-    snapshot as snapshot_release,
-    update_latest_symlink,
-)
-from vault_cli.ship import LegPlan, ShipError, run_ship
-from vault_cli.yaml_io import load_file
 
 console = Console()
 
@@ -239,10 +237,10 @@ def register(app: typer.Typer) -> None:
             f"\\newcommand{{\\numtopics}}{{{topics_count}}}",
             f"\\newcommand{{\\numareas}}{{{topics_count}}}",
             f"\\newcommand{{\\numzones}}{{{zones_count}}}",
-            f"\\newcommand{{\\numedges}}{{123}}",
+            "\\newcommand{\\numedges}{123}",
             f"\\newcommand{{\\numchains}}{{{fmt(chains_total)}}}",
             f"\\newcommand{{\\numfullchains}}{{{fmt(chains_full)}}}",
-            f"\\newcommand{{\\numinvariants}}{{26}}",
+            "\\newcommand{\\numinvariants}{26}",
             "\\newcommand{\\numvalidated}{100.0\\%}",
             "\\newcommand{\\nummatherrors}{0}",
             "",
@@ -480,7 +478,7 @@ def register(app: typer.Typer) -> None:
             LegPlan(name="nextjs", forward=nextjs_forward, rollback=nextjs_rollback),
             LegPlan(name="paper",  forward=paper_forward,  rollback=None),
         ]
-        legs = [l for l in all_legs if l.name not in skip]
+        legs = [leg for leg in all_legs if leg.name not in skip]
 
         if dry_run:
             console.print("[dim]dry-run — would run[/dim]:")
@@ -518,7 +516,6 @@ def register(app: typer.Typer) -> None:
         ),
     ) -> None:
         """Reconstruct release_hash from YAML and assert equality with release.json."""
-        import shutil
         import subprocess
         import tempfile
 
@@ -593,7 +590,7 @@ def register(app: typer.Typer) -> None:
         if actual == expected:
             console.print(f"[green]✓ verified[/green] {version}: {actual}")
             return
-        console.print(f"[red]✗ mismatch[/red]")
+        console.print("[red]✗ mismatch[/red]")
         console.print(f"  expected: {expected}")
         console.print(f"  actual:   {actual}")
         raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)

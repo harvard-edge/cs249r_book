@@ -34,9 +34,7 @@ def is_published(question: Mapping[str, Any], policy: Mapping[str, Any]) -> bool
         return False
     if question.get("id") in set(policy.get("exclude_ids", []) or []):
         return False
-    if question.get("topic") in set(policy.get("exclude_topics", []) or []):
-        return False
-    return True
+    return question.get("topic") not in set(policy.get("exclude_topics", []) or [])
 
 
 def filter_questions(

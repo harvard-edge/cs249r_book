@@ -14,7 +14,7 @@ import shutil
 import sqlite3
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,7 @@ class ReleaseArtifacts:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _git_sha() -> str:
@@ -160,7 +160,9 @@ def _insert_stmt(table: str, cols: list[str], row: dict[str, Any]) -> str:
 
 
 def _delete_stmt(table: str, pk_cols: tuple[str, ...], pk: tuple) -> str:
-    predicates = " AND ".join(f"{c} = {_sql_quote(v)}" for c, v in zip(pk_cols, pk))
+    predicates = " AND ".join(
+        f"{c} = {_sql_quote(v)}" for c, v in zip(pk_cols, pk, strict=True)
+    )
     return f"DELETE FROM {table} WHERE {predicates};"
 
 
@@ -239,8 +241,13 @@ def atomic_rename(pending: Path, final: Path) -> None:
 
 
 def update_latest_symlink(releases_dir: Path, version: str) -> None:
-    """Atomically swap ``releases/latest`` → ``<version>`` via rename-over-tmp."""
+    """Atomically swap ``releases/latest`` → ``<version>`` via rename-over-tmp.
+
+    Asserts the target directory exists so we don't create a dangling symlink.
+    """
     target = releases_dir / version
+    if not target.is_dir():
+        raise FileNotFoundError(f"release dir does not exist: {target}")
     link = releases_dir / "latest"
     tmp_link = releases_dir / ".latest.tmp"
     if tmp_link.exists() or tmp_link.is_symlink():

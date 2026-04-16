@@ -10,9 +10,9 @@ from pydantic import ValidationError
 
 from vault_cli.models import Question
 from vault_cli.paths import (
-    Classification,
     FILENAME_RE,
     LEGACY_FILENAME_RE,
+    Classification,
     classification_from_path,
     vault_questions_root,
 )
@@ -53,7 +53,7 @@ def load_all(vault_dir: Path) -> tuple[list[LoadedQuestion], list[LoadError]]:
     for path in iter_question_files(vault_dir):
         filename = path.name
         if not (FILENAME_RE.match(filename) or LEGACY_FILENAME_RE.match(filename)):
-            errors.append(LoadError(path, f"filename does not match expected patterns"))
+            errors.append(LoadError(path, "filename does not match expected patterns"))
             continue
 
         try:

@@ -13,7 +13,6 @@
 
 import type { Env } from "./types";
 
-const WINDOW_MS = 60 * 1000;   // 1-minute windows
 const BUCKET_CAP_DEFAULT = 60;
 const BUCKET_CAP_SEARCH = 10;
 

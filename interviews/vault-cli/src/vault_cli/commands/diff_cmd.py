@@ -32,7 +32,8 @@ def _load_rows(db: Path) -> dict[str, dict]:
     conn.row_factory = sqlite3.Row
     try:
         return {
-            r["id"]: {k: r[k] for k in r.keys()}
+            # sqlite3.Row iterates as VALUES, not keys; use dict() to coerce.
+            r["id"]: dict(r)
             for r in conn.execute("SELECT * FROM questions")
         }
     finally:
