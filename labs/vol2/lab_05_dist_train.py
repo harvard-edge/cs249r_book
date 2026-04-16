@@ -52,7 +52,6 @@ async def _():
     import math
     from pathlib import Path
     import numpy as np
-    from plotly.subplots import make_subplots
 
     # WASM bootstrap
     if sys.platform == "emscripten":
@@ -66,6 +65,8 @@ async def _():
         if str(_root) not in sys.path:
             sys.path.insert(0, str(_root))
 
+    # plotly must be imported AFTER micropip install, since it's installed at runtime on WASM
+    from plotly.subplots import make_subplots
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme

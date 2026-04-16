@@ -267,6 +267,116 @@ class TestWASMCompatibility:
                     )
 
 
+# Packages installed at runtime via `await micropip.install([...])` in WASM.
+# Importing these BEFORE the micropip install line causes a silent
+# ModuleNotFoundError that only surfaces when the lab is actually loaded
+# in a browser (existing CI misses it because test_engine runs in native
+# Python where these packages are installed at the OS level).
+#
+# Incident: lab_05_dist_train shipped with `from plotly.subplots import
+# make_subplots` at line 55, BEFORE `await micropip.install([..., "plotly",
+# ...])` at line 60. All cells downstream of the setup cell cascaded with
+# "ancestor raised" errors on the production dev preview site. marimo
+# check, test_engine, test_static, and the WASM smoke test all passed.
+# Only a real browser caught it. This test catches that class of bug at
+# static analysis time.
+RUNTIME_INSTALLED_PACKAGES = frozenset({
+    "plotly",
+    "pydantic",
+    "pint",
+    "pandas",
+    "mlsysim",
+})
+
+
+def _find_micropip_install_line(cell_body):
+    """Return the line number of the `await micropip.install(...)` call
+    in this cell's body, or None if not found."""
+    for stmt in ast.walk(ast.Module(body=cell_body, type_ignores=[])):
+        # Match `await micropip.install(...)` — an Await wrapping a Call
+        if isinstance(stmt, ast.Await) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+            if (isinstance(call.func, ast.Attribute)
+                and call.func.attr == "install"
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "micropip"):
+                return stmt.lineno
+    return None
+
+
+class TestWASMRuntimeImportOrder:
+    """Runtime-installed packages must be imported AFTER micropip.install.
+
+    In WASM (Pyodide), packages like plotly and mlsysim are not part of
+    the base distribution. They're installed at runtime via micropip
+    inside the setup cell. Any top-level `import` of those packages that
+    appears BEFORE the `await micropip.install(...)` line will fail with
+    ModuleNotFoundError on the first load, cascading "ancestor raised"
+    errors through every downstream cell.
+
+    This bug class is invisible to native-python tests (test_engine runs
+    in an environment where plotly is already installed) and to the CI
+    WASM smoke test (which only checks that export produced a >10k file).
+    Only a real browser catches it. This static check catches it first.
+    """
+
+    def test_runtime_packages_imported_after_micropip_install(self, lab_path):
+        source = read_source(lab_path)
+        tree = ast.parse(source)
+
+        # Find each @app.cell function. For each, check if it contains
+        # a micropip.install call AND a runtime-installed import before it.
+        violations = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # Must be @app.cell decorated
+            has_cell_dec = any(
+                (isinstance(d, ast.Attribute) and isinstance(d.value, ast.Name)
+                 and d.value.id == "app" and d.attr == "cell")
+                or (isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                    and isinstance(d.func.value, ast.Name)
+                    and d.func.value.id == "app" and d.func.attr == "cell")
+                for d in node.decorator_list
+            )
+            if not has_cell_dec:
+                continue
+
+            # Does this cell have a micropip.install call?
+            install_line = _find_micropip_install_line(node.body)
+            if install_line is None:
+                continue
+
+            # Scan cell body for runtime-installed package imports
+            # that appear BEFORE the micropip install line.
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Import):
+                    for alias in sub.names:
+                        root = alias.name.split(".")[0]
+                        if root in RUNTIME_INSTALLED_PACKAGES and sub.lineno < install_line:
+                            violations.append(
+                                f"line {sub.lineno}: import {alias.name} "
+                                f"(before micropip.install at line {install_line})"
+                            )
+                elif isinstance(sub, ast.ImportFrom) and sub.module:
+                    root = sub.module.split(".")[0]
+                    if root in RUNTIME_INSTALLED_PACKAGES and sub.lineno < install_line:
+                        violations.append(
+                            f"line {sub.lineno}: from {sub.module} import ... "
+                            f"(before micropip.install at line {install_line})"
+                        )
+
+        if violations:
+            pytest.fail(
+                "runtime-installed packages imported before micropip.install "
+                "(will ModuleNotFoundError on WASM/Pyodide load):\n"
+                + "\n".join(f"  {v}" for v in violations)
+                + "\n\nfix: move the import(s) to AFTER the "
+                "`await micropip.install([..., 'plotly', ...])` line. "
+                "see lab_05_dist_train post-#1353 for the correct pattern."
+            )
+
+
 # ── Test: Marimo Dataflow ────────────────────────────────────────────────────
 
 def _has_app_cell_decorator(func):
