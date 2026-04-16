@@ -124,33 +124,45 @@ class LoadGenProxy:
         report["division_passed"] = self.division
 
     def _generate_submission_artifact(self, report: Dict[str, Any]):
+        """Build a real provenance manifest binding the run to its inputs.
+
+        Iter-5 (Dean's spec): replaces the iter-1 era `str(report)`
+        self-hash with manifest.build_provd(), which computes a Merkle
+        root over leaves for source_tree/weights/dataset/rng/hardware/
+        roofline_sidecar/measurement. Verification is via
+        scripts/verify_submission.py.
         """
-        Dumps the reproducible telemetry and hardware footprint into
-        a structured local submission directory based on MLCommons standard.
-        """
+        from .manifest import build_provd
+
         os.makedirs("submissions", exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"submissions/mlperf_submission_{timestamp}.json"
-        
-        import hashlib
-        
-        # We seal the object mathematically before persistence natively!
-        hash_payload = str(report) + str(self.hardware_signature)
-        sealed_hash = hashlib.sha256(hash_payload.encode('utf-8')).hexdigest()
-        
-        submission_payload = {
-            "metadata": {
-                "timestamp": timestamp,
-                "framework": "MLPerf EDU 2.0",
-                "accelerator_active": "CUDA_GPU" if torch.cuda.is_available() else "APPLE_MPS_GPU" if torch.backends.mps.is_available() else "CPU_ONLY"
-            },
-            "system_under_test": self.hardware_signature,
-            "telemetry": report,
-            "integrity_hash": sealed_hash
-        }
-        
-        with open(filename, "w") as f:
-            json.dump(submission_payload, f, indent=4)
+        report_filename = f"submissions/mlperf_submission_{timestamp}_report.json"
+        manifest_filename = f"submissions/mlperf_submission_{timestamp}.provd.json"
+
+        with open(report_filename, "w") as f:
+            json.dump(report, f, indent=2, sort_keys=True)
+
+        # Roofline sidecar (if a measure_roofline() block ran in this process).
+        sidecar_path = os.environ.get("MLPERF_EDU_LAST_SIDECAR")
+
+        # Optional inputs the workload's run() can stash on self for binding.
+        manifest = build_provd(
+            workload=getattr(self, "workload_name", "unknown"),
+            scenario=self.scenario,
+            division=self.division,
+            hardware_fingerprint=self.hardware_signature,
+            report=report,
+            report_path=report_filename,
+            weights_path=getattr(self, "weights_path", None),
+            weights_n_params=getattr(self, "weights_n_params", None),
+            dataset_name=getattr(self, "dataset_name", "unknown"),
+            dataset_files=getattr(self, "dataset_files", None),
+            rng_seed=getattr(self, "rng_seed", None),
+            torch_state_bytes=getattr(self, "torch_state_bytes", None),
+            roofline_sidecar_path=sidecar_path,
+        )
+        with open(manifest_filename, "w") as f:
+            json.dump(manifest.to_dict(), f, indent=2, sort_keys=True)
 
     async def _run_offline(self, query_handler: Callable[[List[QuerySample]], Awaitable[Any]]):
         """
