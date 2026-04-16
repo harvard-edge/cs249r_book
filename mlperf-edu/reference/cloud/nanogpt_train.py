@@ -20,14 +20,20 @@ from .gpt2_infer import GPTBlock
 
 CHAR_VOCAB_SIZE = 128  # ASCII range; TinyShakespeare uses 65 of these.
 
+# iter-6 (Han): GPT-2-Small canonical geometry as the "real LLM" stand-in.
+# 124M params at d_model=768, n_head=12, n_layer=12. Trains in ~30 min on
+# M5 Max; weights ~248 MB at fp16. This is the configuration that fills
+# the (dram_bound, bandwidth_bound, device_saturated) cell when run with
+# batch_size=32 ctx=2048 per Han's iter-6 sizing math.
+GPT2_SMALL_CONFIG = dict(n_embd=768, n_head=12, n_layer=12, max_seq_len=4096)
+
 
 class NanoGPTWhiteBox(nn.Module):
     """Char-level decoder-only transformer used for the NanoGPT workload.
 
-    With defaults (vocab=128, n_embd=384, n_head=6, n_layer=6) this is
-    ~11M parameters — small enough to converge on TinyShakespeare in
-    ~90 s on Apple Silicon, large enough to exhibit the O(N^2) attention
-    pattern that motivates KV-cache and FlashAttention discussions.
+    Default config (~11M params) is the iter-1/iter-3 small variant.
+    Pass NanoGPTWhiteBox(**GPT2_SMALL_CONFIG) for the iter-6 124M
+    variant used by the LLM serving workloads.
     """
 
     def __init__(self, vocab_size=CHAR_VOCAB_SIZE, n_embd=384, n_head=6, n_layer=6, max_seq_len=2048):
