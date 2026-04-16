@@ -265,3 +265,127 @@ class TestWASMCompatibility:
                         f"WASM-incompatible import 'from {node.module}' at line {node.lineno}. "
                         f"This package is not available in Pyodide."
                     )
+
+
+# ── Test: Marimo Dataflow ────────────────────────────────────────────────────
+
+def _has_app_cell_decorator(func):
+    """True if the function is decorated with @app.cell or @app.cell(...)."""
+    for dec in func.decorator_list:
+        if isinstance(dec, ast.Attribute) and isinstance(dec.value, ast.Name):
+            if dec.value.id == "app" and dec.attr == "cell":
+                return True
+        if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
+            if (
+                isinstance(dec.func.value, ast.Name)
+                and dec.func.value.id == "app"
+                and dec.func.attr == "cell"
+            ):
+                return True
+    return False
+
+
+def _is_mo_stop_call(stmt):
+    """True if stmt is an expression statement calling mo.stop(...)."""
+    if not isinstance(stmt, ast.Expr) or not isinstance(stmt.value, ast.Call):
+        return False
+    func = stmt.value.func
+    return (
+        isinstance(func, ast.Attribute)
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "mo"
+        and func.attr == "stop"
+    )
+
+
+def _is_mo_ui_assign(stmt):
+    """If stmt is `<name> = mo.ui.<widget>(...)`, return the name. Else None."""
+    if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
+        return None
+    target = stmt.targets[0]
+    if not isinstance(target, ast.Name) or not isinstance(stmt.value, ast.Call):
+        return None
+    func = stmt.value.func
+    while isinstance(func, ast.Attribute):
+        if (
+            isinstance(func.value, ast.Attribute)
+            and isinstance(func.value.value, ast.Name)
+            and func.value.value.id == "mo"
+            and func.value.attr == "ui"
+        ):
+            return target.id
+        func = func.value if isinstance(func.value, ast.Attribute) else None
+        if func is None:
+            break
+    return None
+
+
+def _returned_names(func):
+    """Names listed in the cell's return statement."""
+    for node in ast.walk(func):
+        if isinstance(node, ast.Return) and node.value is not None:
+            if isinstance(node.value, ast.Tuple):
+                return {elt.id for elt in node.value.elts if isinstance(elt, ast.Name)}
+            if isinstance(node.value, ast.Name):
+                return {node.value.id}
+    return set()
+
+
+class TestMarimoDataflow:
+    """Detect the widget-in-gated-cell anti-pattern.
+
+    When a @app.cell has mo.stop() AND defines mo.ui.* widgets that
+    appear in the cell's return tuple, those widgets will not exist
+    until the gate unblocks. Any cell that depends on them cannot run,
+    which produces a "dependency undefined" cascade manifesting as
+    widgets invisibly failing to render.
+
+    Proper pattern (see lab_02's prediction cells): define widgets in
+    their own un-gated cell. Gate cells should be pure `mo.stop()`
+    statements with no side-effect widget definitions.
+
+    This bug class is tracked as an open cleanup effort. The test is
+    xfail-marked until a systematic refactor lands across all labs.
+    Once that tracking issue is closed, remove the xfail.
+    """
+
+    @pytest.mark.xfail(
+        reason=(
+            "widget-in-gated-cell pattern exists in most labs today. the "
+            "systematic refactor is a separate tracking effort. once labs are "
+            "converted to the proper pattern (widget in its own cell, gate cell "
+            "is pure mo.stop), remove this xfail."
+        ),
+        strict=False,
+    )
+    def test_no_widget_defined_in_gated_cell(self, lab_path):
+        tree = parse_tree(lab_path)
+        violations = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not _has_app_cell_decorator(node):
+                continue
+            if not any(_is_mo_stop_call(s) for s in node.body):
+                continue
+            widgets_defined = {}
+            for s in node.body:
+                name = _is_mo_ui_assign(s)
+                if name is not None:
+                    widgets_defined[name] = s.lineno
+            leaked = widgets_defined.keys() & _returned_names(node)
+            if leaked:
+                violations.append((node.lineno, sorted(leaked)))
+
+        if violations:
+            summary = "\n".join(
+                f"  cell at line {line}: gated AND returns widgets {names}"
+                for line, names in violations
+            )
+            pytest.fail(
+                "widget defined in gated cell (will not render until gate unblocks):\n"
+                + summary
+                + "\n\nfix: move widget definitions to their own un-gated cell. "
+                "gate cells should be pure mo.stop(). see lab_02's prediction "
+                "cells for the canonical pattern."
+            )
