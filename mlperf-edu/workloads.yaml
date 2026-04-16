@@ -86,6 +86,30 @@ suites:
       scenario: server
       provenance: "Naumov et al. 2019 (DLRM) + Weinberger et al. 2009 (hashing trick); production-realistic memory access pattern at laptop scale"
 
+    nanogpt-prefill:
+      model: nanogpt-12m
+      shared_checkpoint: nanogpt-train
+      params: 11.5M
+      compute_regime: compute_bound
+      regime_note: "Single forward over ctx_len tokens. Weights are reused across all tokens, giving high arithmetic intensity (~289 FLOPs/byte at ctx=1792). Should sit on the compute side of the M-series roofline (ridge ~30 FLOP/byte fp32). Pair with nanogpt-decode (same checkpoint) to observe the prefill-vs-decode split."
+      default_context_len: 1792
+      smoke_test_result: "iter-3 host (M-series, MPS): prefill 13.0 ms at ctx=1792, ~138K tok/s, intensity 289 FLOPs/byte"
+      scenario: offline
+      provenance: "GPT-2 prefill regime; corresponds to MLPerf Inference 'prompt processing' phase"
+
+    nanogpt-decode:
+      model: nanogpt-12m
+      shared_checkpoint: nanogpt-train
+      params: 11.5M
+      compute_regime: bandwidth_bound
+      regime_note: "Per-step KV-cache stream from DRAM dominates. Each decode step appends 1 token's K,V and re-reads the entire cached K,V. Arithmetic intensity is ~0.5 FLOPs/byte at ctx=1792, three orders of magnitude below prefill. Wall-clock measurement on MPS shows ~4 GB/s achieved BW (well below M1's 68 GB/s peak), revealing PyTorch's per-kernel dispatch overhead at small per-step compute -- itself a teaching moment about when dispatch overhead dominates the bandwidth signal."
+      default_prefill_ctx: 1792
+      default_decode_steps: 64
+      kv_bytes_per_token: 18432   # 2 * n_layer(6) * n_head(6) * head_dim(64) * 4 bytes
+      smoke_test_result: "iter-3 host (M-series, MPS): TTFT 668 ms, ITL median 8.5 ms (p99 22.9 ms), 117 tok/s, intensity ratio prefill/decode = 578x"
+      scenario: server
+      provenance: "GPT-2 autoregressive decode; the regime that dominates LLM serving cost in production (vLLM, TensorRT-LLM, TGI all built around this)"
+
     micro-diffusion-train:
       model: micro-diffusion-32px
       params: 2.0M

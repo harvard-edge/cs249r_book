@@ -30,7 +30,7 @@ class NanoGPTWhiteBox(nn.Module):
     pattern that motivates KV-cache and FlashAttention discussions.
     """
 
-    def __init__(self, vocab_size=CHAR_VOCAB_SIZE, n_embd=384, n_head=6, n_layer=6, max_seq_len=1024):
+    def __init__(self, vocab_size=CHAR_VOCAB_SIZE, n_embd=384, n_head=6, n_layer=6, max_seq_len=2048):
         super().__init__()
         self.config = {
             "vocab_size": vocab_size, "n_embd": n_embd,
@@ -38,19 +38,36 @@ class NanoGPTWhiteBox(nn.Module):
         }
         self.wte = nn.Embedding(vocab_size, n_embd)
         self.wpe = nn.Embedding(max_seq_len, n_embd)
-        self.blocks = nn.Sequential(*[GPTBlock(n_embd, n_head) for _ in range(n_layer)])
+        self.blocks = nn.ModuleList([
+            GPTBlock(n_embd, n_head, max_seq_len=max_seq_len) for _ in range(n_layer)
+        ])
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
-        self.wte.weight = self.lm_head.weight  # weight tying
+        self.wte.weight = self.lm_head.weight
 
-    def forward(self, idx, targets=None):
+    def forward(self, idx, targets=None, use_kv_cache=False, past_key_values=None):
+        """Unified forward path for training and inference (incl. KV-cache decode).
+
+        Returns:
+            (logits, loss)            if targets is given (training).
+            (logits, present_kvs)     if use_kv_cache=True (decode).
+            (logits, None)            otherwise (single-shot inference / prefill).
+        """
         b, t = idx.size()
-        pos = torch.arange(0, t, dtype=torch.long, device=idx.device).unsqueeze(0)
+        past_length = past_key_values[0][0].size(-2) if past_key_values is not None else 0
+        pos = torch.arange(past_length, past_length + t, dtype=torch.long, device=idx.device)
         x = self.wte(idx) + self.wpe(pos)
-        x = self.blocks(x)
+
+        present_kvs = [] if use_kv_cache else None
+        for i, block in enumerate(self.blocks):
+            past_kv = past_key_values[i] if past_key_values is not None else None
+            x, present_kv = block(x, use_kv_cache=use_kv_cache, past_key_value=past_kv)
+            if use_kv_cache:
+                present_kvs.append(present_kv)
         x = self.ln_f(x)
         logits = self.lm_head(x)
-        loss = None
+
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-        return logits, loss
+            return logits, loss
+        return logits, present_kvs
