@@ -324,6 +324,35 @@ Round 3 launched on the user's "proceed with 2" green-light. All four reviewers 
 
 ---
 
+# Round 4 — Code-level security + safety audit (2026-04-16)
+
+Post-Bucket-B code audit by Chip Huyen focused on actual exploitable paths (not architectural critique). Previous three rounds were specification-level; this one was line-by-line on what landed.
+
+## R4 findings — all 12 resolved
+
+| Severity | ID | Finding | Resolution |
+|---|---|---|---|
+| Critical | R4-C-1 | FTS5 MATCH injection: char-class strip left `NEAR`/`OR`/`AND`/`NOT` keywords intact, permitting quadratic-cost DoS queries | `MAX_SEARCH_Q_CHARS=100` cap; reject reserved tokens pre-sanitize; wrap sanitized term in FTS5 phrase literal |
+| Critical | R4-C-2 | Service worker trusted any page's `postMessage` to set vault API origin — XSS anywhere on staffml → persistent exfiltration via IDB-poisoned origin | `event.source` must be same-origin window client; posted origin must be in build-time `VAULT_API_ALLOWLIST`; refuse overwrite once set; activate re-validates persisted IDB origin |
+| Critical | R4-C-3 | `vault ship --resume` had no version-binding check — could resume old journal against new version, publishing mixed-release | Assert `journal.version == version` AND `journal.env == env` in `run_ship`; refuse overwrite of existing journal without `--resume` |
+| High | R4-H-1 | `_sql_quote` treated `bool` as `int` (Python subclass quirk), emitting `"True"`/`"False"` as SQL tokens | Handle `bool` BEFORE numeric branch; also added `bytes`/`bytearray` → BLOB literal |
+| High | R4-H-2 | CORS allowlist fell open to `"*"` on empty env var; catch-all echoed `String(e)` leaking D1/SQL fragments cross-origin | Fail-closed: no `Access-Control-Allow-Origin` header when allowlist is empty or origin unmatched. Error responses no longer include `detail` — log to console.error instead |
+| High | R4-H-3 | Rate limiter trusted `X-Forwarded-For` (client-settable); `"unknown"` sentinel collapsed all non-CF traffic into one bucket | Trust only `CF-Connecting-IP`; when missing, return deny with retry-after-60. KV read-then-write within-POP race documented (2-3× cap leakage acceptable; Durable Objects path reserved for Phase-4 if observed) |
+| High | R4-H-4 | Taxonomy DAG didn't initialize `color` for pure-target nodes; LSH shingling uncapped vs 256KB-scenario YAML | Initialize `color` over `sources ∪ targets`. Cap pre-shingle text at `MAX_SHINGLE_LEN=8000` chars |
+| Medium | R4-M-1 | `vault edit` used `question_id in p.read_text()` substring match — could open wrong file if ID appeared in a chain reference elsewhere | Anchored regex on `^\s*id:\s*['"]?<id>['"]?$` pattern; exact-field match |
+| Medium | R4-M-2 | Dead-code band-aid `(". " + ".pending-{v}").replace("..", ".")` in migrations-emit path | Replaced with plain `f".pending-{version}"` |
+| Medium | R4-M-3 | Service worker served 7-day-stale cache forever when manifest polling silently failed | Track `lastManifestSuccessMs`; bypass cache on question/search endpoints after 24h of silent manifest failures |
+| Low | R4-L-1 | No version-string validation — `version="HEAD"` or `"1..0"` would produce weird on-disk layouts | `_VERSION_RE` enforces `X.Y.Z[-prerelease]` on every command taking a `version` arg |
+| Low | R4-L-2 | `vault ship` paper-leg created git tag without pre-existence check; re-running escalated to paper-leg failure | Pre-check `git rev-parse refs/tags/v<v>`; if exists and matches, status=`already-pushed-skipped`; only create-and-push if genuinely new |
+
+## R4 verdict (post-fix)
+
+All 12 findings closed. `vault check --strict` passes on 9,657 questions with 0 load errors and 0 invariant failures. 28/28 pytest green. `vault verify 0.9.0` reconstructs release_hash `fe69d4c4...` from YAML source (post-normalization).
+
+**GREEN** for Phase-0/1/2 in-repo work. Phase-3/4 deploy gates remain as enumerated in CUTOVER_QA.md §0. No further rounds planned; if new issues emerge they're ordinary PR feedback.
+
+---
+
 **End of review ledger.**
 
 

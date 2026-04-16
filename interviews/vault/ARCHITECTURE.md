@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2.2** — Round-3 adversarial review integrated 2026-04-16. Phases 0-6 landed.
+> **Status**: **v2.3** — Round-4 security+safety review integrated 2026-04-16. Phases 0-6 landed + full Bucket B + 3C/4H/3M/2L security fixes.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).
