@@ -232,9 +232,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_model_size = mo.ui.slider(
         start=0.1, stop=70, value=7, step=0.1, label="Model size (billions of params)",
     )
@@ -262,9 +260,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_data_ms = mo.ui.slider(
         start=1, stop=100, value=50, step=1, label="Data loading (ms)",
     )
@@ -292,9 +288,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_model_c = mo.ui.slider(
         start=0.1, stop=13, value=1.5, step=0.1, label="Model size (billions)",
     )
@@ -318,8 +312,6 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_gpus = mo.ui.slider(
         start=1, stop=256, value=8, step=1, label="Number of GPUs",
     )

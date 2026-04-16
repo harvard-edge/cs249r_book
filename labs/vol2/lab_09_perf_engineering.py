@@ -305,9 +305,7 @@ def _(mo):
 
 # ─── CELL 5: Part A controls + Part B prediction ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_batch = mo.ui.dropdown(
         options={"Batch 1": 1, "Batch 4": 4, "Batch 16": 16,
                  "Batch 64": 64, "Batch 256": 256},
@@ -355,9 +353,7 @@ def _(mo, pA_pred):
 
 # ─── CELL 6: Part B controls + Part C prediction ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_seqlen = mo.ui.slider(
         start=512, stop=131072, value=4096, step=512,
         label="Sequence length (tokens)",
@@ -377,9 +373,7 @@ def _(mo, pB_pred):
 
 # ─── CELL 7: Part D prediction ──────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_pred = mo.ui.radio(
         options={
             "A: Both are similar -- 4 bits is 4 bits": "A",
@@ -398,9 +392,7 @@ def _(mo, pC_pred):
 
 # ─── CELL 8: Part D controls + Part E prediction ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_precision = mo.ui.dropdown(
         options={"FP16": 16, "INT8": 8, "INT4": 4},
         value="INT4",
@@ -425,9 +417,7 @@ def _(mo, pD_pred):
 
 # ─── CELL 9: Part E controls ────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pE_workload = mo.ui.dropdown(
         options={
             "LLM Decode (batch=1) -- AI=1, memory-bound": "decode",

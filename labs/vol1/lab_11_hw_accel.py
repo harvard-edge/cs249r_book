@@ -227,9 +227,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_dim = mo.ui.slider(start=128, stop=8192, value=512, step=128, label="Matrix dimension N")
     pA_prec = mo.ui.radio(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
@@ -248,9 +246,7 @@ def _(mo, pA_pred):
     return (pB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_mode = mo.ui.radio(
         options={"Eager (separate kernels)": "eager", "Fused (single kernel)": "fused"},
         value="Eager (separate kernels)", label="Execution mode:", inline=True,
@@ -269,9 +265,7 @@ def _(mo, pB_pred):
     return (pC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_hw = mo.ui.radio(
         options={"Cloud (H100)": "h100", "Edge (Jetson Orin NX)": "jetson", "Mobile (A17 Pro)": "iphone"},
         value="Cloud (H100)", label="Hardware:", inline=True,
@@ -289,9 +283,7 @@ def _(mo, pC_pred):
     return (pD_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pE_pred = mo.ui.radio(
         options={
             "A) ~1.2x (minor)": "1_2",
@@ -305,8 +297,6 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     pE_tile = mo.ui.slider(start=32, stop=2048, value=256, step=32, label="Tile size (elements)")
     pE_seq = mo.ui.slider(start=512, stop=16384, value=4096, step=512, label="Sequence length")
 

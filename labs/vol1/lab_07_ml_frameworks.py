@@ -241,9 +241,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_kernels = mo.ui.slider(
         start=10, stop=2000, value=1000, step=10, label="Number of kernels",
     )
@@ -265,9 +263,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_num_ops = mo.ui.slider(
         start=2, stop=8, value=3, step=1, label="Operations to fuse",
     )
@@ -289,9 +285,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_compile_time = mo.ui.slider(
         start=5, stop=300, value=30, step=5, label="Compile time (seconds)",
     )
@@ -314,8 +308,6 @@ def _(mo, partC_prediction):
 
 @app.cell(hide_code=True)
 def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_framework = mo.ui.dropdown(
         options={"PyTorch": "PyTorch", "TensorFlow": "TensorFlow",
                  "ONNX Runtime": "ONNX Runtime", "TF Lite": "TF Lite",
