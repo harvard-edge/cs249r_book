@@ -277,9 +277,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     # Part B widgets
     partB_prediction = mo.ui.radio(
         options={
@@ -294,9 +292,7 @@ def _(mo, partA_prediction):
     return (partB_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     # Part C widgets
     partC_prediction = mo.ui.radio(
         options={
@@ -311,9 +307,7 @@ def _(mo, partB_prediction):
     return (partC_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     # Part D widgets
     partD_prediction = mo.ui.radio(
         options={
@@ -328,9 +322,7 @@ def _(mo, partC_prediction):
     return (partD_prediction,)
 
 @app.cell(hide_code=True)
-def _(DecisionLog, mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(DecisionLog, mo):
     partA_scenario = mo.ui.dropdown(
         options={
             "Rec System: stale training data": "stale_data",
