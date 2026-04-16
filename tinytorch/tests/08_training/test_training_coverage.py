@@ -374,12 +374,14 @@ class TestSchedulerIntegration:
         assert len(trainer.history["learning_rates"]) == 0
 
     def test_optimizer_lr_updated_by_scheduler(self):
-        """After train_epoch, optimizer lr should match scheduler output."""
+        """After train_epoch, optimizer lr should match the scheduler value applied that epoch."""
         scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=10)
         trainer, _ = simple_trainer(lr=0.1, scheduler=scheduler)
         data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        # train_epoch applies scheduler.get_lr(self.epoch) at the start of the epoch,
+        # when self.epoch == 0, then increments epoch to 1 at the end.
+        expected_lr = scheduler.get_lr(0)
         trainer.train_epoch(data)
-        expected_lr = scheduler.get_lr(1)   # epoch 1 after first epoch
         assert abs(trainer.optimizer.lr - expected_lr) < 1e-9
 
     def test_lr_decreases_over_epochs(self):
