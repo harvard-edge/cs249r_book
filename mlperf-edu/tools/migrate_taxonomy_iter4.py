@@ -26,7 +26,7 @@ WORKLOADS_YAML = REPO_ROOT / "workloads.yaml"
 
 # Threshold constants (must match check_taxonomy.py).
 LLC_BYTES = 12 * 1024 * 1024
-RIDGE = 30  # M1 fp32 ridge FLOP/byte
+RIDGE = 30  # M-series reference fp32 ridge FLOP/byte
 PEAK_BW = 68.25
 
 # Per Emer's placement table in the iter-4 proposal. Values for axes
@@ -68,7 +68,7 @@ PLACEMENTS: dict[str, dict] = {
         "working_set": dict(value="dram_bound", peak_bytes_per_step=96468992,
                             note="Per-layer attention scores tensor (1792x1792 per head, 6 heads, fp32) is 19.3M floats = 77 MB alone — well past the 4*LLC = 48 MB threshold. The cited 96 MB also includes Q/K/V and FFN activations."),
         "arithmetic_intensity": dict(value="compute_bound", flops_per_byte=289,
-                                     classification_rule="weights reused across ctx_len=1792 tokens; well past M1 ridge of 30"),
+                                     classification_rule="weights reused across ctx_len=1792 tokens; well past M-series reference ridge of 30"),
         "dispatch": dict(value="device_saturated", utilization=0.55,
                          observation_source="iter-3 smoke_nanogpt_phases.py; prefill latency 13ms over 1792 tokens"),
     },

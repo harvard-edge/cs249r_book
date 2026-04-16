@@ -30,10 +30,14 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKLOADS_YAML = REPO_ROOT / "workloads.yaml"
 
-# Reference platform thresholds (Apple M1; documented in proposal).
-LLC_BYTES = 12 * 1024 * 1024
-RIDGE_FLOPS_PER_BYTE = 30
-PEAK_BW_GBPS = 68.25  # M1 unified memory peak (informational)
+# Reference platform thresholds. These are *canonical* (textbook) M-series
+# baseline numbers, intentionally chosen as the conservative lower bound
+# of the Apple Silicon family so off-platform sidecars (M-Pro/Max/Ultra)
+# rarely contradict the YAML. Per-machine actuals live in
+# ~/.mlperf-edu/machine_caps_<hwfp>.json (bench/measure_peaks.py).
+LLC_BYTES = 12 * 1024 * 1024          # M1 base LLC; M-Max class has more
+RIDGE_FLOPS_PER_BYTE = 30             # M1 base fp32 ridge
+PEAK_BW_GBPS = 68.25                  # M1 base unified memory peak (informational)
 
 VALID_VALUES = {
     "working_set": {"cache_resident", "dram_bound", "unmeasured"},

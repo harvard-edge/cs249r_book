@@ -58,9 +58,17 @@ class NanoGPTDecode:
         # if students need temperature/top-p exploration.
         return logits.argmax(dim=-1, keepdim=True)
 
-    def run(self) -> dict:
+    def run(self, emit_sidecar: bool = True) -> dict:
         device = next(self.model.parameters()).device
         prompt = torch.randint(0, self.vocab, (self.batch, self.prefill_ctx), device=device)
+        n_params = sum(p.numel() for p in self.model.parameters())
+        cfg = self.model.config
+        head_dim = cfg["n_embd"] // cfg["n_head"]
+        # Per-step bytes during decode: full weight reread + full KV stream.
+        kv_bytes_per_step = 2 * cfg["n_layer"] * cfg["n_head"] * head_dim * self.prefill_ctx * 4
+        bytes_per_step = n_params * 4 + kv_bytes_per_step
+        # Per-step FLOPs: one new token through all weights + attention over ctx.
+        flops_per_step = 2 * n_params + 4 * cfg["n_layer"] * cfg["n_head"] * head_dim * self.prefill_ctx
 
         with torch.no_grad():
             # Warm the cache and get the last-step logits.
@@ -80,13 +88,30 @@ class NanoGPTDecode:
             ttft = time.perf_counter() - t0
 
             per_step = []
-            for _ in range(self.decode_steps - 1):
-                next_tok = self._sample(logits[:, -1, :])
-                _sync()
-                t = time.perf_counter()
-                logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
-                _sync()
-                per_step.append(time.perf_counter() - t)
+            n_loop = self.decode_steps - 1
+            if emit_sidecar and n_loop > 0:
+                from mlperf.roofline import measure_roofline
+                with measure_roofline(
+                    "nanogpt-decode",
+                    analytic_flops=lambda: flops_per_step * n_loop,
+                    analytic_bytes=lambda: bytes_per_step * n_loop,
+                    n_iter=n_loop,
+                ):
+                    for _ in range(n_loop):
+                        next_tok = self._sample(logits[:, -1, :])
+                        _sync()
+                        t = time.perf_counter()
+                        logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
+                        _sync()
+                        per_step.append(time.perf_counter() - t)
+            else:
+                for _ in range(n_loop):
+                    next_tok = self._sample(logits[:, -1, :])
+                    _sync()
+                    t = time.perf_counter()
+                    logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
+                    _sync()
+                    per_step.append(time.perf_counter() - t)
 
         kv_bytes = kv_cache_bytes(kv)
         median_itl = statistics.median(per_step) if per_step else float("nan")

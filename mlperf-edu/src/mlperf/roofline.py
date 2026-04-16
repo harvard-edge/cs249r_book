@@ -27,12 +27,15 @@ from typing import Callable, Iterator
 
 SCHEMA_VERSION = "mlperf-edu-roofline/1.0"
 
-# Reference platform peaks. iter-5 used hardcoded M1 defaults; iter-5.5
-# adds bench/measure_peaks.py to measure them per-machine and cache to
+# Reference platform peaks. iter-5.5 added bench/measure_peaks.py to
+# measure them per-machine and cache to
 # ~/.mlperf-edu/machine_caps_<hwfp>.json. This module reads from the
-# cache when available and falls back to the defaults below.
-DEFAULT_PEAK_FLOPS = 2.6e12   # M1 8-core GPU fp32, rough
-DEFAULT_PEAK_BW_GBPS = 68.25  # M1 unified memory peak
+# cache when available and falls back to these conservative defaults
+# (M1 base class) only if no cached measurement exists. The defaults
+# are intentionally low so an unmeasured run is more likely to flag
+# its workload as device_saturated than to hide a dispatch bottleneck.
+DEFAULT_PEAK_FLOPS = 2.6e12   # M1 base 8-core GPU fp32, conservative fallback
+DEFAULT_PEAK_BW_GBPS = 68.25  # M1 base unified memory peak
 
 
 def _machine_caps() -> tuple[float, float]:
@@ -120,7 +123,7 @@ def measure_roofline(workload_name: str,
                       output_dir: str | Path = "roofline",
                       peak_flops: float | None = None,
                       peak_bw_gbps: float | None = None,
-                      machine_class: str = "apple-m1-16gb",
+                      machine_class: str = "apple-silicon",
                       ) -> Iterator[dict]:
     """Wrap a hot loop and emit a roofline sidecar on exit.
 

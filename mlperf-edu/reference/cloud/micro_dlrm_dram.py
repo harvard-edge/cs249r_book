@@ -3,7 +3,8 @@ MLPerf EDU: Micro-DLRM-DRAM (Cloud Division)
 
 DRAM-bound DLRM variant. Same MLP topology as MicroDLRMWhiteBox, but
 sparse lookups go through a virtual hashed embedding table sized to
-exceed M1's last-level cache (~12 MB) by ~20x.
+exceed the canonical M-series LLC reference (~12 MB on M1 base; larger
+on M-Pro/Max but the same factor-of-20 cushion holds across the family).
 
 Why this exists
 ---------------
@@ -19,13 +20,15 @@ ID space into a much larger virtual table via a deterministic vectorized
 hash, mirroring the "hash trick" used at scale (Weinberger et al. 2009;
 Meta's hashed embedding tables in production DLRM).
 
-Pedagogical contract
---------------------
-On Apple Silicon (M1, ~68 GB/s unified bandwidth, ~12 MB LLC):
+Pedagogical contract (canonical reference: Apple M1 base, 68 GB/s unified, 12 MB LLC)
+-------------------------------------------------------------------------------------
   - micro-dlrm           : sustained BW < 5 GB/s, MLP > 80% of step time.
-  - micro-dlrm-dram (us) : sustained BW 50-65 GB/s, embedding lookups
-                           > 70% of step time, step time linear in row
-                           width but insensitive to MLP width.
+  - micro-dlrm-dram (us) : sustained BW 50-65 GB/s on M1 base; on
+                           larger Apple Silicon (M-Pro/Max), bandwidth
+                           scales but the regime classification holds.
+                           Embedding lookups > 70% of step time;
+                           step time linear in row width but insensitive
+                           to MLP width.
 
 The pair is meant to be run together so students *measure the bottleneck
 transition* — same data, same MLP, different memory access pattern.
@@ -73,7 +76,8 @@ def _hash_mod(idx: torch.Tensor, seed: int, mod: int) -> torch.Tensor:
 class MicroDLRMDRAM(nn.Module):
     """DRAM-bound DLRM: same MLP topology, hash-mapped virtual embedding table.
 
-    Defaults are tuned for an Apple M1 (12 MB LLC, 68 GB/s unified memory):
+    Defaults tuned for the canonical M-series reference (M1 base: 12 MB
+    LLC, 68 GB/s unified; M-Max class: more headroom on both axes):
         virtual_table_size=2_000_000, m_spa=32  ->  256 MB table (~21x LLC).
     Adjust virtual_table_size up if your machine has > 32 MB LLC.
     """
