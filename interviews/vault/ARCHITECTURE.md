@@ -55,7 +55,7 @@
 > - **Makefile `hooks` target** (B.2): `make hooks` symlinks `pre_commit_corpus_guard.py` into `.git/hooks/pre-commit`.
 > - **`check_registry_append_only.py`** (B.3): CI script diffing registry against base branch; rejects reordered or removed lines.
 > - **Paper `generate_macros.py` rewritten as `vault export-paper` wrapper** (B.1): 66-line macros.tex emits BOTH `\staffml*` and legacy `\num*` namespaces so paper.tex needs no edits. Paper and site agree by construction (closes §20.5 #2 + #7).
-> - **LICENSE files added**: CC-BY-4.0 for `vault/questions/` corpus, MIT for `vault-cli/` code.
+> - **License remains OPEN**: §15 item 1 retains its "recommendation" status from v2.0. No LICENSE file shipped in v2.2; the decision is the user's and remains a Phase-3 deploy gate.
 > - **Known-deferred** (accepted engineering decisions, listed in REVIEWS.md §R3 for Phase-3-entry gates): Cache API wiring, circuit-breaker half-open, rate-limit KV, cross-language content_hash (moved to Python GitHub Action path), worker vitest, LSH scenario dedup.
 
 ---

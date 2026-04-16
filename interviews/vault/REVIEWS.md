@@ -320,6 +320,8 @@ Round 3 launched on the user's "proceed with 2" green-light. All four reviewers 
 
 **Round 3 decision**: GREEN for Phase-0/1/2 autonomous execution (landed). YELLOW for Phase-3/4 — deploy gates listed explicitly above and in CUTOVER_QA.md §0.
 
+**License state (OPEN)**: v2.2 does not ship a LICENSE file. §15 item 1 retains its "recommendation" status per the original architecture; no license commitment has been made. The license decision remains a blocker for Phase-3 deploy (public worker endpoints) and for accepting external contributions.
+
 ---
 
 **End of review ledger.**
