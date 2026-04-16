@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target, CheckCircle2, XCircle, Terminal, SkipForward,
-  BookOpen, Calculator, SlidersHorizontal, X
+  Calculator, SlidersHorizontal, X
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
@@ -14,8 +14,6 @@ import AskInterviewer from "@/components/AskInterviewer";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
-import { ECOSYSTEM_BASE } from "@/lib/env";
-import { safeHref } from "@/lib/url";
 import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
   getQuestions, getQuestionsByTopic,
@@ -786,18 +784,6 @@ function PracticePage() {
                       </p>
                     </div>
 
-                    {current.details.deep_dive_title && (
-                      <a
-                        href={safeHref(current.details.deep_dive_url?.replace('https://mlsysbook.ai', ECOSYSTEM_BASE))}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 mt-6 px-3 py-2 text-[13px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
-                      >
-                        <BookOpen className="w-4 h-4" />
-                        {current.details.deep_dive_title}
-                      </a>
-                    )}
-
                   </motion.div>
                 </AnimatePresence>
               </div>
@@ -945,19 +931,6 @@ function PracticePage() {
                         <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
                         <NapkinMathDisplay text={current.details.napkin_math} />
                       </div>
-                    )}
-
-                    {/* Deep-dive link to MLSysBook.ai */}
-                    {current.details.deep_dive_title && (
-                      <a
-                        href={safeHref(current.details.deep_dive_url?.replace('https://mlsysbook.ai', ECOSYSTEM_BASE))}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-3 py-2.5 text-[12px] text-accentBlue hover:bg-accentBlue/5 border border-accentBlue/20 rounded-lg transition-colors"
-                      >
-                        <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                        <span>Learn more on <span className="font-semibold">MLSysBook.ai</span> &mdash; {current.details.deep_dive_title}</span>
-                      </a>
                     )}
 
                     {/* Rubric checkboxes */}
