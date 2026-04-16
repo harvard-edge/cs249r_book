@@ -234,6 +234,27 @@ class TestAutogradWithLayers:
         except ImportError as e:
             assert False, f"Import failed: {e}"
 
+    def test_tanh_activation_gradient(self):
+        """
+        ✅ TEST: Tanh propagates gradients (regression test for #1341)
+
+        Tanh was previously missing from enable_autograd()'s patch list,
+        so tanh(x).backward() silently failed to populate x.grad.
+        """
+        from tinytorch.core.tensor import Tensor
+        from tinytorch.core.activations import Tanh
+
+        # tanh'(0) = 1 - tanh(0)² = 1 - 0 = 1
+        # tanh'(1) = 1 - tanh(1)² ≈ 1 - 0.7616² ≈ 0.4200
+        x = Tensor(np.array([0.0, 1.0, -1.0]), requires_grad=True)
+        tanh = Tanh()
+
+        y = tanh(x).sum()
+        y.backward(np.ones_like(y.data))
+
+        assert x.grad is not None, "Tanh did not produce a gradient"
+        np.testing.assert_allclose(x.grad, [1.0, 0.4199743, 0.4199743], rtol=1e-5)
+
 
 class TestAutogradWithLosses:
     """

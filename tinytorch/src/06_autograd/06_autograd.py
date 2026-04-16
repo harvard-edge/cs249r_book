@@ -1734,6 +1734,65 @@ class SigmoidBackward(Function):
         ### END SOLUTION
 
 
+# %% nbgrader={"grade": false, "grade_id": "tanh-backward", "solution": true}
+#| export
+class TanhBackward(Function):
+    """
+    Gradient computation for tanh activation.
+
+    Tanh: tanh(x) = (eˣ - e⁻ˣ) / (eˣ + e⁻ˣ)
+    Derivative: tanh'(x) = 1 - tanh(x)²
+    """
+
+    def __init__(self, input_tensor, output_tensor):
+        """
+        Initialize with both input and output.
+
+        Args:
+            input_tensor: Original input to tanh
+            output_tensor: Output of tanh (saves recomputation)
+        """
+        super().__init__(input_tensor)
+        self.output_data = output_tensor.data
+
+    def apply(self, grad_output):
+        """
+        Compute gradient for tanh.
+
+        TODO: Implement gradient computation for tanh activation.
+
+        APPROACH:
+        1. Extract input tensor from self.saved_tensors
+        2. If tensor requires gradients:
+           - Use saved output: tanh(x) = self.output_data
+           - Compute tanh derivative: tanh'(x) = 1 - tanh(x)²
+           - Multiply by grad_output: grad_output * tanh_grad
+           - Return as tuple: (result,)
+        3. Else return (None,)
+
+        EXAMPLE:
+        >>> X = Tensor([0.0], requires_grad=True)
+        >>> Y = tanh(X)  # Y = 0.0
+        >>> # During backward: grad_output = 1
+        >>> # tanh'(0) = 1 - 0² = 1
+        >>> # grad_X = 1 * 1 = 1
+
+        HINTS:
+        - Tanh derivative: tanh'(x) = 1 - tanh(x)²
+        - Output is already computed and saved in self.output_data
+        - This avoids recomputing tanh during backward pass
+        """
+        ### BEGIN SOLUTION
+        tensor, = self.saved_tensors
+
+        if isinstance(tensor, Tensor) and tensor.requires_grad:
+            # tanh'(x) = 1 - tanh(x)²
+            tanh_grad = 1 - self.output_data ** 2
+            return grad_output * tanh_grad,
+        return None,
+        ### END SOLUTION
+
+
 # %% nbgrader={"grade": false, "grade_id": "softmax-backward", "solution": true}
 #| export
 class SoftmaxBackward(Function):
@@ -2741,7 +2800,7 @@ def enable_autograd(quiet=False):
 
     # Patch activations and losses to track gradients
     try:
-        from tinytorch.core.activations import Sigmoid, ReLU, Softmax, GELU
+        from tinytorch.core.activations import Sigmoid, ReLU, Softmax, GELU, Tanh
         from tinytorch.core.losses import BinaryCrossEntropyLoss, MSELoss, CrossEntropyLoss
 
         # Store original methods
@@ -2749,6 +2808,7 @@ def enable_autograd(quiet=False):
         _original_relu_forward = ReLU.forward
         _original_softmax_forward = Softmax.forward
         _original_gelu_forward = GELU.forward
+        _original_tanh_forward = Tanh.forward
         _original_bce_forward = BinaryCrossEntropyLoss.forward
         _original_mse_forward = MSELoss.forward
         _original_ce_forward = CrossEntropyLoss.forward
@@ -2761,6 +2821,17 @@ def enable_autograd(quiet=False):
             if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
                 result._grad_fn = SigmoidBackward(x, result)
+
+            return result
+
+        def tracked_tanh_forward(self, x):
+            """Tanh with gradient tracking."""
+            result_data = np.tanh(x.data)
+            result = Tensor(result_data)
+
+            if _GRAD_TRACKING_ENABLED and x.requires_grad:
+                result.requires_grad = True
+                result._grad_fn = TanhBackward(x, result)
 
             return result
 
@@ -2860,6 +2931,7 @@ def enable_autograd(quiet=False):
         ReLU.forward = tracked_relu_forward
         Softmax.forward = tracked_softmax_forward
         GELU.forward = tracked_gelu_forward
+        Tanh.forward = tracked_tanh_forward
         BinaryCrossEntropyLoss.forward = tracked_bce_forward
         MSELoss.forward = tracked_mse_forward
         CrossEntropyLoss.forward = tracked_ce_forward
