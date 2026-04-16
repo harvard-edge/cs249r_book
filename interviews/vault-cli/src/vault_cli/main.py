@@ -10,7 +10,13 @@ import typer
 from rich.console import Console
 
 from vault_cli._version import __version__
-from vault_cli.commands import authoring, build as build_cmd_mod, check as check_cmd_mod, serve_api
+from vault_cli.commands import (
+    authoring,
+    build as build_cmd_mod,
+    check as check_cmd_mod,
+    release as release_cmd_mod,
+    serve_api,
+)
 from vault_cli.exit_codes import ExitCode
 
 console = Console()
@@ -30,6 +36,7 @@ build_cmd_mod.register(app)
 check_cmd_mod.register(app)
 authoring.register(app)
 serve_api.register(app)
+release_cmd_mod.register(app)
 
 
 def _version_callback(value: bool) -> None:
