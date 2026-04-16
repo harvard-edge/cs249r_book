@@ -4,7 +4,7 @@
 
 ### ML Systems Interview Playbook
 
-**5,700+ physics-grounded systems design questions across Cloud, Edge, Mobile & TinyML.**
+**9,000+ physics-grounded systems design questions across Cloud, Edge, Mobile & TinyML.**
 
 *You can generate the code, but you cannot prompt your way out of a silicon bottleneck.*
 
@@ -89,7 +89,7 @@ Questions are organized into **chains** — sequences that deepen understanding 
 
 | Metric | Count |
 |--------|-------|
-| Questions | 5,700+ |
+| Questions | 9,000+ |
 | Chains | 1,000+ |
 | Taxonomy Concepts | 650+ |
 | Competency Areas | 12 |
@@ -286,7 +286,7 @@ Cost reduction: 98.4%
 ---
 
 <p align="center">
-  <b>These are 15 of 5,700+ questions.</b><br>
+  <b>These are 15 of 9,000+ questions.</b><br>
   <a href="staffml/">Explore the full vault →</a>
 </p>
 

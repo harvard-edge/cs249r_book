@@ -1,0 +1,41 @@
+schema_version: 1
+id: cloud-0760
+title: The Silent ECC Degradation
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: Your 128-GPU H100 cluster has been running for 14 months. You notice that one specific node
+  (GPUs 40–47) consistently produces slightly different AllReduce results than other nodes — the gradient
+  checksums diverge by 1–2 ULP (units in the last place) every ~100 steps. Training still converges, but
+  your reproducibility tests fail. `nvidia-smi` shows no errors. What's degrading, and when does 'slightly
+  different' become 'dangerously wrong'?
+details:
+  realistic_solution: 'The HBM on GPUs 40–47 is experiencing an elevated rate of *correctable* ECC errors
+    (single-bit flips that ECC silently fixes). While each individual correction is invisible to the application,
+    the correction process stalls the memory controller for ~100 ns per event. If a memory page has a
+    marginal cell that flips frequently, the GPU''s memory controller spends increasing time on corrections,
+    subtly changing the timing of memory accesses. This timing change affects the order of floating-point
+    reductions in parallel operations (warp-level reductions are timing-dependent when using non-deterministic
+    atomics), producing the 1–2 ULP divergence. The danger: correctable ECC errors are precursors to *uncorrectable*
+    errors (double-bit flips). HBM cells degrade over time — a cell that flips once per hour today may
+    flip once per minute in 3 months, and eventually produce double-bit errors that ECC cannot fix, causing
+    Silent Data Corruption. Check `nvidia-smi -q -d ECC` for the `Volatile ECC Errors: Single Bit` counter
+    — if it''s climbing, the HBM is degrading and the GPU should be proactively replaced.'
+  common_mistake: '"1–2 ULP difference is just floating-point non-determinism — it''s normal" or "If ECC
+    reports no errors, the memory is fine." ULP-level differences are normal for *different code paths*,
+    but the same code on the same hardware should produce bit-identical results. And ECC only corrects
+    single-bit errors — it doesn''t report correctable errors to the application by default.'
+  napkin_math: 'H100 HBM3: 80 GB across 6 stacks, each with billions of cells. Normal correctable ECC
+    rate: <1 error per GPU per day. Degrading HBM: 100+ errors per GPU per day on the affected page. Each
+    correction: ~100 ns stall. At 100 errors/day: total stall = **10 μs/day** — negligible for performance.
+    But the *timing perturbation* during a warp-level reduction (32 threads reducing 32 values) changes
+    the addition order when one thread''s memory access is delayed by 100 ns. FP32 addition: $(a + b)
+    + c$ vs $a + (b + c)$ can differ by 1 ULP when $|a| \gg |c|$. Over 100 steps, ~1% of reductions are
+    perturbed → 1–2 ULP divergence in the final AllReduce result. **Failure progression:** Correctable
+    errors doubling every month (typical HBM degradation curve). Month 14: 100/day. Month 15: 200/day.
+    Month 16: 400/day. Month 18: 1,600/day. Month 20: first uncorrectable (double-bit) error → **silent
+    data corruption** in a weight tensor. Proactive replacement at month 14 costs 1 GPU ($30K). Reactive
+    replacement after SDC corrupts a training run costs the entire run ($500K+).'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

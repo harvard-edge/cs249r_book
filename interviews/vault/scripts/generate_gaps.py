@@ -286,8 +286,7 @@ Return a JSON array. Each object must have these fields:
     "common_mistake": "What engineers typically get wrong and why...",
     "realistic_solution": "The correct answer with full explanation...",
     "napkin_math": "Step-by-step quantitative reasoning with real numbers...",
-    "deep_dive_title": "Relevant Chapter Title",
-    "deep_dive_url": "https://mlsysbook.ai/..."
+    "resources": []
   }}
 ]
 ```
@@ -388,8 +387,7 @@ def render_question_md(q: dict) -> str:
     common_mistake = q.get("common_mistake", "")
     realistic_solution = q.get("realistic_solution", "")
     napkin_math = q.get("napkin_math", "")
-    deep_dive_title = q.get("deep_dive_title", "")
-    deep_dive_url = q.get("deep_dive_url", "")
+    resources = q.get("resources") or []
 
     topic_tags = " ".join(f"<code>{t.strip()}</code>" for t in topic.split(","))
 
@@ -402,9 +400,14 @@ def render_question_md(q: dict) -> str:
         inner.append("")
         inner.append(f"  > **Napkin Math:** {napkin_math}")
 
-    if deep_dive_title and deep_dive_url:
+    if resources:
         inner.append("")
-        inner.append(f"  📖 **Deep Dive:** [{deep_dive_title}]({deep_dive_url})")
+        inner.append("  📖 **Resources:**")
+        for r in resources:
+            name = (r.get("name") or "").strip()
+            url = (r.get("url") or "").strip()
+            if name and url:
+                inner.append(f"  - [{name}]({url})")
 
     inner_content = "\n".join(inner)
 

@@ -1,0 +1,34 @@
+schema_version: 1
+id: edge-0879
+title: Drone Calibration Domain Shift
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: Delivery drones use a 300M parameter CNN for depth estimation, running at 18ms latency on a
+  strict 20ms NPU budget. The INT8 PTQ model was calibrated using 5,000 high-res urban images. When deployed
+  in rural, low-contrast, and foggy areas, collision rates spike by 5x. Telemetry shows severe activation
+  clipping.
+details:
+  realistic_solution: 'The root cause is a severe PTQ calibration dataset mismatch. Urban environments
+    have sharp edges and high contrast, resulting in wide min/max activation ranges during calibration.
+    In foggy/rural environments, the actual activation ranges are much narrower. Using the urban static
+    scale/zero-point parameters causes the narrow rural activations to collapse into just 2-3 INT8 bins,
+    destroying gradient/depth perception.
+
+
+    The architectural fix is a Multi-Profile Static Quantization system. Offline, calibrate three distinct
+    INT8 profiles (Urban, Fog, Night) using KL-divergence minimization on domain-specific datasets. At
+    runtime, introduce a lightweight pre-processing router that computes image variance/contrast statistics.
+    Based on a threshold, the router dynamically swaps the NPU''s scale and zero-point registers to the
+    matching calibration profile. This maintains the speed of static INT8 while providing environment-aware
+    precision.'
+  common_mistake: Switching to dynamic quantization to handle the varied environments, which adds runtime
+    overhead and pushes latency well past the 20ms safety budget.
+  napkin_math: "Latency budget = 20ms. Current INT8 static latency = 18ms. FP16 latency = 45ms. Dynamic\
+    \ INT8 adds ~6ms for runtime scale calculations (24ms total, violating budget). \nRouter overhead:\
+    \ computing global variance on a 640x480 frame (~300k pixels) takes ~0.5ms on the edge CPU. Swapping\
+    \ 1,000 scale/ZP registers to the NPU takes <0.1ms. Total latency: 0.5ms + 18ms = 18.5ms, successfully\
+    \ staying under the 20ms hard deadline while restoring accuracy."
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

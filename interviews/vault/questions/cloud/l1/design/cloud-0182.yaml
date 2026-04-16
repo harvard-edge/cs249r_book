@@ -1,0 +1,43 @@
+schema_version: 1
+id: cloud-0182
+title: The AI Analyst's Deadline
+topic: latency-decomposition
+status: published
+provenance: imported
+scenario: 'You are the Principal Engineer at a new FinTech startup building a unified ''AI Analyst'' API
+  on a fixed cluster of H100 GPUs (deployed with Tensor Parallelism TP=2 per instance). The API must serve
+  two workloads with conflicting demands:'
+details:
+  realistic_solution: 'The core of the problem is isolating the latency-sensitive workload from the throughput-oriented
+    workload on the same hardware. My first three decisions would be: (1) **Priority queuing with preemption**:
+    Implement a multi-level priority queue where real-time news requests preempt long-running report generation
+    jobs. The scheduler must be able to pause a report generation mid-decode, save its KV cache, and immediately
+    begin prefilling a real-time request. (2) **Dedicated capacity partitioning**: Reserve a subset of
+    GPUs exclusively for real-time requests to guarantee latency SLOs, while allowing report generation
+    to use remaining capacity plus any idle real-time GPUs. This prevents head-of-line blocking entirely
+    for the latency-sensitive path. (3) **Request-aware continuous batching**: Use a scheduling policy
+    that limits the maximum prefill length admitted into a batch to cap the compute time per iteration.
+    Long-context report requests (100k tokens) would be chunked into smaller prefill windows to prevent
+    a single request from monopolizing the GPU for seconds.'
+  common_mistake: Using a single, simple FIFO queue for all requests. This is the most common and fatal
+    mistake. While simple to implement, it leads to **Head-of-Line Blocking**. A single, long-running
+    100k-token report generation job will enter the batch, and its massive prefill computation will occupy
+    the GPU for seconds. All subsequent real-time news requests that arrive during this time will be stuck
+    in the queue, immediately violating their 500ms deadline.
+  napkin_math: "Model: 70B Llama-class on 2x H100 (TP=2). H100 SXM specs (x2): 1978 TFLOPS FP16 total,\
+    \ 6.7 TB/s HBM3 total.\n\n**1. Prefill time for real-time request (~500 tokens):**\nFLOPs = 2 × 70×10^9\
+    \ × 500 = 70 TFLOPs.\nAt 1978 TFLOPS peak (assume ~50% MFU for prefill): 70 / 989 = 70.8 ms.\nAt 100%\
+    \ utilization (lower bound): 70 / 1978 = 35.4 ms.\n\n**2. Prefill time for report generation (100k\
+    \ tokens):**\nFLOPs = 2 × 70×10^9 × 100,000 = 14,000 TFLOPs.\nTime at 1978 TFLOPS peak = 14,000 /\
+    \ 1978 = 7.08 seconds.\nAt 50% MFU: 14,000 / 989 = 14.16 seconds.\n\n**3. Key insight — head-of-line\
+    \ blocking quantified:**\nA single report prefill blocks the GPU instance for 7-14 seconds.\nAt 100\
+    \ real-time requests/second arrival rate, during one report prefill:\n  Queued requests = 100 req/s\
+    \ × 7.1 s = ~710 requests blocked.\nAll 710 requests violate their 500 ms deadline.\n\n**4. Capacity\
+    \ planning for real-time tier:**\nEach real-time request needs ~71 ms of GPU time (prefill) + decode.\n\
+    Decode for 200 output tokens: 70B FP16 = 140 GB weights.\nPer-token decode = 140 GB / 6.7 TB/s = 20.9\
+    \ ms/token.\nTotal per-request time = 71 ms + 200 × 20.9 ms = 4.25 seconds.\nMax throughput per TP=2\
+    \ instance = 1 / 4.25 = 0.235 requests/s.\nFor 100 req/s: need ~425 TP=2 instances (850 GPUs dedicated\
+    \ to real-time).\n\nThis proves workload isolation is a hard architectural requirement, not optional."
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

@@ -1,0 +1,37 @@
+schema_version: 1
+id: mobile-0070
+title: The Stuttering AI Assistant
+topic: real-time-deadlines
+status: draft
+provenance: imported
+scenario: 'You are a Mobile ML Engineer optimizing an on-device generative AI assistant. User reports
+  are coming in: the assistant''s first word appears almost instantly (good TTFT), but the rest of the
+  sentence stutters out, and the app''s animations become choppy during generation. You profile the device
+  and find that TTFT is consistently under 200ms, but UI frame rates drop below 15 FPS during the token
+  generation phase. Your current implementation uses a 3B parameter model running on the Apple A17 Pro''s
+  NPU in a simple synchronous loop. Given the hardware specs, diagnose the most likely cause of the UI
+  jank.'
+details:
+  realistic_solution: The root cause is a scheduling conflict between the blocking, single-threaded inference
+    task and the high-priority, real-time UI thread. A single token generation pass is a 'chunky' operation
+    that takes longer than the 16.7ms budget for a 60 FPS frame, causing jank. The excellent TTFT shows
+    the prefill is fast, but the subsequent token-by-token decoding loop is the culprit. The correct solution
+    is to decouple inference from the main thread. The generation loop should run on a background thread
+    or queue (e.g., a `DispatchQueue` in Swift with a `.userInitiated` QoS). As each token is generated,
+    it should be passed back to the main thread for UI updates. This allows the OS to schedule the UI
+    rendering and inference work concurrently, preventing the UI from freezing while waiting for the next
+    token.
+  common_mistake: 'Engineers often blame the model size or raw NPU performance. They might suggest aggressive
+    quantization or pruning. While these can help, they miss the core architectural problem: the synchronous,
+    high-priority computation is starving the real-time UI thread. The problem isn''t just the *average*
+    Time Per Output Token (TPOT), but the *scheduling* of the compute workload.'
+  napkin_math: 60 FPS UI requires a frame every 16.67ms. If the LLM generates 15 tokens per second, generation
+    time per token = 1000ms / 15 = 66.6ms. Since 66.6ms > 16.67ms, synchronous generation on the main
+    thread will block UI updates for 4 consecutive frames per token, causing severe stuttering. Generation
+    must run asynchronously.
+chain:
+  id: mobile-chain-059
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:App Experience

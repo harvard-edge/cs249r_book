@@ -1,0 +1,51 @@
+schema_version: 1
+id: cloud-2293
+title: The End-to-End Fairness Infrastructure
+topic: mlops-lifecycle
+status: published
+provenance: imported
+scenario: 'You are the Staff engineer tasked with designing a company-wide Responsible AI infrastructure
+  that supports 50 ML models across 12 teams. Requirements: (1) every model must pass disaggregated fairness
+  evaluation before deployment (gate), (2) production models must have continuous fairness monitoring
+  with automated rollback if metrics breach thresholds, (3) full artifact provenance — for any production
+  prediction, an auditor must be able to trace back to the exact training data, preprocessing steps, model
+  version, and fairness evaluation results, (4) the system must support the EU AI Act''s ''right to explanation''
+  for high-risk models. Design this system. Specify the key components, data flows, storage requirements,
+  and the hardest systems challenge.'
+details:
+  realistic_solution: 'Architecture: a platform approach with four layers. (1) Fairness SDK (client-side):
+    a lightweight library each team integrates into their training and serving pipelines. It handles demographic
+    annotation propagation, per-group metric computation, and structured logging. This runs in each team''s
+    infrastructure — no central bottleneck. (2) Fairness Gate Service (CI/CD integration): a gRPC service
+    that receives evaluation reports from the SDK and enforces deployment policies. Before any model can
+    be promoted to production (via the model registry), it must submit a fairness evaluation report. The
+    gate service validates: minimum subgroup sample sizes met, equalized odds gap below threshold (configurable
+    per model risk tier), comparison against the model it is replacing (no fairness regression). This
+    is a stateless service — easy to scale. (3) Production Monitoring Pipeline: a streaming pipeline (Flink)
+    that consumes prediction logs from all 50 models, joins with outcome data (delayed labels), computes
+    rolling per-group metrics on configurable windows (1hr, 24hr, 7d), and publishes to a time-series
+    store (Prometheus/InfluxDB). Alert rules trigger automated rollback to the previous model version
+    via the deployment system (ArgoCD/Spinnaker) if any group''s metric breaches the threshold for 2 consecutive
+    windows. (4) Provenance & Explanation Layer: an immutable lineage store (built on a content-addressable
+    storage system like DVC or a custom solution on S3 with Merkle-tree hashing) that records: training
+    data manifests (hash of every sample), preprocessing DAG, model artifacts, fairness evaluation snapshots.
+    For right-to-explanation: a pre-computation pipeline that generates SHAP explanations for the top-100
+    most common feature patterns per model (covers ~80% of requests), with on-demand computation for the
+    long tail (SLA: explanation available within 72 hours). Hardest challenge: provenance at scale. With
+    50 models, some retrained daily, and billions of predictions — maintaining queryable lineage from
+    prediction → model version → training data → raw source requires a graph database or specialized lineage
+    system (Apache Atlas, Marquez). The storage is manageable (~100 TB/year), but the query latency for
+    ''show me everything about this prediction from 6 months ago'' requires careful index design.'
+  common_mistake: Designing a centralized fairness service that becomes a bottleneck for all 50 models,
+    or treating this as a 'fairness library' that each team imports. Both fail at scale — the first creates
+    organizational bottleneck, the second creates inconsistency.
+  napkin_math: '50 models × avg 1M predictions/day = 50M audit records/day × 2KB each = 100 GB/day. 7-year
+    retention: 100 GB × 365 × 7 = 255 TB. Lineage metadata per training run: ~10 GB (data manifest + preprocessing
+    DAG + metrics). 50 models × 12 retrains/year = 600 runs × 10 GB = 6 TB/year. Fairness gate service:
+    <100 RPS (50 models × few deployments/day) — a single pod handles this. Monitoring pipeline: 50M predictions/day
+    ÷ 86400 = ~580 events/sec — a modest Flink cluster (4 TaskManagers). SHAP pre-computation: 50 models
+    × 100 patterns × ~2 sec/explanation = ~2.8 hrs/day on a single GPU. Total infrastructure cost: ~$15-25K/month
+    — roughly the cost of one Staff engineer''s time.'
+last_modified: '2026-04-01'
+tags:
+- scope:Responsible AI

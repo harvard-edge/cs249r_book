@@ -1,0 +1,37 @@
+schema_version: 1
+id: cloud-fill-00280
+title: Optimizing Data Movement for Large Models on NVIDIA H100
+topic: dma-data-movement
+status: published
+provenance: imported
+scenario: You are tasked with fine-tuning a 100B parameter language model on an NVIDIA H100 GPU (80 GB
+  HBM3, 3.35 TB/s memory bandwidth). Due to the model's size and the extensive training dataset, some
+  intermediary data (e.g., optimizer states, very large embedding tables) frequently needs to be moved
+  between the host CPU memory and the H100's device memory. Design a strategy to minimize the overhead
+  associated with these host-device data transfers, specifically leveraging DMA transfers, zero-copy techniques,
+  and pinned memory, to maximize the H100's computational throughput.
+details:
+  realistic_solution: The optimal solution involves using pinned (page-locked) host memory for all buffers
+    participating in host-to-device and device-to-host transfers. This enables the GPU's DMA engine to
+    transfer data asynchronously from host memory to device memory without CPU intervention, overlapping
+    communication with computation. Implement double-buffering or triple-buffering using CUDA streams
+    to ensure that while one data batch is being processed by the GPU, the next batch is asynchronously
+    transferred from the host. Zero-copy memory (mapped host memory) can be considered for smaller, read-only
+    data structures that are frequently accessed by both host and device, but its overhead for writes
+    or larger transfers must be carefully profiled. Prioritize asynchronous DMA with pinned memory for
+    large, performance-critical transfers.
+  common_mistake: A common mistake is to perform synchronous `cudaMemcpy` operations for data transfers,
+    which stalls the GPU. Developers might also neglect using pinned host memory, preventing true asynchronous
+    DMA, or incorrectly assume zero-copy memory is always a performance win without considering its latency
+    implications, especially for large, non-contiguous data.
+  napkin_math: 'An NVIDIA H100 typically connects via PCIe Gen5 x16, offering a theoretical host-to-device
+    bandwidth of ~64 GB/s. The H100''s HBM3 internal bandwidth is 3.35 TB/s (3350 GB/s). If a 50 GB optimizer
+    state needs to be transferred from host to device:
+
+    - Synchronous `cudaMemcpy` without pinned memory: Will block for at least 50 GB / 64 GB/s = ~0.78
+    seconds. This is significant downtime for a 989 TFLOPS GPU.
+
+    - Asynchronous DMA with pinned memory: This 0.78-second transfer can be mostly hidden if overlapped
+    with computation or other kernel executions, effectively reducing the perceived latency to near zero,
+    unlocking the H100''s full potential.'
+last_modified: '2026-04-01'

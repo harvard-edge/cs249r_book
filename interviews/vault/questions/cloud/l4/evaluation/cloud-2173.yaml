@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-2173
+title: The Occupancy vs IPC Tradeoff
+topic: roofline-analysis
+status: published
+provenance: imported
+scenario: Two versions of a matrix multiply kernel target an H100 SM. Version A achieves 100% occupancy
+  (2,048 threads resident) using 32 registers per thread and small 16x16 tiles. Version B achieves only
+  25% occupancy (512 threads) using 128 registers per thread and large 64x64 tiles. Counterintuitively,
+  Version B runs 2x faster despite having 4x fewer resident threads. Explain why higher occupancy did
+  not translate to higher performance, and when you should intentionally sacrifice occupancy.
+details:
+  realistic_solution: 'Occupancy''s purpose is latency hiding: when one warp stalls on a memory access,
+    the SM switches to another warp. But this only helps when the kernel is memory-latency-bound. Version
+    A uses tiny tiles (16x16), so each thread accumulates over a small register tile and must reload data
+    from shared memory or HBM frequently. The high occupancy hides this latency but doesn''t eliminate
+    the traffic. Version B uses large 64x64 tiles held entirely in registers (128 regs x 4 bytes = 512
+    bytes per thread). Each loaded element is reused 64 times within the register file (1ns access) instead
+    of being reloaded from shared memory (5ns) or HBM (300ns). The register-level data reuse transforms
+    the kernel from memory-bound to compute-bound, where it hits the Tensor Core throughput ceiling. At
+    that point, additional occupancy adds nothing — the SMs are already fully utilized by the resident
+    warps. This is Volkov''s insight: for compute-bound kernels, maximize IPC (instructions per clock)
+    through register-level data reuse, not occupancy.'
+  common_mistake: Assuming occupancy is the primary predictor of performance. Many engineers treat occupancy
+    as a target to maximize, applying Volkov's 'more threads = more latency hiding' heuristic without
+    considering data reuse. NVIDIA's own occupancy calculator reinforces this bias.
+  napkin_math: 'Version A (16x16 tile, 100% occupancy): Each thread processes 16 output elements, reusing
+    each loaded element 16x. Shared memory loads per output element: ~1. At 19 TB/s shared mem BW with
+    2,048 threads contending: effective per-thread BW is high but reuse is low. Version B (64x64 tile,
+    25% occupancy): Each thread processes 64 output elements, reusing each loaded element 64x. Shared
+    memory loads per output element: ~0.25 (4x fewer). Register file delivers data at effectively infinite
+    bandwidth (no contention). Compute intensity: Version B performs 4x more FLOPs per byte loaded, pushing
+    it past the ridge point into compute-bound territory where Tensor Cores are the bottleneck, not memory.'
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

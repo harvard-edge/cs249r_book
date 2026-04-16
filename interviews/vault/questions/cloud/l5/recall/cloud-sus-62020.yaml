@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-sus-62020
+title: KV-Cache Radix Tree for Prefix Sharing
+topic: disaggregated-serving
+status: published
+provenance: imported
+scenario: Your serving system (SGLang-style) uses a radix tree to manage prefix KV-cache sharing. You
+  have 200 active system prompts, each used by ~50 users simultaneously, with 512-token system prompts
+  and 128-token user suffixes. On MI300X (192 GB, model=70B at 140 GB, 52 GB KV pool), compute how much
+  HBM is saved by shared prefix caching vs. no sharing, and determine the maximum number of concurrent
+  requests the KV pool can support with vs. without sharing.
+details:
+  realistic_solution: 'Without prefix sharing: each request stores full 640-token KV (512 system prompt
+    + 128 user). KV per token (70B, GQA 8 heads, head_dim 128, 96 layers, FP16): 2×8×128×1×96×2 = 393,216
+    bytes ≈ 0.375 MB/token. Full request KV: 640 × 0.375 MB = 240 MB. 52 GB / 240 MB = 216 concurrent
+    requests. With prefix sharing: prefix KV (512 tokens) stored once per unique system prompt. 200 system
+    prompts × 512 tokens × 0.375 MB = 38.4 GB for all prefix caches. Remaining for user suffix KV: 52
+    - 38.4 = 13.6 GB. User suffix KV: 128 tokens × 0.375 MB = 48 MB per request. 13.6 GB / 48 MB = 283
+    concurrent user suffix KV slots. Total concurrent requests: 283 (limited by suffix KV). Improvement:
+    283 vs 216 = 31% more concurrent requests. Memory saved: 200 × 50 users × 512 tokens × 0.375 MB ×
+    (1 - 1/50) = 196 × 50 × 192 MB = 188 GB if unshared vs 38.4 GB shared — but constrained by 52 GB pool
+    anyway.'
+  common_mistake: Forgetting that the radix tree stores the prefix KV once per unique prefix, not once
+    per user. Also forgetting that the total KV = prefix KV + suffix KV per request.
+  napkin_math: 'Per-token KV size (GQA): 2 × 8 heads × 128 dim × 96 layers × 2 bytes = 393,216 bytes =
+    384 KB/token. 512-token prefix: 512 × 384 KB = 192 MB. 128-token suffix: 128 × 384 KB = 48 MB. No
+    sharing: 240 MB × N = 52 GB → N = 216. With sharing: 200 prefixes × 192 MB = 38.4 GB prefix store.
+    Suffix pool: 13.6 GB / 48 MB = 283. Concurrent: 283 (+31%).'
+last_modified: '2026-04-02'
+tags:
+- scope:Disaggregated Serving

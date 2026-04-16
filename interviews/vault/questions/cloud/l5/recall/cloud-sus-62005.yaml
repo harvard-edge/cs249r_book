@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-sus-62005
+title: MI300X KV Pool Sizing vs H100
+topic: disaggregated-serving
+status: published
+provenance: imported
+scenario: You are choosing the GPU for your decode pool in a disaggregated serving deployment for a 70B
+  FP16 model. Compare H100 SXM5 (80 GB, 3.35 TB/s) and MI300X (192 GB, 5.3 TB/s) for the decode role.
+  Compute the maximum concurrent sequences each can serve at 4096-token context, and the single-stream
+  token generation throughput. Which is better for decode and why?
+details:
+  realistic_solution: 'Model weights for 70B FP16 = 140 GB. H100: 140 GB exceeds 80 GB → needs tensor
+    parallelism (TP=2, two H100s), leaving each GPU with 80-70=10 GB for KV. MI300X: 192 GB fits entire
+    model on one GPU with 52 GB free for KV. KV per sequence at 4096 tokens (96 layers, 8 KV heads GQA,
+    head_dim 128, FP16) ≈ 384 MB. H100 (10 GB KV pool): ~26 sequences. MI300X (52 GB KV pool): ~135 sequences.
+    Token throughput (bandwidth-limited): H100 pair at 2×3.35 TB/s = 6.7 TB/s / 140 GB = 47.8 tokens/s
+    per sequence × 26 = 1243 tok/s aggregate. MI300X at 5.3 TB/s / 140 GB = 37.8 tokens/s single sequence
+    × 135 = 5103 tok/s aggregate. MI300X wins on aggregate throughput per GPU-unit for decode, especially
+    when eliminating TP communication overhead.'
+  common_mistake: Choosing MI300X purely for memory capacity without accounting for the fact that decode
+    throughput scales with memory bandwidth, not capacity — more sequences only helps if bandwidth can
+    keep up.
+  napkin_math: 'Decode tok/s = HBM_bandwidth / model_size_bytes. H100: 3.35e12 / 140e9 = 23.9 tok/s (single
+    GPU, but TP=2 needed so use 2×). MI300X: 5.3e12 / 140e9 = 37.8 tok/s (single GPU). MI300X delivers
+    1.58× more tokens/s per GPU and 5.2× more concurrent sequences per GPU-unit vs H100 TP=2 pair. TCO
+    favors MI300X for memory-bound decode.'
+last_modified: '2026-04-02'
+tags:
+- scope:Disaggregated Serving

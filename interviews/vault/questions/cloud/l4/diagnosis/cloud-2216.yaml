@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2216
+title: The NUMA-Unaware Inference Regression
+topic: data-parallelism
+status: published
+provenance: imported
+scenario: After migrating your inference service from bare-metal servers to Kubernetes, P99 latency increased
+  by 40% despite running on identical hardware (2-socket servers with 4 GPUs per socket). CPU utilization,
+  GPU utilization, and memory usage all look normal. The Kubernetes pods are pinned to specific GPUs.
+  What is the scheduler missing?
+details:
+  realistic_solution: 'The scheduler is NUMA-unaware. In a 2-socket system, GPUs 0-3 are attached to NUMA
+    node 0 and GPUs 4-7 to NUMA node 1. Each CPU socket has local memory controllers. When the Kubernetes
+    pod is scheduled on CPU cores from NUMA node 1 but pinned to a GPU on NUMA node 0, every CPU-GPU data
+    transfer crosses the QPI/UPI interconnect between sockets — adding ~100ns per cache line and halving
+    effective PCIe bandwidth. The fix: use Kubernetes topology manager with the ''single-numa-node'' policy,
+    which co-locates CPU cores, memory, and GPU on the same NUMA domain.'
+  common_mistake: Blaming Kubernetes overhead, container networking, or GPU driver differences. These
+    add microseconds of overhead, not 40% latency regression. The pod has GPU pinning, so it's not a GPU
+    scheduling issue either.
+  napkin_math: 'Local NUMA PCIe transfer: ~25 GB/s effective (PCIe Gen4 x16). Remote NUMA PCIe transfer:
+    ~12-15 GB/s (QPI hop adds ~40% overhead). For a batch of inference requests with 50MB of tensor data
+    per batch: Local: 50MB / 25 GB/s = 2.0ms. Remote: 50MB / 13 GB/s = 3.8ms. Delta = 1.8ms per batch.
+    At P99 with queueing amplification, this 1.8ms base penalty compounds to ~40% of the 12ms baseline
+    latency.'
+last_modified: '2026-04-01'
+tags:
+- scope:Systems & Scale

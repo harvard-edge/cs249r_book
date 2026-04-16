@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-crit-20041
+title: Draft Model Placement on Multi-GPU Inference
+topic: speculative-decoding
+status: published
+provenance: imported
+scenario: 'You serve a 405B target model across 8x H100 (tensor parallelism) with a 7B draft model. Options:
+  (A) run draft on all 8 GPUs (TP=8), (B) run draft on 1 GPU while others idle, (C) run draft on a separate
+  9th GPU. Specify the optimal placement considering latency, GPU utilization, and memory.'
+details:
+  realistic_solution: 'Option A (TP=8): Draft weights per GPU: 7B x 2B / 8 = 1.75GB. Forward pass: 14
+    GFLOP / (8 x 989T) = 1.8us compute + all-reduce: 128K x 2B / 900 GB/s = 0.3us per layer x 32 layers
+    = 9.6us. Total: ~12us per token. Very fast but wastes 7 GPUs during draft generation. Option B (TP=1):
+    Draft on GPU-0: 14GB weights. Forward: 14 GFLOP / 989T = 14us. Other 7 GPUs idle during ~5 x 14us
+    = 70us. Negligible idle time vs target decode (80ms). Total: 70us for 5 draft tokens. Option C (extra
+    GPU): 14GB on GPU-8. No interference with target. Latency: same as B (70us). Cost: extra H100 ($2/hr).
+    Recommendation: Option B. Draft generation is only 70us total — 0.09% of the verification time. No
+    need for parallelism or extra hardware. The key insight: speculation is valuable precisely because
+    the draft is tiny and fast; making it faster with more GPUs has negligible impact.'
+  common_mistake: Choosing option A (TP=8 for draft) by default. Tensor parallelism for a 7B model across
+    8 GPUs adds all-reduce synchronization overhead that exceeds the parallelization benefit — 7B is too
+    small for TP=8.
+  napkin_math: 'Option A: 12us/token x 5 = 60us, all GPUs busy. B: 14us/token x 5 = 70us, 1 GPU busy.
+    C: 70us, separate GPU. Target verify: 80ms. Draft overhead: 0.09% of round. Option B is optimal.'
+last_modified: '2026-04-01'

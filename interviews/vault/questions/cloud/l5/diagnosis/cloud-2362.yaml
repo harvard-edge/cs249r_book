@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2362
+title: Diagnosing CXL Cache Thrashing
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: A 1TB embedding table is hosted on a CXL 2.0 Type 3 memory expansion module (32 GB/s bandwidth).
+  A batch of 1 million random sparse lookups takes 120ms. When the same table is temporarily forced into
+  local DDR5 (acting as a cache), the lookups take 5ms. The CXL link monitoring shows only 2 GB/s utilization.
+details:
+  realistic_solution: 'The root cause is latency-bound cache thrashing due to random sparse lookups. CXL
+    memory has higher latency (~250ns) compared to local DDR5 (~80ns). Because the 1 million lookups are
+    completely random (e.g., 64-byte fetches), the CPU cache miss rate is near 100%. The system becomes
+    bottlenecked by the round-trip latency of serial memory fetches before it can saturate the 32 GB/s
+    bandwidth. The solution requires software-managed batching and prefetching: gather the required embedding
+    indices, sort them to improve spatial locality, and issue wide asynchronous fetches (e.g., AVX-512
+    gather instructions or software prefetch `__builtin_prefetch`) to overlap the CXL latency and saturate
+    the link.'
+  common_mistake: Assuming the CXL hardware is defective because it isn't reaching 32 GB/s, and requesting
+    a motherboard swap.
+  napkin_math: '1 million fetches of 64 bytes = 64MB total data. Theoretical CXL transfer time = 64MB
+    / 32 GB/s = 2ms. However, if fetches are partially serial (e.g., Memory Level Parallelism = 2): 1M
+    fetches * 250ns latency = 250ms total serial time. MLP of ~2 yields 125ms, matching the 120ms observed.
+    For DDR5: 1M * 80ns / 16 (higher MLP) = 5ms.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

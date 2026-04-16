@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-crit-21011
+title: MoE Training Throughput vs Dense Model
+topic: mixture-of-experts
+status: published
+provenance: imported
+scenario: A team trains both a dense 13B model and a Mixtral-style 8x7B MoE (47B total, 13B active) on
+  64 H100 GPUs. The dense model achieves 3200 tokens/sec/GPU. The MoE model only achieves 2100 tokens/sec/GPU
+  despite having the same active FLOPs. Analyze where the 34% throughput gap comes from.
+details:
+  realistic_solution: 'The 34% throughput gap has three main sources: (1) All-to-all communication: dispatch
+    + combine operations per MoE layer add ~10-15% overhead even with NVLink, especially with non-uniform
+    routing. (2) Memory bandwidth: The MoE model has 47B params vs 13B — 3.6× more weights to load from
+    HBM per forward pass. Even though only 13B are ''active,'' the expert weights still consume HBM bandwidth
+    for loading the selected experts'' weights. At batch sizes where the model is memory-bandwidth-bound
+    (common during training with gradient checkpointing), this is the dominant factor. (3) Load imbalance:
+    The slowest expert determines layer latency. Even with aux loss, a 10-15% imbalance means 10-15% idle
+    time on the fastest GPUs. (4) Router overhead: computing gating probabilities and top-k selection
+    adds serial latency. Combined: ~15% memory BW + ~12% communication + ~7% load imbalance ≈ 34% total.'
+  common_mistake: Attributing the gap entirely to all-to-all communication overhead. While communication
+    is a factor, the memory bandwidth cost of loading all expert weights is often the dominant bottleneck.
+  napkin_math: 'Dense 13B weight loads per step: 13B × 2B = 26 GB. MoE 47B weight loads: 47B × 2B = 94
+    GB. Weight load ratio: 94/26 = 3.6×. At 3.35 TB/s HBM3 BW, dense: 26 GB/3.35 TB/s = 7.8ms. MoE: ~30ms
+    for full expert weight loading (with routing overhead).'
+last_modified: '2026-04-01'

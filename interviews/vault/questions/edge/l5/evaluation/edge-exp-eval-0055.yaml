@@ -1,0 +1,31 @@
+schema_version: 1
+id: edge-exp-eval-0055
+title: Evaluating Edge Accelerators vs Traditional GPUs
+topic: gpu-compute-architecture
+status: published
+provenance: imported
+scenario: You are deploying a 10M parameter INT8 object detection model (MobileNetV2-SSD derivative) processing
+  1080p video at 30 FPS. The hardware team proposes replacing an embedded GPU (with traditional SIMT/warp-based
+  execution and local DRAM) with a Hailo-8 dataflow accelerator. The Hailo-8 provides 26 TOPS INT8 compute
+  within a 2.5W envelope, but crucially, it has no local DRAM and relies entirely on streaming activations
+  from host memory. Compare the architectural tradeoffs between these two execution models. Which architecture
+  minimizes system-level latency and power for this pipeline, and how does the Hailo-8's lack of local
+  DRAM alter your model optimization strategy?
+details:
+  realistic_solution: The Hailo-8's dataflow architecture is vastly superior for power-constrained streaming
+    pipelines because it eliminates the von Neumann bottleneck inherent in GPUs. Instead of optimizing
+    for warp occupancy and memory coalescing to hide DRAM latency layer-by-layer, the optimization strategy
+    must shift to spatial graph compilation. The goal is to ensure the entire model's computational graph
+    fits within the Hailo-8's on-chip memory resources so that input pixels stream in via PCIe/host-memory
+    and output bounding boxes stream out, without intermediate off-chip memory spills.
+  common_mistake: Candidates often assume the lack of local DRAM is a severe bottleneck by applying GPU
+    paradigms (like memory coalescing and Tensor Core occupancy) to the Hailo-8. They fail to recognize
+    that a dataflow accelerator compiles the entire network into a spatial pipeline, keeping intermediate
+    activations entirely in distributed on-chip SRAM rather than writing them back to off-chip memory.
+  napkin_math: A 1080p RGB frame is 1920x1080x3 bytes ≈ 6.2 MB. Streaming at 30 FPS requires 6.2 MB *
+    30 ≈ 186 MB/s host-to-device bandwidth, easily handled by standard PCIe. An embedded GPU reading/writing
+    intermediate activations for a 50-layer network might consume 50 * 6.2 MB * 2 (read+write) * 30 FPS
+    ≈ 18.6 GB/s of local DRAM bandwidth, burning >2W just on memory I/O. The Hailo-8 avoids this entirely,
+    delivering its 26 TOPS INT8 within a strict 2.5W total power envelope (10.4 TOPS/W) by keeping those
+    18.6 GB/s of data movement strictly on-chip.
+last_modified: '2026-04-01'

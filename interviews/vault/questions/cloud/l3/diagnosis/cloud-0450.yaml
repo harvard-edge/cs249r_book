@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-0450
+title: The PCIe Starvation
+topic: data-pipeline-engineering
+status: published
+provenance: imported
+scenario: You are training a large vision model using a dataset stored on a local, high-speed NVMe SSD
+  array. Your H100 GPU reports fluctuating utilization, averaging only 35%. The CPUs are not maxed out,
+  and you have plenty of idle system RAM. Profiling shows that the `forward()` and `backward()` passes
+  are extremely fast, but there are large gaps of GPU inactivity between training steps. You are using
+  PyTorch's `DataLoader` with `pin_memory=True`. What is the most probable architectural bottleneck causing
+  the GPU to starve?
+details:
+  realistic_solution: The bottleneck is the PCIe Gen5 bus. An H100 GPU can process data from its HBM3
+    memory at an incredible rate (3.35 TB/s). However, the training data must first travel from the system's
+    main memory (where the DataLoader places it) to the GPU's memory over the PCIe bus. A PCIe Gen5 x16
+    slot has a maximum theoretical bandwidth of ~64 GB/s. This creates a massive impedance mismatch; the
+    GPU can consume data over 50 times faster than the PCIe bus can supply it. The gaps in GPU activity
+    are periods where the GPU has finished its work and is waiting for the next batch to be transferred
+    across the relatively slow PCIe bus.
+  common_mistake: Blaming the storage (NVMe) or the CPU workers. While slow storage or insufficient CPU
+    preprocessing can cause this, the most fundamental bottleneck in modern systems is often the bus connecting
+    the CPU/RAM to the GPU. Engineers often underestimate the massive bandwidth gap between the GPU's
+    own memory and the PCIe bus used to feed it.
+  napkin_math: H100 HBM3 BW is 3.35 TB/s, but data crosses PCIe Gen4 (32 GB/s). For a batch of 256 high-res
+    images (3x1024x1024, 6MB each) total size is 1.5GB. If a step takes 30ms, required bandwidth is 1.5GB
+    / 0.03s = 50 GB/s. This exceeds 32 GB/s, leaving the GPU starved for data 35% of the time.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

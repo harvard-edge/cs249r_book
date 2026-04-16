@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-1810
+title: Diagnosing LLM Decode Inefficiency
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: A team is optimizing an LLM serving engine on an NVIDIA A100 GPU (312 TFLOPS BF16 peak compute,
+  2.0 TB/s memory bandwidth). Profiling reveals the prompt prefill phase achieves 65% of peak compute
+  utilization, but the token decoding phase achieves less than 1% of peak TFLOPS. To fix the decoding
+  phase, engineers rewrite the MLP and Attention layers using custom Triton kernels to squeeze out more
+  compute efficiency. However, the token generation latency barely improves. Using the Roofline model,
+  explain why the Triton compute optimization failed and diagnose the fundamental bottleneck.
+details:
+  realistic_solution: The Roofline model shows the decode phase is severely memory-bandwidth bound, not
+    compute-bound. For a single token generation, each 2-byte weight (BF16) is loaded once to perform
+    1 Multiply-Accumulate (2 FLOPs), resulting in an arithmetic intensity of 1 FLOP/Byte. Because this
+    is far below the A100's ridge point of 156 FLOPs/Byte, the workload sits deep in the memory-bound
+    region of the Roofline plot. Optimizing compute kernels only raises the compute roof, which the decode
+    phase isn't hitting. The correct approach is to increase arithmetic intensity via continuous batching
+    or reduce memory traffic via weight quantization.
+  common_mistake: Candidates often assume low compute utilization implies poorly optimized kernels or
+    lack of instruction-level parallelism, suggesting even deeper kernel-level compute tuning without
+    realizing the workload is constrained by an entirely different hardware limit.
+  napkin_math: "A100 Ridge Point = Peak Compute / Peak Bandwidth = 312e12 FLOPs/sec / 2e12 Bytes/sec =\
+    \ 156 FLOPs/Byte. \nLLM Decode AI (batch size 1) = 2 FLOPs (MAC) / 2 Bytes (BF16 weight) = 1 FLOP/Byte.\
+    \ \nMax Decode Throughput = AI * Bandwidth = 1 * 2e12 = 2 TFLOPS. \nTheoretical Max Utilization =\
+    \ 2 TFLOPS / 312 TFLOPS = ~0.64%."
+chain:
+  id: cloud-chain-345
+  position: 2
+created_at: '2026-03-24T00:48:41.457269'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

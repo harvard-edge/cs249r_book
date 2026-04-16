@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-0550
+title: 'The Speculative Decoding Backfire: Speculative Decoding'
+topic: speculative-decoding
+status: published
+provenance: imported
+scenario: Your team is serving a 70B parameter summarization model. To improve throughput and reduce time-to-first-token,
+  you implement speculative decoding. You use a 1.3B distilled version of the model as a 'drafter' to
+  generate 5-token drafts, which the 70B 'verifier' model then checks in a single parallel pass. The system
+  is deployed on H100s. During testing, the team observes that while average latency improves on typical
+  conversational inputs, the P99 latency gets catastrophically worse on out-of-domain inputs, like summarizing
+  source code. In these failure cases, the total time to generate the first token is more than double
+  the latency of using the 70B model by itself. Critique this design. Why does an optimization that helps
+  the average case cause a non-linear latency explosion for the worst case?
+details:
+  realistic_solution: 'The system is experiencing a ''Verification Failure Tax''. Speculative decoding
+    is a probabilistic bet: you gamble that the cheap draft is correct to avoid expensive autoregressive
+    generation. The problem is not the speed of the draft model, but its *accuracy* on out-of-domain inputs.
+    When the distilled model''s knowledge doesn''t cover the input (e.g., code), its draft is consistently
+    wrong, causing the acceptance rate to plummet. The system then pays the latency of: 1) generating
+    the useless draft, 2) running the expensive verification pass only for it to fail, and 3) falling
+    back to a standard autoregressive step with the large model. This fallback makes the process significantly
+    slower than just using the large model from the start. The result is a bimodal latency distribution:
+    a fast mode for high-acceptance inputs and a catastrophically slow mode for low-acceptance inputs,
+    which destroys the P99 latency.'
+  common_mistake: The draft model is too slow, or the Python logic for switching between models adds too
+    much overhead. This focuses on the raw speed of the components in isolation, not the cost of their
+    interaction. The overhead of Python logic is microseconds, while the observed slowdown is tens of
+    milliseconds.
+  napkin_math: '70B weights = 140GB (needs 2x H100s, aggregate BW = 6.7 TB/s). 1.3B weights = 2.6GB. Draft
+    5 tokens: 5 * (2.6GB / 3.35 TB/s) = 3.9ms. Verifier step: 140GB / 6.7 TB/s = 20.9ms. Total time =
+    24.8ms. If all 5 drafts are rejected, we yield 1 token in 24.8ms. Standard generation yields 1 token
+    in 20.9ms. The failed gamble costs 3.9ms/token.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

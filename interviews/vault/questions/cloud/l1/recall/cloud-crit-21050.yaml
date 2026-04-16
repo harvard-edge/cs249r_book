@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-crit-21050
+title: Disaggregated KV-Cache Storage Architecture
+topic: kv-cache-management
+status: published
+provenance: imported
+scenario: You are architecting a next-generation LLM serving system where KV-cache is stored in a shared
+  distributed memory pool (RDMA-accessible) rather than on individual GPU HBM. The pool uses CXL-attached
+  memory providing 100 GB/s per GPU link. Design the architecture for Llama 3 70B serving and analyze
+  when it outperforms local HBM KV-cache.
+details:
+  realistic_solution: 'Architecture: Disaggregated KV-cache pool (DKV) with CXL memory as a backing store,
+    not a replacement for HBM. (1) GPU HBM holds the ''hot'' working set: current batch''s KV-cache for
+    the active decode window (~last 1K tokens). (2) CXL pool holds ''warm'' KV-cache: prefix caches, paused
+    conversations, recently completed requests'' caches for potential reuse. (3) Access pattern: Prefill
+    writes KV to both local HBM and CXL pool. During decode, KV is read from local HBM (3.35 TB/s). When
+    a request is paused/preempted, its KV is already in the CXL pool — no GPU memory freed instantly,
+    just dereference local copy. (4) Benefits: (a) Request migration: move a request to a different GPU
+    by having the new GPU pull KV from the pool (100 GB/s × 2.62 GB = 26ms for 8K context) — faster than
+    recomputing prefill (~200ms). (b) Prefix deduplication: shared prompts stored once in the pool, referenced
+    by all GPUs. (c) Elastic scaling: GPUs can be added/removed without losing cached state. (5) When
+    DKV wins: high request migration rate (load balancing), large shared prefixes (RAG with shared corpus),
+    and long-running multi-turn conversations (KV persistence across sessions).'
+  common_mistake: Assuming CXL memory bandwidth is sufficient for real-time KV-cache access during every
+    decode step. At 100 GB/s (vs 3.35 TB/s HBM), remote KV access is 33× slower — it cannot be on the
+    decode critical path.
+  napkin_math: 'CXL bandwidth: 100 GB/s (33× slower than HBM3 at 3.35 TB/s). KV load for decode step (8K
+    ctx): 2.62 GB. Via HBM: 0.78 ms. Via CXL: 26 ms (unacceptable for decode). Use case: request migration
+    2.62 GB / 100 GB/s = 26 ms vs recompute prefill 200 ms → 7.7× faster migration.'
+last_modified: '2026-04-01'

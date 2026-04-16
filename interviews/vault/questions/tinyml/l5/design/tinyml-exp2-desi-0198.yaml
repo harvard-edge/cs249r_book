@@ -1,0 +1,29 @@
+schema_version: 1
+id: tinyml-exp2-desi-0198
+title: Continuous Audio Ingestion Pipeline on Corstone-300
+topic: streaming-ingestion
+status: published
+provenance: imported
+scenario: You are designing a real-time predictive maintenance sensor that continuously ingests 16 kHz
+  acoustic data to detect machine anomalies. The system runs on an ARM Cortex-M7 + Ethos-U55 (Corstone-300)
+  platform, which features a 480 MHz M7 and an Ethos-U55 NPU (capable of 128-512 MAC/cycle) that share
+  a strict 512 KB SRAM constraint. You need to architect the streaming data ingestion, feature extraction
+  (MFCCs), and NPU inference pipeline to ensure zero dropped audio frames while fitting within the shared
+  memory and compute budgets.
+details:
+  realistic_solution: Architect a DMA-backed ping-pong buffer for raw audio ingestion (e.g., 20ms frames).
+    While DMA fills buffer B, the Cortex-M7 computes MFCC features from buffer A. These features are appended
+    to a compact sliding-window ring buffer. The M7 then triggers the Ethos-U55 to run inference on the
+    feature window. By keeping raw audio buffers tiny and using DMA, the CPU is freed, and the shared
+    512 KB SRAM is preserved for the NPU's execution.
+  common_mistake: Candidates often propose a naive sequential pipeline (read audio -> compute MFCC ->
+    run NPU) without DMA, causing dropped samples during M7 processing or NPU execution. Alternatively,
+    they over-allocate large ring buffers for raw audio history, forgetting that the M7 and Ethos-U55
+    share the 512 KB SRAM, which quickly starves the NPU's activation arena.
+  napkin_math: Raw audio at 16 kHz (16-bit) generates 32 KB/sec. A 20ms DMA ping-pong buffer requires
+    2 x 640 bytes = 1.28 KB of SRAM. Generating 40 MFCC features per frame creates a 1-second feature
+    window of 50 frames x 40 bytes = 2 KB. Total ingestion buffer size is ~3.28 KB. At 480 MHz, the M7
+    has 9.6M cycles per 20ms frame; MFCC extraction typically takes <2M cycles. This leaves >500 KB of
+    the 512 KB shared SRAM dedicated entirely to the Ethos-U55 tensor arena, ensuring the 128-512 MAC/cycle
+    NPU is fully fed without memory contention.
+last_modified: '2026-04-01'

@@ -1,0 +1,38 @@
+schema_version: 1
+id: mobile-0782
+title: The NAS Latency Predictor Blind Spot
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: You are using hardware-aware NAS to find an optimal architecture for a mobile vision model targeting
+  a Qualcomm Snapdragon 8 Gen 3 NPU. The NAS uses a latency lookup table (LUT) built by profiling individual
+  operators (convolutions, depthwise separable convolutions, attention blocks) in isolation. After 500
+  GPU-hours of search, the top architecture achieves the predicted 8ms latency on the NPU — but only when
+  run in isolation. When deployed inside the full camera pipeline (which also runs ISP processing, object
+  tracking, and UI rendering on the same SoC), actual latency balloons to 22ms. The NAS found the wrong
+  architecture. Why?
+details:
+  realistic_solution: 'The NAS latency predictor has a fundamental blind spot: it profiles operators in
+    isolation on the NPU, but the production deployment shares the SoC''s resources with other workloads.
+    Three specific failures occur: (1) Memory bandwidth contention — the NAS-selected architecture uses
+    depthwise separable convolutions with large spatial dimensions that are memory-bandwidth-bound. In
+    isolation, they get full LPDDR5 bandwidth (~50 GB/s). When the ISP and GPU are also active, available
+    bandwidth drops to ~15 GB/s, and memory-bound operators slow down 3.3x while compute-bound operators
+    are unaffected. A NAS that accounted for contention would prefer compute-bound operators (dense convolutions,
+    attention). (2) The NPU has a DMA engine that overlaps data loading with compute; under contention,
+    DMA stalls cascade through the operator pipeline. (3) The NAS explored architectures with many small
+    operators (higher accuracy per FLOP), but each operator has fixed dispatch overhead on the NPU runtime
+    (~0.05ms), and 80 operators × 0.05ms = 4.0ms of overhead alone. The fix: profile the latency LUT under
+    realistic concurrent load, penalize memory-bandwidth-bound operators, and add an operator-count penalty
+    to the NAS reward function.'
+  common_mistake: Blaming thermal throttling alone. 'The SoC gets hot under full load.' Thermal effects
+    contribute but are not the primary cause, and they would affect all architectures equally — they wouldn't
+    make this specific NAS-found architecture worse than alternatives.
+  napkin_math: 'Isolated NPU: 50 GB/s bandwidth. NAS-selected arch compute: 4.0ms (memory-bound depthwise
+    convs). Overhead: 80 ops × 0.05ms = 4.0ms. Total isolated = 8.0ms. Under contention (15 GB/s): memory-bound
+    ops slow 3.3x (4.0ms × 3.3 = 13.2ms), plus cascading DMA stalls (~4.8ms). Total = 13.2 + 4.0 + 4.8
+    = 22.0ms. Alt arch (dense convs, compute-bound): 7.0ms compute + 20 ops × 0.05ms overhead = 8.0ms.
+    Under contention: 7.0ms + 1.0ms = 8.0ms (unaffected).'
+last_modified: '2026-04-01'
+tags:
+- scope:Deployed Device

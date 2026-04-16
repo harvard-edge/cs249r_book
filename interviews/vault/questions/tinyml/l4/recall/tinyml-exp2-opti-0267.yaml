@@ -1,0 +1,29 @@
+schema_version: 1
+id: tinyml-exp2-opti-0267
+title: Mitigating Shared SRAM Contention in U55
+topic: real-time-deadlines
+status: published
+provenance: imported
+scenario: You are deploying a predictive maintenance model on an ARM Cortex-M7 + Ethos-U55 (Corstone-300)
+  platform to meet a strict 10ms real-time deadline per sensor reading. The system features a 480 MHz
+  M7 and 512 KB of shared SRAM. While the Ethos-U55 is configured for 256 MAC/cycle, sporadic inference
+  latencies spike to 12ms when the M7 concurrently processes high-frequency sensor interrupts and logs
+  data into the same SRAM, causing the system to miss its budget. How do you diagnose and resolve this
+  pipeline bottleneck?
+details:
+  realistic_solution: 'The bottleneck is AXI bus contention for the shared 512 KB SRAM. The M7''s continuous
+    memory accesses during interrupts stall the U55''s DMA memory controller. The solution is to isolate
+    memory traffic: map the M7''s sensor logging buffers and stack/heap to the M7''s Tightly Coupled Memory
+    (TCM), which has a dedicated internal bus, and reserve the main 512 KB SRAM exclusively for the U55''s
+    tensors. This eliminates bus contention and allows the U55 to hit its peak MAC utilization.'
+  common_mistake: Candidates often suggest lowering the model's compute requirements (e.g., pruning or
+    reducing input resolution) without realizing that the NPU is memory-bound in this state, not compute-bound.
+    They fail to identify the bus contention over the shared 512 KB SRAM between the M7's interrupt-driven
+    data logging and the U55's weight/activation fetching.
+  napkin_math: Assuming a model with 20M MACs. The Ethos-U55 at 480 MHz with 256 MAC/cycle provides 122.8
+    GMAC/s peak, needing only ~0.16ms for compute. However, reading/writing 400 KB of activations/weights
+    requires ~100,000 cycles on a 32-bit bus (~0.21ms ideal latency). If the M7's interrupt routine saturates
+    the bus or locks the memory arbiter during its logging bursts, the U55's memory fetch latency spikes
+    by up to 50x, pushing total inference time over 10ms. Moving the M7's memory allocations to the M7
+    TCM removes this stall, dropping inference back to ~0.4ms total, well within the 10ms deadline.
+last_modified: '2026-04-01'

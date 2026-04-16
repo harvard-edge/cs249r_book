@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-1304
+title: Diagnosing RoCEv2 Throughput Collapse Under Minor Packet Loss
+topic: collective-communication
+status: published
+provenance: imported
+scenario: You are debugging a distributed LLM training job across 256 H100 GPUs connected via a 400Gbps
+  RoCEv2 fabric. The network engineering team reports a seemingly negligible switch packet loss rate of
+  just 0.05%, caused by mild incast congestion during NCCL AllReduce operations. However, your distributed
+  training logs show that the effective network bandwidth has collapsed drastically, dropping from an
+  expected 45 GB/s down to just 8 GB/s. Why would such a microscopic packet drop rate cause an 80% degradation
+  in goodput, and how do you resolve it?
+details:
+  realistic_solution: The underlying RoCE NICs are utilizing a Go-Back-N retransmission mechanism. In
+    high Bandwidth-Delay Product (BDP) environments, dropping one packet forces the sender to discard
+    and retransmit the entire inflight window of subsequent packets, flooding the network with redundant
+    data. The fix is to enable Selective Repeat (Selective ACK / SACK) or hardware-assisted out-of-order
+    data placement on the NICs so that only the specifically dropped packets are re-sent.
+  common_mistake: Blaming the throughput drop entirely on Priority Flow Control (PFC) pause frames creating
+    deadlocks, or assuming a PCIe bottleneck, without realizing that the underlying RDMA transport protocol
+    is brutally multiplying the penalty of a single dropped packet.
+  napkin_math: At 400 Gbps (50 GB/s) with a cluster RTT of 20µs, the BDP is 50 GB/s * 20µs = 1MB. Assuming
+    a 4KB MTU, there are 250 packets in flight per Queue Pair. At a 0.05% loss rate (1 drop per 2,000
+    packets), Go-Back-N forces the retransmission of all 250 inflight packets every time a drop occurs.
+    This means for every 2,000 packets sent, an extra 250 are needlessly retransmitted—an immediate 12.5%
+    penalty. In heavily concurrent AllReduce phases, these redundant bursts exacerbate the incast congestion,
+    driving the drop rate higher in a catastrophic positive feedback loop that crushes effective throughput.
+chain:
+  id: cloud-chain-161
+  position: 2
+created_at: '2026-03-23T22:30:57.866095'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

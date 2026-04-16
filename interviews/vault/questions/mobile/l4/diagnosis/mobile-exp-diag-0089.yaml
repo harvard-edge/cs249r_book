@@ -1,0 +1,30 @@
+schema_version: 1
+id: mobile-exp-diag-0089
+title: CI/CD Deployment Fallback Regression
+topic: mlops-lifecycle
+status: published
+provenance: imported
+scenario: Your MLOps CI/CD pipeline promotes a newly trained INT8 vision model to the registry after validating
+  strict accuracy parity. Upon canary deployment to edge devices powered by the Qualcomm Hexagon NPU (Snapdragon
+  8 Gen 3), on-device telemetry reports a severe latency regression from 5ms to over 80ms, along with
+  elevated power draw. The target platform features 45 TOPS INT8 compute and a shared 12-16 GB LPDDR5X
+  memory system across its heterogeneous CPU+GPU+NPU architecture. Given that the model architecture size
+  and the input resolution remained identical, analyze the training-serving consistency gap causing this
+  deployment failure.
+details:
+  realistic_solution: The root cause is a silent subgraph fallback due to an unsupported operator introduced
+    in the new model version (e.g., replacing ReLU with SiLU). Because the MLOps pipeline did not strictly
+    validate Hexagon NPU compatibility during the CI conversion step, the unsupported layer forces the
+    inference engine to partition the graph. Execution falls back to the CPU, bypassing the 45 TOPS INT8
+    NPU advantage and incurring severe context switching and memory transfer overheads across the heterogeneous
+    architecture.
+  common_mistake: Candidates often assume the LPDDR5X memory is saturated or thermal throttling is occurring
+    due to background tasks. They fail to identify that a silent operator mismatch in the CI/CD compilation
+    pipeline causes a hardware fallback, breaking training-serving consistency.
+  napkin_math: 'For a model requiring 2 GOPS: Theoretical NPU compute time at 45 TOPS is (2 * 10^9) /
+    (45 * 10^12) = 0.044 ms. If an unsupported operator forces a fallback, passing two 8MB activation
+    tensors between the NPU and CPU via the shared LPDDR5X (approx 64 GB/s bandwidth) takes (16 * 10^6
+    bytes) / (64 * 10^9 bytes/s) = 0.25 ms purely in memory copy time. However, the CPU processes the
+    INT8 fallback at a fraction of the NPU''s speed (e.g., 1 TOPS), adding computation time, plus a massive
+    70-80ms OS context-switching and framework partitioning latency, resulting in the observed 80ms+ regression.'
+last_modified: '2026-04-01'

@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-0628
+title: The Embedding Table Sharding Problem
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: We run a recommendation model with a 1 TB embedding table (4 billion entries × 128 dimensions
+  × FP16). The table is sharded across 64 GPUs, each holding ~16 GB. Training throughput is terrible —
+  GPUs are 80% idle. The network isn't saturated. What's going on?
+details:
+  realistic_solution: 'Embedding lookups follow a Zipf distribution: a tiny fraction of entries (popular
+    items) account for the vast majority of accesses. With naive hash-based sharding (entry $i$ goes to
+    GPU $i \mod 64$), the popular entries are spread uniformly — every batch requires AllToAll communication
+    to fetch embeddings from remote GPUs. Worse, the hot entries create load imbalance: the few GPUs holding
+    the most popular entries become bottlenecks while others sit idle. The 80% idle time is GPUs waiting
+    for AllToAll to complete. The fix is **popularity-aware sharding**: (1) identify the top-1% hottest
+    entries (which serve ~50% of lookups by Zipf''s law); (2) replicate these entries on every GPU — they
+    fit easily (1% of 1 TB = 10 GB, replicated on each GPU); (3) shard the remaining 99% of cold entries
+    across GPUs. Now 50% of lookups are local (no communication), and the remaining 50% are evenly distributed
+    across GPUs (no hot spots).'
+  common_mistake: '"The embedding table is too large — we need more GPUs to reduce per-GPU memory." Adding
+    GPUs to a poorly sharded embedding table makes the problem worse, not better.'
+  napkin_math: '**Zipf distribution:** Top 1% of entries (40M entries × 256 bytes = **10.2 GB**) serve
+    ~50% of lookups. Remaining 99% (3.96B entries = **1,014 GB**) serve the other 50%. **Naive sharding
+    (64 GPUs):** Every batch of 65,536 lookups: ~50% hit hot entries spread across all 64 GPUs → AllToAll
+    moves ~32,768 embeddings × 256 bytes = **8.4 MB** per batch. At 400 Gbps IB: transfer = 0.17 ms, but
+    AllToAll latency with 64 participants = ~**2-5 ms** (synchronization-dominated). Step time: 1 ms compute
+    + 5 ms AllToAll = **6 ms** → 83% communication overhead. **Popularity-aware sharding:** Replicate
+    top 1% on each GPU: 10.2 GB per GPU (fits in 80 GB alongside 15.8 GB of cold shards). 50% of lookups
+    are now local (0 ms communication). Remaining 50% still need AllToAll but with 50% less data: **~1-2.5
+    ms**. Step time: 1 ms compute + 2.5 ms AllToAll = **3.5 ms** → 71% utilization improvement. Memory
+    cost: 10.2 GB × 64 GPUs = 653 GB total replication overhead — but GPU memory is cheaper than GPU idle
+    time.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

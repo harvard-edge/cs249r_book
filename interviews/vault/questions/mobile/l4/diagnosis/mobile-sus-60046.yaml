@@ -1,0 +1,25 @@
+schema_version: 1
+id: mobile-sus-60046
+title: Profiling and eliminating unnecessary tensor copies in mobile autograd pipeline
+topic: autograd-computational-graphs
+status: published
+provenance: imported
+scenario: A PyTorch Mobile model on A17 Pro (35 TOPS, 8GB) processes images from the camera in real-time.
+  Profiling shows 60% of inference time (12ms out of 20ms) is spent on memory operations, not compute.
+  The model is a MobileNetV2 (3.4M params) which should be compute-bound at 300M FLOPs.
+details:
+  realistic_solution: 'Convert to channels-last memory format: model = model.to(memory_format=torch.channels_last).
+    Process input in NHWC natively. Fuse the uint8→float32 conversion and normalization into a single
+    operation. Eliminate unnecessary .contiguous() calls by ensuring all operations support non-contiguous
+    tensors or by using channels-last throughout. Result: memory ops should drop from 12ms to ~2ms.'
+  common_mistake: Not realizing that camera frame data arrives in NHWC format (common in mobile frameworks)
+    while PyTorch expects NCHW. The implicit format conversion during preprocessing creates a non-contiguous
+    tensor, and subsequent operations call .contiguous() internally, creating large copies. Additionally,
+    converting from uint8 to float32 and normalizing as separate operations creates intermediate tensors.
+  napkin_math: 'Camera frame: 1×3×720×1280 = 2.76MB. uint8→float32 copy: 2.76MB → 11MB. Format conversion
+    NHWC→NCHW: 11MB copy = 22MB total intermediate. At A17 Pro memory bandwidth ~200GB/s: 22MB / 200GB/s
+    = 0.11ms per conversion. But with cache misses on non-contiguous access: 10-50× penalty → 1-5ms. Channels-last
+    format: 0.11ms without cache penalties. Savings: 4ms per frame.'
+last_modified: '2026-04-02'
+tags:
+- scope:single-machine

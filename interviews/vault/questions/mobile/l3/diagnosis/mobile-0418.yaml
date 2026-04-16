@@ -1,0 +1,36 @@
+schema_version: 1
+id: mobile-0418
+title: The Futile Shard
+topic: 3d-parallelism
+status: draft
+provenance: imported
+scenario: You are the Staff ML Engineer on the mobile team. A junior engineer, with a strong background
+  in cloud LLM training, is tasked with implementing on-device fine-tuning for a 50M parameter personalization
+  model on an Apple A17 Pro. To save memory, they wrap the model in a PyTorch FSDP (Fully Sharded Data
+  Parallelism) variant designed for single-node, multi-accelerator use. During testing, they are shocked
+  to find that training is 10x slower than a baseline implementation and peak memory usage has actually
+  increased. They suspect a bug in the ANE drivers. Given the specs, diagnose the most likely cause of
+  the performance degradation.
+details:
+  realistic_solution: The root cause is the architectural mismatch. FSDP is designed for multi-accelerator
+    systems where model parameters are distributed across physically separate memory pools (e.g., different
+    GPUs). It relies on high-speed interconnects (like NVLink) to run communication (All-Gather) in parallel
+    with computation. On a mobile SoC, there is only one accelerator and one pool of unified memory. FSDP's
+    'sharding' provides no memory saving and its 'communication' phase becomes a series of blocking memory
+    copies on the main memory bus. This communication overhead, which is meant to be hidden by overlapping
+    with computation on a different accelerator, now dominates the total execution time and adds latency,
+    making the process much slower than a simple, non-parallel forward/backward pass.
+  common_mistake: Engineers accustomed to cloud environments often assume that parallelism techniques
+    like FSDP are universal solutions for memory and compute scaling. They misapply multi-GPU architectural
+    patterns to single-accelerator, unified-memory systems, failing to account for the fact that the 'network'
+    is now the device's memory bus, and the communication overhead outweighs any benefits.
+  napkin_math: '50M params INT8=50MB. FSDP shards across N GPUs; on single SoC N=1→no sharding benefit.
+    All-Gather per layer: memcpy of full params. 20 layers × 2.5MB × 2 passes = 100MB blocking copies.
+    A17 Pro BW: 51.2 GB/s but copies compete with compute. Overhead: 100MB/51.2=2ms pure copy + scheduling.
+    Baseline fwd+bwd ~10ms; FSDP adds serial blocking → 10× slower.'
+chain:
+  id: mobile-chain-003
+  position: 1
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

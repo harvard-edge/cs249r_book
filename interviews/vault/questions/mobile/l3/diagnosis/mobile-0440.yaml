@@ -1,0 +1,43 @@
+schema_version: 1
+id: mobile-0440
+title: The Live Filter Battery Drain
+topic: roofline-analysis
+status: published
+provenance: imported
+scenario: You are a mobile ML engineer at a major social media company, tasked with optimizing a new 'Live
+  Portrait' filter. The feature works, but internal testing shows it causes significant battery drain
+  and thermal throttling on the latest smartphones, leading to a choppy user experience. Your profiler
+  points to a specific 3×3 depthwise separable convolution as the main culprit. The layer processes a
+  256×256×128 feature map at INT8, performing ~151 M Ops and moving ~16.8 MB of data per inference. The
+  device is an A17 Pro (35 TOPS, 51.2 GB/s). Diagnose the performance bottleneck.
+details:
+  realistic_solution: The layer is severely **memory-bound**. Its calculated arithmetic intensity is extremely
+    low, meaning the number of computations performed per byte of data moved is tiny. The NPU's powerful
+    compute cores spend most of their time idle, waiting for data to be fetched from the much slower LPDDR5
+    RAM. The high power consumption is not from doing math, but from the energy cost of constantly accessing
+    main memory. The correct optimization strategy is to improve data locality, for example, by fusing
+    this layer with its preceding or succeeding layer to keep intermediate tensors in the much faster
+    on-chip cache, avoiding the round trip to DRAM.
+  common_mistake: Engineers often see high power draw and immediately assume the workload is compute-bound,
+    thinking the NPU is running at 100% capacity. They fail to consider that inefficient data movement
+    between DRAM and the processing cores can also consume significant power while the compute units themselves
+    are starving for data. This leads them to incorrectly pursue solutions like reducing model parameters
+    instead of improving memory access patterns.
+  napkin_math: '1. **Arithmetic Intensity:** AI = 151 × 10^6 Ops / (16.8 × 10^6 Bytes) ≈ 9 Ops/Byte.
+
+    2. **Ridge Point:** 35 × 10^12 / (51.2 × 10^9) ≈ 683 Ops/Byte.
+
+    3. **Compare:** AI (9) << Ridge Point (683) → layer is **severely memory-bound**.
+
+    4. **Memory time:** 16.8 MB / 51.2 GB/s ≈ 0.33 ms. Compute time: 151 MOps / 35 TOPS ≈ 0.0043 ms.
+
+    5. **Diagnosis:** Compute units are mostly idle, waiting for data. The energy is spent on DRAM access,
+    not math.
+
+    6. **Fix:** Fuse with adjacent layers to keep data in on-chip SRAM, avoiding the round trip to DRAM.'
+chain:
+  id: mobile-chain-090
+  position: 1
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

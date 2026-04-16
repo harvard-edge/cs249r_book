@@ -1,0 +1,43 @@
+schema_version: 1
+id: cloud-fill-00363
+title: Designing Low-Latency, High-Throughput LLM Inference with Dynamic Batching on NVIDIA A100
+topic: batching-strategies
+status: published
+provenance: imported
+scenario: Your team is deploying a critical real-time inference service for a large language model (LLM)
+  on a cluster of NVIDIA A100 GPUs. Each A100 offers 80 GB HBM2e memory, 312 TFLOPS FP16 performance,
+  and 2.0 TB/s memory bandwidth, with a 400W TDP. The service has stringent latency requirements (e.g.,
+  p99 < 50ms) but also needs to maximize overall throughput to handle millions of queries per second.
+  You are tasked with designing the inference pipeline's batching strategy. Specifically, you need to
+  evaluate and propose a solution that balances throughput and latency, considering static, dynamic, and
+  continuous batching approaches. How would you architect the system, including scheduling policies, to
+  leverage the A100's capabilities effectively while meeting both latency and throughput KPIs?
+details:
+  realistic_solution: A realistic solution would involve a dynamic or continuous batching strategy, potentially
+    augmented with a smart request scheduler. For instance, a continuous batching approach (like vLLM's
+    PagedAttention) on the A100 can maximize GPU utilization by grouping requests with varying sequence
+    lengths and progress, ensuring the GPU is always processing active tokens. A hybrid approach might
+    also involve a small, fixed-size 'express lane' static batch for ultra-low-latency critical requests,
+    while the majority of traffic goes through a dynamic or continuous batching system that accumulates
+    requests for a short window (e.g., 5-10ms) or until a certain batch size is met, ensuring the A100's
+    FP16 TFLOPS and HBM2e bandwidth are heavily utilized. The scheduler would prioritize requests based
+    on their individual deadlines and available GPU resources, potentially using techniques like speculative
+    decoding for further latency reduction.
+  common_mistake: A common mistake is to exclusively focus on static batching with a fixed, small batch
+    size to meet latency targets, leading to underutilization of the A100's compute capabilities and significantly
+    reduced throughput. Conversely, using very large static batch sizes for throughput can severely violate
+    latency SLAs, especially for variable input lengths, without intelligent scheduling, as requests might
+    wait too long to fill a batch.
+  napkin_math: Consider an LLM inference scenario where the base processing time for a single token, single
+    request on an A100 is 10ms. If we aim for a p99 latency of 50ms, a naive static batching approach
+    would severely limit throughput. If the memory bandwidth (2.0 TB/s) is the bottleneck for a large
+    model, an A100 could theoretically move (2.0 * 10^12 bytes/s) / (2 bytes/FP16) = 10^12 FP16 operations
+    per second, which means it can process a significant amount of data. To fully utilize the 312 TFLOPS
+    FP16, a batch size might need to be substantial. If the per-token inference cost on an A100 is roughly
+    `T_base / sqrt(batch_size)` (a simplification for efficiency gains), then to maintain a 50ms latency
+    for a 5-token output, the average time per token needs to be 10ms. If a model fits entirely in the
+    80 GB HBM2e, then maximizing the dynamic batch size up to the memory limit, while respecting the 50ms
+    overall processing window for the batch, would be key to leveraging the 312 TFLOPS. For example, if
+    a batch of 128 tokens takes 40ms, that's 128 tokens / 40ms = 3200 tokens/s. This drastically improves
+    throughput compared to a single token in 10ms.
+last_modified: '2026-04-01'

@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-fill-04022
+title: Micro-batch Size Selection Under Memory Constraints
+topic: pipeline-parallelism
+status: published
+provenance: imported
+scenario: You are setting up pipeline parallelism on 4 H100 (80GB HBM3) for a 40B parameter model in BF16.
+  Model parameters alone consume 80 GB across 4 GPUs (20 GB/GPU). The optimizer states (Adam) add 2× parameters
+  × 2 bytes = another 40 GB across 4 GPUs (10 GB/GPU). You have 50 GB free per GPU for activations. What
+  is the maximum micro-batch size you can use with 8 micro-batches in flight?
+details:
+  realistic_solution: Activation memory per layer = seq_len × batch_size × hidden_dim × bytes. With 8
+    micro-batches in flight, total activation memory = 8 × (activation per micro-batch). Solve for max
+    batch size given 50 GB free. Apply gradient checkpointing to reduce activation memory by ~3× at the
+    cost of one extra forward pass.
+  common_mistake: Calculating activation memory for a single micro-batch and multiplying by global batch
+    size rather than by the number of micro-batches in the pipeline at one time. In GPipe-style pipeline
+    parallelism, all m micro-batches accumulate activations simultaneously in the forward pass before
+    backprop begins.
+  napkin_math: 'Activation per token per layer: seq=2048, hidden=4096, BF16: 2048 × 4096 × 2 = 16 MB/layer.
+    40B model: ~80 layers / 4 stages = 20 layers/GPU. Activation per micro-batch: 20 layers × 16 MB ×
+    micro_batch_size = 320 MB × micro_batch_size. With 8 micro-batches: 2.56 GB × micro_batch_size ≤ 50
+    GB. Max micro_batch_size = 50 / 2.56 ≈ 19. Practical max: 16 (power of 2). With checkpointing: 50
+    GB / (2.56/3) ≈ 58 → micro_batch_size = 32.'
+last_modified: '2026-04-01'

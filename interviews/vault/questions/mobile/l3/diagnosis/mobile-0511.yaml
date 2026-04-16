@@ -1,0 +1,36 @@
+schema_version: 1
+id: mobile-0511
+title: The Distributed Training Scaling Failure
+topic: interconnect-topology
+status: published
+provenance: imported
+scenario: 'You are a Mobile ML Engineer responsible for developing a new real-time video segmentation
+  feature. To achieve the required on-device performance, you are distilling a small student model from
+  a very large ''teacher'' model trained in the cloud. Your team observes that the distributed training
+  job for the teacher model is scaling poorly. When scaling from 2 to 8 multi-GPU nodes, throughput only
+  improved by 1.5x instead of the expected ~4x. Your infrastructure team provides a profiling report:
+  within each 8-GPU (H100) node, GPU utilization is high and NVLink traffic is normal. However, the `AllReduce`
+  operation, which synchronizes gradients across nodes, shows extremely high latency. All nodes are physically
+  located in the same datacenter rack. Based on this, diagnose the most likely architectural bottleneck.'
+details:
+  realistic_solution: The most likely cause is that the servers are connected with a standard, low-bandwidth
+    interconnect like 10/40Gbps Ethernet using the TCP/IP stack, instead of a high-performance fabric
+    like InfiniBand with RDMA (Remote Direct Memory Access). Standard TCP/IP requires data to be copied
+    from GPU memory to CPU memory, processed by the kernel's network stack, and then sent. This introduces
+    massive latency and CPU overhead. An `AllReduce` operation is extremely sensitive to this cross-node
+    latency and bandwidth. InfiniBand with RDMA allows the network card to pull data directly from the
+    remote server's GPU memory, bypassing the host CPU and kernel entirely, which is critical for efficient
+    scaling.
+  common_mistake: Engineers often misinterpret 'high GPU utilization' as a sign of an efficient system.
+    They may focus on intra-node bottlenecks (like PCIe or NVLink) which are easier to measure, without
+    considering that the GPU could be executing short bursts of work and then waiting idly for data from
+    other nodes. The true bottleneck is often the inter-node communication fabric, which is orders of
+    magnitude slower than on-server interconnects.
+  napkin_math: Assume we are doing federated learning across mobile nodes (or simulating it). Sending
+    a 256MB gradient chunk over a fast 5G connection (approx 100 Mbps = 12.5 MB/s upload) takes 256MB
+    / 12.5 MB/s = 20.48 seconds per chunk. For a Ring-AllReduce with just 4 nodes, a full sync would take
+    over a minute! Distillation must happen entirely on a single device or in the cloud to avoid massive
+    network stalls.
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

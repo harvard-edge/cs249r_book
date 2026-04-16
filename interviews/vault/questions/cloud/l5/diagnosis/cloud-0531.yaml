@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0531
+title: The Sequence Parallelism Necessity
+topic: 3d-parallelism
+status: published
+provenance: imported
+scenario: You're fine-tuning a 70B model with 128k context length using tensor parallelism across 8 H100
+  GPUs. The model weights fit comfortably — only 17.5 GB per GPU in FP16. But you OOM immediately. Your
+  colleague says 'just add more tensor parallelism.' Why is tensor parallelism alone insufficient, and
+  what additional technique do you need?
+details:
+  realistic_solution: Tensor parallelism partitions the weight matrices and their corresponding GEMMs,
+    but the activations between the partitioned regions — specifically LayerNorm inputs, dropout masks,
+    and the residual stream — are replicated on every GPU. These "non-tensor-parallel" activations scale
+    with sequence length and are identical on all 8 GPUs. At 128k context, they dominate memory. You need
+    Sequence Parallelism (SP), which partitions these replicated activations along the sequence dimension
+    across the tensor-parallel group.
+  common_mistake: '"Tensor parallelism shards everything across GPUs, so 8 GPUs should have 8× the memory."
+    Tensor parallelism shards weights and compute, but NOT activations from LayerNorm, Dropout, and the
+    input/output embeddings.'
+  napkin_math: '70B model, 80 layers, hidden=8192, 128k sequence, batch=1, FP16. Tensor-parallel weight
+    memory per GPU: $140\text{ GB} / 8 = 17.5\text{ GB}$. Replicated activation memory per layer (LayerNorm
+    input + dropout + residual): $3 \times 128000 \times 8192 \times 2 \text{ bytes} = 6.3\text{ GB}$
+    per layer. Over 80 layers: $6.3 \times 80 = 504\text{ GB}$ — replicated on every GPU. Each H100 has
+    80 GB. Even with only 17.5 GB of weights, 504 GB of replicated activations is 6.3× the total GPU memory.
+    With sequence parallelism: $504 / 8 = 63\text{ GB}$ per GPU. Combined with gradient checkpointing:
+    feasible.'
+chain:
+  id: cloud-chain-441
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

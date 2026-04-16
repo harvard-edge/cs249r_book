@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2387
+title: Resolving Feature-Model Desynchronization
+topic: mlops-lifecycle
+status: published
+provenance: imported
+scenario: During a Blue/Green deployment of a V2 recommendation model, P99 latency suddenly spikes from
+  50ms to 800ms, triggering automated rollbacks. The V2 model requires a new feature (`user_affinity_v2`)
+  fetched from a Redis online feature store at runtime. The batch pipeline began backfilling this feature
+  into Redis at the exact same time the model deployment started.
+details:
+  realistic_solution: 'Decouple the feature store backfill lifecycle from the model deployment lifecycle.
+    The latency spike is caused by a massive cache-miss storm: V2 requests `user_affinity_v2`, it''s missing
+    in Redis, causing the system to fall back to on-the-fly computation or database queries. Architecture
+    fix: 1) Deploy the feature pipeline days in advance and dual-write to both V1 and V2 namespaces. 2)
+    Monitor the cache hit rate for the V2 feature until it reaches >99%. 3) Only then, trigger the Blue/Green
+    deployment of the V2 model. 4) Enforce this via a Model Registry webhook that checks feature readiness
+    before allowing deployment.'
+  common_mistake: Increasing the Redis timeout settings or scaling up the Redis cluster to handle the
+    perceived load spike.
+  napkin_math: 'Service throughput: 5,000 QPS. Cache hit takes 1ms. Cache miss triggers fallback compute
+    taking 150ms. If 80% of requests miss during the backfill, expected latency per request = (0.2 * 1ms)
+    + (0.8 * 150ms) = 120.2ms average. However, 5,000 QPS * 0.8 = 4,000 heavy operations/sec queues up,
+    instantly exhausting the typical 200-thread worker pool (Little''s Law: 4000 * 0.15 = 600 concurrent
+    threads needed), causing P99 to skyrocket to 800ms+ due to queuing delay.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

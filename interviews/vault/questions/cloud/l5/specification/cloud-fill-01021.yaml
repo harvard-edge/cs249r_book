@@ -1,0 +1,71 @@
+schema_version: 1
+id: cloud-fill-01021
+title: Designing Efficient Tensor Parallelism for Large Language Models on Google TPU v5e
+topic: model-tensor-parallelism
+status: published
+provenance: imported
+scenario: You are tasked with deploying a 100-billion parameter Large Language Model (LLM) for inference
+  on Google Cloud, specifically utilizing a cluster of Google TPU v5e devices. Each Google TPU v5e offers
+  16 GB HBM, 197 TFLOPS BF16 peak performance, and 1.6 TB/s memory bandwidth. The model's weights alone
+  consume significantly more memory than a single TPU's HBM. Design a tensor parallelism strategy that
+  minimizes inference latency while maximizing throughput. Specifically, describe how you would partition
+  the model's layers across devices, considering column and row partitioning for linear layers, and how
+  you would overlap communication with computation to mask overheads. Provide a high-level architecture
+  overview and justify your choices with quantitative reasoning.
+details:
+  realistic_solution: 'A realistic solution would involve a combination of tensor and possibly pipeline
+    parallelism, carefully orchestrated to exploit the TPU v5e architecture:
+
+    1.  **Tensor Partitioning (Intra-layer)**: For large linear layers (e.g., in attention or feed-forward
+    networks), apply column parallelism for the first linear layer in a block (splitting the output dimension)
+    and row parallelism for the subsequent linear layer (splitting the input dimension). This ensures
+    that the output of the first partitioned layer can be immediately used by the second partitioned layer
+    on the same device without an `all-gather` operation between the two linear layers within a block.
+    An `all-reduce` or `reduce-scatter` would be needed for activation synchronization across devices
+    only when moving to the next block or at specific points.
+
+    2.  **Layer Partitioning (Inter-layer)**: For a 100-billion parameter model, memory is a significant
+    constraint. If pure tensor parallelism isn''t sufficient for the model weights, consider partitioning
+    entire transformer blocks or groups of layers across TPUs. This is often combined with pipeline parallelism
+    to keep all stages busy. Given the 16 GB HBM, a 100B model (approx. 200GB BF16 weights) would need
+    at least 13 TPUs just for weights, making layer partitioning inevitable.
+
+    3.  **Communication-Computation Overlap**: Utilize non-blocking collective operations (e.g., `jax.lax.all_reduce_p`,
+    `all_gather`, `reduce_scatter`) provided by the JAX/XLA framework. Communication for the next layer''s
+    inputs or previous layer''s outputs should be initiated while the current layer is performing its
+    computation. For example, during column parallelism, partial computations can proceed while the necessary
+    intermediate results are being transferred across devices.
+
+    4.  **TPU-Specific Optimizations**: Leverage the high-bandwidth inter-chip interconnect (ICI) on TPUs
+    for efficient collective operations. The JAX `pjit` (partitioned JIT) transformation is crucial for
+    defining the sharding strategy and ensuring that XLA generates optimized code that uses the ICI effectively
+    for communication. Careful layout of sharding annotations (`ShardingSpec`) is paramount.'
+  common_mistake: Overlooking the significant impact of inter-device communication latency and bandwidth,
+    especially for small batch sizes typical in inference. Candidates might propose naive partitioning
+    without considering the actual data movement costs between TPU cores, or fail to account for the asymmetric
+    communication patterns introduced by column/row parallelism, leading to communication bubbles and
+    underutilized TPUs. Another common mistake is not fully leveraging the TPU's high-bandwidth inter-chip
+    interconnect (ICI) and instead relying on slower host-to-device communication.
+  napkin_math: '1.  **Model Weight Memory**: A 100-billion parameter model using BF16 precision (2 bytes/parameter)
+    requires `100 * 10^9 * 2 bytes = 200 GB` for its weights alone.
+
+    2.  **Minimum TPUs for Weights**: With 16 GB HBM per Google TPU v5e, the minimum number of TPUs required
+    to hold just the model weights is `ceil(200 GB / 16 GB/TPU) = 13 TPUs`. This doesn''t account for
+    activations, KV-cache, or other runtime memory overheads, suggesting more TPUs or aggressive sharding
+    will be needed.
+
+    3.  **Communication Cost Example (Intermediate Activation)**: Consider an intermediate activation
+    tensor of size `(batch_size, sequence_length, hidden_size)`. For `batch_size=1`, `sequence_length=2048`,
+    `hidden_size=8192` (common for large LLMs), and BF16 precision, the tensor size is `1 * 2048 * 8192
+    * 2 bytes = 33,554,432 bytes ≈ 32 MB`. If this data needs to be exchanged across TPUs over the ICI,
+    even with the high ICI bandwidth, the cumulative latency for multiple such transfers can add up significantly.
+    A rough estimate for ICI bandwidth might be in the hundreds of GB/s (e.g., 200 GB/s on some topologies),
+    so `32 MB / 200 GB/s = 0.00016 seconds` per transfer. The critical factor is how many such transfers
+    are non-overlapping.
+
+    4.  **Computation per Token**: While complex, a very simplified estimate for the FLOPs of a transformer
+    layer for inference is roughly `2 * Parameters_per_layer * Batch_size * Sequence_length`. For a 100B
+    model, distributed over 13+ TPUs, each TPU will handle a fraction of the total computation. Peak performance
+    of `197 TFLOPS (BF16) = 197 * 10^12 FLOPS/s` provides a target for how many operations can be performed
+    locally per second.'
+last_modified: '2026-04-01'

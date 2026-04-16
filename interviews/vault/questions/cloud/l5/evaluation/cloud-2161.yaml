@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-2161
+title: The Gradient Accumulation vs. Data Parallelism Choice
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: 'You need an effective batch size of 4M tokens for your 13B model. You have 128 GPUs available.
+  Compare two approaches: (A) micro-batch 32K tokens/GPU with no gradient accumulation (128 × 32K = 4M),
+  vs. (B) micro-batch 8K tokens/GPU with 4 accumulation steps (128 × 8K × 4 = 4M). Both achieve the same
+  effective batch size. What are the systems-level tradeoffs?'
+details:
+  realistic_solution: 'Approach A (large micro-batch, no accumulation): Higher activation memory per GPU
+    (32K tokens worth of activations), but only 1 AllReduce per optimizer step. The larger matmuls have
+    higher arithmetic intensity → better GPU utilization. Risk: may OOM at 32K token micro-batch for a
+    13B model. Approach B (small micro-batch, 4× accumulation): Lower activation memory per GPU (only
+    8K tokens stored), but still only 1 AllReduce per optimizer step (gradients accumulate locally). The
+    smaller matmuls have lower arithmetic intensity → worse GPU utilization per micro-step. However, you
+    can overlap forward/backward of micro-step N+1 with nothing — no communication to overlap with. Key
+    insight: both approaches have identical communication cost (1 AllReduce per weight update). The difference
+    is purely compute efficiency and memory. Approach A is faster if memory allows because larger matmuls
+    are more efficient. Approach B exists when memory is the binding constraint.'
+  common_mistake: Assuming both approaches are identical because they achieve the same effective batch
+    size. The systems implications are significantly different.
+  napkin_math: 'Approach A: 1 forward(32K) + 1 backward(32K) + 1 AllReduce = 1 step | Matmul size: 32K
+    × hidden → high arithmetic intensity, ~45% MFU | Memory: ~40 GB activations (may OOM with optimizer
+    states) | Approach B: 4 × [forward(8K) + backward(8K)] + 1 AllReduce = 1 step | Matmul size: 8K ×
+    hidden → lower arithmetic intensity, ~35% MFU | Memory: ~10 GB activations (safe) | B is ~20% slower
+    but fits in memory'
+last_modified: '2026-04-01'
+tags:
+- scope:Training

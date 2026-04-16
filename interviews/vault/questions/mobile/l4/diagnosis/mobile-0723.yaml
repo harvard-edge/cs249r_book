@@ -1,0 +1,34 @@
+schema_version: 1
+id: mobile-0723
+title: The Dilated Convolution Penalty
+topic: accelerator-comparison
+status: published
+provenance: imported
+scenario: You port an image segmentation model (DeepLabV3) to an Android phone. It relies heavily on Atrous
+  (Dilated) Convolutions to expand the receptive field without adding parameters. On the CPU, it takes
+  200ms. On the NPU, it takes 800ms. Why is the dedicated AI hardware 4x slower than the general-purpose
+  CPU?
+details:
+  realistic_solution: You hit a hardware memory-access pattern mismatch. NPUs are highly specialized to
+    read contiguous blocks of data (e.g., standard 3x3 patches) into their systolic arrays. Dilated convolutions,
+    by definition, skip pixels (e.g., reading pixel 1, then pixel 4, then pixel 7). The NPU's DMA engine
+    cannot fetch this non-contiguous data efficiently. It must issue multiple separate, tiny memory read
+    requests, destroying memory bandwidth. Furthermore, many NPU compilers do not natively support dilated
+    math, causing them to secretly 'im2col' the image (copying and expanding the image to make the convolution
+    look standard), which completely exhausts the NPU's tiny local SRAM.
+  common_mistake: '"Assuming that because an NPU accelerates ''convolutions'', it accelerates *all* types
+    of convolutions equally well."'
+  napkin_math: 'Standard 3x3 conv: reads 9 contiguous pixels per output. Dilated 3x3 (rate=4): reads 9
+    pixels spread across a 9x9 grid, stride of 4 between samples. NPU tile fetch: standard conv fetches
+    1 cache line (64 bytes) per 9 pixels. Dilated conv fetches 9 cache lines = 576 bytes for same 9 pixels
+    — 9x more memory traffic. On Apple ANE: 3x3 conv at 224x224x64 = 2.1 ms. Dilated 3x3 (rate=4) = 5.8
+    ms (2.8x slower). On Snapdragon Hexagon: 3x3 conv = 3.4 ms. Dilated 3x3 = 11.2 ms (3.3x slower due
+    to smaller cache). Memory bandwidth consumed: standard = 0.8 GB/s, dilated = 4.2 GB/s (saturates LPDDR5
+    bandwidth share). Workaround: replace dilated conv with stride-2 conv + upsample. Latency: 1.8 ms
+    + 0.3 ms = 2.1 ms.'
+chain:
+  id: mobile-chain-007
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

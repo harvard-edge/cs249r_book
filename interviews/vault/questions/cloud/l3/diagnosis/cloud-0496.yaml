@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-0496
+title: The Two-Node Scaling Cliff (cloud-0496)
+topic: collective-communication
+status: draft
+provenance: imported
+scenario: You are a Staff ML Engineer fine-tuning a 70B parameter LLM. Your training job scales almost
+  linearly on a single 8xH100 node where all GPUs are interconnected via NVLink. When you expand the job
+  to two nodes (16 GPUs total), connected by an InfiniBand NDR switch, you observe that the training throughput
+  only increases by 20%, far from the expected near-2x improvement. Your profiler reports that the `All-Reduce`
+  gradient synchronization step now dominates 90% of the wall-clock time per step. Based on this data,
+  diagnose the most likely performance bottleneck.
+details:
+  realistic_solution: The bottleneck is the inter-node InfiniBand network. Within a single node, the 8
+    H100 GPUs exchange gradients over the 900 GB/s NVLink fabric, a process that is extremely fast. When
+    scaling to two nodes, the `All-Reduce` operation must send half of the gradients over the InfiniBand
+    network, which has a bandwidth of only 50 GB/s (400 Gbps). This 18x drop in communication bandwidth
+    creates a massive stall, causing GPUs to wait for data from the other node and preventing the system
+    from achieving linear scaling.
+  common_mistake: Engineers often underestimate the bandwidth gap between on-node and off-node interconnects.
+    They might blame the PCIe bus or the CPU, failing to recognize that even a state-of-the-art datacenter
+    network like InfiniBand is an order of magnitude slower than the on-node NVLink fabric. The symptom—poor
+    scaling when adding nodes—points directly to the inter-node link.
+  napkin_math: 70B parameters = 140GB gradients. An all-reduce transfers ~280GB. Over intra-node NVLink
+    (900 GB/s), this takes 280 / 900 = 0.31s. Over inter-node InfiniBand (50 GB/s), it takes 280 / 50
+    = 5.6s. Network time explodes by 18x, causing GPUs to idle while waiting to synchronize gradients.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

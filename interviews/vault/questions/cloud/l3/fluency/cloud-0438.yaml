@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-0438
+title: The Tensor Parallelism Choke Point
+topic: collective-communication
+status: published
+provenance: imported
+scenario: 'You are diagnosing a performance issue in a large-scale LLM training job using 8-way tensor
+  parallelism. The job runs across two servers, each with four H100 GPUs. Profiling shows that an `All-Reduce`
+  operation on a 4 GB tensor is a major bottleneck. Your servers use NVLink 4.0 for intra-node GPU communication
+  and InfiniBand NDR for inter-node communication. Using your systems knowledge, diagnose the most likely
+  performance bottleneck by calculating the transfer time for this operation under two conditions: a)
+  when all GPUs are in one server, and b) when the GPUs are split across two servers.'
+details:
+  realistic_solution: The primary bottleneck is the dramatic drop in bandwidth when communication must
+    leave the server and traverse the InfiniBand network. Intra-node communication happens over the ultra-high-bandwidth
+    NVLink fabric, while inter-node communication is limited by the speed of the network interface cards
+    and switches, which is an order of magnitude slower. The `All-Reduce` operation becomes bound by the
+    slowest link in the chain, which is the inter-node InfiniBand connection.
+  common_mistake: Engineers often underestimate the magnitude of the bandwidth gap between on-node (NVLink)
+    and off-node (InfiniBand) interconnects. They might assume the difference is minor (2-3x) or incorrectly
+    blame software overhead (e.g., NCCL) or PCIe bus contention, rather than the fundamental physics of
+    the network topology.
+  napkin_math: '**Data size:** 4 GB tensor | **All-Reduce cost ≈ 2 × (N-1)/N × data_size** (ring all-reduce)
+    | For N=8 GPUs: effective data ≈ 2 × 7/8 × 4 GB = 7 GB | **Case A: All 8 GPUs in one server (NVLink
+    4.0):** | NVLink 4.0 bisection bandwidth: 900 GB/s per GPU | All-Reduce time ≈ 7 GB / 900 GB/s ≈ 7.8
+    ms | **Case B: 4 GPUs per server, 2 servers (InfiniBand NDR):** | Intra-node (NVLink): 900 GB/s |
+    Inter-node (IB NDR): 400 Gbps = 50 GB/s per link (unidirectional) | The all-reduce must cross the
+    inter-node link. The bottleneck is the IB link. | Effective cross-node data ≈ 2 × 4 GB = 8 GB (each
+    server sends ~4 GB across) | Inter-node transfer time ≈ 4 GB / 50 GB/s ≈ 80 ms | Plus intra-node steps:
+    ~4 ms each side | Total ≈ 80 + 8 = ~88 ms | **Slowdown:** 88 ms / 7.8 ms ≈ 11× slower when crossing
+    server boundary | **Diagnosis:** The inter-node IB link (50 GB/s) is ~18× slower than NVLink (900
+    GB/s). Tensor parallelism''s frequent all-reduces make it extremely sensitive to this gap. Keep TP
+    within a single NVLink domain; use pipeline parallelism across nodes.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

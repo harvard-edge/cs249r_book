@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-0235
+title: Handling KV Cache Fragmentation
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: When serving a large language model with multiple concurrent requests, we notice that memory
+  utilization is poor despite having free memory available, leading to out-of-memory errors for new requests.
+  How does PagedAttention specifically solve this issue in the KV cache?
+details:
+  realistic_solution: PagedAttention partitions the KV cache into fixed-size blocks (pages) that can be
+    non-contiguous in physical GPU memory, similar to how virtual memory works in operating systems. Without
+    paging, the system must pre-allocate a contiguous block of memory for the maximum possible sequence
+    length for each request. If a request only uses 512 of its allocated 2048 tokens, the remaining 1536
+    tokens of contiguous memory are wasted (internal fragmentation). Worse, as requests of different lengths
+    start and finish, the freed memory becomes scattered in non-contiguous chunks too small for new allocations
+    (external fragmentation). PagedAttention solves this by allocating memory in small, fixed-size pages
+    on demand as each new token is generated. Pages need not be contiguous, so any free page can be used
+    for any request, virtually eliminating both internal and external fragmentation.
+  common_mistake: Thinking that PagedAttention compresses the KV cache to save memory rather than managing
+    fragmentation.
+  napkin_math: '- 13B model, 40 layers, 40 heads, head_dim=128, FP16. KV cache per token = `num_layers
+    × 2 (K+V) × num_kv_heads × head_dim × bytes_per_element` = `40 × 2 × 40 × 128 × 2B` = 819 KB/token.
+    | - Without paging: pre-allocate max_seq_len=2048 per request = 819 KB × 2048 = 1.6 GB. 50 concurrent
+    requests = 80 GB (saturates an H100). | - With PagedAttention at avg 512 tokens/request: only allocate
+    pages for actual tokens used. 819 KB × 512 = 0.4 GB/request × 50 = 20 GB. Memory waste drops from
+    ~60% to <5%, freeing 60 GB for additional concurrent requests.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

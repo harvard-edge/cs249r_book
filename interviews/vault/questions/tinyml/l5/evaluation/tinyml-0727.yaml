@@ -1,0 +1,30 @@
+schema_version: 1
+id: tinyml-0727
+title: The DMA Buffer Corruption
+topic: mcu-compute-constraints
+status: published
+provenance: imported
+scenario: Your audio keyword spotting system on a Cortex-M7 (STM32H7, 480 MHz, 1 MB SRAM) uses DMA to
+  stream PDM microphone data into a circular buffer in AXI SRAM. The model reads from this buffer for
+  inference. Occasionally — about once every 500 inferences — the model outputs a confident but completely
+  wrong classification. The audio data in the buffer looks correct when you pause and inspect it. What's
+  the ghost in the machine?
+details:
+  realistic_solution: The Cortex-M7 has a **data cache (D-cache)** — typically 16 KB on STM32H7. The D-cache
+    sits between the CPU and the AXI bus. The DMA controller writes directly to AXI SRAM, bypassing the
+    D-cache. This creates a **cache coherency problem:**
+  common_mistake: '"If the data looks correct when inspected, the model must have a rare misclassification
+    — retrain with more data." The data looks correct when you pause because pausing flushes the cache.
+    The corruption is invisible to the debugger.'
+  napkin_math: 'D-cache: 16 KB, 4-way set associative, 32-byte lines. DMA buffer: 4 KB = 128 cache lines.
+    Inference tensor arena: 200 KB (much larger than cache). During inference, the arena accesses evict
+    most of the DMA buffer''s cache lines. Probability of a cache line surviving: P(survive) = (4 ways
+    - 1) / 4 = 0.75 per set access. Over ~50 set accesses during inference: P(survive) = 0.75^50 ≈ 5.66e-7
+    per line. For 128 lines, expected stale lines: 128 × 5.66e-7 ≈ 0.000072. But the audio buffer is accessed
+    sequentially, so if one line is stale, the adjacent lines in the same set may also be stale (correlated
+    eviction). Effective probability of at least one stale line affecting inference: ~0.2% = 1 in 500.
+    **Matches observation.** Cache invalidation cost: 128 lines × 8 cycles/line = 1,024 cycles = 2.1 µs
+    at 480 MHz. Negligible compared to inference time.'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

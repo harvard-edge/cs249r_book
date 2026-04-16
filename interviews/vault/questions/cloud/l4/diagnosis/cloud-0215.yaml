@@ -1,0 +1,43 @@
+schema_version: 1
+id: cloud-0215
+title: The BatchNorm Drift
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: Your image classification model (ResNet-50 on A100) was deployed 6 months ago with 94% accuracy.
+  Without any model updates, accuracy has gradually degraded to 87%. The model weights are identical to
+  deployment day — you verified the checkpoint hash. The training team says the model is fine. What's
+  silently changing?
+details:
+  realistic_solution: 'This is data distribution drift interacting with Batch Normalization''s frozen
+    statistics. During training, BatchNorm layers compute running mean ($\mu$) and running variance ($\sigma^2$)
+    from the training data. At inference time, these frozen statistics are used to normalize inputs: $\hat{x}
+    = (x - \mu_{\text{train}}) / \sigma_{\text{train}}$. If the production data distribution shifts over
+    time (lighting conditions change seasonally, camera firmware updates alter preprocessing, new product
+    categories are added), the true mean and variance diverge from the frozen statistics. The normalization
+    now *distorts* the data instead of normalizing it — pushing activations into regions the downstream
+    layers never saw during training. The gradual 7-point drop over 6 months matches a slow seasonal drift
+    (e.g., winter lighting vs summer lighting for a retail image classifier). Fix: (1) implement periodic
+    BatchNorm recalibration — run a forward pass over recent production data with BatchNorm in training
+    mode to update running statistics, then freeze again; (2) replace BatchNorm with LayerNorm or GroupNorm,
+    which compute statistics per-sample and are immune to distribution drift; (3) deploy a data drift
+    monitor that tracks input feature statistics and alerts when they diverge from training distribution.'
+  common_mistake: '"The model must have been accidentally updated" or "This is just random variance in
+    the test set." The checkpoint hash verification rules out the first, and a 7-point drop over 6 months
+    is a systematic trend, not noise.'
+  napkin_math: 'ResNet-50 has 53 BatchNorm layers. Training data mean pixel value: $\mu_{\text{train}}
+    = 0.485$ (ImageNet). After 6 months of drift (new camera firmware increases brightness): $\mu_{\text{prod}}
+    = 0.52$. Shift = $0.035$. BatchNorm normalizes: $\hat{x} = (0.52 - 0.485) / 0.229 = 0.153$ — the network
+    sees a constant bias of 0.153 added to every activation. Through 53 layers with ReLU, this bias compounds:
+    early layers clip negative activations that should have been positive (or vice versa), changing ~**3–8%
+    of activation signs** per layer. By the final layer, the cumulative effect shifts the feature representation
+    enough to flip predictions for **7% of samples** — matching the 94% → 87% accuracy drop. BatchNorm
+    recalibration: forward pass of 10,000 production images through ResNet-50 on A100: $10000 \times 8\text{
+    GFLOPs} = 80\text{ TFLOPs}$. At 312 TFLOPS: **0.25 seconds**. Running this weekly costs essentially
+    nothing and prevents the drift.'
+chain:
+  id: cloud-chain-364
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

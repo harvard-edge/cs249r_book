@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2434
+title: The CSR Sparsity Performance Collapse
+topic: roofline-analysis
+status: published
+provenance: imported
+scenario: You deploy a pruned BERT-Large model on A100 GPUs (312 TFLOPS Tensor Core, 19 TFLOPS CUDA Core,
+  2 TB/s bandwidth). The weights are pruned to 70% unstructured sparsity. To 'skip the zeros', a junior
+  engineer replaces cuBLAS dense matrix multiplications with a Sparse Matrix-Vector (SpMM) kernel using
+  Compressed Sparse Row (CSR) format. Instead of a speedup, latency increases by 5x compared to the dense
+  model.
+details:
+  realistic_solution: Two catastrophic roofline shifts occur. First, dense matrix multiplications on A100
+    utilize highly optimized Tensor Cores (312 TFLOPS). CSR SpMM kernels map poorly to Tensor Cores and
+    typically fall back to standard CUDA cores, dropping the theoretical compute ceiling to ~19 TFLOPS.
+    Second, CSR introduces irregular memory access patterns (fetching row pointers and column indices),
+    drastically lowering Arithmetic Intensity. The workload shifts from a compute-bound operation on a
+    high ceiling (Tensor Cores) to a memory-bound operation on a low ceiling (CUDA cores with irregular
+    gathers).
+  common_mistake: Assuming that doing 70% fewer FLOPs automatically translates to faster execution, regardless
+    of the hardware execution units or memory access patterns.
+  napkin_math: 'Dense BERT layer (4k x 4k, batch=4000): 128 GFLOPs. Memory = 96 MB. Dense AI = 1333 FLOPs/B.
+    A100 Tensor Core Ridge Point = 312,000 / 2000 = 156 FLOPs/B. (Compute bound). Dense time = 128G /
+    312T = 410 µs. Sparse CSR (70% sparse): FLOPs = 38.4 GFLOPs. AI drops significantly due to irregular
+    access, but even if compute-bound on CUDA cores (19 TFLOPS peak): Sparse time = 38.4 GFLOPs / 19 TFLOPS
+    = 2021 µs. 2021 µs is ~5x slower than 410 µs.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

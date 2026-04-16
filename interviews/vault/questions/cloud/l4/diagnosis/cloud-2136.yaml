@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-2136
+title: The Embedding Sharding Strategy
+topic: feature-store-management
+status: published
+provenance: imported
+scenario: Your production DLRM has 50 embedding tables totaling 400 GB. Table sizes range from 200 MB
+  to 80 GB. You have 8 GPUs with 80 GB HBM each. A naive row-parallel sharding splits every table equally
+  across all 8 GPUs. The system runs, but GPU utilization is only 25% and All-to-All communication dominates
+  the profile. What went wrong, and how do you fix it?
+details:
+  realistic_solution: 'Row-parallel sharding of all 50 tables across 8 GPUs means every forward pass requires
+    an All-to-All collective to redistribute embeddings — regardless of table size. For a 200 MB table,
+    each GPU holds only 25 MB, but the All-to-All overhead of exchanging lookups across 8 GPUs far exceeds
+    the compute. The fix is a **mixed sharding strategy**: (1) **Table-wise placement** for small tables
+    (< 10 GB): place entire table on a single GPU. With 35 small tables averaging 2 GB each = 70 GB, distribute
+    across GPUs as whole tables. (2) **Column-wise sharding** for medium tables (10-40 GB): split embedding
+    dimension across 2-4 GPUs, requiring only AllReduce (cheaper than All-to-All). (3) **Row-wise sharding**
+    for the largest tables (> 40 GB): split rows across all 8 GPUs. This eliminates All-to-All for ~80%
+    of tables, cutting communication overhead by 3-5×.'
+  common_mistake: Assuming that splitting every table across all GPUs is always optimal. Small tables
+    sharded across 8 GPUs generate 8× the communication overhead for negligible memory benefit.
+  napkin_math: 'Naive: 50 tables × All-to-All per forward = massive comm overhead. All-to-All for 8 GPUs:
+    O(N * message_size). Mixed: 35 small tables placed locally (zero comm), 10 medium tables with AllReduce
+    (partial comm), 5 large tables with All-to-All. Communication volume drops ~75%. GPU utilization:
+    25% → 60-70%.'
+chain:
+  id: cloud-chain-455
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Data Engineering

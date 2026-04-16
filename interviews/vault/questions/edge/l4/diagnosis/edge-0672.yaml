@@ -1,0 +1,33 @@
+schema_version: 1
+id: edge-0672
+title: The Repeated Model Loading Memory Leak
+topic: compound-ai-systems
+status: published
+provenance: imported
+scenario: 'Your edge device (Qualcomm RB5, 8 GB RAM, Hexagon DSP) runs a multi-model pipeline: a person
+  detector, then a pose estimator, then an action classifier. To save memory, you load and unload models
+  on demand — detector runs continuously, pose estimator loads when a person is detected, action classifier
+  loads when pose is extracted. After 3 days of continuous operation, the device OOM-kills the inference
+  process. Memory monitoring shows a steady climb of 50 MB/day, even though each model is only 15 MB.
+  What''s leaking?'
+details:
+  realistic_solution: The Qualcomm SNPE (Snapdragon Neural Processing Engine) runtime allocates **intermediate
+    activation buffers** on the Hexagon DSP's shared memory (ION/DMA-BUF allocations) each time a model
+    is loaded. When the model is unloaded, SNPE releases the model weights but **doesn't fully release
+    the DSP's scratch memory allocations**. This is a known behavior in several edge ML runtimes — the
+    runtime keeps a memory pool for fast re-allocation, but the pool grows monotonically because each
+    load/unload cycle fragments the pool slightly differently.
+  common_mistake: '"The model files aren''t being freed — add explicit `del model` calls." The model weights
+    are freed correctly. The leak is in the runtime, not the model.'
+  napkin_math: 'Three models loaded simultaneously: 45 MB. Available RAM after OS: ~6.5 GB. Models as
+    % of available RAM: 0.7% — trivially small. Leak rate: 50 MB/day. Time to OOM without fix: (6,500
+    - 45 - 5,500 base) / 50 = 19 days (the 3-day observation was with a higher detection rate in a busy
+    store). With all models pre-loaded: leak rate = 0. Memory overhead: 45 MB constant. The "optimization"
+    of dynamic loading actually caused a worse outcome than the "wasteful" approach of keeping everything
+    loaded.'
+chain:
+  id: edge-chain-120
+  position: 1
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

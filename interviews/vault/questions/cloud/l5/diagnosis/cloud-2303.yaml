@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-2303
+title: GQA Prefill Latency Regression
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: 'To support 32K context windows for a 70B model on an 8x A100 node, your team modifies the architecture
+  from Multi-Head Attention (MHA, 64 Q heads, 64 KV heads) to Grouped-Query Attention (GQA, 64 Q, 8 KV).
+  This successfully reduces KV cache memory by 8x. However, production monitoring shows a massive failure:
+  32K context prefill latency unexpectedly spiked from 1.2 seconds to 2.8 seconds, triggering API timeouts.
+  Decode latency improved as expected. What is the root cause of the prefill regression?'
+details:
+  realistic_solution: "The root cause is a compiler-hardware mapping failure where the algorithmic optimization\
+    \ (GQA) is defeated by intermediate tensor materialization. During prefill, the inference framework\
+    \ lacked a native GQA-optimized FlashAttention kernel. To compensate, the compiler/framework implicitly\
+    \ 'upsampled' or broadcasted the 8 KV heads back to 64 KV heads in High Bandwidth Memory (HBM) *before*\
+    \ invoking the standard MHA FlashAttention kernel. \n\nMaterializing this massive 32K-length repeated\
+    \ tensor in HBM causes an enormous memory bandwidth bottleneck. The GPU wastes cycles and bandwidth\
+    \ writing the duplicated KV heads to HBM, and then reading them back into SRAM, completely eclipsing\
+    \ any compute savings from having fewer distinct KV heads. \n\nThe fix requires hardware-compiler\
+    \ co-design: integrating a fused GQA-aware FlashAttention kernel (e.g., FlashAttention-2 with GQA\
+    \ support). In this kernel, the 8 KV heads are loaded from HBM into the SM's SRAM only once per block.\
+    \ The broadcast to the 64 Q heads happens entirely on-chip within the SRAM and registers, eliminating\
+    \ the O(N x d x H) out-of-core HBM read/write overhead."
+  common_mistake: Assuming GQA intrinsically requires more FLOPs during prefill due to complex routing,
+    or blaming KV cache fragmentation.
+  napkin_math: "For 1 layer, 32K tokens, 64 heads, 128 dim, FP16 (2 bytes): \nMHA KV size: 32K * 64 *\
+    \ 128 * 2 = 524 MB. \nGQA KV size: 32K * 8 * 128 * 2 = 65 MB. \nImplicit upsample operation: Reads\
+    \ 65 MB, writes 524 MB to HBM. Then standard attention reads 524 MB. \nTotal extra HBM traffic = ~1\
+    \ GB per layer. For 80 layers: 80 GB of pure overhead memory traffic. At 2 TB/s A100 bandwidth, this\
+    \ adds at least 40ms of pure memory-copy stall time per request, plus kernel launch overheads, starving\
+    \ the tensor cores during what should be a compute-bound prefill phase."
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

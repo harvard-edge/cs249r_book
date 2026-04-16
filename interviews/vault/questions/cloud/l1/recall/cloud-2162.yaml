@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-2162
+title: The 10K-GPU Training Instability
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You are leading pre-training of a 405B model on 16,384 H100 GPUs. At step 80K (out of 300K total),
+  the training loss suddenly diverges. You roll back to the step-79K checkpoint and resume, but the divergence
+  happens again at approximately the same step. This is not a hardware failure (the cluster is healthy).
+  Design a systematic approach to diagnose and recover from this reproducible training instability.
+details:
+  realistic_solution: 'This is a loss landscape instability at a specific training phase — the model has
+    entered a sharp region of the loss landscape. Systematic diagnosis: (1) **Characterize the instability**:
+    log per-layer gradient norms, activation norms, and attention entropy around step 78K-82K. Look for
+    which layers spike first — typically attention logits or embedding norms. (2) **Data investigation**:
+    extract the exact data batches at steps 79K-81K. Check for distribution shifts in the data curriculum
+    that coincide with the spike. (3) **Targeted interventions** (in order of disruption): (a) Reduce
+    LR by 10-30% starting at step 78K and re-warmup, (b) Apply z-loss regularization to attention logits
+    (forces logits to stay near zero, preventing the exponential blowup), (c) Increase gradient clipping
+    threshold monitoring — if gradient norms are growing exponentially, add per-layer adaptive clipping,
+    (d) Nuclear option: shrink batch size temporarily to increase gradient noise, which can help escape
+    sharp minima. (4) **Prevention for future runs**: implement automatic loss spike detection with rollback-and-reduce-LR
+    policy, use QK-norm (normalize query and key vectors) to prevent attention entropy collapse.'
+  common_mistake: Simply reducing the learning rate globally or skipping the offending data batch. Both
+    are band-aids that may mask deeper issues and cost significant compute.
+  napkin_math: '16,384 GPUs × $3/hr = $49K/hour | Rollback from step 80K to 79K = 1,000 steps lost | At
+    ~12s/step = 12,000s = 3.3 hours = $164K wasted per rollback | If it takes 3 rollbacks to diagnose:
+    ~$500K wasted | z-loss overhead: <1% compute cost, prevents most instabilities | ROI of loss spike
+    detection: saves $500K+ per avoided incident'
+last_modified: '2026-04-01'
+tags:
+- scope:Training

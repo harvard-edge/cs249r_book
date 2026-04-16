@@ -1,0 +1,26 @@
+schema_version: 1
+id: edge-sus-60028
+title: Implementing efficient backward pass for continual learning on Jetson Orin
+topic: autograd-computational-graphs
+status: published
+provenance: imported
+scenario: You are implementing continual learning with Elastic Weight Consolidation (EWC) on Jetson Orin
+  (275 TOPS, 32GB, 60W). EWC requires computing the Fisher information diagonal — the expected squared
+  gradients per parameter — after learning each task. For a 10M parameter model, this requires running
+  1000 data samples and accumulating gradient² statistics within Orin's memory and power constraints.
+details:
+  realistic_solution: 'Use per-sample gradients via torch.func.grad and vmap to vectorize gradient computation
+    across a mini-batch. Accumulate Fisher diagonal as sum of squared gradients without storing individual
+    gradients. Use half precision (FP16) for Fisher accumulation. Power budget: EWC Fisher computation
+    should be done in one pass, not incrementally — run at task boundary, then discard the graph.'
+  common_mistake: Running the full backward pass for each of 1000 samples sequentially, holding the full
+    computational graph in memory for each sample (batch=1). At 10M params × 4 bytes × 3 (params + grad
+    + graph) per sample, the peak memory during Fisher estimation is 120MB per sample — manageable, but
+    not exploiting Orin's vectorized compute.
+  napkin_math: 'Orin at 60W: running full backward for 1000 samples sequentially at batch=1: 1000 × 10ms/sample
+    = 10 seconds × 60W = 600 joules. With vmap at batch=32: 32 samples per pass × 5ms = 5ms, 1000/32=32
+    passes × 5ms = 160ms. Power: 160ms × 60W = 9.6 joules. 62× energy reduction. Critical for battery-powered
+    edge deployment.'
+last_modified: '2026-04-02'
+tags:
+- scope:single-machine

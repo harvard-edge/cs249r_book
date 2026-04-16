@@ -1,0 +1,42 @@
+schema_version: 1
+id: cloud-2253
+title: The Deterministic Global Shuffle at Trillion-Token Scale
+topic: data-pipeline-engineering
+status: published
+provenance: imported
+scenario: 'Your LLM pre-training uses 2,048 GPUs with data parallelism. Each GPU must see a unique, non-overlapping
+  subset of the 2 trillion token corpus per epoch, and the global ordering must be deterministically shuffled
+  (so that if training resumes from a checkpoint at step 50,000, every GPU sees exactly the same data
+  it would have seen without the interruption). The corpus is stored as 2 million 1 GB shards on a parallel
+  filesystem. A naive approach: generate a global permutation of all 2M shard indices, split into 2,048
+  contiguous chunks. But this requires a coordinator to hold and distribute a 2M-element permutation,
+  and the shuffle must change every epoch. How do you implement a deterministic, coordinator-free global
+  shuffle that scales to millions of shards and thousands of GPUs, and what happens when the GPU count
+  changes mid-training due to elastic scaling?'
+details:
+  realistic_solution: 'Use a pseudorandom permutation function (PRP) that maps (epoch, global_index) →
+    shard_index without materializing the full permutation. Implementation: a Feistel cipher with the
+    epoch as the key. Each GPU computes its own shard assignments locally: for GPU rank r in epoch e,
+    it reads shards at indices PRP(e, r × shards_per_gpu + 0), PRP(e, r × shards_per_gpu + 1), ..., PRP(e,
+    r × shards_per_gpu + k-1). This is coordinator-free (every GPU computes independently), deterministic
+    (same seed + epoch → same permutation), and produces a true global shuffle (the Feistel PRP is a bijection
+    over the shard index space). For elastic scaling (GPU count changes from N₁ to N₂ at step S): record
+    the consumed_shard_set up to step S (which is deterministically computable from the PRP). Recompute
+    assignments for N₂ GPUs over the remaining shards. The key invariant: no shard is seen twice within
+    an epoch, and every shard is seen exactly once. This requires maintaining a global ''cursor'' that
+    tracks how far through the permutation training has progressed, but the cursor is a single integer
+    (the global step count), not a 2M-element list.'
+  common_mistake: '"Each GPU independently shuffles its assigned shards using the same random seed." This
+    only shuffles within each GPU''s partition — it doesn''t create a global shuffle. Documents assigned
+    to GPU 0 in epoch 1 stay on GPU 0 in epoch 2, creating data ordering correlations across epochs that
+    can harm convergence.'
+  napkin_math: 'Naive coordinator approach: 2M shard indices × 8 bytes = 16 MB permutation. Broadcasting
+    16 MB to 2,048 GPUs via AllBroadcast: 16 MB × log₂(2048) = 176 MB total network traffic per epoch.
+    Not terrible, but adds a synchronization barrier. PRP approach: each GPU computes 2M/2048 = 977 Feistel
+    cipher evaluations per epoch. At ~100ns per evaluation: 97.7 μs per GPU — negligible. Zero network
+    traffic for shuffle coordination. For mid-training GPU count change (2,048 → 1,536 due to node failure):
+    consumed shards = global_step × 2,048 × shards_per_step. Remaining shards: 2M - consumed. Redistribute
+    remaining over 1,536 GPUs. Each GPU recomputes its new assignment in <1ms.'
+last_modified: '2026-04-01'
+tags:
+- scope:Data Engineering

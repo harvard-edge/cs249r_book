@@ -1,0 +1,22 @@
+schema_version: 1
+id: cloud-new-50016
+title: HIP Kernel Launch Parameter Translation from CUDA
+topic: software-portability
+status: published
+provenance: imported
+scenario: You are porting a CUDA kernel that launches with <<<grid(256), block(256), shared_mem(48KB)>>>.
+  The kernel uses __syncthreads() and threadIdx. On MI300X with HIP, the maximum workgroup size is 1024
+  (same as CUDA) but the LDS (shared memory) limit per CU is 64KB. Translate the launch configuration.
+details:
+  realistic_solution: The kernel launch translates to hipLaunchKernelGGL(kernel, dim3(256), dim3(256),
+    48*1024, stream). __syncthreads() -> __syncthreads() (same name in HIP). threadIdx -> threadIdx (same).
+    However, with 48KB LDS out of 64KB total per CU, only 1 workgroup can be resident per CU (64KB/48KB
+    = 1.33, floor to 1). On H100, 228KB/48KB = 4 blocks per SM. This means MI300X will have much lower
+    occupancy — consider reducing shared memory to 32KB to allow 2 workgroups per CU.
+  common_mistake: Directly translating block(256) to HIP without checking that the LDS allocation (48KB)
+    doesn't limit occupancy on CDNA3 CUs differently than on NVIDIA SMs. CDNA3 has 64KB LDS per CU vs
+    H100's 228KB shared memory per SM.
+  napkin_math: 'MI300X: 304 CUs x 1 workgroup = 304 concurrent workgroups. H100: 132 SMs x 4 blocks =
+    528 concurrent blocks. Reducing LDS to 32KB: 304 CUs x 2 = 608 concurrent workgroups, better than
+    H100.'
+last_modified: '2026-04-02'

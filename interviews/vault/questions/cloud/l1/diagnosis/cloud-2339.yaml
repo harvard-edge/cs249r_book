@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-2339
+title: HBM Thermal Throttling on Zipfian Embeddings
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: Serving a trillion-parameter DLRM on TPU v4. The system starts at 150,000 QPS. After 10 minutes,
+  throughput steadily drops to 60,000 QPS. Hardware metrics show the TPU core clock is throttling down
+  to 700MHz. Curiously, HBM stack 0 is reporting 95°C, while HBM stacks 1, 2, and 3 are at 45°C. Total
+  HBM bandwidth utilization is only 18%.
+details:
+  realistic_solution: 'The symptom (localized thermal throttling on a single HBM stack with low overall
+    bandwidth) is caused by the interaction of Zipfian power-law data distributions with physical memory
+    mapping. In recommendation systems, embedding lookups are highly skewed: a few popular IDs (e.g.,
+    viral videos) account for 90% of accesses. If these popular embedding vectors happen to be physically
+    allocated in the memory addresses managed by HBM Stack 0, that specific memory controller and physical
+    silicon stack will be constantly bombarded with read requests. The localized high switching activity
+    generates a physical thermal hotspot, triggering hardware thermal throttling of the whole chip to
+    prevent damage. The co-design solution is software-level memory interleaving or embedding replication:
+    replicate the top 0.1% hottest embeddings across all 4 HBM stacks and round-robin the read requests,
+    distributing the thermal load evenly.'
+  common_mistake: Adding more cooling or assuming a general memory leak, missing the localized physical
+    nature of the memory accesses.
+  napkin_math: TPU v4 has 4 HBM stacks, 32GB total (8GB each). Peak BW = 1200 GB/s (300 GB/s per stack).
+    150,000 QPS * 100 lookups/query * 128 bytes/vector = 1.9 GB/s total read bandwidth. This is <1% of
+    peak. However, if 90% of lookups hit 10 specific vectors (1280 bytes total), the SRAM caches them,
+    but cache eviction policies in TPU compilers for large tables might force repeated HBM fetches. The
+    constant polling of a tiny physical area on Stack 0 causes localized joule heating. Distributing these
+    10 vectors across 4 stacks drops localized heat by 75%.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

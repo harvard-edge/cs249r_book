@@ -1,0 +1,33 @@
+schema_version: 1
+id: edge-exp2-mast-0146
+title: Multi-modal Sensor Data Ingestion Architecture on Jetson Orin
+topic: storage-format-selection
+status: published
+provenance: imported
+scenario: You are designing the local telemetry and sensor recording system for an autonomous drone powered
+  by a single NVIDIA Jetson Orin. The system must continuously log structured metadata, bounding box predictions
+  from the DLA, and high-frequency LiDAR point clouds (100Hz) directly to an onboard NVMe drive for post-mission
+  training. Given the Orin's 32 GB LPDDR5 memory is heavily utilized by the main perception stack (consuming
+  24 GB) and the system operates under a strict 60W TDP, design a novel hybrid storage format and tiering
+  strategy to serialize and persist this heterogeneous data without stalling the inference pipeline.
+details:
+  realistic_solution: A robust L6+ architecture uses a dual-path storage strategy. Structured perception
+    metadata and bounding boxes are serialized using a lightweight row-based format like FlatBuffers or
+    Cap'n Proto (zero-copy overhead) and batched into memory-mapped files. High-volume LiDAR data bypasses
+    the CPU via zero-copy DMA directly to an NVMe-backed circular buffer, optionally utilizing the Ampere
+    GPU's hardware NVENC/NVDEC or custom CUDA kernels for lightweight delta encoding before persistence.
+    This isolates the CPU, respects the power envelope, and keeps memory overhead well below the remaining
+    8 GB.
+  common_mistake: Candidates often propose standard Parquet or TFRecord implementations using CPU-heavy
+    compression (like GZIP or Snappy) without accounting for the limited power budget and CPU overhead.
+    They also frequently fail to separate the high-throughput, unstructured LiDAR data from the low-throughput,
+    highly structured bounding box metadata, leading to memory fragmentation and lock contention in the
+    remaining 8 GB of RAM.
+  napkin_math: 'Available RAM: 32 GB LPDDR5 - 24 GB (Perception) = 8 GB available. LiDAR data rate: 100Hz
+    * 65,000 points * 16 bytes (XYZI) = ~104 MB/s. Metadata rate: 30Hz * 100 objects * 256 bytes = ~750
+    KB/s. Uncompressed 1-hour mission storage: (104 MB/s + 0.75 MB/s) * 3600s = ~377 GB. Using an aggressive
+    CPU compressor like Zstd-9 might consume 15W+ and multiple CPU cores, violating the 60W system TDP
+    when combined with the 275 TOPS INT8 DLA/GPU load. Instead, using a fast GPU-accelerated bit-packing/delta-encoding
+    scheme reduces the LiDAR payload by 50% (saving ~188 GB per hour) while drawing < 5W overhead from
+    the Ampere GPU.'
+last_modified: '2026-04-01'

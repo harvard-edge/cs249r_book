@@ -1,0 +1,23 @@
+schema_version: 1
+id: cloud-cell-12134
+title: 'Network Bandwidth Bottlenecks: Diagnose Bandwidth Bottleneck in Multi-Node Training'
+topic: network-bandwidth-bottlenecks
+status: published
+provenance: imported
+scenario: 'A 32-GPU training job (4 DGX nodes, H100) shows 65% GPU utilization (target: >85%) during data-parallel
+  training of a 7B model. Profiling shows 35% of step time is in AllReduce. Diagnose the bottleneck: is
+  it NVLink (900GB/s) or InfiniBand (200Gb/s = 25GB/s) between nodes, and quantify a fix.'
+details:
+  realistic_solution: 'AllReduce bottleneck: 7B model, 32 GPUs (4 nodes × 8 GPUs). Gradient size: 7B ×
+    2B = 14GB. Per GPU: 14/32=437.5MB. Ring AllReduce data per GPU: 2×31/32×437.5MB=843MB. Intra-node:
+    NVLink 900GB/s → negligible. Inter-node: all 4 nodes exchange via IB 25GB/s per node (200Gb/s). AllReduce
+    over IB: 843MB/25GB/s=33.7ms per step. Compute: 7B fwd+bwd on H100: ~100ms. AllReduce fraction: 33.7/133.7=25.2%
+    (close to observed 35% with overhead). Fix: overlap AllReduce with backward pass (DDP overlap) → AllReduce
+    runs during backward. Gradient bucketing: 25MB buckets. Effective overhead: ~5ms sequential at end.'
+  common_mistake: Assuming NVLink is the bottleneck because it's labeled a 'limit'; in multi-node training,
+    InfiniBand inter-node bandwidth is almost always the binding constraint.
+  napkin_math: '7B gradient: 14GB. Per GPU: 437.5MB. Ring: 843MB per GPU exchanged. IB: 200Gb/s=25GB/s.
+    Time: 843/25=33.7ms. Step: 100ms. Overhead: 33.7/(100+33.7)=25.2%. With overlap (DDP): start AllReduce
+    during backward. Backward: 100ms. AllReduce: 33.7ms. If overlapped 100%: total step≈100ms. GPU util:
+    100%. In practice, 50% overlap: step=100+16.85=116.85ms. GPU util: 100/116.85=85.6% ✓.'
+last_modified: '2026-04-01'

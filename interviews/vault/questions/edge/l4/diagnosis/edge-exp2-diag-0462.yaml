@@ -1,0 +1,31 @@
+schema_version: 1
+id: edge-exp2-diag-0462
+title: Edge TPU Activation Memory Spilling and Partitioning
+topic: activation-memory
+status: published
+provenance: imported
+scenario: You are deploying a fully INT8-quantized CNN for high-resolution vision tasks on a Google Coral
+  Edge TPU (4 TOPS INT8, 2W, USB form factor). During testing, you observe that inference latency is hundreds
+  of milliseconds per frame, completely missing real-time targets, and host CPU memory usage spikes during
+  execution. The Edge TPU compiler logs indicate the model was successfully quantized to INT8 but partitioned
+  into multiple subgraphs. Diagnose the root cause of this system behavior and explain the hardware constraints
+  driving it.
+details:
+  realistic_solution: The root cause is an activation memory overflow causing graph partitioning. High-resolution
+    inputs produce massive intermediate feature maps. When a layer's output activations exceed the Coral
+    Edge TPU's limited on-chip SRAM (typically around 8MB), the compiler partitions the model. The Edge
+    TPU evaluates the first partition and must offload the massive INT8 intermediate activation tensor
+    over the USB bus to the host CPU before continuing. This host-device I/O completely dominates the
+    latency. The fix is to redesign the early layers of the network with aggressive striding to reduce
+    spatial dimensions quickly, ensuring peak activation memory stays under the SRAM limit.
+  common_mistake: Candidates often assume the 4 TOPS compute capacity is intrinsically too weak for high-resolution
+    inputs or that the initial image transfer over USB is the main bottleneck. They fail to connect the
+    compiler partitioning logs to memory constraints, missing that intermediate activations have exceeded
+    on-chip memory and forced a massive host-device data transfer.
+  napkin_math: Assume an early layer outputs a 1024x1024x16 feature map. In INT8 precision, this intermediate
+    activation tensor requires 1024 * 1024 * 16 * 1 byte = 16.7 MB. This exceeds the Edge TPU's ~8MB SRAM,
+    forcing the compiler to spill it to the host. Transferring this 16.7 MB tensor over a USB 2.0 connection
+    (effective ~35 MB/s) takes 16.7 MB / 35 MB/s ≈ 477 ms. By contrast, computing 2 billion operations
+    for that layer on the 4 TOPS INT8 accelerator takes only (2 * 10^9) / (4 * 10^12) = 0.5 ms. The USB
+    activation transfer is nearly 1000x slower than the actual compute.
+last_modified: '2026-04-01'

@@ -1,0 +1,32 @@
+schema_version: 1
+id: tinyml-0622
+title: The Checkpoint-Watchdog Death Spiral
+topic: safety-certification
+status: published
+provenance: imported
+scenario: Your team is building a safety-critical misfire detection system for an automotive ECU using
+  a TinyML model. To prevent the system from ever hanging, you've implemented a hardware watchdog timer
+  (WDT) with a 100ms timeout. If the WDT is not 'petted' within that window, it triggers a hard reset.
+  Normal inference takes ~80ms. For added resilience, the system checkpoints the model's state to internal
+  flash memory after every inference, which takes an additional 30ms. During a rare engine 'cold start'
+  event, sensor data becomes unusually complex, causing inference time to spike to 105ms. The WDT correctly
+  fires and reboots the device. However, instead of recovering, the ECU enters a continuous, rapid reboot
+  loop. Critique this fault-tolerance design and justify precisely why the system enters a deterministic
+  failure loop instead of successfully resetting.
+details:
+  realistic_solution: 'The design has a critical flaw: the total time for the ''success'' path is longer
+    than the watchdog timeout. This is a latent bug waiting to be triggered. Normal operation is `80ms
+    (inference) + 30ms (checkpoint) = 110ms`, which is greater than the `100ms` WDT timeout. The only
+    reason it works at all is that the `pet_watchdog()` call must be placed *after* inference but *before*
+    checkpointing. The system is living on a prayer.'
+  common_mistake: Blaming the checkpointed data. A common guess is that the checkpoint is corrupt, and
+    reloading it causes a crash. While possible, the scenario describes a clean WDT timeout, not a data
+    corruption fault. Another mistake is to focus only on the inference time spike, without considering
+    its interaction with the other system components. The engineer fails to see the system as a whole.
+  napkin_math: 'Normal: T_inf(80ms)+T_chk(30ms)=110ms > T_wdt(100ms). WDT pet between inference and checkpoint.
+    Cold start: T_inf=105ms>100ms → WDT fires → reboot. Restore checkpoint → retry same complex input
+    → 105ms → reboot again. Loop: boot(50ms)+restore(10ms)+inference(105ms), WDT fires at 100ms every
+    time. Fix: pet mid-inference, or boot counter to skip checkpoint.'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

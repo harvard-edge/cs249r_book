@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-1726
+title: Diagnosing W8A16 Quantization Regression During Prefill
+topic: quantization-fundamentals
+status: published
+provenance: imported
+scenario: 'You are deploying a 70B parameter LLM across 4x A100 (80GB) GPUs. To save memory, you implement
+  W8A16 (8-bit weight, 16-bit activation) quantization. Profiling reveals an interesting divergence: during
+  the autoregressive decoding phase (batch size 1), token generation speed nearly doubles compared to
+  the FP16 baseline. However, during the prefill phase (processing a 2048-token prompt), the latency is
+  actually 15% slower than the pure FP16 model. Diagnose the root cause of this performance regression
+  during prefill.'
+details:
+  realistic_solution: Decoding is memory-bandwidth bound (GEMV), so halving weight bytes directly halves
+    latency (8.75ms vs 17.5ms). Prefill is compute-bound (GEMM). Because activations remain in FP16, the
+    Tensor Cores require FP16 weights. The INT8 weights must be dequantized on-the-fly in the SM registers,
+    adding ALU overhead without alleviating any bottleneck, thus degrading overall prefill latency.
+  common_mistake: Candidates often incorrectly assume that quantization uniformly improves performance
+    by reducing memory traffic, failing to distinguish between the memory-bound nature of decoding (GEMV)
+    and the compute-bound nature of prefill (GEMM).
+  napkin_math: 'Decoding (GEMV): 70B params * 1 byte = 70GB traffic per token. At 8 TB/s aggregate bandwidth
+    (4x A100), it takes ~8.75ms vs ~17.5ms for FP16. Prefill (GEMM): 70B * 2048 * 2 = ~286 TFLOPs. Since
+    this is purely compute-bound (4x A100 has 1248 TFLOPS FP16), the INT8 memory bandwidth savings are
+    irrelevant, while the extra INT8-to-FP16 cast instructions consume vector ALU cycles, lowering the
+    achievable TFLOPS.'
+chain:
+  id: cloud-chain-311
+  position: 2
+created_at: '2026-03-24T00:28:07.421125'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2313
+title: Auto-Tuning Budget vs Dynamic Batching
+topic: graph-compilation
+status: published
+provenance: imported
+scenario: Deploying a dense retrieval model (100 unique MatMul shapes) on L4 GPUs. Auto-tuning a single
+  batch size takes 20 minutes. We need to support 64 dynamic batch sizes (1 to 64). Full auto-tuning takes
+  64 * 20 = 1280 mins (21 hours). Our CI/CD enforces a 3-hour (180 mins) max compilation budget. Eager
+  mode yields 10ms latency (failing 5ms SLA). How do you meet the SLA and budget?
+details:
+  realistic_solution: Implement sequence bucketization in the compiler frontend. Group the 64 batch sizes
+    into 8 buckets (e.g., 1, 2, 4, 8, 16, 32, 48, 64). Configure the auto-tuner (like TVM Ansor or XLA)
+    to only search and compile optimized kernels for these 8 specific shapes. At runtime, pad incoming
+    requests to the nearest bucket size. The compute overhead from padding is completely eclipsed by the
+    speedup of running heavily optimized, auto-tuned kernels, while fitting comfortably within the CI/CD
+    pipeline's time constraints.
+  common_mistake: Falling back to eager mode or heuristic compilation for all batch sizes, missing the
+    SLA.
+  napkin_math: 'Full Tuning: 64 sizes * 20 min = 1,280 mins (> 180m budget).
+
+    Bucket Tuning (8 buckets): 8 * 20 min = 160 mins (< 180m budget).
+
+    Latency: Tuned exact-match latency is ~3ms. Worst-case padding adds ~33% compute overhead. 3ms * 1.33
+    = ~4ms average latency. 4ms < 5ms SLA.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

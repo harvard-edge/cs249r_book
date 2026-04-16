@@ -1,0 +1,26 @@
+schema_version: 1
+id: edge-exp2-diag-0003
+title: Latency Spikes in Conditional Privacy Guardrails on Hailo-8
+topic: responsible-ai
+status: published
+provenance: imported
+scenario: Your team deployed a smart security camera on a Hailo-8 accelerator (26 TOPS INT8, 2.5W, no
+  local DRAM). To comply with privacy guardrails, a secondary 'face-blurring' model is triggered conditionally
+  whenever the primary object detector flags a person. During red-team testing in crowded environments,
+  the pipeline latency spikes catastrophically from 30ms to over 300ms, yet the Hailo-8 compute utilization
+  remains under 30%. Identify the root cause of this symptom based on the hardware architecture.
+details:
+  realistic_solution: The root cause is PCIe bandwidth saturation and massive context-switching overhead.
+    Because the Hailo-8 has no local DRAM, conditionally swapping between the primary model and the guardrail
+    model requires re-streaming the network weights and graph over the host interface each time. The solution
+    is either to co-compile both models into a single unified dataflow context using the Hailo toolchain
+    to avoid swapping, or to offload the lightweight privacy guardrail to the host CPU.
+  common_mistake: Candidates often misdiagnose the issue as thermal throttling or assume the 26 TOPS compute
+    capacity is being exceeded by running two models. They fail to account for the Hailo-8's dataflow
+    architecture, which lacks local DRAM and relies entirely on streaming from host memory.
+  napkin_math: Assume the primary model is 25MB (INT8) and the guardrail is 5MB. Streaming over a PCIe
+    Gen3 x4 link yields ~4 GB/s effective bandwidth. Swapping to the guardrail takes 5MB / 4GB/s = 1.25ms,
+    and swapping back to the primary model takes 25MB / 4GB/s = 6.25ms. The total I/O penalty per conditional
+    trigger is ~7.5ms. If a crowd triggers the guardrail 30 times per frame, the system incurs 30 * 7.5ms
+    = 225ms of pure memory streaming latency, dwarfing the actual compute time.
+last_modified: '2026-04-01'

@@ -1,0 +1,26 @@
+schema_version: 1
+id: edge-sus-60031
+title: Implementing sparse gradient updates for efficient edge fine-tuning
+topic: autograd-computational-graphs
+status: published
+provenance: imported
+scenario: You need to implement personalization fine-tuning on Jetson Orin where only the top-k most-changed
+  parameters are updated each step (sparse gradient descent). This should reduce communication overhead
+  in a future federated learning deployment. The model is a 20M parameter transformer encoder.
+details:
+  realistic_solution: Register gradient hooks via parameter.register_hook(sparse_hook) that immediately
+    zero out the gradient tensor in-place except for the top-k elements before the gradient accumulates
+    into the parameter's .grad. Alternatively, use torch.nn.utils.parametrize to wrap parameters with
+    a sparsity constraint. For truly sparse backward passes, custom CUDA kernels with sparse scatter-reduce
+    operations are needed — but on Orin, the CPU can handle the top-k selection on the 80MB gradient tensor
+    in ~5ms.
+  common_mistake: Computing the full gradient tensor and then masking out small gradients before the optimizer
+    step. This approach still computes and stores the full gradient (80MB for 20M params FP32), using
+    the same memory and compute as dense training. The sparsity saves nothing in the backward pass itself.
+  napkin_math: '20M params × 4 bytes = 80MB full gradient. Top-k with k=100K (0.5%): torch.topk on 20M
+    elements takes ~2ms on Orin CPU. Sparse gradient storage: 100K indices × 4 bytes + 100K values × 4
+    bytes = 0.8MB. Communication savings in federated learning: 80MB vs 0.8MB = 100× reduction at cost
+    of 2ms CPU overhead per step.'
+last_modified: '2026-04-02'
+tags:
+- scope:single-machine

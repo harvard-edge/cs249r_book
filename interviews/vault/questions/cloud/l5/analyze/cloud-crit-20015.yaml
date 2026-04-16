@@ -1,0 +1,24 @@
+schema_version: 1
+id: cloud-crit-20015
+title: FlashDecoding for Long-Context Decode
+topic: flash-attention
+status: draft
+provenance: imported
+scenario: During autoregressive decoding of a 70B model on H100, each step attends to the full KV cache.
+  At context length 32K with 80 layers, 8 GQA KV heads, head_dim=128, standard FlashAttention processes
+  KV sequentially within one thread block per head. FlashDecoding parallelizes across the KV sequence.
+  Analyze the speedup.
+details:
+  realistic_solution: 'Decode attention: Q is 1 token, K/V are 32K tokens. FLOPs per head: 2 x 1 x 32K
+    x 128 = 8M FLOPs. IO: read K (32K x 128 x 2B = 8MB) + V (8MB) + Q (256B) = 16MB. AI = 8M / 16M = 0.5
+    FLOP/byte — deeply memory-bound (ridge = 295). Standard FA: 1 block per head = 8 blocks for 132 SMs.
+    Only 6% occupancy. FlashDecoding: split 32K KV into 256-token chunks, each processed by a separate
+    block: 32K/256 = 128 blocks per head x 8 heads = 1024 blocks. 100% occupancy. Need a reduction to
+    combine partial softmax results. Reduction cost: 128 x 128 x 2B x 8 = 256KB at 3.35TB/s = 0.1us. Speedup:
+    ~8-16x from parallelism, bringing decode attention from ~50us to ~5us.'
+  common_mistake: Not recognizing that decode attention is memory-bound (1 query token against 32K KV
+    tokens), so FlashAttention's compute-bound optimization provides less benefit. FlashDecoding addresses
+    this by splitting the KV dimension across multiple thread blocks.
+  napkin_math: 'Standard: 8 blocks / 132 SMs = 6% occupancy. FlashDecoding: 1024 blocks = 100%. IO-bound:
+    16MB x 8 heads / 3.35 TB/s = 38us (standard). With 128x parallelism within each head: ~5us.'
+last_modified: '2026-04-01'

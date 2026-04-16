@@ -1,0 +1,28 @@
+schema_version: 1
+id: global-0104
+title: Long-Context VRAM Exhaustion
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: You are serving a 34B parameter code generation model with a massive 64k token context window
+  on 2x A100 (80GB) GPUs. The model weights are quantized to INT4 (occupying ~17GB). At a concurrency
+  of just 20 requests, the system hits Out-Of-Memory (OOM) errors and crashes, even though compute utilization
+  is below 40%.
+details:
+  realistic_solution: The architectural requirement is to implement KV Cache Quantization. While weights
+    are INT4, the KV cache (storing past keys and values for attention) is likely defaulting to FP16.
+    At long context lengths, the KV cache footprint grows linearly and surpasses the weight footprint.
+    By quantizing the KV cache dynamically to INT8 (or FP8 on supported hardware) using techniques like
+    per-token or per-channel asymmetric quantization, you halve the memory required per token. This allows
+    the system to support the required 64k context at 20+ concurrency without OOMing, while maintaining
+    long-context retrieval accuracy.
+  common_mistake: Aggressively quantizing the model weights further to INT3 or INT2, which degrades accuracy
+    but fails to solve the OOM because the KV cache is the actual memory bottleneck.
+  napkin_math: 'Assume 60 layers, 64 heads, 128 head dim. FP16 KV cache per token: 60 * 64 * 128 * 2 (K+V)
+    * 2 bytes = ~1.96 MB/token. For 64k context: 1.96 MB * 65536 = 128 GB per request! Across 20 requests
+    = 2.56 TB (impossible on 160GB total VRAM). Using Grouped Query Attention (GQA, e.g. 8 KV heads) reduces
+    this to 16 GB/req. Still, 20 reqs = 320GB. Quantizing KV to INT8 (1 byte) halves it to 160GB, and
+    using INT4 KV cache (0.5 bytes) brings it to 80GB, fitting comfortably within the 160GB VRAM budget.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

@@ -1,0 +1,65 @@
+schema_version: 1
+id: edge-fill-00368
+title: 'Optimizing Object Detection on Jetson Orin: Dynamic Batching for Throughput and Latency'
+topic: batching-strategies
+status: published
+provenance: imported
+scenario: You are deploying a real-time object detection model (e.g., YOLOv8) on an NVIDIA Jetson Orin
+  (32 GB LPDDR5, 275 TOPS INT8, 60W) to process a 4K video stream at 30 FPS. The primary objective is
+  to maximize detection throughput while maintaining an end-to-end inference latency under 50ms per frame.
+  The initial deployment uses a fixed static batch size of 1. However, profiling reveals that the GPU
+  is underutilized, and increasing the batch size improves throughput but significantly exceeds the latency
+  target for some frames. Explain in detail the throughput-latency tradeoffs of static, dynamic, and continuous
+  batching strategies in this specific hardware context and propose a scheduling policy that could achieve
+  the desired balance. Justify why your chosen strategy would be effective on the Jetson Orin's architecture
+  and power constraints.
+details:
+  realistic_solution: 'Implement a dynamic batching strategy with an adaptive scheduling policy. This
+    involves:
+
+    1.  **Real-time Monitoring:** Continuously monitor system metrics such as GPU utilization, inference
+    latency, input queue depth, and power consumption.
+
+    2.  **Adaptive Batch Size Adjustment:** Dynamically adjust the batch size based on these metrics.
+    For instance, if the input queue grows and latency is comfortably below the 50ms threshold, gradually
+    increase batch size. If latency approaches or exceeds the threshold, immediately reduce batch size.
+    Incorporate hysteresis to prevent rapid oscillations.
+
+    3.  **Asynchronous Operations:** Employ asynchronous data transfer (e.g., using CUDA streams or DeepStream''s
+    `batch-size` property with `batch-copy` mode) to overlap data movement from host to device (and vice-versa)
+    with computation, leveraging the Orin''s ability for concurrent execution.
+
+    4.  **Continuous Batching Principles:** Integrate principles of continuous batching to minimize idle
+    time. Rather than waiting for a full batch to accumulate, process partially filled batches or schedule
+    new inferences as soon as resources are available, especially crucial for maintaining low latency
+    for a constant 30 FPS stream.
+
+    5.  **Power Awareness:** Factor the 60W power budget into the scheduling policy. Aggressive batching
+    might push power consumption, leading to throttling. The adaptive system should also consider power
+    limits and potentially scale back batch sizes to stay within the power envelope.'
+  common_mistake: A common mistake is assuming that a larger batch size always leads to proportionally
+    higher throughput or that a batch size of 1 is always optimal for low latency. On edge devices like
+    the Jetson Orin, memory bandwidth (32 GB LPDDR5) and the number of CUDA cores are finite. Fixed large
+    batches can introduce tail latency due to increased queueing and processing time, while very small
+    batches might lead to underutilization of the 275 TOPS INT8 available, incurring significant overhead
+    from kernel launches and data transfers between CPU and GPU for each batch. Furthermore, ignoring
+    the 60W power budget might lead to thermal throttling or inefficient operation.
+  napkin_math: "Let's assume the object detection model requires approximately 15 INT8 TOPS per frame\
+    \ inference. \n- **Max theoretical INT8 inferences/sec:** 275 TOPS / 15 TOPS/inference ≈ 18.3 inferences/sec.\
+    \ This is a highly idealized peak, not considering memory access, kernel launch overhead, or I/O.\n\
+    - **Target latency:** < 50ms. For a 30 FPS input stream, frames arrive every ~33.3ms.\n\n**Scenario\
+    \ 1: Static Batch Size = 1**\nIf processing a single frame takes 40ms, throughput is 1 frame/40ms\
+    \ = 25 FPS. This meets the latency target but underutilizes the GPU for a 30 FPS stream.\n\n**Scenario\
+    \ 2: Static Batch Size = 2**\nIf processing a batch of 2 frames takes 60ms, the throughput is 2 frames/60ms\
+    \ = 33.3 FPS. This meets the 30 FPS requirement, but the effective latency for the second frame in\
+    \ the batch (if sequential) would be 60ms, exceeding the 50ms target. Even with pipelining, the end-to-end\
+    \ latency for any given frame would be ~60ms.\n\n**Dynamic Batching (Napkin Math Approach):**\n- If\
+    \ current latency is 30ms (well below 50ms) and GPU utilization is 60%, the system can try increasing\
+    \ the batch size from B to B+1. If the new latency for B+1 is 45ms and throughput improves, this is\
+    \ a gain.\n- If latency spikes to 55ms, the system should reduce the batch size or prioritize single-frame\
+    \ processing until latency drops. The goal is to keep `max(inference_time_per_batch / batch_size)`\
+    \ < 50ms, while maximizing `(batch_size * 1000) / inference_time_per_batch`.\n- Overlapping data transfer:\
+    \ If data transfer for a frame takes 5ms and inference takes 40ms, total non-overlapped time is 45ms.\
+    \ With overlap, if transfer and compute happen concurrently, it could be closer to max(5ms, 40ms)\
+    \ = 40ms (ideal case), effectively reducing latency or increasing available compute time."
+last_modified: '2026-04-01'

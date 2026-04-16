@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-r2-40063
+title: GPUDirect RDMA vs GPUDirect Storage Data Paths
+topic: rdma-transport
+status: published
+provenance: imported
+scenario: 'During training, a 64-MI300X cluster performs two types of bulk data transfer: (1) AllReduce
+  gradients via GPUDirect RDMA (GPU→NIC→GPU), and (2) checkpoint saves via GPUDirect Storage (GPU→NVMe
+  SSD). Both bypass CPU memory but share the PCIe bus. Analyze how concurrent checkpoint saves affect
+  AllReduce throughput when both operations compete for PCIe bandwidth.'
+details:
+  realistic_solution: 'On a typical MI300X server (e.g., Supermicro AS-8125GS): each GPU connects to a
+    PCIe Gen5 x16 switch that also hosts its ConnectX-7 NIC and 2 NVMe SSDs. PCIe Gen5 x16: 64 GB/s per
+    direction (theoretical), ~57 GB/s effective. AllReduce GPUDirect RDMA: GPU VRAM → PCIe → NIC. Requires
+    ~50 GB/s (400Gbps NIC line rate) = 88% of PCIe bandwidth. Checkpoint GPUDirect Storage: GPU VRAM →
+    PCIe → NVMe. Each NVMe Gen5: 14 GB/s. 2 SSDs = 28 GB/s = 49% of PCIe bandwidth. Total demand: 50 +
+    28 = 78 GB/s on a 57 GB/s link — 137% oversubscription! Result: AllReduce throughput drops to 57 ×
+    50/78 = 36.5 GB/s (73% of normal). Checkpoint throughput: 57 × 28/78 = 20.5 GB/s (73% of normal).
+    Both suffer proportionally. Mitigation: (1) Schedule checkpoints during forward-pass computation when
+    NICs are idle. (2) Checkpoint only on a subset of GPUs (ZeRO-3 shards: only checkpoint 1/N of weights
+    per GPU, reducing by 64×). (3) Use CPU-bounce buffer path for checkpoints: GPU→CPU→NVMe, trading latency
+    for PCIe bandwidth isolation (CPU uses different PCIe root complex). (4) On MI300X with 192GB: checkpoint
+    = 192GB per GPU. At 20.5 GB/s degraded: 192/20.5 = 9.4 seconds. With full NVMe bandwidth: 192/28 =
+    6.9 seconds. The 2.5 seconds of extra checkpoint time cascades into 2.5s × 64 GPUs of stalled AllReduce.'
+  common_mistake: Assuming GPUDirect RDMA and GPUDirect Storage use separate PCIe paths. On most server
+    platforms, the NIC and NVMe SSDs share the same PCIe root complex or switch, creating bandwidth contention
+    during concurrent operations.
+  napkin_math: 'PCIe contention: 50 + 28 = 78 GB/s demand on 57 GB/s bus = 1.37× oversubscription. AllReduce
+    degradation: from 50 to 36.5 GB/s = 27% throughput loss. For 2GB AllReduce: normal = 40ms, degraded
+    = 54.8ms. Extra 14.8ms per iteration during checkpoint window. Checkpoint duration: 192GB/20.5GB/s
+    = 9.4s. Total wasted time: 9.4s × 14.8ms/200ms = 693ms of AllReduce overhead per checkpoint.'
+last_modified: '2026-04-02'
