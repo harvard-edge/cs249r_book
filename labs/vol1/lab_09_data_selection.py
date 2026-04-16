@@ -228,9 +228,7 @@ def _(
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_frac = mo.ui.slider(
         start=5, stop=100, value=100, step=5,
         label="Dataset fraction (%)",
@@ -255,9 +253,7 @@ def _(mo, partA_pred):
     return (partB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_coreset = mo.ui.slider(
         start=10, stop=90, value=50, step=5,
         label="Coreset fraction (%)",
@@ -293,9 +289,7 @@ def _(mo, partB_pred):
     return (partC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_workers = mo.ui.slider(
         start=1, stop=16, value=8, step=1,
         label="CPU workers",
@@ -330,8 +324,6 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_params_b = mo.ui.slider(
         start=0.5, stop=50, value=10, step=0.5,
         label="Model size (B parameters)",
