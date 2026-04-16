@@ -5,13 +5,13 @@ author: "Vijay Janapa Reddi"
 categories: ["essay"]
 description: "Most developers now use AI tools. Very few build the systems underneath them. In ML systems, failures propagate upward through the stack. Understanding flows downward. That asymmetry is the most expensive gap in the industry."
 draft: true
-image: "figures/essay-03-stack-overlay.svg"
+image: "figures/essay-03-stack-overlay.png"
 ---
 
 <!--
   STATUS: DRAFT v5
   Thesis: "failures propagate upward, understanding flows downward"
-  Figure: figures/essay-03-stack-overlay.svg (converged after 2 rounds of review)
+  Figure: figures/essay-03-stack-overlay.png (converged after 2 rounds of review)
   REMAINING:
   - [ ] Verify workforce data URLs are live at publish time
   - [ ] Confirm figure path when moving from drafts/ to posts/
@@ -29,11 +29,11 @@ Silence.
 
 Between that one line of Python and actual silicon, there are roughly a dozen layers: the autograd engine walks a computation graph, the dispatcher selects operator implementations, cuDNN or cuBLAS picks a kernel, the CUDA runtime schedules it onto a stream, the GPU memory manager allocates and frees buffers, and the hardware executes thousands of parallel threads. Most engineers interact with all of this through three method calls.
 
-Here is why that matters. In ML systems, **failures propagate upward through the stack. Understanding flows downward.** A hardware constraint at the bottom manifests as an incomprehensible error at the top. The only way to diagnose it is to trace downward through layers that most practitioners have never seen. That asymmetry, with failures going one direction and understanding the other, is the most expensive gap in the AI industry.
+Here is why that matters. Systems engineers have long known that abstractions leak and errors surface where they are easiest to detect, not where they originate. Restated for the ML era: **failures propagate upward through the stack. Understanding flows downward.** A hardware constraint at the bottom manifests as an incomprehensible error at the top. The only way to diagnose it is to trace downward through layers that most practitioners have never seen. That asymmetry, with failures going one direction and understanding the other, is the most expensive gap in the AI industry.
 
 ## The Gap in Numbers
 
-The [2024 Stack Overflow Developer Survey](https://survey.stackoverflow.co/2024/) found that 62 percent of developers now use AI tools in their work, with another 14 percent planning to. When the same survey asked about building or fine-tuning ML systems, the number drops into the low single digits. A 10x to 15x gap between people who call the API and people who work on the systems underneath.
+The [2024 Stack Overflow Developer Survey](https://survey.stackoverflow.co/2024/) found that 62 percent of developers now use AI tools in their work, with another 14 percent planning to. When the same survey asked about building or fine-tuning ML systems, the number fell into the low single digits. The gap between people who call the API and people who work on the systems underneath widens every year.
 
 The pipeline is not catching up. Walk through any top ML curriculum and you will find courses on model architectures, optimization theory, and evaluation metrics. You will rarely find courses on GPU programming, memory hierarchies, or distributed training. We are scaling the supply of people who can use AI. We are not scaling the supply of people who understand what happens when they do.
 
@@ -45,7 +45,7 @@ Both disciplines need to exist. Right now only one of them is being taught at sc
 
 The [previous essay](https://buttondown.com/mlsysbook/archive/the-model-is-not-the-product/) introduced the D.A.M taxonomy (**Data**, **Algorithm**, **Machine**) as a diagnostic lens. The 100:1 ratio tells you the gap exists. It does not tell you where. For that, you need to see the stack.
 
-![The four layers of a single-machine ML system. Failures that surface at the top (Application) almost always originate below. The labels on the right name the D.A.M axis that dominates each layer.](figures/essay-03-stack-overlay.svg)
+![The four layers of a single-machine ML system. Failures that surface at the top (Application) almost always originate below. The labels on the right name the D.A.M axis that dominates each layer.](figures/essay-03-stack-overlay.png)
 
 Every layer does a different job. The **Hardware** sets the physical ceiling, silicon and bandwidth and power. The **Runtime** moves data between CPU and GPU, allocates memory, schedules kernels. The **Framework** translates math into hardware instructions, manages autograd, dispatches operators. The **Application** is where you live, batch size and training loop and metrics. An error at the top almost always has a cause at the bottom. That is the gap a builder sees through.
 
@@ -55,7 +55,7 @@ You are training a 7B parameter model. You set batch size to 64, a reasonable st
 
 An API user reduces the batch size or requests a bigger GPU.
 
-A builder traces the memory. A 7B parameter model at batch 64 has three major memory consumers. First, the forward pass activations, which scale with batch size and sequence length. Second, the gradients, which scale with parameter count. Third, the Adam optimizer state, which keeps two extra vectors per parameter and triples the memory cost of SGD. Add them up and the [total exceeds the 80 GB of HBM](https://huggingface.co/docs/transformers/v4.20.1/en/perf_train_gpu_one) on a single A100. The error is not about your batch size. It is about three different memory consumers at three different layers of the stack that your batch size decision activated simultaneously.
+A builder traces the memory. For a 7B parameter model in FP16, the weights alone occupy ~14 GB. The gradients add another ~14 GB. Adam's two optimizer state vectors, typically kept in FP32 for numerical stability, add roughly ~28 GB more. That is ~56 GB before a single activation is stored. Now batch 64 starts generating forward-pass activations, which scale with both batch size and sequence length, and the [combined footprint pushes past](https://huggingface.co/docs/transformers/v4.20.1/en/perf_train_gpu_one) the 80 GB of HBM on an A100. The error is not about your batch size. It is about four different memory consumers at four different layers of the stack that your batch size decision activated simultaneously.
 
 The fix could be activation checkpointing (trade compute for memory at the framework layer), gradient accumulation (change the training loop at the application layer), or mixed-precision training (reduce the bytes per parameter at the hardware layer). Each fix operates at a different layer. Choosing the right one requires seeing through the stack, not just reacting to the error message.
 
@@ -89,9 +89,9 @@ You cannot debug what you did not build. I keep saying this because it keeps bei
 
 Everything above is one machine. One node, 1 to 8 GPUs, shared memory.
 
-At fleet scale, meaning 1,000 to 100,000 GPUs connected by InfiniBand fabric and coordinated by distributed runtimes, the "failures up, understanding down" problem multiplies. Every layer boundary becomes a network boundary. Every memory wall becomes a bandwidth wall. And failure stops being an exception. It becomes a [statistical certainty](https://arxiv.org/abs/2407.21783).
+At fleet scale, meaning 1,000 to 100,000 GPUs connected by InfiniBand fabric and coordinated by distributed runtimes, the "failures up, understanding down" problem multiplies. Every layer boundary becomes a network boundary. Every memory wall becomes a bandwidth wall. And failure stops being an exception. During the 54-day Llama 3 pre-training run on 16,384 GPUs, [Meta recorded 419 unexpected hardware interruptions](https://arxiv.org/abs/2407.21783), roughly one every three hours. That is the empirical footprint of the builder's gap at scale.
 
-If the builder's gap is expensive at one machine, it is existential at ten thousand. That is the next essay.
+If the gap is expensive at one machine, it is existential at ten thousand. That is the next essay.
 
 ## Your Turn
 
@@ -103,19 +103,9 @@ If those are different layers, you have found your builder's gap. The failure we
 
 Vijay
 
-*If this resonated, forward it to someone debugging a system they cannot see through.*
-
 ---
 
-*[Machine Learning Systems](https://mlsysbook.ai) is an open textbook on the physics of AI engineering. Its hands-on companion, [TinyTorch](https://mlsysbook.ai/tinytorch/), walks you through 20 modules from tensors to transformers to acceleration, all built from scratch. Stay tuned, more is on the way.*
+*This newsletter closes the builder's gap in public, essay by essay, from silicon to serving. Forward this to someone debugging a system they cannot see through. If you are not on the list yet, [subscribe](https://mlsysbook.ai/book/#subscribe). The next essay goes to the fleet, with more to follow on benchmarks, inference, and the return of the hardware lottery.*
 
-[Subscribe](https://buttondown.com/mlsysbook) | [GitHub](https://github.com/harvard-edge/cs249r_book) | [TinyTorch](https://mlsysbook.ai/tinytorch/)
-
-**Sources:**
-
-- [Stack Overflow 2024 Developer Survey](https://survey.stackoverflow.co/2024/). 62 percent of developers currently use AI tools; an additional 14 percent plan to. Building and fine-tuning ML systems remains in the low single digits.
-- [Chip Huyen: AI Engineering](https://www.oreilly.com/library/view/ai-engineering/9781098166298/). Comprehensive guide to building applications on top of foundation models.
-- [Mixed Precision Training](https://docs.nvidia.com/deeplearning/performance/mixed-precision-training/index.html) (NVIDIA). FP16 dynamic range limitations and BF16 as the solution.
-- [PyTorch Performance Tuning Guide](https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html). Data pipeline bottlenecks and GPU utilization.
-- [The Llama 3 Herd of Models](https://arxiv.org/abs/2407.21783) (Meta, 2024). 419 unexpected hardware interruptions in a 54-day training run on 16,384 GPUs.
+[MLSysBook](https://mlsysbook.ai) · [Subscribe](https://mlsysbook.ai/book/#subscribe) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [GitHub](https://github.com/harvard-edge/cs249r_book)
 
