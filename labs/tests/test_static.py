@@ -372,21 +372,11 @@ class TestMarimoDataflow:
     # per-lab (tracked in #1347). As each lab is converted to the
     # one-widget-per-gated-cell pattern (see lab_01 post-#1339 or lab_05_dist_train),
     # remove it from this set. When the set is empty the bug class is closed.
+    # Only vol1/lab_00 remains. Its check1/check2/check3 pattern is structurally
+    # different from the partX_prediction idiom and the mechanical Pattern C
+    # transformation breaks test_engine.py. Needs manual per-cell refactor.
     _KNOWN_MULTI_LEAK_LABS = frozenset({
         "vol1/lab_00_introduction.py",
-        "vol1/lab_01_ml_intro.py",
-        "vol2/lab_01_introduction.py",
-        "vol2/lab_06_fault_tolerance.py",
-        "vol2/lab_07_fleet_orch.py",
-        "vol2/lab_08_inference.py",
-        "vol2/lab_09_perf_engineering.py",
-        "vol2/lab_10_edge_intelligence.py",
-        "vol2/lab_11_ops_scale.py",
-        "vol2/lab_12_security_privacy.py",
-        "vol2/lab_13_robust_ai.py",
-        "vol2/lab_14_sustainable_ai.py",
-        "vol2/lab_15_responsible_ai.py",
-        "vol2/lab_16_fleet_synthesis.py",
     })
 
     def test_no_multi_widget_leak_in_gated_cell(self, lab_path):
