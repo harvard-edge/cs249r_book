@@ -1,36 +1,34 @@
 #!/usr/bin/env python3
 """
-Link checker for corpus deep_dive_url values.
+Link checker for the StaffML → textbook chapter-URL manifest.
 
-Walks src/data/corpus.json, collects every unique deep_dive_url, probes each
-once with a HEAD (then GET fallback) over a small concurrent worker pool, and
-emits a structured JSON report at scripts/_deep_dive_link_report.json plus a
+Walks src/data/chapter-urls.json (the 27-entry chapter-id → relative-path map
+consumed by src/lib/refs.ts), prefixes each path with mlsysbook.ai, probes
+each URL once via curl over a small concurrent worker pool, and emits a
+structured JSON report at scripts/_deep_dive_link_report.json plus a
 human-readable summary on stdout.
 
-Why:
-  ~3,000 of 4,159 deep_dive_urls in the corpus currently 404 or are flaky
-  (mlsysbook.ai chapter routes return 404 even though the homepage links to
-  them; the harvard-edge.github.io dev mirror is fully retired). This script
-  surfaces the problem in CI so future regressions are caught at PR time.
+Background:
+  The per-question `deep_dive_url` field was removed during the vault
+  migration (Phase 1). StaffML now links to textbook chapters via this
+  manifest. Topic-granular linking is a separate, deferred design
+  (see interviews/vault/BOOK_LINKING_PLAN.md). Until that ships, the
+  chapter-URL manifest IS the user-facing link surface — probing it keeps
+  us honest about chapter-level link health.
 
 Usage:
-  python3 scripts/check-deep-dive-links.py                # full check
-  python3 scripts/check-deep-dive-links.py --hosts arxiv.org pytorch.org
-  python3 scripts/check-deep-dive-links.py --fail-on-broken    # exit 1 if any URL is dead
+  python3 scripts/check-deep-dive-links.py                  # full check
+  python3 scripts/check-deep-dive-links.py --hosts mlsysbook.ai
+  python3 scripts/check-deep-dive-links.py --fail-on-broken # exit 1 if any URL is dead
 
-CI integration (suggested, not yet wired):
-  - Run weekly via GitHub Action
-  - Compare diff against the previous report and post a PR comment
-  - Fail the build only on *new* breakage, not on the existing backlog
-
-Output report shape:
+Output report shape (keys stable for the workflow to parse):
   {
-    "checked_at": "2026-04-07T18:42:00Z",
-    "total_urls": 4159,
-    "unique_urls": 612,
-    "by_status": { "200": 423, "404": 180, "timeout": 6, ... },
-    "by_host":   { "mlsysbook.ai": { "200": 0, "404": 117 }, ... },
-    "broken":    [ { "url": "...", "status": 404, "occurrences": 23 }, ... ]
+    "checked_at": "2026-04-16T18:42:00Z",
+    "total_links": 27,
+    "unique_urls": 27,
+    "by_status": { "200": 27, "404": 0, ... },
+    "by_host":   { "mlsysbook.ai": { "200": 27 }, ... },
+    "broken":    [ { "url": "...", "status": 404, "occurrences": 1 }, ... ]
   }
 """
 
@@ -57,7 +55,8 @@ if shutil.which("curl") is None:
 TIMEOUT_SECONDS = 6
 MAX_WORKERS = 8
 USER_AGENT = "StaffML-LinkChecker/1.0 (+https://staffml.ai)"
-CORPUS_PATH = Path(__file__).resolve().parent.parent / "src" / "data" / "corpus.json"
+BASE_URL = "https://mlsysbook.ai"
+SOURCE_PATH = Path(__file__).resolve().parent.parent / "src" / "data" / "chapter-urls.json"
 REPORT_PATH = Path(__file__).resolve().parent / "_deep_dive_link_report.json"
 
 # Hosts we know are broken (mark in report but don't even try to probe to save time)
@@ -121,33 +120,30 @@ def probe_url(url: str) -> dict:
     return {"status": int(code_str), "host": host}
 
 
-# ───────────────────── Corpus walking ──────────────────────
-def collect_urls(corpus_path: Path) -> dict[str, int]:
-    """Return {url: occurrence_count} from corpus.json."""
-    with corpus_path.open() as f:
+# ───────────────────── Manifest walking ────────────────────
+def collect_urls(source_path: Path) -> dict[str, int]:
+    """Return {url: occurrence_count} from the chapter-url manifest.
+
+    chapter-urls.json is a flat {chapter_id: relative_path} dict. Each entry
+    is one user-facing destination, so occurrences=1 per URL. The relative
+    path is joined with BASE_URL to form the probe target.
+    """
+    with source_path.open() as f:
         data = json.load(f)
 
-    questions = data
-    if isinstance(data, dict):
-        # corpus.json is a dict that includes a 'questions' array under some key
-        for key in ("questions", "items", "data"):
-            if key in data and isinstance(data[key], list):
-                questions = data[key]
-                break
-
-    if not isinstance(questions, list):
+    if not isinstance(data, dict):
         raise SystemExit(
-            f"Could not find a question list in {corpus_path}. Top-level keys: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}"
+            f"Expected a flat dict in {source_path}, got {type(data).__name__}"
         )
 
     counts: Counter[str] = Counter()
-    for q in questions:
-        if not isinstance(q, dict):
+    for chapter_id, rel_path in data.items():
+        if not isinstance(rel_path, str) or not rel_path:
             continue
-        details = q.get("details") or {}
-        url = details.get("deep_dive_url")
-        if url:
-            counts[url] += 1
+        # Relative paths are absolute under the site root (start with '/'),
+        # so a simple concatenation with BASE_URL is correct.
+        url = BASE_URL.rstrip("/") + "/" + rel_path.lstrip("/")
+        counts[url] += 1
     return dict(counts)
 
 
@@ -161,12 +157,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--quiet", action="store_true", help="Suppress per-URL progress.")
     args = parser.parse_args(argv)
 
-    if not CORPUS_PATH.exists():
-        print(f"FATAL: corpus not found at {CORPUS_PATH}", file=sys.stderr)
+    if not SOURCE_PATH.exists():
+        print(f"FATAL: chapter-url manifest not found at {SOURCE_PATH}", file=sys.stderr)
         return 2
 
-    print(f"Loading corpus from {CORPUS_PATH}")
-    occurrences = collect_urls(CORPUS_PATH)
+    print(f"Loading chapter-url manifest from {SOURCE_PATH}")
+    occurrences = collect_urls(SOURCE_PATH)
     total_links = sum(occurrences.values())
     unique_urls = list(occurrences.keys())
 
@@ -175,7 +171,7 @@ def main(argv: list[str]) -> int:
         unique_urls = [u for u in unique_urls if (urlparse(u).hostname or "") in allow]
         print(f"Filtered by hosts {sorted(allow)}: {len(unique_urls)} URLs to probe.")
 
-    print(f"Found {total_links} total references → {len(occurrences)} unique URLs")
+    print(f"Found {total_links} manifest entries → {len(occurrences)} unique URLs")
     if args.hosts:
         print(f"Probing {len(unique_urls)} after host filter")
     else:
@@ -244,7 +240,7 @@ def main(argv: list[str]) -> int:
 
     # ────────── Human summary ──────────
     print(f"\n=== Summary ({elapsed:.1f}s) ===")
-    print(f"Total references in corpus:  {total_links}")
+    print(f"Manifest entries:            {total_links}")
     print(f"Unique URLs:                 {len(occurrences)}")
     print(f"Probed:                      {len(unique_urls)}")
     print(f"\nBy status:")
