@@ -1,5 +1,36 @@
 # Book-Linking Resume Plan
 
+> **Status (2026-04-16 follow-up — Option B RETIRED in favor of author-curated resources)**:
+> The registry recommendation below is superseded. Implemented model:
+> `details.resources: [{name, url}]` — a multi-valued, author-curated
+> list on each question. Per-question book links come back when
+> `mlsysbook.ai` URLs stabilize; until then authors simply don't list
+> book entries. Site-level cross-linking to the book is covered by the
+> existing `EcosystemBar` and the new page-end `Footer` component.
+>
+> See commit d9fcf8af2 ("refactor(vault): replace singular deep_dive
+> with author-curated resources list") and the commits through
+> 435d5a310 for the full decoupling sequence.
+>
+> **Why retired**: the registry would have pushed the book-URL-churn
+> problem into a single file that still had to be regenerated every
+> book release. The resources-list model sidesteps this entirely —
+> there is no shared dependency surface to regenerate. StaffML is now
+> self-contained for book-linking purposes, and book resources are
+> added per-question by editorial act when the author has a stable
+> URL worth citing.
+>
+> **What this file still documents** (below, kept for historical record):
+> the four options evaluated, the heading-churn evidence, and the
+> registry schema sketch. The "Options evaluated" section, "Resume-session
+> task list", and "Files to touch" are kept verbatim so future readers
+> can audit the decision trail, but the *recommendation* from the
+> original draft no longer reflects shipped reality.
+
+---
+
+# ORIGINAL DRAFT (pre-2026-04-16 follow-up)
+
 > **Status**: Deferred design. Resume in a fresh session after basic vault
 > functionality is validated. Not a blocker for the Phase 4 cutover.
 >
@@ -202,3 +233,72 @@ is how we keep the registry honest over time.
 **End of resume plan.** Load this file at the start of the next session
 along with the current state of `interviews/vault/taxonomy.json` and the
 book's `_quarto.yml`.
+
+---
+
+## 2026-04-16 follow-up decision (supersedes the registry recommendation)
+
+After re-reading the four options with fresh eyes, we chose **none of
+them** — the registry was solving a coupling problem that a simpler
+schema change dissolves entirely.
+
+### The actual decision
+
+Replace `details.deep_dive: {title, url}` (singular) with
+`details.resources: [{name, url}]` (multi-valued, author-curated).
+
+**Why this wins over every option above:**
+
+| Option | Left a coupling? | Auto-failure mode |
+|---|---|---|
+| A: Unified Pagefind | Yes — StaffML ranks against book headings | Book rewrite → wrong ranking |
+| B: Registry | Yes — book publishes file, StaffML consumes | Book release → registry regen required |
+| C: Click-time search | Yes — assumes book has URL-queryable search | Book loses Pagefind → silent fail |
+| D: PSE / Typesense | Yes — crawler freshness dependency | Google indexing lag |
+| **Resources list** | **No** | — |
+
+The resources list carries zero coupling to book state. When book URLs
+stabilize, authors add `{name: "MLSysBook.ai — KV Cache", url: "..."}`
+entries to individual questions at their editorial discretion. When
+the book reorganizes, those entries either keep working (URL still
+resolves) or the author updates them. No registry, no CI probe, no
+manifest, no hostname classifier, no regeneration step.
+
+### What shipped on 2026-04-16 (branch feat/vault-architecture)
+
+1. `schema/question_schema.yaml`: `DeepDive` → `Resource`; `Details.deep_dive`
+   → `Details.resources` (multivalued). `schema.py` Pydantic mirror
+   updated with https-only + name-length validators.
+2. `interviews/vault/corpus.json`: scrubbed 9,495 stale `deep_dive_*`
+   fields that predated the YAML cleanup; added empty `resources: []`
+   to all 9,657 questions.
+3. `interviews/staffml/src/app/practice/page.tsx`: deleted two dead
+   "Learn more on MLSysBook.ai" UI blocks (rendered for 0 questions).
+4. `interviews/staffml/src/lib/refs.ts`: 178-line hostname classifier
+   deleted outright — authors write their own labels now.
+5. `interviews/staffml/src/data/chapter-urls.json`, the
+   `check-deep-dive-links.py` probe, and
+   `.github/workflows/staffml-link-check.yml`: all deleted. The 27-entry
+   chapter manifest was 100% 404 against production (`/contents/vol1|vol2/`
+   paths vs. live `/contents/core/...`).
+6. `TopicDetail.tsx` "Learn first — Read on MLSysBook.ai" block
+   removed (was powered by the now-deleted chapter-urls.json).
+7. New `Footer.tsx` at page bottom provides stable site-level
+   cross-linking back to `mlsysbook.ai`, `/vol1/`, `/vol2/`, and
+   the GitHub repo — homepages and volume roots, never anchors.
+
+### Non-goals (now and forever under this model)
+
+- No registry, ever. Adding one would re-introduce the coupling.
+- No per-URL health CI. External link rot is an editorial problem,
+  not an infrastructure one.
+- No hostname-based classification. Authors write the label.
+
+### Re-entry for per-question book resources
+
+When `mlsysbook.ai/vol1/` ships with canonical, stable URLs, a
+maintainer makes one editorial pass: for the ~20 chapters that map
+to vault topics, add a book `Resource` entry to the 5–15
+most-relevant questions per chapter. Estimated scope: 100–300
+curated book resources across the corpus. Zero code changes
+required — pure YAML authoring.
