@@ -10,7 +10,7 @@ from rich.console import Console
 
 from vault_cli.exit_codes import ExitCode
 from vault_cli.loader import load_all
-from vault_cli.validator import fast_tier, run_all, structural_tier
+from vault_cli.validator import fast_tier, run_all, slow_tier, structural_tier
 
 console = Console()
 
@@ -31,6 +31,8 @@ def register(app: typer.Typer) -> None:
             failures.extend(fast_tier(loaded, vault_dir))
         if tier in {"structural", "all"} or strict:
             failures.extend(structural_tier(loaded, vault_dir))
+        if tier == "slow":
+            failures.extend(slow_tier(loaded, vault_dir))
         if tier == "all" and not strict:
             failures = run_all(loaded, vault_dir)
 

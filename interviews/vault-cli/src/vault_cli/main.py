@@ -15,6 +15,9 @@ from vault_cli.commands import (
     build as build_cmd_mod,
     check as check_cmd_mod,
     codegen as codegen_cmd_mod,
+    diff_cmd as diff_cmd_mod,
+    doctor as doctor_cmd_mod,
+    promote as promote_cmd_mod,
     release as release_cmd_mod,
     serve_api,
     stats as stats_cmd_mod,
@@ -41,6 +44,9 @@ serve_api.register(app)
 release_cmd_mod.register(app)
 stats_cmd_mod.register(app)
 codegen_cmd_mod.register(app)
+doctor_cmd_mod.register(app)
+diff_cmd_mod.register(app)
+promote_cmd_mod.register(app)
 
 
 def _version_callback(value: bool) -> None:
