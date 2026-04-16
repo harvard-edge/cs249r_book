@@ -1,0 +1,75 @@
+name: '🎯 StaffML · 🔎 Vault CI'
+
+# =============================================================================
+# Vault CI — package validation + invariant checks
+# =============================================================================
+#
+# Phase 0 scope (current):
+#   - Lint + type-check + unit/smoke tests for vault-cli.
+#   - Exemplar-coverage audit runs on corpus.json → exemplar-gaps.yaml diff.
+#
+# Phase 1+ additions (incremental):
+#   - vault check --strict (fast + structural invariant tiers).
+#   - vault build + release_hash equivalence vs corpus-equivalence-hash.txt.
+#   - vault codegen --check (LinkML ↔ Pydantic/DDL/TS drift).
+#   - Rollback-symmetry property test on release commits.
+#
+# Referenced from: interviews/vault/ARCHITECTURE.md §19.3, TESTING.md §4.1.
+# =============================================================================
+
+on:
+  pull_request:
+    paths:
+      - 'interviews/vault/**'
+      - 'interviews/vault-cli/**'
+      - 'interviews/staffml-vault-worker/**'
+      - '.github/workflows/vault-ci.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'interviews/vault/**'
+      - 'interviews/vault-cli/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: validate vault-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python (PINNED for hash stability)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install vault-cli with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e 'interviews/vault-cli/[dev]'
+
+      - name: Verify CLI entry point
+        run: |
+          vault --version
+          vault --help
+
+      - name: Lint (ruff)
+        run: ruff check interviews/vault-cli/src interviews/vault-cli/tests
+
+      - name: Type-check (mypy)
+        run: mypy interviews/vault-cli/src
+        continue-on-error: true  # mypy strict in Phase 0 is noisy; enforce in Phase 1
+
+      - name: Unit / smoke tests
+        run: pytest interviews/vault-cli/tests/ -v
+
+      - name: Exemplar-coverage audit (Phase 0 artifact)
+        run: |
+          python interviews/vault-cli/scripts/exemplar_coverage_audit.py
+          git diff --exit-code interviews/vault/exemplar-gaps.yaml \
+            || { echo "::error::exemplar-gaps.yaml is stale; re-run audit and commit"; exit 1; }
