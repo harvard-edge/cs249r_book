@@ -16,17 +16,58 @@ vault --version
 Python ≥3.12 required. CI pins 3.12 exactly for hash stability (see
 [`docs/EXIT_CODES.md`](docs/EXIT_CODES.md) and ARCHITECTURE.md §3.5).
 
-## Quickstart (available commands grow by phase)
+## Quickstart — the 22 subcommands live today
 
-**Phase 0** (current):
+Authoring:
 
 ```bash
-vault --version         # print version
-vault --help            # show help
+vault new --track cloud --level l4 --zone diagnosis \
+          --topic kv-cache --title "..."        # content-addressed ID + registry append + authors
+vault edit <id>                                   # $EDITOR; failure injects comment block, re-opens
+vault move <id> --to <track>/<level>/<zone>       # dirty-tree / chain / applicability refusals
+vault rm <id> [--hard]                            # soft (deprecate) by default; --hard needs typed confirm
+vault restore <id>                                # undo soft-delete
+vault renumber <id>                               # recover from post-rebase dedup-seq collision
+vault mark-exemplar <id>                          # promote to human-only exemplar pool
 ```
 
-**Phase 1** (scaffolded next): `new`, `edit`, `move`, `rm`, `restore`, `build`,
-`check`, `serve`, `api`. See ARCHITECTURE.md §4 for full surface.
+Build + check:
+
+```bash
+vault build                                       # YAML → vault.db
+vault check --strict                              # fast + structural tiers
+vault check --tier slow                           # nightly LSH scenario-dedup
+vault stats [--format-prometheus|--exemplar-coverage]
+vault codegen --check                             # shared-types drift guard
+vault doctor [--check <name>]                     # 8 diagnostic subchecks
+```
+
+Release pipeline:
+
+```bash
+vault snapshot 1.0.0                              # stage to releases/.pending-1.0.0/
+vault migrations-emit 0.9.0 1.0.0                 # forward + inverse SQL (all 4 tables)
+vault export-paper 1.0.0                          # SQL → macros.tex + corpus_stats.json
+vault tag 1.0.0                                   # git commit + tag
+vault publish 1.0.0 [--resume|--sign]             # composed product; atomic POSIX rename
+vault verify 1.0.0 [--git-ref v1.0.0]             # academic-citability round-trip
+vault diff 0.9.0 1.0.0 --classify                 # cosmetic|semantic|structural
+vault deploy 1.0.0 --env staging                  # D1 migration + snapshot + POP probe
+vault rollback <v> --env production [--method snapshot|sql]
+vault ship 1.0.0 --env production [--canary-percent N] [--resume] [--skip-legs paper]
+vault promote <id> | --all-drafts                 # drafts → published with provenance bump
+```
+
+Local dev:
+
+```bash
+vault api --db <path>.db --port 8002              # mirror Worker endpoint surface from local vault.db
+vault serve                                       # Datasette over vault.db (127.0.0.1 only)
+```
+
+All commands support `--json` for machine-readable output per
+[`docs/JSON_OUTPUT.md`](docs/JSON_OUTPUT.md). Exit codes are stable per
+[`docs/EXIT_CODES.md`](docs/EXIT_CODES.md).
 
 ## Run tests
 

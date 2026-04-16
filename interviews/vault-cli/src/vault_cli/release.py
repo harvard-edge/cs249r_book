@@ -94,6 +94,15 @@ def snapshot(vault_db: Path, releases_dir: Path, version: str) -> ReleaseArtifac
 
 
 def _sql_quote(s: Any) -> str:
+    """SQLite string-literal quoting.
+
+    SQLite (unlike MySQL) treats backslashes as literal characters; the ONLY
+    escape in a string literal is `''` for a single quote. That makes this
+    function sufficient and injection-safe for values we control — which is
+    every caller here (corpus content authored via maintainer-approved flow,
+    not external untrusted input). Do not reuse this helper for dialects
+    other than SQLite.
+    """
     if s is None:
         return "NULL"
     if isinstance(s, (int, float)):
