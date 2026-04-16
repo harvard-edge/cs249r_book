@@ -271,9 +271,7 @@ def _(mo):
 
 # ─── CELL 5: PART A CONTROLS + PART B WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_params = mo.ui.slider(
         start=1, stop=100, value=10, step=1,
         label="Model parameters (millions)",
@@ -306,9 +304,7 @@ def _(mo, pA_pred):
 
 # ─── CELL 6: PART B CONTROLS + PART C WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_contexts = mo.ui.slider(
         start=1, stop=20, value=10, step=1,
         label="Number of user contexts",
@@ -327,9 +323,7 @@ def _(mo, pB_pred):
 
 # ─── CELL 7: PART C CONTROLS + PART D WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_target = mo.ui.radio(
         options={"CPU": "cpu", "GPU (mobile)": "gpu", "NPU": "npu"},
         value="CPU",
@@ -354,9 +348,7 @@ def _(mo, pC_pred):
 
 # ─── CELL 8: PART D CONTROLS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_beta = mo.ui.slider(
         start=0.1, stop=2.0, value=0.5, step=0.1,
         label="Data heterogeneity (beta) -- lower = more non-IID",
