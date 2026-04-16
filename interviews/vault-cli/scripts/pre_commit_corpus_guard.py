@@ -34,8 +34,19 @@ def staged_changes() -> list[str]:
 
 
 def commit_message_has_override() -> bool:
-    # During pre-commit, the message file lives at .git/COMMIT_EDITMSG.
-    msg = Path(".git/COMMIT_EDITMSG")
+    # During pre-commit, the message lives at .git/COMMIT_EDITMSG in a regular
+    # clone, but in a worktree .git is a file pointing at a per-worktree gitdir.
+    # Resolve via `git rev-parse --git-path` so this works in both layouts.
+    try:
+        gp = subprocess.run(
+            ["git", "rev-parse", "--git-path", "COMMIT_EDITMSG"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        msg = Path(gp.stdout.strip())
+    except subprocess.CalledProcessError:
+        return False
     if not msg.exists():
         return False
     return OVERRIDE_TRAILER in msg.read_text(encoding="utf-8")
