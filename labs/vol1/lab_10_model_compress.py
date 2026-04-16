@@ -236,9 +236,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4", "INT2": "int2"},
         value="FP32",
@@ -263,9 +261,7 @@ def _(mo, pA_pred):
     return (pB_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_sparsity = mo.ui.slider(start=0, stop=95, value=0, step=5, label="Sparsity (%)")
     pB_type = mo.ui.dropdown(
         options={"Unstructured": "unstructured", "Structured": "structured", "2:4 Structured": "2_4"},
@@ -285,9 +281,7 @@ def _(mo, pB_pred):
     return (pC_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_pred = mo.ui.radio(
         options={
             "A) 50/50 -- balanced": "50_50",
@@ -300,9 +294,7 @@ def _(mo, pC_pred):
     return (pD_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_precision_e = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="FP32",
@@ -327,8 +319,6 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
 
     # ─────────────────────────────────────────────────────────────────────
