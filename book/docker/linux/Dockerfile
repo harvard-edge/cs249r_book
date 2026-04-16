@@ -88,6 +88,8 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "  - wget" && \
     echo "  - curl" && \
     echo "  - git" && \
+    echo "  - cmake" && \
+    echo "  - pkg-config" && \
     apt-get install -y \
     fonts-dejavu \
     fonts-freefont-ttf \
@@ -113,7 +115,9 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     libudunits2-dev \
     wget \
     curl \
-    git && \
+    git \
+    cmake \
+    pkg-config && \
     echo "📦 All system packages installed successfully" && \
     \
     echo "🔍 Verifying critical packages..." && \
