@@ -3,8 +3,7 @@ import torchvision
 import torchvision.transforms as transforms
 from rich.console import Console
 
-# Import the White-Box model directly from the training module!
-from examples.edge.resnet_train import ResNet18WhiteBox
+from reference.edge.resnet_train import ResNet18WhiteBox
 
 console = Console()
 

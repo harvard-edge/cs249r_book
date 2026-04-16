@@ -70,6 +70,15 @@ CLASSICAL_MODELS = {
         "epochs": 20,
         "batches_per_epoch": 50,
     },
+    "micro-dlrm-dram-1m": {
+        "module": "reference.cloud.micro_dlrm_dram",
+        "class": "MicroDLRMDRAM",
+        "kwargs": {},
+        "lr": 1e-3,
+        "batch_size": 1024,
+        "epochs": 20,
+        "batches_per_epoch": 50,
+    },
     "micro-diffusion-32px": {
         "module": "reference.cloud.micro_diffusion",
         "class": "MicroDiffusionUNet",

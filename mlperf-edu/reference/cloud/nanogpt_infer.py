@@ -34,8 +34,11 @@ def get_inference_handler(model: torch.nn.Module, device: str):
     
     async def handler(samples):
         batch_size = len(samples)
-        # Formally simulate dummy tokenization logic for rapid Inference testing organically.
-        input_ids = torch.randint(0, 50257, (batch_size, 16)).to(device)
+        # Use the model's own vocab range so this stays correct if the
+        # NanoGPTWhiteBox config changes (iteration 1 dropped vocab from
+        # 50,257 BPE to 128 char-level).
+        vocab_size = model.config["vocab_size"]
+        input_ids = torch.randint(0, vocab_size, (batch_size, 16)).to(device)
         max_new_tokens = 30
         
         start_time = time.time()

@@ -36,10 +36,10 @@ class CharTokenizer:
     """
     Character-level tokenizer for TinyShakespeare.
 
-    Uses ASCII encoding (vocab_size ~128) rather than BPE. This is pedagogically
+    Uses ASCII encoding (vocab_size 128) rather than BPE. This is pedagogically
     useful because students can inspect the token↔character mapping directly.
-    For compatibility with models using vocab_size=50257, tokens are left as-is
-    since all ASCII values are < 128 << 50257.
+    Models that consume this tokenizer (NanoGPTWhiteBox, Nano-MoE, agent LMs)
+    must size their embedding tables to accept token IDs in [0, 127].
     """
 
     @staticmethod
@@ -369,6 +369,21 @@ def _dlrm_collate_fn(batch):
     return dense, sparse_indices, sparse_offsets, labels
 
 
+def get_dlrm_dram_dataloaders(
+    batch_size: int = 1024, num_workers: int = 0
+) -> tuple:
+    """
+    Returns (train_loader, val_loader) for the DRAM-bound DLRM variant.
+
+    Same MovieLens-100K data and collate_fn as the cache-resident variant,
+    but defaults to a much larger batch size so each step issues enough
+    embedding lookups to escape prefetcher noise and saturate DRAM
+    bandwidth. The model itself (MicroDLRMDRAM) routes lookups through
+    a 2M-row virtual table; the dataloader is unchanged.
+    """
+    return get_dlrm_dataloaders(batch_size=batch_size, num_workers=num_workers)
+
+
 def get_dlrm_dataloaders(
     batch_size: int = 256, num_workers: int = 0
 ) -> tuple:
@@ -415,6 +430,8 @@ def get_dataloaders(model_name: str, batch_size: int = 16) -> tuple:
         return get_cifar100_dataloaders(batch_size=batch_size)
     elif "diffusion" in model_name:
         return get_cifar10_dataloaders(batch_size=batch_size)
+    elif "dlrm-dram" in model_name:
+        return get_dlrm_dram_dataloaders(batch_size=batch_size)
     elif "dlrm" in model_name:
         return get_dlrm_dataloaders(batch_size=batch_size)
     elif "dscnn" in model_name or "kws" in model_name:

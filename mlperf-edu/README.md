@@ -34,26 +34,29 @@ python scripts/compliance_checker.py \
 
 ## Benchmark Suite (16 Workloads)
 
+> Numbers below are kept in sync with `workloads.yaml` (the single source of truth).
+> If you are updating a workload, update the YAML; this table is regenerated from it.
+
 | Division | Task | Model | Params | Dataset | Quality Target |
 |----------|------|-------|--------|---------|----------------|
-| Cloud | Language | NanoGPT | 124.4M | TinyShakespeare | Loss < 2.3 |
-| Cloud | Sparse MoE | Nano-MoE | 17.4M | TinyShakespeare | Loss < 0.05 |
-| Cloud | Rec. | Micro-DLRM | 0.6M | Struct.Click | Acc > 0.91 |
+| Cloud | Language | NanoGPT | 11.1M | TinyShakespeare (char) | Loss < 2.3 |
+| Cloud | Sparse MoE | Nano-MoE | 17.4M | TinyShakespeare (char) | Loss < 0.05 |
+| Cloud | Rec. | Micro-DLRM | 23K | MovieLens-100K | Acc > 0.70 |
 | Cloud | Generation | Micro-Diff. | 2.0M | CIFAR-10 | MSE < 0.002 |
-| Cloud | Graph | Micro-GCN | 5.6K | Synth.Graph | Acc > 0.90 |
-| Cloud | Text Cls. | Micro-BERT | 432K | Synth.Sent. | Acc > 0.95 |
-| Cloud | Time Series | Micro-LSTM | 51K | Synth.TS | MSE < 0.05 |
-| Cloud | RL | Micro-RL | 18K | CartPole | Rew > 195 |
+| Cloud | Graph | Micro-GCN | 5.6K | Cora | Acc > 0.78 |
+| Cloud | Text Cls. | Micro-BERT | 432K | SST-2 | Acc > 0.78 |
+| Cloud | Time Series | Micro-LSTM | 51K | ETTh1 | MSE < 0.13 |
+| Cloud | RL | Micro-RL | 17K | CartPole (local) | Reward > 195 |
 | Edge | Img. Cls. | ResNet-18 | 11.2M | CIFAR-100 | Top1 > 36% |
 | Edge | Mobile | MobileNetV2 | 2.4M | CIFAR-100 | Top1 > 40% |
-| Tiny | KWS | DS-CNN | 20K | Speech v2 | Top1 > 90% |
+| Tiny | KWS | DS-CNN | 20K | Speech Commands v2 | Top1 > 90% |
 | Tiny | Anomaly | Autoencoder | 0.3M | MNIST | MSE < 0.04 |
 | Tiny | Person Det. | MicroNet | 8.5K | Wake Vision | Acc > 85% |
 | Agent | RAG | NanoRAG | 20.1M | ReAct Traces | Retr.+Gen |
-| Agent | CodeGen | NanoCodeGen | 13.7M | MBPP | Gen+Verify |
-| Agent | ReAct | NanoReAct | 13.7M | ReAct Traces | Think+Act |
+| Agent | CodeGen | NanoCodeGen | 13.7M | MBPP (20 tasks) | pass@1 > 0.15 |
+| Agent | ReAct | NanoReAct | 13.7M | ReAct Traces | Trace acc > 0.60 |
 
-All models are pure PyTorch. All training times on Apple M1 MPS. Total suite: ~8 minutes.
+All models are pure PyTorch. All training times measured on Apple M1 MPS. Total supervised suite: ~9 minutes.
 
 ## Project Structure
 

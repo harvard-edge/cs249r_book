@@ -15,7 +15,8 @@ suites:
   cloud:
     nanogpt-train:
       model: nanogpt-12m
-      params: 85.9M
+      params: 11.1M
+      params_note: "Char-level vocab=128 (TinyShakespeare uses 65 unique chars). Earlier README/paper figures of 85.9M and 124.4M reflected a vocab=50,257 BPE config that was never reachable from the char-level data; iteration 1 reconciled the model to its actual effective size."
       dataset: tinyshakespeare
       dataset_source: "Karpathy (2015), character-level, 1.1MB, shipped in repo"
       quality_target:
@@ -26,6 +27,7 @@ suites:
         val_loss: 2.205
         epochs: 25
         time_seconds: 89
+        baseline_note: "Loss curves carry over from the prior 30.3M-with-wasted-vocab config because only the 65 active token embeddings ever updated; needs re-verification on the cleaned 11M model in a follow-up iteration."
       scenario: single_stream
       provenance: "Vaswani et al. 2017 (Transformer); maps to MLPerf Training GPT-3/LLaMA"
 
@@ -48,6 +50,8 @@ suites:
     micro-dlrm-train:
       model: micro-dlrm-1m
       params: 23K
+      working_set_regime: cache_resident
+      regime_note: "Active embedding tables (943×8 + 1682×8 + 21×8 ≈ 21KB) fit in L1 on every modern laptop. Use this variant to study the DLRM *architectural pattern* (sparse-gather + dense-MLP) in isolation from memory bottlenecks. Pair with micro-dlrm-dram-train (iter 2) to observe the bottleneck transition that production DLRM exhibits."
       dataset: movielens-100k
       dataset_source: "Harper & Konstan (2015), MovieLens-100K, 100K ratings from 943 users × 1682 movies; ships in data/movielens/"
       quality_target:
@@ -59,9 +63,28 @@ suites:
         accuracy: 0.71
         epochs: 25
         time_seconds: 5
-        note: "23K params; embedding tables (943×32 + 1682×32 ≈ 336KB) fit in L2 cache"
+        note: "23K params; embedding tables (943×8 + 1682×8 ≈ 21KB) fit in L1 cache"
       scenario: server
       provenance: "Naumov et al. 2019 (DLRM); maps to MLPerf Training DLRM"
+
+    micro-dlrm-dram-train:
+      model: micro-dlrm-dram-1m
+      params: 512M
+      trainable_params: 23K
+      working_set_regime: dram_bound
+      virtual_table_bytes: 2147483648   # 2,000,000 rows × 256 dim × 4 bytes = 2 GB
+      llc_capacity_factor: 170          # ~170x M1's 12 MB LLC; required so per-batch byte transfer (8 MB at B=8192) dominates PyTorch's ~50 us per-call dispatch overhead. With m_spa<128 the dispatch overhead masks the bandwidth signal — production DLRM uses 64-512 dim embeddings for the same reason.
+      smoke_test_result: "iter-2 host: 4.16x end-to-end, 3.27x pure lookup vs cache variant (B=8192, M-series CPU)"
+      regime_note: "Hash-mapped virtual embedding table sized to exceed L3 by ~20x. Same MovieLens data and MLP topology as micro-dlrm-train; only the embedding access pattern changes. Run BOTH variants under identical harness settings to observe the bottleneck transition that defines production-scale DLRM. Quality target is intentionally lower (0.65 vs 0.70) to budget for the ~5pp accuracy cost of hash collisions; use `working_set_regime` to condition harness behavior, not the workload name."
+      dataset: movielens-100k
+      dataset_source: "Harper & Konstan (2015) — same dataset as micro-dlrm-train"
+      quality_target:
+        metric: accuracy
+        value: 0.65
+      verified_baseline:
+        baseline_note: "Awaiting first verification run on iter-2 harness."
+      scenario: server
+      provenance: "Naumov et al. 2019 (DLRM) + Weinberger et al. 2009 (hashing trick); production-realistic memory access pattern at laptop scale"
 
     micro-diffusion-train:
       model: micro-diffusion-32px

@@ -1,7 +1,7 @@
 import asyncio
 import torch
 from mlperf.loadgen import LoadGenProxy
-from examples.mobile.mobilenet_core import build_model
+from reference.mobile.mobilenet_core import build_model
 
 def get_inference_handler(model: torch.nn.Module, device: torch.device, disable_nms: bool):
     """
