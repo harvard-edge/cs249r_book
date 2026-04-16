@@ -17,9 +17,19 @@ let schemaOk: boolean | undefined;
 
 async function checkSchemaFingerprint(env: Env): Promise<boolean> {
   if (schemaOk !== undefined) return schemaOk;
+  // Fail-closed on placeholder (Chip R3-C1, Dean R3-NH-3): a deploy that
+  // forgot to substitute the real fingerprint MUST enter degraded mode.
+  // Silent auto-pass on placeholder was the v2.1 Critical regression.
+  if (!env.SCHEMA_FINGERPRINT || env.SCHEMA_FINGERPRINT === "PLACEHOLDER-deploy-time") {
+    schemaOk = false;
+    return schemaOk;
+  }
   try {
     const result = await env.DB.prepare(
-      "SELECT sql FROM sqlite_master WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' ORDER BY name"
+      // Include triggers per ARCHITECTURE.md §10.1 (Dean R3-NH-4 adjacent):
+      // FTS5 materializes as tables + shadow tables + triggers. Omitting
+      // triggers means FTS5-aware releases hash differently from non-FTS5.
+      "SELECT sql FROM sqlite_master WHERE type IN ('table','index','trigger') AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).all<{ sql: string | null }>();
     const ddl = (result.results ?? [])
       .map(r => (r.sql ?? "").replace(/\s+/g, " ").trim())
@@ -30,11 +40,26 @@ async function checkSchemaFingerprint(env: Env): Promise<boolean> {
     const hex = Array.from(new Uint8Array(digest))
       .map(b => b.toString(16).padStart(2, "0"))
       .join("");
-    schemaOk = (env.SCHEMA_FINGERPRINT === "PLACEHOLDER-deploy-time" || hex === env.SCHEMA_FINGERPRINT);
+    schemaOk = hex === env.SCHEMA_FINGERPRINT;
   } catch {
     schemaOk = false;
   }
   return schemaOk;
+}
+
+/**
+ * Forget the cached schema-fingerprint decision so the next request re-checks.
+ * Called on release_id change (R3-NH-4): every deploy advances release_id in
+ * release_metadata, which surfaces via /manifest. That natural cadence keeps
+ * the check fresh without per-request cost.
+ */
+let lastSeenRelease: string | null = null;
+function maybeInvalidateSchemaCache(releaseId: string | undefined): void {
+  if (!releaseId) return;
+  if (lastSeenRelease !== null && lastSeenRelease !== releaseId) {
+    schemaOk = undefined;
+  }
+  lastSeenRelease = releaseId;
 }
 
 async function getManifest(env: Env): Promise<Manifest> {
@@ -44,8 +69,10 @@ async function getManifest(env: Env): Promise<Manifest> {
   }>();
   const meta: Record<string, string> = {};
   for (const r of rows.results ?? []) meta[r.key] = r.value;
+  const release_id = meta.release_id ?? "unknown";
+  maybeInvalidateSchemaCache(release_id);
   return {
-    release_id: meta.release_id ?? "unknown",
+    release_id,
     release_hash: meta.release_hash ?? "",
     schema_version: meta.schema_version ?? "1",
     policy_version: meta.policy_version ?? "1",

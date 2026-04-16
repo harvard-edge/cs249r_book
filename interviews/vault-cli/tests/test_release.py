@@ -39,6 +39,30 @@ def _row(qid: str, solution: str) -> tuple:
             f"/tmp/{qid}.yaml", "hash-" + qid, None)
 
 
+def _with_chain(path: Path, rows: list[tuple], chain_rows: list[tuple]) -> None:
+    """Extend the test DB with a chain + chain_questions + tags for
+    multi-table rollback-symmetry coverage (Dean R3-NC-1)."""
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE IF NOT EXISTS chains (id TEXT PRIMARY KEY, name TEXT, topic TEXT)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS chain_questions "
+        "(chain_id TEXT, question_id TEXT, position INTEGER, PRIMARY KEY(chain_id, position))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tags (question_id TEXT, tag TEXT, PRIMARY KEY(question_id, tag))"
+    )
+    for cid, name, topic in [("c1", "Chain 1", "t")]:
+        conn.execute("INSERT OR REPLACE INTO chains VALUES (?,?,?)", (cid, name, topic))
+    for cid, qid, pos in chain_rows:
+        conn.execute(
+            "INSERT OR REPLACE INTO chain_questions VALUES (?,?,?)", (cid, qid, pos)
+        )
+    for qid, tag in [(rows[0][0], "hw:a100")]:
+        conn.execute("INSERT OR REPLACE INTO tags VALUES (?,?)", (qid, tag))
+    conn.commit()
+    conn.close()
+
+
 def test_snapshot_copies_db_and_writes_release_json(tmp_path: Path) -> None:
     db = tmp_path / "vault.db"
     _make_db(db, [_row("a", "answer-a")])
@@ -88,3 +112,43 @@ def test_rollback_symmetry_property(tmp_path: Path) -> None:
     prev_rows = set(conn.execute("SELECT id, realistic_solution FROM questions").fetchall())
     conn.close()
     assert target_rows == prev_rows, "rollback must restore pre-migration state"
+
+
+def test_emit_migrations_covers_all_tables(tmp_path: Path) -> None:
+    """Dean R3-NC-1: emit_migrations must diff questions, chains,
+    chain_questions, and tags — not just questions."""
+    prev = tmp_path / "prev.db"
+    new = tmp_path / "new.db"
+    _make_db(prev, [_row("a", "same"), _row("b", "same")])
+    _with_chain(prev, [_row("a", "same"), _row("b", "same")], [("c1", "a", 1), ("c1", "b", 2)])
+    _make_db(new, [_row("a", "same"), _row("b", "same"), _row("c", "new")])
+    _with_chain(new, [_row("a", "same"), _row("b", "same"), _row("c", "new")], [("c1", "a", 1), ("c1", "c", 2)])
+
+    fwd = tmp_path / "fwd.sql"
+    rbk = tmp_path / "rbk.sql"
+    emit_migrations(prev_db=prev, new_db=new, out_forward=fwd, out_rollback=rbk)
+
+    fwd_text = fwd.read_text()
+    rbk_text = rbk.read_text()
+    # Forward + rollback must touch chain_questions, not just questions.
+    assert "chain_questions" in fwd_text, "forward migration missed chain_questions table"
+    assert "chain_questions" in rbk_text, "rollback missed chain_questions table"
+    # Rollback of a chain_questions modification must restore prior position binding.
+    assert "INSERT OR REPLACE INTO chain_questions" in rbk_text
+
+    # Apply forward + rollback, assert state is byte-identical across ALL tables.
+    import shutil
+    target = tmp_path / "target.db"
+    shutil.copy2(prev, target)
+    conn = sqlite3.connect(target)
+    conn.executescript(fwd_text)
+    conn.executescript(rbk_text)
+    target_q = set(conn.execute("SELECT id, realistic_solution FROM questions").fetchall())
+    target_c = set(conn.execute("SELECT chain_id, question_id, position FROM chain_questions").fetchall())
+    conn.close()
+    conn = sqlite3.connect(prev)
+    prev_q = set(conn.execute("SELECT id, realistic_solution FROM questions").fetchall())
+    prev_c = set(conn.execute("SELECT chain_id, question_id, position FROM chain_questions").fetchall())
+    conn.close()
+    assert target_q == prev_q, "rollback must restore questions state"
+    assert target_c == prev_c, "rollback must restore chain_questions state"

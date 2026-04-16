@@ -26,11 +26,46 @@ def _base_question() -> dict:
 
 
 def test_content_hash_stable_across_key_reorder() -> None:
-    """Soumith M-NEW-4: nested-dict hash must be key-order-invariant."""
+    """Soumith M-NEW-4 / R3-F-4: top-level AND nested-dict hashing must be
+    key-order-invariant.
+
+    The prior version of this test only reordered top-level keys and collapsed
+    ``details`` to a single-key dict, so it didn't actually exercise the
+    nested-dict claim. Extended to also reorder ``details`` and ``chain``.
+    """
     q1 = _base_question()
+    # Reorder top-level keys AND nested dicts.
     q2 = {k: q1[k] for k in reversed(list(q1.keys()))}
-    q2["details"] = {"realistic_solution": q1["details"]["realistic_solution"]}
+    q2["details"] = {
+        "napkin_math": "X",  # add a second nested key so the order matters
+        "common_mistake": "Y",
+        "realistic_solution": q1["details"]["realistic_solution"],
+    }
+    q2["chain"] = {"position": q1["chain"]["position"], "id": q1["chain"]["id"]}
+    # Mirror on q1 to keep the semantic payload identical.
+    q1 = dict(q1)
+    q1["details"] = dict(q2["details"])
+    # Now q1 and q2 share the same semantic fields; only key insertion order differs.
     assert content_hash(q1) == content_hash(q2)
+
+
+def test_content_hash_nested_dict_order_invariance() -> None:
+    """Explicit nested-order test with a 3-key ``details`` — must hash identical
+    regardless of ``details`` key insertion order.
+    """
+    base = _base_question()
+    base["details"] = {
+        "realistic_solution": "ANS",
+        "common_mistake": "WRONG",
+        "napkin_math": "2 + 2 = 4",
+    }
+    reordered = dict(base)
+    reordered["details"] = {
+        "napkin_math": "2 + 2 = 4",
+        "realistic_solution": "ANS",
+        "common_mistake": "WRONG",
+    }
+    assert content_hash(base) == content_hash(reordered)
 
 
 def test_content_hash_excludes_metadata() -> None:

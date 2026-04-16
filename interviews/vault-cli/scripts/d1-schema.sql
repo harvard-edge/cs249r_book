@@ -50,3 +50,28 @@ CREATE TABLE release_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Full-text search (B.5). Content-table pattern keeps the FTS index in sync
+-- with INSERTs/UPDATEs/DELETEs via triggers. Cold-start fingerprint check
+-- includes triggers — see staffml-vault-worker/src/index.ts.
+CREATE VIRTUAL TABLE questions_fts USING fts5(
+  title, scenario, realistic_solution,
+  content='questions', content_rowid='rowid'
+);
+
+CREATE TRIGGER questions_ai AFTER INSERT ON questions BEGIN
+  INSERT INTO questions_fts(rowid, title, scenario, realistic_solution)
+  VALUES (new.rowid, new.title, new.scenario, new.realistic_solution);
+END;
+
+CREATE TRIGGER questions_ad AFTER DELETE ON questions BEGIN
+  INSERT INTO questions_fts(questions_fts, rowid, title, scenario, realistic_solution)
+  VALUES('delete', old.rowid, old.title, old.scenario, old.realistic_solution);
+END;
+
+CREATE TRIGGER questions_au AFTER UPDATE ON questions BEGIN
+  INSERT INTO questions_fts(questions_fts, rowid, title, scenario, realistic_solution)
+  VALUES('delete', old.rowid, old.title, old.scenario, old.realistic_solution);
+  INSERT INTO questions_fts(rowid, title, scenario, realistic_solution)
+  VALUES (new.rowid, new.title, new.scenario, new.realistic_solution);
+END;
