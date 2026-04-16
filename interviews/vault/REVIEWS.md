@@ -349,7 +349,47 @@ Post-Bucket-B code audit by Chip Huyen focused on actual exploitable paths (not 
 
 All 12 findings closed. `vault check --strict` passes on 9,657 questions with 0 load errors and 0 invariant failures. 28/28 pytest green. `vault verify 0.9.0` reconstructs release_hash `fe69d4c4...` from YAML source (post-normalization).
 
-**GREEN** for Phase-0/1/2 in-repo work. Phase-3/4 deploy gates remain as enumerated in CUTOVER_QA.md §0. No further rounds planned; if new issues emerge they're ordinary PR feedback.
+**GREEN** for Phase-0/1/2 in-repo work. Phase-3/4 deploy gates remain as enumerated in CUTOVER_QA.md §0.
+
+---
+
+# Round 5 — Gemini 1M-context holistic review (2026-04-16)
+
+After Phase-1-migration-completion (v2.4), a Gemini 3.1 Pro pass was run on
+the full branch (371 KB / 43K words including ARCHITECTURE + REVIEWS + 31
+code files + 8 test files). Purpose: catch cross-file issues that per-file
+reviewers cannot see. Advantage: 1M context holds the whole architecture
+simultaneously.
+
+## R5 findings — all 9 resolved
+
+| Severity | ID | Finding | Resolution |
+|---|---|---|---|
+| Critical | R5-C-1 | `_MIGRATION_TABLES` in `release.py` omitted `release_metadata` → after `vault ship`, release_id never propagates to D1; worker keeps serving old release forever | Added `"release_metadata": ("key",)` to migration table set |
+| Critical | R5-C-2 | Offline SW wake-up destroyed valid cache: `cacheName` defaulted to `-unknown` and `activate` pruned all caches that didn't match | Persist `currentRelease` to IDB on fetch success; restore on activate; move pruning from activate → updateReleaseFromManifest so it only runs after confirmed online release-change |
+| Critical | R5-C-3 | `schema_fingerprint` hand-edited in wrangler.toml after every DDL change; automated release pipeline broke on any DDL touch | `compiler.py` computes from `sqlite_master` at build time + stores in `release_metadata`; worker reads from DB via `getManifest`; `env.SCHEMA_FINGERPRINT` path removed |
+| High | R5-H-1 | `getManifest()` hit D1 on every request before Cache API check → destroyed §10.4 cost target | Module-level manifest memo, 60s TTL; invalidated on release_id change |
+| High | R5-H-2 | `_insert_stmt` emitted explicit NULL for columns absent in row → rollback would crash past any future NOT NULL column addition | Emit only columns actually present in row dict; SQLite applies defaults cleanly |
+| High | R5-H-3 | ARCHITECTURE promised CI rejects `--reviewed-by` spoofing; no check existed | New `scripts/check_reviewer_identity.py` + CI step enforces authors ⊆ PR-commit emails for llm-then-human-edited promotions |
+| High | R5-H-4 | LSH dedup told operator to run `vault dup --ack` — command didn't exist; legitimate templates would red nightly CI permanently | Implemented `vault dup` (--ack/--unack/--show) writing to `vault/dedup-acks.yaml`; validator reads ack list and skips flagged pairs |
+| Medium | R5-M-1 | `vault tag` swallowed git failures with check=False: 'tag already exists', 'nothing to commit', merge conflicts all printed green | Explicit error check on every git subprocess; pre-existence check on tag matches ship.paper_forward logic |
+| Low | R5-L-1 | Applicability matrix invariant case-sensitive — hand-authored "Cloud" vs path's "cloud" silently failed enforcement | Lowercase-normalize both sides of comparison |
+
+## Meta-observation
+
+Gemini's finding pattern confirmed the value of context-size diversity in
+adversarial review. All 9 R5 findings were genuinely cross-file —
+require seeing CLI-builder + worker + SW + CI + architecture simultaneously
+to notice. The 4 prior rounds (Claude subagents) consistently caught
+within-file or pair-file issues; Gemini's R5 caught seq-of-files issues.
+
+## Post-R5 state
+
+All 5 rounds of adversarial review closed. No further scheduled rounds.
+Any new findings from here come from PR review on #1348 or from deploy-day
+observation.
+
+**End of review ledger.**
 
 ---
 

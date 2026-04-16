@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2.4** — Phase-1 migration contract fully closed in-repo 2026-04-16. YAML is the sole authoring surface; corpus.json is a generated artifact enforced by pre-commit hook + CI equivalence check.
+> **Status**: **v2.5** — Round-5 Gemini holistic review integrated 2026-04-16. 9 cross-file findings (3C/4H/1M/1L) closed. Final pre-deploy state.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).
