@@ -79,7 +79,7 @@ class ListCommand(BaseCommand):
                 cats = post.metadata.get("categories", [])
                 cat = cats[0] if cats else "—"
             except Exception:
-                title, cat = "(unparseable)", "—"
+                title, cat = "(unparsable)", "—"
             table.add_row(draft.name, title, cat)
 
         self.console.print(table)
@@ -106,7 +106,7 @@ class ListCommand(BaseCommand):
                 cats = post.metadata.get("categories", [])
                 cat = cats[0] if cats else "—"
             except Exception:
-                title, date, cat = "(unparseable)", "", "—"
+                title, date, cat = "(unparsable)", "", "—"
             table.add_row(str(date), title, cat)
 
         self.console.print(table)
