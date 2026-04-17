@@ -1,0 +1,39 @@
+schema_version: 1
+id: cloud-2251
+title: The Connected Components Problem in Fuzzy Deduplication
+topic: data-pipeline-engineering
+status: published
+provenance: imported
+scenario: 'After running MinHash LSH deduplication on your 5 billion document corpus, you have 800 million
+  candidate pairs of near-duplicate documents. Now you must decide which documents to keep and which to
+  remove. A colleague proposes: for each pair, keep the longer document and remove the shorter one. After
+  running this, you discover you only removed 200 million documents, but manual inspection shows there
+  are clusters of 50-100 near-identical documents (e.g., the same news article syndicated across 80 sites).
+  The pairwise approach only removed one document per pair, leaving 49 duplicates in each cluster. How
+  do you efficiently resolve this at the scale of 800M edges over 5B nodes?'
+details:
+  realistic_solution: 'This is a connected components problem on a graph with 5B nodes and 800M edges.
+    Build the similarity graph (document = node, near-duplicate pair = edge), find connected components,
+    and within each component keep only the highest-quality representative. Distributed connected components
+    at this scale: use the Hash-to-Min algorithm (or the more efficient Alternating algorithm): (1) Initialize
+    each node''s component label as its own ID. (2) Each node sends its current minimum label to all neighbors.
+    (3) Each node updates its label to the minimum received. (4) Repeat until convergence (~log(diameter)
+    iterations). For the news-syndication clusters with diameter ~2-3, this converges in 5-10 iterations.
+    In MapReduce: each iteration is a single shuffle. Total: 10 iterations × 1.6B directed edges × 16
+    bytes/edge = 25.6 GB shuffle per iteration = 256 GB total network I/O. Within each component: rank
+    documents by a quality score and keep the top-1.'
+  common_mistake: '"Just run the pairwise dedup iteratively until no more duplicates are found." This
+    is O(k) iterations where k is the maximum cluster size, and each iteration requires re-running the
+    full 800M-edge dedup — totaling 80 × 800M = 64B pair comparisons.'
+  napkin_math: 'Graph: 5B nodes, 800M edges. Average component size after convergence: ~15 documents (yielding
+    ~53M components with duplicates + 4.2B singleton components). 53M components × 15 docs/cluster × 14
+    removals/cluster = 742M documents removed (vs 200M with pairwise). Hash-to-Min iterations: ~8. Per
+    iteration: emit (neighbor_id, min_label) for each directed edge: 1.6B edges × 16 bytes = 25.6 GB/iteration.
+    8 iterations = 205 GB total shuffle. On 500 nodes at 3 GB/s each: 205 GB / 1,500 GB/s = 0.14 seconds
+    per iteration. Total: ~1 second of shuffle time + overhead ≈ 10 minutes wall time.'
+chain:
+  id: cloud-chain-464
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Data Engineering

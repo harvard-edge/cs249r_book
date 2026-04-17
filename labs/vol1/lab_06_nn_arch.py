@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -51,7 +51,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, Engine, H100, JETSON, IPHONE,
         H100_RAM_GB, JETSON_RAM_GB, IPHONE_RAM_GB,
@@ -230,9 +230,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_arch = mo.ui.radio(
         options={"MLP (no structure)": "mlp", "CNN 3x3": "cnn3", "CNN 5x5": "cnn5"},
         value="MLP (no structure)", label="Architecture:", inline=True,
@@ -252,12 +250,10 @@ def _(mo, partA_prediction):
         label="Doubling a Transformer's context from 4,096 to 8,192 tokens -- "
               "how much more memory does attention require?",
     )
-    return (partB_prediction,)
+    return (partA_arch, partA_resolution, partB_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_seq_len = mo.ui.slider(
         start=512, stop=131072, value=4096, step=512, label="Sequence length (tokens)",
     )
@@ -276,12 +272,10 @@ def _(mo, partB_prediction):
         label="Two networks: identical FLOPs/params. One is 128 layers deep (width 32). "
               "The other is 2 layers deep (width 512). Which is faster at inference?",
     )
-    return (partC_prediction,)
+    return (partB_heads, partB_seq_len, partC_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_depth = mo.ui.slider(
         start=2, stop=128, value=64, step=2, label="Depth (layers)",
     )
@@ -300,15 +294,23 @@ def _(mo, partC_prediction):
         },
         label="Which architecture family achieves the highest GPU utilization (MFU) at batch=1?",
     )
-    return (partD_prediction,)
+    return (partC_context_c, partC_depth, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_batch_d = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )
+    return (partD_batch_d,)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_arch, partA_prediction, partA_resolution,
+    partB_heads, partB_prediction, partB_seq_len, partC_context_c,
+    partC_depth, partC_prediction, partD_prediction, partD_batch_d,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Cost of No Structure

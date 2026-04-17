@@ -1,0 +1,40 @@
+schema_version: 1
+id: cloud-fill-00999
+title: 'FlashAttention on A100: Optimizing for Sequence Length and Throughput'
+topic: flash-attention
+status: published
+provenance: imported
+scenario: You are developing a large language model (LLM) inference service and need to optimize the self-attention
+  mechanism for maximum throughput and longer sequence lengths on an NVIDIA A100 GPU. The A100 features
+  80 GB of HBM2e memory with 2.0 TB/s bandwidth, delivering up to 312 TFLOPS (FP16). Your current attention
+  implementation is struggling with memory limits for sequences exceeding 8k tokens, leading to frequent
+  HBM overflows or significant performance drops due to global memory access. How would you redesign the
+  attention mechanism, specifically leveraging FlashAttention-style tiling and online softmax, to maximize
+  throughput for long sequences while respecting the A100's memory and bandwidth constraints?
+details:
+  realistic_solution: The optimal approach involves implementing FlashAttention-style tiling, where the
+    attention mechanism is broken down into smaller, manageable blocks that fit within the SRAM (on-chip
+    memory). This reduces the number of times Q, K, and V are read from/written to the slower HBM2e. An
+    online softmax algorithm (e.g., by constantly updating the maximum and sum of exponentials) is crucial
+    to avoid storing the entire N x N attention matrix. By doing so, computation can be performed in SRAM,
+    and only the final output (O) is written back to HBM2e. Careful selection of tile sizes and ensuring
+    concurrent loading of the next K/V block while processing the current one (double-buffering) will
+    effectively utilize the A100's 2.0 TB/s bandwidth and improve FP16 TFLOPS utilization.
+  common_mistake: A common mistake is to perform the full attention matrix computation (Q @ K^T) and subsequent
+    softmax in global memory, which grows quadratically with sequence length (N^2) and quickly exhausts
+    the 80 GB HBM2e. Additionally, not overlapping computation and I/O, or using sub-optimal tile sizes,
+    can lead to underutilization of the A100's 2.0 TB/s memory bandwidth and its 312 TFLOPS FP16 compute
+    capability, making the operation memory-bound even for smaller sequences.
+  napkin_math: For a sequence length N and head dimension D, the attention matrix (Q @ K^T) is N x N.
+    Storing this in FP16 requires N^2 * 2 bytes. For N=80k, this is (80000)^2 * 2 bytes = 12.8 GB, which
+    for a single head can already be substantial. Adding Q, K, V, and gradients, this quickly exceeds
+    80GB HBM2e. FlashAttention reduces this by keeping intermediate products in SRAM. With online softmax,
+    the memory footprint is reduced to O(N * D) for Q, K, V and O (output), plus a small O(block_size^2)
+    for the intermediate attention block. For a 2.0 TB/s memory bandwidth, fetching Q, K, V for N=80k,
+    D=128 (assuming 16 heads on a 2048-dim embedding) requires 3 * N * D * 2 bytes (FP16) per pass. A
+    single pass on 80k tokens (Q,K,V each 80k x 128) would involve 3 * 80000 * 128 * 2 bytes = 61.44 MB.
+    Given 2.0 TB/s, this data can be fetched in ~30 microseconds. The critical part is minimizing repeated
+    HBM accesses for the N^2 computation by keeping intermediate tiles in SRAM, turning the problem from
+    memory-bound (N^2 global memory access) to compute-bound (with efficient SRAM use) or bandwidth-bound
+    (O(N) global memory access).
+last_modified: '2026-04-01'

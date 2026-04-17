@@ -1,0 +1,28 @@
+schema_version: 1
+id: global-0145
+title: Continuous Batching Generation Deadlock
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: Your vLLM instance serving LLaMA-3-8B allocates 40GB to the KV cache pool. The scheduler admits
+  100 concurrent requests, which initially fits fine during prefill. However, 10 seconds into generation,
+  throughput drops to zero and the engine stalls. Profiling shows no OOM error, but all active requests
+  are paused and no new tokens are being generated.
+details:
+  realistic_solution: This is a classic KV cache oversubscription deadlock in continuous batching systems.
+    The scheduler admitted 100 requests based on their *prefill* length, but did not reserve enough KV
+    cache blocks for their maximum potential *decode* lengths. As the 100 requests generated tokens simultaneously,
+    they consumed the remaining free KV cache blocks. Once the pool was fully depleted, no request could
+    allocate the block needed for its next token. Because all requests are active and waiting for blocks,
+    and none can finish to release blocks, the system deadlocks. The fix is configuring the scheduler
+    to either preempt/swap active requests to CPU memory when VRAM is low, or to use a stricter admission
+    control policy that reserves a buffer for generation.
+  common_mistake: Suspecting a hardware NVLink hang or a NCCL timeout during tensor parallelism.
+  napkin_math: Total KV pool = 40GB. Block size = 16 tokens (approx 2MB). Total blocks = 20,000. 100 requests
+    are admitted. Average prefill = 500 tokens. Initial blocks used = 100 * (500/16) = 3,125 blocks. Remaining
+    blocks = 16,875. If all 100 requests attempt to generate 3000 tokens, they will need 100 * (3000/16)
+    = 18,750 blocks. Because 18,750 > 16,875, the pool will hit 0 free blocks before any request finishes
+    its 3000-token generation, causing a deadlock if eviction/swapping is disabled.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -54,7 +54,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, Engine, H100, V100, A100, JETSON,
         H100_RAM_GB, H100_BW_GBS, V100_RAM_GB, A100_RAM_GB,
@@ -232,9 +232,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_model_size = mo.ui.slider(
         start=0.1, stop=70, value=7, step=0.1, label="Model size (billions of params)",
     )
@@ -259,12 +257,10 @@ def _(mo, partA_prediction):
         label="GPT-2 training on V100 with SSD storage and 4 GPUs over PCIe. "
               "Which stage is the bottleneck?",
     )
-    return (partB_prediction,)
+    return (partA_model_size, partA_optimizer, partA_precision_a, partB_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_data_ms = mo.ui.slider(
         start=1, stop=100, value=50, step=1, label="Data loading (ms)",
     )
@@ -289,12 +285,10 @@ def _(mo, partB_prediction):
         label="GPT-2 (1.5B) requires ~77 GB in full FP32 (with activations). "
               "Mixed precision (FP16 forward + FP32 master + FP32 Adam) requires how much?",
     )
-    return (partC_prediction,)
+    return (partB_compute_ms, partB_data_ms, partB_pcie_ms, partB_sync_ms, partC_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_model_c = mo.ui.slider(
         start=0.1, stop=13, value=1.5, step=0.1, label="Model size (billions)",
     )
@@ -314,18 +308,27 @@ def _(mo, partC_prediction):
         label="Training on 8 GPUs with r=0.15 (gradient sync = 15% of step time). "
               "What speedup over 1 GPU?",
     )
-    return (partD_prediction,)
+    return (partC_model_c, partC_precision_c, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_gpus = mo.ui.slider(
         start=1, stop=256, value=8, step=1, label="Number of GPUs",
     )
     partD_r = mo.ui.slider(
         start=0.01, stop=0.50, value=0.15, step=0.01, label="Communication fraction (r)",
     )
+    return (partD_gpus, partD_r)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_model_size, partA_optimizer, partA_precision_a,
+    partA_prediction, partB_compute_ms, partB_data_ms, partB_pcie_ms,
+    partB_prediction, partB_sync_ms, partC_model_c, partC_precision_c,
+    partC_prediction, partD_prediction, partD_gpus, partD_r,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Memory Budget Shock

@@ -1,0 +1,34 @@
+schema_version: 1
+id: edge-exp-anal-0030
+title: TensorRT DLA Fallback Overhead on Jetson Orin
+topic: model-format-conversion
+status: published
+provenance: imported
+scenario: You are deploying a transformer-based vision model on an NVIDIA Jetson Orin (32 GB LPDDR5, Ampere
+  GPU + DLA accelerator, 60W TDP). You compile the ONNX model to a TensorRT INT8 engine to leverage the
+  275 TOPS performance, delegating the dense layers to the DLA while unsupported operators like LayerNorm
+  fall back to the Ampere GPU. Despite the INT8 quantization significantly reducing raw compute time,
+  the total end-to-end inference latency increases from 20ms to 25ms compared to running the entire network
+  purely in FP16 on the GPU. Based on the system architecture, why does partial delegation to the DLA
+  cause this performance regression?
+details:
+  realistic_solution: The performance drop is driven by the operator coverage gap in the DLA, which forces
+    format conversion and synchronization between the DLA and the Ampere GPU. When TensorRT encounters
+    the unsupported LayerNorm, it must halt the DLA pipeline, reformat the intermediate tensor from the
+    DLA's proprietary blocked memory layout to a standard layout, and transfer execution context to the
+    GPU. To resolve this, the engineer must modify the ONNX graph to fuse or substitute unsupported operators
+    to achieve a single complete DLA subgraph, or simply keep the highly interleaved network entirely
+    on the Ampere GPU.
+  common_mistake: Candidates often assume that mapping any sub-graph to a dedicated INT8 accelerator will
+    strictly reduce latency because of the high theoretical TOPS. They fail to account for the catastrophic
+    synchronization penalties and memory reformatting costs that occur when a model execution falls back
+    to the primary GPU.
+  napkin_math: 'Assume the model has 24 layers, each triggering 2 DLA-to-GPU fallbacks (48 total context
+    switches per inference). Intermediate activation size: Batch 1 * Sequence 512 * Hidden 1024 * 1 byte
+    (INT8) = 0.5 MB. Data read/write per fallback: 0.5 MB * 2 = 1.0 MB. Total data moved strictly for
+    fallbacks: 48 MB. On the 32 GB LPDDR5 unified memory (assuming ~200 GB/s practical bandwidth), the
+    raw data transfer time is 48 MB / 200,000 MB/s = 0.24 ms. However, the hardware synchronization and
+    TensorRT format layout conversion penalty is roughly 0.1 ms per boundary crossing. Total sync overhead:
+    48 crossings * 0.1 ms = 4.8 ms. Combined overhead (4.8 ms + 0.24 ms) is ~5 ms, exactly explaining
+    the regression from 20ms to 25ms despite utilizing the 275 TOPS INT8 capability.'
+last_modified: '2026-04-01'

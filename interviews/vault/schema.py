@@ -95,12 +95,42 @@ VALID_REASONING_MODES = {
 }
 
 
+class Resource(BaseModel):
+    """Author-curated external reference attached to a question.
+
+    Replaces the singular deep_dive_title/deep_dive_url pair. Questions may
+    carry zero, one, or many resources in Details.resources (display order =
+    list order). The `name` is author-written prose so the UI labels each
+    link without hostname-based classification.
+    """
+
+    name: str
+    url: str
+
+    @field_validator("name")
+    @classmethod
+    def name_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Resource.name must be non-empty")
+        if len(v) > 200:
+            raise ValueError(f"Resource.name too long ({len(v)} chars, max 200)")
+        return v
+
+    @field_validator("url")
+    @classmethod
+    def url_is_https(cls, v: str) -> str:
+        # XSS defense (REVIEWS.md H-6): allowlist https:// only.
+        # Rejects javascript:, data:, http:, relative paths.
+        if not v.startswith("https://"):
+            raise ValueError(f"Resource.url must start with https:// (got: {v[:40]!r})")
+        return v
+
+
 class QuestionDetails(BaseModel):
     common_mistake: str
     realistic_solution: str
     napkin_math: str = ""
-    deep_dive_title: str = ""
-    deep_dive_url: str = ""
+    resources: list[Resource] = []
     options: Optional[list[str]] = None
     correct_index: Optional[int] = None
 

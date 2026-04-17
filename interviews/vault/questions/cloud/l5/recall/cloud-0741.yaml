@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-0741
+title: The Network Congestion Collapse
+topic: collective-communication
+status: published
+provenance: imported
+scenario: You have 256 H100 GPUs across 32 nodes, connected by a 2-tier fat-tree with 400 Gbps InfiniBand.
+  During a 70B model AllReduce, your monitoring shows aggregate switch throughput drops from 90% link
+  utilization to 35% as you scale from 64 to 256 GPUs. The switches aren't dropping packets. What's happening?
+details:
+  realistic_solution: 'You''re experiencing **congestion spreading** via InfiniBand''s credit-based flow
+    control. When multiple flows converge on a single switch port (incast), the receiver''s buffer fills.
+    The switch stops issuing credits to the senders, which back-pressures upstream switches, which stop
+    issuing credits to *their* senders. This "credit stall" propagates backwards through the fat-tree,
+    throttling even flows that don''t traverse the congested port (head-of-line blocking at the switch
+    level). At 256 GPUs, the AllReduce traffic pattern creates many-to-one incast at every tier of the
+    fat-tree simultaneously. Solutions: adaptive routing (NVIDIA SHARP, or switch-level adaptive routing),
+    AllReduce decomposition into smaller sub-groups, or using in-network reduction (SHARP) to reduce traffic
+    at the switch.'
+  common_mistake: '"If no packets are dropped, the network is healthy — the problem must be on the GPU
+    side." Zero packet loss doesn''t mean zero congestion. Credit-based flow control (InfiniBand) prevents
+    drops by *throttling senders*, which is exactly the problem.'
+  napkin_math: '70B model, FP16 gradients = 140 GB. Ring AllReduce with 256 GPUs: each GPU sends $2 \times
+    140\text{GB} \times 255/256 = 279.5\text{ GB}$. Aggregate traffic across the network: 256 × 279.5
+    GB = 71.5 TB (each byte traverses multiple links). 2-tier fat-tree spine bisection = 256 × 400 Gbps
+    = 102.4 Tbps = 12.8 TB/s. AllReduce demands ~71.5 TB / (ideal time) flowing through the spine. At
+    90% efficiency (64 GPUs): AllReduce ≈ 2.8s. At 35% efficiency (256 GPUs): AllReduce ≈ 7.2s — the 4×
+    GPU increase yields only 1.55× throughput improvement.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

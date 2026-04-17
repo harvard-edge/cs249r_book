@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-1441
+title: Diagnosing Activation Function Memory Bottlenecks
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: A custom activation function `y = x1 * torch.sigmoid(x2)` is applied to two FP16 tensors `x1`
+  and `x2`, each with 100 million elements (200MB each). Profiling on an A100 GPU (2 TB/s memory bandwidth)
+  shows this simple operation takes ~500 microseconds. Since the compute required is less than 1 GFLOP,
+  the team is confused why it's so slow compared to the 312 TFLOPs peak compute of the A100. Diagnose
+  the root cause of this performance bottleneck.
+details:
+  realistic_solution: Identify that the operation is severely memory-bound (arithmetic intensity ~0.8
+    FLOPs/byte vs A100 ridge point of 156 FLOPs/byte). The naive implementation creates an intermediate
+    sigmoid tensor, requiring 1.0GB of HBM I/O vs 600MB for a fused kernel. Implement kernel fusion using
+    Triton or torch.compile to load x1 and x2 into SRAM once, compute sigmoid and multiplication in registers,
+    and write only the final output y. This reduces HBM traffic by 40%, yielding a 1.67x speedup (500us
+    to 300us).
+  common_mistake: Assuming the bottleneck is compute or Python-level overhead, and attempting to optimize
+    by simplifying the math operations. Element-wise operations are dominated by memory bandwidth, not
+    arithmetic throughput.
+  napkin_math: 'Naive execution creates an intermediate tensor: `temp = torch.sigmoid(x2)` (Read 200MB,
+    Write 200MB) + `y = x1 * temp` (Read 200MB x1, Read 200MB temp, Write 200MB y) = 1.0 GB total HBM
+    I/O. At 2TB/s bandwidth, time = 1.0 GB / 2000 GB/s = 500 μs. Fused execution: Read x1 (200MB) + Read
+    x2 (200MB) + Write y (200MB) = 600MB total HBM I/O. Time = 600MB / 2000 GB/s = 300 μs. Arithmetic
+    intensity (fused) is ~5 FLOPs / 6 bytes ≈ 0.8 FLOPs/byte, far below the A100 ridge point (~156 FLOPs/byte).'
+chain:
+  id: cloud-chain-209
+  position: 2
+created_at: '2026-03-23T23:01:46.463042'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

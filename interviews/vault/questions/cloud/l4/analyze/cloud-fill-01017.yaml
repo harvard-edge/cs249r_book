@@ -1,0 +1,40 @@
+schema_version: 1
+id: cloud-fill-01017
+title: Optimizing Large Language Model Inference with Tensor Parallelism on Google TPU v5e
+topic: model-tensor-parallelism
+status: published
+provenance: imported
+scenario: Imagine deploying a massive 175-billion parameter large language model (LLM) for real-time inference
+  on a cluster of Google TPU v5e devices. Each TPU v5e offers 16 GB HBM, 197 TFLOPS BF16 performance,
+  and 1.6 TB/s memory bandwidth. To fit the model and achieve low latency, you decide to use tensor parallelism.
+  Specifically, you're considering splitting the large linear layers (e.g., in attention mechanisms or
+  feed-forward networks) across multiple TPU v5e chips using column-wise and row-wise partitioning. Describe
+  the challenges and opportunities for communication-computation overlap in this setup. How would you
+  design the tensor parallelism strategy to maximize throughput and minimize latency, considering the
+  TPU's architecture and interconnection?
+details:
+  realistic_solution: Implement a hybrid tensor parallelism strategy where appropriate layers use column-wise
+    partitioning (e.g., input to attention weights, feed-forward up-projection) and others use row-wise
+    (e.g., attention output weights, feed-forward down-projection). Key to efficiency is strategically
+    overlapping the all-reduce communication with subsequent computations. For example, during a column-wise
+    partitioned matrix multiplication, the all-reduce for the output (needed for the next row-wise partitioned
+    layer) can be initiated as soon as partial results are available, running concurrently with the remaining
+    local computation for the current layer or with other independent operations. Leverage the high-bandwidth
+    inter-chip interconnect of the TPU v5e to minimize communication latency.
+  common_mistake: A common mistake is underestimating the communication overhead, especially for all-reduce
+    operations required when switching between column-wise and row-wise parallelism (e.g., after matrix
+    multiplication or element-wise operations). If communication is not effectively overlapped with computation,
+    TPUs can spend significant time idle waiting for data, leading to suboptimal utilization and higher
+    inference latency.
+  napkin_math: Consider a large linear layer where the output dimension `H_out` is `12288` and the effective
+    batch size `B*S` is `1024`. If BF16 precision is used, an all-reduce operation across `N` TPUs for
+    the activations would involve transferring `1024 * 12288 * 2 bytes = 25.16 MB`. With the Google TPU
+    v5e's HBM bandwidth of 1.6 TB/s, the theoretical communication time for this data transfer would be
+    approximately `25.16 MB / (1.6 TB/s) ≈ 15.7 microseconds`. Meanwhile, a single TPU (out of N=8) computing
+    a matrix multiplication of `[1024, H_in] @ [H_in, H_out/8]` (assuming `H_in = H_out = 12288`) performs
+    `1024 * 12288 * (12288/8)` BF16 operations. This amounts to approximately `19.33 billion` operations.
+    Given the TPU v5e's 197 TFLOPS BF16 performance, the computation time for this local part would be
+    `19.33 * 10^9 ops / (197 * 10^12 ops/s) ≈ 98 microseconds`. Since the computation time (98 µs) is
+    significantly larger than the communication time (15.7 µs), there is ample opportunity to effectively
+    overlap communication with computation, maximizing TPU utilization.
+last_modified: '2026-04-01'

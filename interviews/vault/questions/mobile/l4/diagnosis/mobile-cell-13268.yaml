@@ -1,0 +1,28 @@
+schema_version: 1
+id: mobile-cell-13268
+title: Diagnose Attention Softmax Precision Loss on Mobile NPU
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: 'A Snapdragon 8 Gen 3 mobile LLM deployment shows coherent output for short prompts (<128 tokens)
+  but produces repetitive or incoherent text for 512+ token contexts. Accuracy on a 128-token benchmark:
+  89%. Accuracy on 512-token benchmark: 61%. The model uses INT8 activations throughout, including attention
+  logits before softmax. The Hexagon NPU performs softmax in INT8 with range [-128, 127]. Diagnose the
+  precision failure mode.'
+details:
+  realistic_solution: 'Attention logits before softmax: QK^T / sqrt(d_head). At d_head=64: scale = 1/8
+    = 0.125. Raw logits ≈ N(0, 1) after scaling. INT8 range [-128, 127] maps to approximately [-8, 8]
+    if scale=0.0625. For 512-token context, attention matrix is 512×512. The max logit across 512 tokens
+    may be 3-4σ above mean = 3.0-4.0. But in INT8: if some logits map to 127 (saturation), softmax denominator
+    gets distorted. Softmax denominator: sum of exp(logits). If max saturates at 127 → exp(127×scale)
+    ≠ correct value. Fix: (1) Use FP16 or BF16 for attention logits before softmax. (2) Apply temperature
+    scaling to compress logit range. (3) Use online softmax (flash attention style) to avoid storing full
+    logit matrix.'
+  common_mistake: Attributing the degradation to model capability (thinking the model 'can't handle' long
+    context); the actual issue is numerical overflow in INT8 softmax at long sequence lengths.
+  napkin_math: 'INT8 softmax: max representable logit = 127 × scale. If scale = 0.05: max = 6.35. At 512
+    tokens, expected max attention logit ≈ 4.5 (from max of 512 samples). 4.5 / 0.05 = 90 < 127 — fits.
+    But numerical error: exp(90×0.05)=exp(4.5)=90.0 vs FP16 exp(4.5)=90.0. Issue: quantization noise accumulates
+    in sum over 512 terms: σ_sum = sqrt(512) × quant_noise = 22.6 × (1/127) = 0.178 → significant attention
+    weight error at long context.'
+last_modified: '2026-04-01'

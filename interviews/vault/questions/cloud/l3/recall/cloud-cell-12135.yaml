@@ -1,0 +1,23 @@
+schema_version: 1
+id: cloud-cell-12135
+title: 'Network Bandwidth Bottlenecks: Realize AllReduce Data Volume for 70B Model Training'
+topic: network-bandwidth-bottlenecks
+status: published
+provenance: imported
+scenario: 'Concretely size the AllReduce data volume for training a 70B model (FP16 gradients) across
+  64 H100 GPUs (8 DGX nodes) with data parallelism degree=8 (8-way DP, each DP group uses 8 GPUs for TP).
+  Compute: total gradient bytes per DP group, bytes moved per GPU in ring-AllReduce, and time over 200Gb/s
+  InfiniBand.'
+details:
+  realistic_solution: 'TP-8: each GPU holds 70B/8=8.75B params × 2B = 17.5GB model. Gradient per GPU:
+    17.5GB. DP-8 AllReduce: ring-AllReduce data per GPU = 2×(8-1)/8 × 17.5GB = 30.6GB moved per GPU. Time
+    over IB 25GB/s: 30.6/25=1.224s per step. That''s extremely slow! Fix: use ZeRO stage 3 to shard gradients:
+    instead of AllReduce, use ReduceScatter+AllGather = same data but pipelined. ReduceScatter: (8-1)/8
+    × 17.5 = 15.3GB. Time: 15.3/25=0.61s. Still slow. Increase IB to 400Gb/s (50GB/s) or reduce DP degree.'
+  common_mistake: AllReducing the full 70B gradient when each DP rank holds only its TP shard (70B/8 =
+    8.75B params per GPU in this TP-8 setup).
+  napkin_math: 'Per GPU gradient (TP-8): 17.5GB. Ring-AllReduce: 2×7/8×17.5=30.6GB moved. IB 25GB/s: 30.6/25=1.22s.
+    Compute step: ~500ms for 70B. AllReduce is 2.4× step time → 71% overhead. Fix: 800Gb/s IB (InfiniBand
+    NDR, 100GB/s per port): 30.6/100=306ms. Still longer than compute. ZeRO-3: same 30.6GB moved but overlapped
+    with forward. Effective overhead: ~150ms (50% overlap). ✓'
+last_modified: '2026-04-01'

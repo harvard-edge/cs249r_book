@@ -1,0 +1,27 @@
+schema_version: 1
+id: tinyml-exp2-diag-0204
+title: Ethos-U55 W4A8 Fallback Stalls
+topic: extreme-quantization
+status: published
+provenance: imported
+scenario: The team deployed a custom W4A8 (4-bit weight, 8-bit activation) quantized CNN on the Corstone-300
+  platform (480 MHz ARM Cortex-M7 + Ethos-U55). The heavily quantized 400 KB model weights comfortably
+  fit within the 512 KB shared SRAM, theoretically eliminating flash memory fetches. However, inference
+  latency is disastrously high, and profiling shows the Ethos-U55 NPU utilization is nearly zero while
+  the Cortex-M7 is pegged at 100% compute. What is the hardware-level root cause of this extreme latency
+  degradation?
+details:
+  realistic_solution: The Ethos-U55 matrix multiply engine natively accelerates INT8 and INT16 operations,
+    relying on the Vela compiler for offline weight compression. Because the U55 lacks native hardware
+    support for custom W4A8 MACs or dynamic 4-bit unpacking, the Vela compiler delegates the unmapped
+    operations back to the Cortex-M7 CPU. The M7 must sequentially unpack the 4-bit weights using bitwise
+    shifts and masks before executing the MACs, completely bypassing the NPU and bottlenecking the system.
+  common_mistake: Candidates often assume that memory bandwidth bottlenecks or SRAM contention between
+    the M7 and U55 are causing the stall, or that the U55 is starving while waiting on DMA transfers.
+    They miss the fundamental operator support requirements of the NPU.
+  napkin_math: An Ethos-U55 configured for 128 MAC/cycle provides a peak throughput of 128 MACs * 480
+    MHz = 61.44 GMAC/s. On fallback, the Cortex-M7 must manually unpack the 4-bit weights. Assuming bitwise
+    unpacking and MAC execution takes ~4 CPU cycles per operation, the M7 achieves roughly (480 MHz /
+    4) = 120 MMAC/s (0.12 GMAC/s). This forced fallback results in a 61.44 / 0.12 = 512x theoretical compute
+    slowdown compared to running standard INT8 natively on the NPU.
+last_modified: '2026-04-01'

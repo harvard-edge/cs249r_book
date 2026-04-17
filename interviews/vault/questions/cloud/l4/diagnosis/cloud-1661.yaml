@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-1661
+title: Diagnosing ONNX Runtime Graph Fragmentation
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You are deploying a Transformer-based embedding model (150M parameters, FP16) on an AWS g4dn.xlarge
+  instance (NVIDIA T4 GPU) using ONNX Runtime. After switching from the CPUExecutionProvider to the CUDAExecutionProvider,
+  latency improves from 120ms to 45ms, but GPU utilization remains low at 30%. Profiling traces reveal
+  multiple fallback nodes executed on the CPU (e.g., NonZero, Gather), causing frequent Host-to-Device
+  (H2D) and Device-to-Host (D2H) memory copies across the PCIe Gen3 bus during each forward pass. How
+  do you diagnose and resolve this performance bottleneck?
+details:
+  realistic_solution: The root cause is graph fragmentation, where unsupported operators or dynamic shapes
+    force ONNX Runtime to split the graph between the CPU and GPU. The solution is to inspect the session
+    creation logs for partition warnings, update the ONNX opset version during PyTorch export (e.g., to
+    opset 15+), run ONNX shape inference, and apply constant folding to ensure the entire computational
+    graph is supported by and assigned to the CUDA EP, eliminating PCIe transfer overhead.
+  common_mistake: Candidates often assume adding a hardware accelerator execution provider (EP) automatically
+    runs the entire model on the GPU, ignoring graph partitioning warnings and the severe latency cost
+    of PCIe data transfers for CPU fallbacks.
+  napkin_math: 'Transferring a 2MB intermediate tensor over PCIe Gen3 x16 (~12 GB/s effective bandwidth)
+    takes: 2MB / 12GB/s ≈ 0.16ms. If the graph fragments 5 times, 10 PCIe transfers occur (5 H2D, 5 D2H),
+    adding ~1.6ms of pure transfer overhead. More importantly, this breaks kernel fusion and stalls the
+    GPU pipeline while waiting for the slow CPU operators, explaining the jump from an optimal ~10ms to
+    the observed 45ms latency.'
+chain:
+  id: cloud-chain-288
+  position: 2
+created_at: '2026-03-24T00:07:00.478581'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-2248
+title: The Distributed Join Strategy Selection
+topic: data-pipeline-engineering
+status: published
+provenance: imported
+scenario: 'You need to enrich a 50 TB training dataset with metadata from three lookup tables: a 5 GB
+  language-detection table, a 200 GB domain-quality table, and a 2 TB URL-to-category mapping. Each join
+  is on a different key. You have a 500-node Spark cluster with 64 GB RAM per executor. For each of the
+  three joins, determine the optimal join strategy (broadcast, shuffle hash, or sort-merge) and calculate
+  the total network I/O across all three joins.'
+details:
+  realistic_solution: 'Join 1 (50 TB × 5 GB on language key): Broadcast the 5 GB table. Each of the 500
+    executors receives a copy: 5 GB × 500 = 2.5 TB network I/O, but the 50 TB table stays put (zero shuffle).
+    Total: 2.5 TB. Join 2 (50 TB × 200 GB on domain key): 200 GB fits in executor memory (64 GB with some
+    overhead — marginal). If it fits, broadcast: 200 GB × 500 = 100 TB — this is MORE than shuffling both
+    sides (50.2 TB). So use shuffle hash join: shuffle both sides by domain key. Network I/O: 50 TB +
+    200 GB ≈ 50.2 TB. Join 3 (50 TB × 2 TB on URL key): Both tables are large. Sort-merge join: shuffle
+    both sides by URL. Network I/O: 50 TB + 2 TB = 52 TB. Total across all 3 joins: 2.5 + 50.2 + 52 =
+    104.7 TB. Optimization: if you order the joins so that Join 1 (broadcast) happens first, the output
+    is still ~50 TB. Then chain Join 2 and Join 3 — but with careful co-partitioning, you can make Join
+    2''s output already partitioned by URL for Join 3, saving one shuffle.'
+  common_mistake: '"Use sort-merge join for everything because the tables are large." This ignores that
+    broadcast join is dramatically more efficient when one side fits in executor memory, and that join
+    strategy choice depends on the size ratio between the two tables.'
+  napkin_math: 'Broadcast breakeven point: broadcast costs R × N (where R = small table size, N = number
+    of nodes). Shuffle costs L + R (both tables shuffled). Broadcast wins when R × N < L + R, i.e., R
+    < L / (N - 1). For N=500, L=50 TB: R < 50 TB / 499 ≈ 100 GB. So tables under 100 GB should be broadcast.
+    5 GB: broadcast. 200 GB: shuffle (200 > 100). 2 TB: shuffle.'
+last_modified: '2026-04-01'
+tags:
+- scope:Data Engineering

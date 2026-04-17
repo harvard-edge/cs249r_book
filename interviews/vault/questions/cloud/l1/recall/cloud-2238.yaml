@@ -1,0 +1,45 @@
+schema_version: 1
+id: cloud-2238
+title: The Storage Disaggregation Dilemma
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: 'You are advising a hyperscaler on their next-generation AI training cluster architecture. The
+  current design uses ''converged'' nodes where each GPU server has local NVMe SSDs for data caching and
+  checkpoint staging. The infrastructure team proposes ''disaggregated storage'': removing local SSDs
+  entirely and replacing them with a high-bandwidth network-attached NVMe-oF (NVMe over Fabric) storage
+  pool. Their argument: better utilization (shared pool vs stranded per-node capacity), easier replacement
+  of failed drives, and simpler node design. The training platform team pushes back, arguing this will
+  destroy checkpoint performance and introduce a new single point of failure. Evaluate both architectures.
+  Under what conditions is disaggregated storage the right choice, and when does converged storage win?'
+details:
+  realistic_solution: 'The tradeoff hinges on two ratios: (1) the network bandwidth per node relative
+    to local NVMe bandwidth, and (2) the I/O latency sensitivity of the workload. Converged wins when:
+    (a) Checkpoint writes are in the critical path. Local NVMe at 6-25 GB/s per node with ~50us latency
+    is 10-60× faster than NVMe-oF at 3-6 GB/s with ~300-500us latency over a 200 Gbps fabric. (b) The
+    training data pipeline requires low-jitter random reads. Local NVMe provides deterministic latency;
+    network-attached storage introduces tail latency from fabric congestion, competing traffic, and switch
+    hops. (c) The cluster runs a single large training job — storage is not ''stranded'' because every
+    node is active. Disaggregated wins when: (a) The cluster is multi-tenant with heterogeneous workloads.
+    Some jobs are I/O-heavy, others are not. A shared pool avoids 80% of NVMe sitting idle on compute-heavy
+    nodes. (b) Drive replacement and capacity scaling are operationally expensive. A JBOF (Just a Bunch
+    of Flash) rack can be hot-swapped without affecting GPU nodes. (c) The network fabric is overprovisioned
+    (400-800 Gbps per node with RDMA), narrowing the bandwidth gap to <2×. The hybrid approach most hyperscalers
+    adopt: small local NVMe (1-2 drives) for checkpoint staging and data pipeline buffering, plus a disaggregated
+    pool for capacity-tier storage. This gives latency-sensitive operations local speed while sharing
+    bulk capacity.'
+  common_mistake: Taking an absolute position — either 'disaggregation is always better because it improves
+    utilization' or 'local storage is always better because it is faster.' The right answer depends on
+    the workload's sensitivity to I/O latency and the network fabric's bandwidth relative to local NVMe
+    bandwidth.
+  napkin_math: 'Converged: 4× 3.84 TB NVMe per node = 15.36 TB, 25 GB/s read, ~50us latency. Per-node
+    checkpoint write: 1.6 GB at 6 GB/s = 267ms. Disaggregated (NVMe-oF over 200 Gbps RDMA): effective
+    20 GB/s shared across 8 GPUs → 2.5 GB/s per GPU equivalent, ~300us latency. Per-node checkpoint write:
+    1.6 GB at 2.5 GB/s = 640ms — 2.4× slower. At scale (12,500 nodes), converged NVMe total capacity:
+    192 PB. Average utilization for a single training job: ~15% (most capacity is for checkpoint rotation).
+    Wasted capacity: 163 PB × $50/TB = $8.2M stranded. Disaggregated pool sized to actual demand (30 PB
+    at $80/TB for NVMe-oF): $2.4M. Savings: $5.8M in hardware — but only if the 2.4× checkpoint latency
+    increase is acceptable.'
+last_modified: '2026-04-01'
+tags:
+- scope:Infrastructure

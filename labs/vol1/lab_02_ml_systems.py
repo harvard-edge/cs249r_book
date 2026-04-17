@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -71,7 +71,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme,
         go, mo, np, math,
@@ -175,7 +175,7 @@ def _(COLORS, ledger, mo):
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
                 <div style="margin-bottom: 3px;">1. <strong>Diagnose the Memory Wall</strong> &mdash;
-                    show that a 6x GPU upgrade (A100 to H100) yields only ~8% latency improvement
+                    show that a 3x GPU upgrade (A100 to H100) yields only ~1.6x latency improvement
                     for a memory-bound workload (AI = 5 FLOPs/Byte).</div>
                 <div style="margin-bottom: 3px;">2. <strong>Calculate the Light Barrier</strong> &mdash;
                     compute the propagation delay floor for a given datacenter distance and determine
@@ -253,48 +253,45 @@ def _(mo):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-# ─── CELL 4: TABS CELL ────────────────────────────────────────────────────
+# ─── WIDGET CELLS (one per part) ─────────────────────────────────────────
+# Pattern: each cell defines and RETURNS every widget the part owns so
+# marimo's dataflow can route them to the tabs cell. #1332.
 @app.cell(hide_code=True)
-def _(
-    COLORS,
-    H100_TFLOPS, H100_BW, H100_RAM, H100_TDP,
-    A100_TFLOPS, A100_BW, A100_RAM,
-    JETSON_TFLOPS, JETSON_BW, JETSON_RAM, JETSON_TDP,
-    IPHONE_TFLOPS, IPHONE_TDP,
-    ESP32_TFLOPS, ESP32_TDP, ESP32_RAM_KB,
-    RESNET50_FLOPS, RESNET50_SIZE_MB,
-    MOBILENET_FLOPS, DSCNN_FLOPS,
-    SPEED_OF_LIGHT_KM_S, FIBER_FACTOR,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-):
-    # ─────────────────────────────────────────────────────────────────────
-    # SHARED WIDGETS
-    # ─────────────────────────────────────────────────────────────────────
-
-    # Part A
+def _(mo):
+    # Options aligned to actual Hardware registry specs (A100 312 TFLOPS /
+    # 2039 GB/s, H100 989 TFLOPS / 3350 GB/s): compute ratio is 3.17x, BW
+    # ratio is 1.64x. For an AI=5 workload both GPUs are deeply memory-bound
+    # so the speedup collapses to the BW ratio. Option C is correct (#1332).
     partA_prediction = mo.ui.radio(
         options={
-            "A) ~6x (proportional to compute increase)":  "6x",
-            "B) ~3x (half the compute gain)":              "3x",
-            "C) ~1.5x (modest improvement)":               "1.5x",
-            "D) <1.1x (almost no improvement)":            "1.1x",
+            "A) ~3x (proportional to compute increase)":     "3x",
+            "B) ~2x (partial benefit from compute bump)":    "2x",
+            "C) ~1.6x (approximately the BW ratio)":         "1.6x",
+            "D) <1.1x (no improvement at all)":              "1.1x",
         },
-        label="Upgrading from A100 ($15K) to H100 ($30K) -- a 6x compute increase. "
+        label=r"Upgrading from A100 (\$15K) to H100 (\$30K) -- a 3x compute increase. "
               "For a workload with AI = 5 FLOPs/Byte, what latency improvement?",
     )
     return (partA_prediction,)
 
-@app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
 
+# Each widget cell below defines AND returns every widget it owns. A previous
+# version defined partA_ai/partB_distance/partB_sla/... but only returned the
+# next part's prediction; marimo's dataflow then never flowed those widgets
+# into the tabs cell, so sliders and dropdowns never rendered even after the
+# prediction was answered (#1332). Grouping by part keeps the mental model
+# simple: "one cell per part's widgets."
+@app.cell(hide_code=True)
+def _(mo):
     partA_ai = mo.ui.slider(
         start=1, stop=400, value=5, step=1,
         label="Arithmetic Intensity (FLOPs/Byte)",
     )
+    return (partA_ai,)
 
-    # Part B
+
+@app.cell(hide_code=True)
+def _(mo):
     partB_prediction = mo.ui.radio(
         options={
             "A) Yes -- 1 ms compute leaves 9 ms for network":              "yes_easy",
@@ -308,10 +305,9 @@ def _(mo, partA_prediction):
     )
     return (partB_prediction,)
 
-@app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
 
+@app.cell(hide_code=True)
+def _(mo):
     partB_distance = mo.ui.slider(
         start=0, stop=5000, value=1500, step=50,
         label="Datacenter distance (km)",
@@ -321,8 +317,11 @@ def _(mo, partB_prediction):
         value="10 ms (AV safety)",
         label="SLA budget:",
     )
+    return (partB_distance, partB_sla)
 
-    # Part C
+
+@app.cell(hide_code=True)
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) Still 60 FPS -- hardware is designed for this":  "60fps",
@@ -335,10 +334,9 @@ def _(mo, partB_prediction):
     )
     return (partC_prediction,)
 
-@app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
 
+@app.cell(hide_code=True)
+def _(mo):
     partC_target = mo.ui.dropdown(
         options={
             "Cloud (300W TDP)": "cloud",
@@ -358,8 +356,11 @@ def _(mo, partC_prediction):
         value="ResNet-50 (4.1 GFLOPs)",
         label="Model:",
     )
+    return (partC_model, partC_target)
 
-    # Part D
+
+@app.cell(hide_code=True)
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) ~2x (cloud is slightly more expensive)":  "2x",
@@ -372,10 +373,12 @@ def _(mo, partC_prediction):
     )
     return (partD_prediction,)
 
-@app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
 
+# Part D slider and dropdown pulled out of the tabs cell (was nested inside
+# before, which left them invisible to the tabs cell's dataflow tracker
+# even though they appeared syntactically near the tabs code). #1332.
+@app.cell(hide_code=True)
+def _(mo):
     partD_data_size = mo.ui.slider(
         start=1, stop=1024, value=16, step=1,
         label="Data size (KB)",
@@ -385,7 +388,24 @@ def _(mo, partD_prediction):
         value="BLE (1 Mbps)",
         label="Wireless technology:",
     )
+    return (partD_data_size, partD_wireless)
 
+
+# ─── CELL N: TABS COMPOSITION ────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(
+    COLORS, H100_TFLOPS, H100_BW, H100_RAM,
+    H100_TDP, A100_TFLOPS, A100_BW, A100_RAM,
+    JETSON_TFLOPS, JETSON_BW, JETSON_RAM, JETSON_TDP,
+    IPHONE_TFLOPS, IPHONE_TDP, ESP32_TFLOPS, ESP32_TDP,
+    ESP32_RAM_KB, RESNET50_FLOPS, RESNET50_SIZE_MB, MOBILENET_FLOPS,
+    DSCNN_FLOPS, SPEED_OF_LIGHT_KM_S, FIBER_FACTOR, Engine,
+    Models, Hardware, apply_plotly_theme, go,
+    math, mo, np, partA_ai,
+    partA_prediction, partB_distance, partB_prediction, partB_sla,
+    partC_model, partC_prediction, partC_target, partD_data_size,
+    partD_prediction, partD_wireless,
+):
     # ─────────────────────────────────────────────────────────────────────
     # PART A -- The Memory Wall Revelation
     # ─────────────────────────────────────────────────────────────────────
@@ -402,7 +422,7 @@ def _(mo, partD_prediction):
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
                 &ldquo;We are considering upgrading our inference fleet from A100s ($15K each)
-                to H100s ($30K each). The H100 has 6x the compute throughput. Engineering
+                to H100s ($30K each). The H100 has 3x the compute throughput. Engineering
                 says we should see proportional latency reduction. Finance wants your analysis
                 before approving $2M in hardware spend.&rdquo;
             </div>
@@ -452,6 +472,20 @@ def _(mo, partD_prediction):
         _t_comp_a100 = (_flops / (A100_TFLOPS * 1e12 * _eta)) * 1000
         _t_total_a100 = max(_t_mem_a100, _t_comp_a100) + 0.015
 
+        # Anchor the correct/wrong feedback to the original question (AI=5)
+        # even after the student moves the slider, so "at AI=5" wording stays
+        # truthful regardless of current slider position. #1332.
+        _flops_at_5 = 5 * _data_bytes
+        _t_a100_at_5 = max(
+            _data_bytes / (A100_BW * 1e9),
+            _flops_at_5 / (A100_TFLOPS * 1e12 * _eta),
+        ) * 1000 + 0.015
+        _t_h100_at_5 = max(
+            _data_bytes / (H100_BW * 1e9),
+            _flops_at_5 / (H100_TFLOPS * 1e12 * _eta),
+        ) * 1000 + 0.01
+        _speedup_at_5 = _t_a100_at_5 / _t_h100_at_5 if _t_h100_at_5 > 0 else 1
+
         _t_mem_h100 = (_data_bytes / (H100_BW * 1e9)) * 1000
         _t_comp_h100 = (_flops / (H100_TFLOPS * 1e12 * _eta)) * 1000
         _t_total_h100 = max(_t_mem_h100, _t_comp_h100) + 0.01
@@ -477,8 +511,8 @@ def _(mo, partD_prediction):
             name="A100 to H100 Speedup",
             line=dict(color=COLORS["BlueLine"], width=2.5),
         ))
-        _fig.add_hline(y=6, line_dash="dash", line_color=COLORS["GreenLine"], line_width=1,
-                       annotation_text="Ideal 6x", annotation_position="top right",
+        _fig.add_hline(y=3, line_dash="dash", line_color=COLORS["GreenLine"], line_width=1,
+                       annotation_text="Ideal 3x (compute ratio)", annotation_position="top right",
                        annotation_font_color=COLORS["GreenLine"])
         _fig.add_hline(y=1, line_dash="dot", line_color=COLORS["TextMuted"], line_width=1)
         _fig.add_vline(x=_ridge_a100, line_dash="dash", line_color=COLORS["OrangeLine"], line_width=1.5,
@@ -546,19 +580,20 @@ Speedup = {_speedup:.2f}x   Improvement = {_improvement_pct:.1f}%
 ```
 
 At AI=5: BW ratio is {H100_BW/A100_BW:.2f}x ({H100_BW:,.0f} vs {A100_BW:,.0f} GB/s).
-The 6x compute upgrade is almost entirely wasted.
+The 3x compute upgrade collapses to just the BW ratio.
 """))
 
         _pred = partA_prediction.value
-        if _pred == "1.1x":
-            _rev = ("**Correct.** At AI=5, both GPUs are deeply memory-bound. "
-                    f"The speedup is only {_speedup:.2f}x because bandwidth, not compute, "
-                    "is the binding constraint.")
+        if _pred == "1.6x":
+            _rev = ("**Correct.** At AI=5, both GPUs are deeply memory-bound, so "
+                    f"the speedup collapses to the bandwidth ratio ({_speedup_at_5:.2f}x). "
+                    "Compute throughput is irrelevant in this regime.")
             _rkind = "success"
         else:
-            _rev = (f"**The actual speedup at AI=5 is only ~{_speedup:.2f}x.** "
-                    "The workload is memory-bound. Slide AI above the ridge point "
-                    "to see where the 6x upgrade actually pays off.")
+            _rev = (f"**The actual speedup at AI=5 is only ~{_speedup_at_5:.2f}x.** "
+                    "The workload is memory-bound, so the speedup tracks the BW "
+                    "ratio (1.64x), not the compute ratio. Slide AI above the "
+                    "ridge point to see where the 3x upgrade actually pays off.")
             _rkind = "warn"
 
         items.append(mo.callout(mo.md(_rev), kind=_rkind))
@@ -1082,8 +1117,9 @@ The energy ratio is often **~1,000x**, making local inference the only viable op
                 <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                     <div style="margin-bottom: 10px;">
                         <strong>1. The Memory Wall makes compute upgrades worthless for
-                        memory-bound workloads.</strong> At AI=5, a 6x GPU upgrade yields
-                        only ~8% improvement.
+                        memory-bound workloads.</strong> At AI=5, a 3x GPU compute upgrade
+                        (A100 to H100) only delivers the 1.64x BW ratio speedup -- roughly
+                        half the hardware gain, because bandwidth is the binding constraint.
                     </div>
                     <div style="margin-bottom: 10px;">
                         <strong>2. The speed of light is irreducible.</strong>
@@ -1159,7 +1195,7 @@ def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, 
             "light_barrier_prediction": partB_prediction.value,
             "power_wall_prediction": partC_prediction.value,
             "energy_wall_prediction": partD_prediction.value,
-            "memory_wall_correct": partA_prediction.value == "1.1x",
+            "memory_wall_correct": partA_prediction.value == "1.6x",
             "light_barrier_correct": partB_prediction.value == "no_physics",
             "power_wall_correct": partC_prediction.value == "15fps",
             "energy_wall_correct": partD_prediction.value == "1000x",

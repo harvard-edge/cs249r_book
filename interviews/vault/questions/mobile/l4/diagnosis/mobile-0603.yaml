@@ -1,0 +1,62 @@
+schema_version: 1
+id: mobile-0603
+title: The Mobile-to-Cloud Latency Choke
+topic: gpu-compute-architecture
+status: draft
+provenance: imported
+scenario: You are a senior ML engineer on a mobile team launching a new generative AI feature. The feature
+  sends a request to a cloud-hosted model and streams the response back. During testing, you observe that
+  while P50 latency is acceptable, P99 latency is terrible, leading to a choppy user experience. Your
+  mobile-side profiling with Perfetto is clean; the device is sending requests promptly. You suspect a
+  bottleneck in the backend serving infrastructure.
+details:
+  realistic_solution: The correct analysis is that Architecture A, the scale-up design, is the likely
+    cause of P99 latency spikes and is the wrong choice for this workload.
+  common_mistake: Engineers often fixate on raw bandwidth numbers, concluding 'NVLink is 900 GB/s and
+    InfiniBand is 50 GB/s, so NVLink is always better.' This ignores the system topology and the actual
+    workload. They fail to recognize that NVLink is an intra-node interconnect for model parallelism,
+    which is irrelevant if the model fits on a single GPU and requests are independent. They mistake the
+    fastest component for the best system design.
+  napkin_math: 'Let''s analyze the system''s ability to absorb bursts, which directly impacts P99 latency.
+    Assume we have 32 GPUs in total.
+
+
+    **Architecture A: Scale-Up (4 nodes × 8 GPUs, model sharded across 8 GPUs via NVLink)**
+
+    1. Each request requires all 8 GPUs in a node → max 4 concurrent requests.
+
+    2. Request 5 must wait for one of the 4 slots to free up → **head-of-line blocking**.
+
+    3. If a burst of 8 requests arrives, 4 are queued. Queue latency dominates P99.
+
+    4. Effective parallelism: **4 independent request slots**.
+
+
+    **Architecture B: Scale-Out (32 single-GPU nodes, model fits on 1 GPU)**
+
+    1. Each request requires 1 GPU → max 32 concurrent requests.
+
+    2. Request 33 must wait → but 32 slots absorb most bursts.
+
+    3. Effective parallelism: **32 independent request slots**.
+
+
+    **P99 impact calculation:**
+
+    - Assume requests arrive in Poisson bursts, mean 20 req/s, compute time 100ms/req.
+
+    - Architecture A: 4 slots, utilization = 20 × 0.1 / 4 = 50%. By M/M/c queueing, P99 wait ≈ **250ms**.
+
+    - Architecture B: 32 slots, utilization = 20 × 0.1 / 32 = 6.25%. P99 wait ≈ **<1ms**.
+
+
+    Architecture A''s limited parallelism creates queueing that explodes at P99 under bursty mobile traffic.
+    Architecture B, despite using slower per-request hardware, provides 8× more independent request slots,
+    absorbing bursts gracefully. For independent inference requests (no model parallelism needed), scale-out
+    always wins on tail latency.'
+chain:
+  id: mobile-chain-014
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

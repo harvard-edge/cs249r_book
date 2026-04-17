@@ -12,8 +12,15 @@ import {
   VERSION,
   BUILD_DATE,
 } from "@/lib/stats";
+import PaperCitationCard from "@/components/PaperCitationCard";
 
 const PAPER_URL = "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf";
+
+// Release metadata is baked at build time. These are set by `vault publish`
+// via NEXT_PUBLIC_VAULT_RELEASE (ARCHITECTURE.md §7.1 cutover contract) and
+// are the citable identity of the corpus snapshot this bundle serves.
+const RELEASE_ID = process.env.NEXT_PUBLIC_VAULT_RELEASE ?? VERSION ?? "0.9.0";
+const RELEASE_HASH = process.env.NEXT_PUBLIC_VAULT_RELEASE_HASH;
 
 export default function AboutPage() {
   // Pick a sample question to show on the page. Prefer the hand-picked L2
@@ -45,6 +52,19 @@ export default function AboutPage() {
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">100% free</span>
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">Open source</span>
         </div>
+
+        {/* ─── Paper prominence (Phase 6 — above the fold) ─── */}
+        {/* Academic readers land here wanting to cite the work. Card sits
+            above the Numbers banner so the paper link + BibTeX are visible
+            without scrolling (ARCHITECTURE.md §9, v2.1 closure of H-19 with
+            evidence: after cutover, instrument About→Paper click-rate). */}
+        <section className="mb-8">
+          <PaperCitationCard
+            paperUrl={PAPER_URL}
+            releaseId={RELEASE_ID}
+            releaseHash={RELEASE_HASH}
+          />
+        </section>
 
         {/* ─── Numbers banner ─── */}
         {/* The four numbers every visitor should see before they scroll.

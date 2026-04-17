@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -81,7 +81,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, DecisionLog,
         go, mo, np, math,
@@ -277,9 +277,52 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
+def _(mo):
+    # Part B widgets
+    partB_prediction = mo.ui.radio(
+        options={
+            "A) Data loading (D_vol/BW) -- weight loading dominates at batch=1": "data",
+            "B) Compute (O/R_peak) -- it is a GPU, compute must dominate":       "compute",
+            "C) Framework overhead -- kernel dispatch is the bottleneck":         "overhead",
+            "D) All three terms are roughly equal":                                "balanced",
+        },
+        label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
+              "term dominates total inference latency?",
+    )
+    return (partB_prediction,)
 
+@app.cell(hide_code=True)
+def _(mo):
+    # Part C widgets
+    partC_prediction = mo.ui.radio(
+        options={
+            "A) ~2x over budget (need a small trim)":                   "2x",
+            "B) ~10x over budget (need significant compression)":        "10x",
+            "C) ~200x over budget (fundamentally infeasible)":           "200x",
+            "D) It fits with INT8 quantization":                         "fits",
+        },
+        label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
+              "What is the ratio of model size to available memory?",
+    )
+    return (partC_prediction,)
+
+@app.cell(hide_code=True)
+def _(mo):
+    # Part D widgets
+    partD_prediction = mo.ui.radio(
+        options={
+            "A) ~100x":            "100x",
+            "B) ~10,000x":         "10000x",
+            "C) ~1,000,000x":      "1000000x",
+            "D) ~1,000,000,000x":  "1000000000x",
+        },
+        label="What is the compute ratio between an H100 GPU and an ESP32 "
+              "microcontroller?",
+    )
+    return (partD_prediction,)
+
+@app.cell(hide_code=True)
+def _(DecisionLog, mo):
     partA_scenario = mo.ui.dropdown(
         options={
             "Rec System: stale training data": "stale_data",
@@ -298,45 +341,9 @@ def _(mo, partA_prediction):
         value="Add more GPUs (Machine)",
         label="Prescribe fix:",
     )
-
-    # Part B widgets
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) Data loading (D_vol/BW) -- weight loading dominates at batch=1": "data",
-            "B) Compute (O/R_peak) -- it is a GPU, compute must dominate":       "compute",
-            "C) Framework overhead -- kernel dispatch is the bottleneck":         "overhead",
-            "D) All three terms are roughly equal":                                "balanced",
-        },
-        label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
-              "term dominates total inference latency?",
-    )
-    return (partA_scenario, partA_fix, partB_prediction)
-
-@app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partB_batch = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )
-
-    # Part C widgets
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) ~2x over budget (need a small trim)":                   "2x",
-            "B) ~10x over budget (need significant compression)":        "10x",
-            "C) ~200x over budget (fundamentally infeasible)":           "200x",
-            "D) It fits with INT8 quantization":                         "fits",
-        },
-        label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
-              "What is the ratio of model size to available memory?",
-    )
-    return (partB_batch, partC_prediction)
-
-@app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partC_target = mo.ui.radio(
         options={
             "H100 (Cloud)": "h100",
@@ -347,24 +354,6 @@ def _(mo, partC_prediction):
         label="Deployment target:",
         inline=True,
     )
-
-    # Part D widgets
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) ~100x":            "100x",
-            "B) ~10,000x":         "10000x",
-            "C) ~1,000,000x":      "1000000x",
-            "D) ~1,000,000,000x":  "1000000000x",
-        },
-        label="What is the compute ratio between an H100 GPU and an ESP32 "
-              "microcontroller?",
-    )
-    return (partC_target, partD_prediction)
-
-@app.cell(hide_code=True)
-def _(DecisionLog, mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_scale = mo.ui.radio(
         options={"Linear scale": "linear", "Log scale": "log"},
         value="Linear scale",
@@ -376,26 +365,22 @@ def _(DecisionLog, mo, partD_prediction):
         placeholder="Based on what I learned in this lab, the most important diagnostic "
                     "question before investing in hardware is..."
     )
-    return (partD_scale, synth_decision_input, synth_decision_ui)
+    return (partA_fix, partA_scenario, partB_batch, partC_target, partD_scale)
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-    A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
+    COLORS, H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB,
+    H100_TDP_W, A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
     JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
     IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-    HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-    RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-    partA_prediction, partA_scenario, partA_fix,
-    partB_prediction, partB_batch,
-    partC_prediction, partC_target,
-    partD_prediction, partD_scale,
-    synth_decision_input, synth_decision_ui,
-    ledger,
+    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB,
+    ESP32_TDP_W, HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB,
+    HIMAX_TDP_W, RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
+    Engine, Models, Hardware, apply_plotly_theme,
+    go, math, mo, np,
+    synth_decision_input, synth_decision_ui, ledger, partA_fix,
+    partA_prediction, partA_scenario, partB_batch, partB_prediction,
+    partC_prediction, partC_target, partD_prediction, partD_scale,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- Three Axes, One System

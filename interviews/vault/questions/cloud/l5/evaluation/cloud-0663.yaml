@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-0663
+title: The Vision-Language Model Serving
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: We're serving a vision-language model (LLaVA-1.5 13B) that takes an image + text prompt and
+  generates text. Users are uploading 4K images (3840×2160) and complaining about 8-second TTFT. The text-only
+  version of the same model has 200ms TTFT. Where are the 7.8 extra seconds going?
+details:
+  realistic_solution: 'VLMs convert images into visual tokens via a vision encoder (typically ViT), then
+    concatenate these with text tokens for the LLM. A 4K image at the default patch size (14×14 pixels)
+    produces $(3840/14) \times (2160/14) \approx 274 \times 154 = 42,196$ visual tokens. The LLM must
+    prefill all of these — the same as a 42K-token text prompt. The vision encoder itself takes ~50ms;
+    the remaining 7.75 seconds is pure LLM prefill over 42K visual tokens. The fix: downsample images,
+    use adaptive resolution (only high-res where needed), or use a vision encoder with larger patch sizes.'
+  common_mistake: '"The image encoder is slow — use a smaller vision model." The vision encoder (ViT)
+    is fast; the problem is that high-resolution images produce thousands of visual tokens that dominate
+    the prefill cost.'
+  napkin_math: 'LLaVA-1.5 13B on A100-80GB (based on Llama-2 13B: 40 layers, 40 attention heads, 40 KV
+    heads, 128 head_dim): | **Vision encoder (ViT-L/14):** 304M params. Forward pass on 4K image: ~50ms.
+    | **Visual tokens from 4K image:** (3840/14) × (2160/14) ≈ **42,196 tokens**. | **LLM prefill for
+    42K tokens:** 2 × 13B × 42,196 = 1,097 TFLOPs. On A100 (312 TFLOPS at ~50% utilization): 1,097/156
+    = **7.0 seconds**. Plus KV-cache allocation for 42K tokens: 2 × 40 × 40 × 128 × 2 bytes × 42,196 =
+    ~34.5 GB per request — consuming nearly half the A100''s 80 GB HBM. | **At 768×768 resolution:** (768/14)²
+    ≈ **3,025 tokens**. Prefill: 2 × 13B × 3,025 = 78.7 TFLOPs / 156 = **504ms**. KV-cache: 2 × 40 × 40
+    × 128 × 2 × 3,025 = 2.47 GB. **14× faster TTFT, 14× less KV memory**. | **Trade-off:** Downsampling
+    to 768×768 loses fine-grained detail (can''t read small text in documents). Adaptive resolution (high-res
+    crops only for regions of interest) balances quality and speed.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

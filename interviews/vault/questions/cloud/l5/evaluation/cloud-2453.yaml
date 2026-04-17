@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2453
+title: Paged Attention Block Size Fragmentation
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: You are serving a 13B model on a single A100 40GB GPU. Max context is 8192 tokens. You implemented
+  Paged Attention to manage the KV cache. Initially, you set the block size to 256 tokens to maximize
+  memory-fetch efficiency. However, you hit OOM limits at a batch size of 32, despite average request
+  lengths being only 300 tokens.
+details:
+  realistic_solution: The root cause is massive internal memory fragmentation due to an oversized block
+    size. In Paged Attention, memory is allocated in fixed-size blocks. A request of 300 tokens requires
+    two 256-token blocks (512 tokens capacity), wasting 212 tokens worth of KV cache memory. The tradeoff
+    in block size selection is internal fragmentation versus page table lookup overhead. Large blocks
+    reduce page table size and kernel launch overhead but waste memory for unfilled blocks. Small blocks
+    (e.g., 16 tokens) virtually eliminate internal fragmentation, allowing much higher batch sizes, but
+    slightly increase the time spent traversing the block table during the attention computation.
+  common_mistake: Decreasing the maximum context length or reducing the batch size to avoid OOM, rather
+    than addressing internal memory fragmentation.
+  napkin_math: 'Block size = 256. Request = 300 tokens -> 2 blocks allocated = 512 tokens. Wasted = 212
+    tokens per request. Internal fragmentation = 212 / 512 = 41.4%. At batch size 32, wasted tokens =
+    32 * 212 = 6,784 tokens. KV size per token (13B model): ~100KB. Wasted memory = 6784 * 100KB = ~678
+    MB. By reducing block size to 16, a 300-token request takes 19 blocks (304 tokens). Wasted = 4 tokens
+    (1.3% fragmentation), saving ~670 MB and allowing the batch size to increase.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

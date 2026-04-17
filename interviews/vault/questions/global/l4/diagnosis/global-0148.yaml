@@ -1,0 +1,29 @@
+schema_version: 1
+id: global-0148
+title: The QSPI Thrashing Spikes
+topic: federated-learning
+status: published
+provenance: imported
+scenario: On a Cortex-M7 (256KB SRAM, 2MB QSPI Flash), running on-device fine-tuning for federated learning.
+  Epoch execution time jumps drastically from 400ms to 3.2s when the batch size increases from 1 to 2.
+  Total theoretical memory footprint for batch size 2 is only 210KB.
+details:
+  realistic_solution: The root cause is a loss of spatial and temporal locality causing D-Cache thrashing
+    over the external QSPI Flash. With batch size 1, the activations and gradients fit entirely in the
+    internal SRAM (TCM). When increasing to batch size 2, the memory arena exceeds the available contiguous
+    internal SRAM, forcing the system's memory allocator to place activation buffers in the external memory-mapped
+    QSPI Flash. Because federated learning backpropagation requires multiple passes over activations,
+    the CPU constantly fetches data over the slow SPI bus, completely destroying locality and stalling
+    the pipeline.
+  common_mistake: Assuming the CPU is thermal throttling or the CMSIS-NN kernels lack optimizations for
+    batch sizes greater than 1.
+  napkin_math: 'Batch 1: 100KB weights + 80KB activations (SRAM) = 400ms. Batch 2: Activations = 160KB.
+    Total SRAM needed = 160KB + 50KB OS = 210KB. If fragmented, spills to QSPI. QSPI access is 40ns vs
+    TCM 10ns. Cache miss rate spikes to 30%, adding (0.3 * 10M ops * 40ns) = 120ms latency per layer,
+    ballooning the total execution time to over 3 seconds.'
+chain:
+  id: global-chain-013
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

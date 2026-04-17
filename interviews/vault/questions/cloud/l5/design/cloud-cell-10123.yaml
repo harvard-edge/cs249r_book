@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-cell-10123
+title: Realize end-to-end EfficientNet-B4 serving with DALI preprocessing on H100
+topic: cnn-efficient-design
+status: published
+provenance: imported
+scenario: You need to deploy EfficientNet-B4 (19M params, 4.2 GFLOPs, 380×380 input) for a medical imaging
+  API that must process 2,000 QPS of 1920×1080 JPEG images on a single H100 node. The current CPU preprocessing
+  pipeline (JPEG decode + resize + normalize) takes 12ms per image. Realize the full inference pipeline
+  with GPU-accelerated preprocessing.
+details:
+  realistic_solution: 'DALI pipeline: GPU JPEG decode (nvjpeg) + resize (480→380 with bilinear) + normalize.
+    Run on CUDA stream 1. TensorRT engine on CUDA stream 2. Double-buffer: while batch N is on GPU for
+    inference, batch N+1 is being preprocessed. DALI GPU pipeline: ~0.5ms per image on H100 vs 12ms CPU.
+    At batch=64: 32ms CPU preprocessing eliminated, ~1ms DALI. Pipeline: DALI batch fills 64 images in
+    ~1ms, TRT inference in ~2ms (4.2G×64=269G FLOPs, at 494 TFLOPS 50% util = 0.54ms + overhead). Total:
+    ~3ms/batch = 64/3ms = 21K QPS — exceeds 2K QPS requirement.'
+  common_mistake: Using DALI without pinned memory buffers, causing D2H/H2D copies to block the preprocessing
+    stream; or using a single CUDA stream for both preprocessing and inference, preventing overlap.
+  napkin_math: 'Target: 2,000 QPS. CPU preprocessing: 12ms/image → max 83 QPS on 1 CPU core, need 24 cores
+    for 2K QPS. With DALI GPU: 1920×1080 JPEG decode via nvjpeg: ~2ms for batch=64 (32 img/ms). Resize
+    1920×1080→380×380: GPU bilinear ~0.3ms batch=64. Normalize: 0.1ms. Total DALI: ~2.4ms/64 images =
+    37μs/image. EfficientNet-B4 TRT FP16 at batch=64: ~2ms. Pipeline latency: max(2.4, 2) = 2.4ms/batch
+    = 26,667 QPS >> 2,000 target. Use 1/13 of H100 capacity, leave rest for burst.'
+last_modified: '2026-04-01'

@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2308
+title: GPU Starvation from Cloud Storage
+topic: data-pipeline-engineering
+status: published
+provenance: imported
+scenario: We are training a Vision-Language model on 8x A100 GPUs (40GB). We observe highly volatile GPU
+  utilization averaging 25-30%, while CPU utilization on the host is pegged at 100%. The dataset consists
+  of 50 million 100KB images read directly from an S3 bucket. Network throughput is hovering around 400MB/s,
+  well below the instance's 100Gbps limit.
+details:
+  realistic_solution: The symptom (high CPU, low GPU util, flatlined but low network throughput) points
+    directly to an I/O metadata and connection overhead bottleneck. Reading 100KB files directly from
+    S3 requires individual HTTP GET requests. The CPU is completely saturated managing thousands of TLS
+    handshakes and HTTP requests rather than actually transferring data or doing data augmentation. To
+    fix this, we must shift from random reads of small files to sequential reads of large files. The solution
+    is to pack the dataset into larger (e.g., 1GB) tarballs using a format like WebDataset or TFRecord.
+    Additionally, introducing a local high-performance caching layer (like AWS FSx for Lustre or local
+    NVMe SSDs) will decouple the cloud storage latency from the training loop, allowing the dataloader
+    to prefetch sequentially into RAM.
+  common_mistake: Blindly increasing the number of DataLoader CPU workers or upgrading to an instance
+    with faster GPUs without addressing the I/O pattern.
+  napkin_math: 'Target throughput: 8 GPUs * 500 imgs/sec = 4,000 imgs/sec. 4,000 * 100KB = 400MB/s bandwidth.
+    4,000 HTTP GETs/sec to S3 from a single node incurs massive CPU overhead (TLS, metadata). By packing
+    into 1GB shards: 400MB/s requires reading only 0.4 shards/sec. This reduces request overhead by a
+    factor of 10,000x, freeing the CPU to feed the GPUs.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

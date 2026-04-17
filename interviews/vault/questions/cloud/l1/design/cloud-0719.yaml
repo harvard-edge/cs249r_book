@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-0719
+title: The Expert Parallelism Communication
+topic: 3d-parallelism
+status: published
+provenance: imported
+scenario: You're training a Mixture-of-Experts model with 64 experts, placing one expert per GPU across
+  64 H100s connected via 400 Gbps InfiniBand. Each token is routed to 2 experts. During training, you
+  notice the all-to-all communication takes longer than the expert computation itself. At what point does
+  the network become the bottleneck, and how do you fix it?
+details:
+  realistic_solution: In expert parallelism, every GPU must send a fraction of its tokens to every other
+    GPU (the tokens routed to remote experts) and receive tokens back. This is an all-to-all communication
+    pattern where the total data volume scales as $O(N)$ with the number of GPUs, but each GPU's network
+    port bandwidth is fixed. With 64 GPUs, each GPU sends tokens to 63 other GPUs simultaneously, creating
+    massive incast at the network switches. Unlike all-reduce (which can use ring or tree topologies to
+    limit per-link traffic), all-to-all requires full bisection bandwidth.
+  common_mistake: '"All-to-all is just like all-reduce — it scales well with more GPUs." All-to-all has
+    fundamentally different scaling properties than all-reduce.'
+  napkin_math: 'Hidden dim=4096, FP16. Each token''s activation: $4096 \times 2 = 8\text{ KB}$. Batch
+    per GPU: 4096 tokens. Top-2 routing: each token goes to 2 of 64 experts. Expected tokens sent per
+    GPU: $4096 \times 2 \times (63/64) \approx 8064$ tokens to remote GPUs. Data sent per GPU: $8064 \times
+    8\text{ KB} = 63\text{ MB}$. At 400 Gbps (50 GB/s) per link: $63\text{ MB} / 50\text{ GB/s} = 1.26\text{
+    ms}$ — if you had a dedicated link to every peer. But with a 2-level fat-tree network, bisection bandwidth
+    is typically 2:1 oversubscribed: effective = 25 GB/s, time = 2.52 ms. Expert compute per token (one
+    FFN layer): $\approx 0.5\text{ ms}$. Communication (2.52 ms) > compute (0.5 ms) — network-bound. Fix:
+    expert-parallel groups of 8 within NVLink domains, data-parallel across nodes.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

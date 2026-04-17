@@ -3,7 +3,7 @@ title: "🔧 Building TinyTorch Together — Live Kickoff"
 date: "2026-02-04"
 author: "Vijay Janapa Reddi"
 description: "Dear Tiny Torch Community, We’re excited to invite you to the first Tiny Torch kickoff session—a live Zoom tutorial that marks the beginning of something we’ve been building toward for a while. Tiny..."
-categories: ["update"]
+categories: ["hands-on"]
 ---
 
 ```{=html}

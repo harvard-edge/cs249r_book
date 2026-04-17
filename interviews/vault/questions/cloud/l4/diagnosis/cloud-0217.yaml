@@ -1,0 +1,41 @@
+schema_version: 1
+id: cloud-0217
+title: The CPU Preprocessing Bottleneck
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: 'Your LLM serving endpoint on an H100 should deliver 40 tokens/s for a 13B model (bandwidth-bound:
+  26 GB weights / 3.35 TB/s ≈ 7.8 ms/token → 128 tokens/s theoretical). But you''re measuring only 15
+  tokens/s. `nvidia-smi` shows GPU utilization flickering between 0% and 95% in a sawtooth pattern. CPU
+  utilization is pegged at 100% on one core. Where''s the bottleneck?'
+details:
+  realistic_solution: 'The sawtooth pattern (0% → 95% → 0% → 95%) means the GPU is alternating between
+    waiting for input and processing it. The CPU is the bottleneck — specifically, the tokenizer and/or
+    detokenizer running in Python on a single core. The Python GIL ensures only one thread executes Python
+    bytecode at a time. The serving pipeline is: (1) CPU tokenizes input (Python, single-threaded) → (2)
+    GPU runs model forward pass → (3) CPU detokenizes output token (Python, single-threaded) → (4) CPU
+    samples next token → repeat. If tokenization + detokenization + sampling takes 50 ms on CPU, but the
+    GPU forward pass takes only 7.8 ms, the GPU is idle for $50 / (50 + 7.8) = 87\%$ of the time. Effective
+    throughput: $1000 / (50 + 7.8) = 17.3$ tokens/s — matching the observed 15 tokens/s (with overhead).
+    Fix: (1) use a Rust/C++ tokenizer (HuggingFace `tokenizers` library) that''s 10–50× faster than pure
+    Python; (2) batch tokenization — tokenize multiple requests simultaneously; (3) move sampling to GPU
+    (`torch.multinomial` on CUDA); (4) use a C++ serving runtime (TensorRT-LLM, vLLM''s C++ backend) that
+    eliminates the Python hot path.'
+  common_mistake: '"The model is too large for the GPU — we need tensor parallelism" or "The batch size
+    is too small." The model fits fine (26 GB on 80 GB), and the sawtooth GPU pattern reveals the real
+    issue.'
+  napkin_math: '**GPU forward pass (memory-bound decode, 13B FP16):** | Weight read = 13B × 2 = 26 GB
+    | Time = 26 GB / 3,350 GB/s ≈ 7.8 ms/token | **CPU overhead per decode token (Python transformers):**
+    | Detokenize 1 token: ~0.5 ms | Sampling (torch.multinomial on CPU, includes GPU→CPU logit transfer):
+    ~2 ms | Total CPU per decode step: ~2.5 ms | Note: Input tokenization (e.g., 512 tokens → ~25 ms)
+    is a ONE-TIME cost at request start, not per decode step. | **Pipeline per decode step:** 2.5 ms (CPU)
+    + 7.8 ms (GPU) = 10.3 ms/token → 97 tokens/s | But observed is only 15 tokens/s → 66.7 ms/token. The
+    gap suggests additional Python/GIL overhead or synchronous CPU work (e.g., logit post-processing,
+    streaming callbacks) adding ~57 ms per step. | **GPU idle fraction:** If CPU takes 57 ms and GPU takes
+    7.8 ms: GPU idle = 57/(57+7.8) = 88% — matches the sawtooth pattern. | **After optimization (Rust
+    tokenizer + GPU sampling):** | Detokenize: 0.05 ms (Rust) | Sampling: 0.1 ms (GPU-side, no transfer)
+    | CPU per token: 0.15 ms | Pipeline: 0.15 + 7.8 = 7.95 ms/token → 126 tokens/s | Improvement: ~8.4×
+    over the bottlenecked 15 tokens/s.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

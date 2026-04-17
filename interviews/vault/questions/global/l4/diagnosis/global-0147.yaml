@@ -1,0 +1,32 @@
+schema_version: 1
+id: global-0147
+title: Ring Attention Compute Starvation
+topic: collective-communication
+status: published
+provenance: imported
+scenario: You deploy a document-analysis LLM supporting a 1M token context window across an 8xH100 HGX
+  node using Ring Attention. To minimize activation memory, you set the sequence chunk size (block size)
+  to 1024 tokens. During the 1M token prefill, NSYS traces show the GPU SMs are idle 75% of the time,
+  and the prefill takes 45 seconds instead of the theoretically calculated 12 seconds.
+details:
+  realistic_solution: The symptom is caused by compute starvation due to a mismatch between the chunk
+    size and the network bandwidth. Ring Attention works by overlapping the computation of one chunk of
+    Queries against Keys/Values while simultaneously transmitting the next K/V chunk over NVLink to the
+    adjacent GPU. To hide the network latency, the computation time must be greater than or equal to the
+    network transfer time. With a chunk size of 1024, the FLOPs required are so small that the H100 completes
+    the attention computation almost instantly. It then stalls, waiting for the 1024-token K/V block to
+    finish traversing the NVLink. To fix this, you must increase the chunk size (e.g., to 8192 or 16384).
+    Because attention FLOPs scale quadratically with chunk size while network transfer scales linearly,
+    a larger chunk size increases arithmetic intensity, allowing compute to fully mask the network latency.
+  common_mistake: Blaming FlashAttention for poor performance on long sequences or assuming the KV cache
+    is overflowing.
+  napkin_math: 'Let C = chunk size (1024). Hidden dim d = 128. Heads = 32. Compute FLOPs for Q*K^T per
+    head = 2 * C^2 * d = 2 * 1024 * 1024 * 128 = 268 MFLOPs. Across 32 heads = 8.5 GFLOPs. On H100 (989
+    TFLOPS), compute time = 8.5 * 10^9 / 989e12 = 8.6 microseconds. Network transfer for K and V block:
+    2 (K+V) * C * d * 32 heads * 2 bytes = 2 * 1024 * 128 * 32 * 2 = 16.7 MB. NVLink bandwidth = 450 GB/s.
+    Transfer time = 16.7 MB / 450 GB/s = 37 microseconds. Because network time (37us) > compute time (8.6us),
+    the GPU spends ~75% of its time waiting for data. Increasing chunk size to 8192 increases compute
+    time by 64x (544us) but transfer time by only 8x (296us), completely hiding the network latency.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

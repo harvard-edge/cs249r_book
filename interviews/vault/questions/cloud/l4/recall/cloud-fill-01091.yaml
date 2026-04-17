@@ -1,0 +1,73 @@
+schema_version: 1
+id: cloud-fill-01091
+title: Optimizing Distributed Training Throughput with RoCE on NVIDIA A100
+topic: rdma-transport
+status: published
+provenance: imported
+scenario: You are leading a team training a large language model across 64 NVIDIA A100 GPUs. Each A100
+  features 80 GB HBM2e memory with 2.0 TB/s memory bandwidth and 312 TFLOPS FP16 performance. These GPUs
+  are interconnected over a 200 Gbps RoCE v2 network. You've observed that while individual GPU utilization
+  is high during computation, the overall training throughput is significantly lower than expected during
+  gradient synchronization. Specifically, a single all-reduce operation for a 100 GB gradient tensor across
+  all 64 GPUs takes much longer than theoretical expectations. Your current framework uses standard TCP/IP
+  sockets for inter-GPU communication over the RoCE fabric.
+details:
+  realistic_solution: 'To resolve this, you need to ensure your deep learning framework''s communication
+    backend is correctly configured to leverage RoCE''s RDMA capabilities. This involves:
+
+    1.  **Verifying RDMA Driver Installation**: Confirm Mellanox OFED drivers are installed and `ib_verbs`
+    are accessible on all nodes.
+
+    2.  **NCCL Configuration**: Set environment variables like `NCCL_IB_DISABLE=0` and potentially `NCCL_NET_GDR_LEVEL=3`
+    to enable GPUDirect RDMA. This allows data to move directly from GPU memory to the network interface
+    card (NIC) without CPU involvement or host memory copies (zero-copy).
+
+    3.  **UCX Integration**: If using an MPI-based communication backend, ensure UCX (Unified Communication
+    X) is enabled and configured to use InfiniBand/RoCE transport for optimal performance, as it natively
+    supports kernel bypass and RDMA verbs.
+
+    4.  **MTU/Jumbo Frames**: Configure the network interfaces to use jumbo frames (e.g., 9000 bytes MTU)
+    to reduce packet overhead and increase the effective bandwidth for large data transfers during gradient
+    exchange.'
+  common_mistake: A common mistake is assuming that deploying on a RoCE-enabled network automatically
+    translates to high-performance, low-latency communication. Without explicitly configuring the deep
+    learning framework or communication library (like NCCL/MPI) to utilize RDMA verbs and kernel bypass
+    mechanisms, the traffic might still be routed through the kernel's TCP/IP stack. This negates most
+    of the RoCE benefits, leading to higher CPU overhead, increased latency, and reduced effective bandwidth
+    compared to native RDMA.
+  napkin_math: '**Assumptions:**
+
+    *   64 NVIDIA A100 GPUs, 200 Gbps (25 GB/s theoretical) RoCE v2 interconnect.
+
+    *   100 GB gradient tensor for all-reduce.
+
+    *   Ring All-Reduce algorithm, commonly used in NCCL.
+
+
+    **Theoretical All-Reduce Time (Optimal RoCE):**
+
+    For a ring all-reduce with large N, the communication volume is approximately `2 * data_size`. So,
+    for 100 GB, total effective data movement is `200 GB` over the network links.
+
+    *   Assuming an optimal effective network bandwidth of ~22 GB/s per link (accounting for protocol
+    overhead from 25 GB/s line rate).
+
+    *   Optimal All-reduce communication time: `(200 GB / 22 GB/s) ≈ 9.09 seconds`.
+
+
+    **Bottlenecked All-Reduce Time (TCP/IP over RoCE):**
+
+    *   With TCP/IP over RoCE, kernel overhead and memory copies can reduce effective bandwidth significantly.
+    Let''s assume an effective bandwidth of 8 GB/s.
+
+    *   Bottlenecked All-reduce communication time: `(200 GB / 8 GB/s) ≈ 25.0 seconds`.
+
+
+    **Impact:**
+
+    The misconfiguration causes the gradient synchronization phase to take `25.0 - 9.09 = 15.91 seconds`
+    longer than necessary for this single operation. This means the communication bottleneck is approximately
+    `25.0 / 9.09 ≈ 2.75x` slower than optimal, significantly impacting overall training time and GPU utilization
+    during communication steps. The A100''s HBM2e bandwidth (2.0 TB/s) is vastly higher than network bandwidth,
+    confirming communication as the limiting factor for distributed performance.'
+last_modified: '2026-04-01'

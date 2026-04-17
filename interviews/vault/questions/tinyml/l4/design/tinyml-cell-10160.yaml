@@ -1,0 +1,26 @@
+schema_version: 1
+id: tinyml-cell-10160
+title: 'Realization: adapt MobileNetV1-0.25x for ESP32-S3 with resolution scaling'
+topic: cnn-efficient-design
+status: published
+provenance: imported
+scenario: MobileNetV1-0.25x at 224×224 input (27M MACs, 225K params) is too slow at 450ms on ESP32-S3
+  (240MHz, 512KB SRAM). You need <100ms per inference for a 5-class classifier using the camera module.
+  Realize an architecture adaptation using resolution scaling and verify SRAM budget.
+details:
+  realistic_solution: 'Resolution 96×96: MobileNetV1 with 5× stride-2 layers would produce 96/32 = 3×3
+    final feature map — too small. Adjust: remove 2 of the stride-2 layers (use stride-1 for DW conv layers
+    8 and 10). Final feature map: 96/8 = 12×12 (still meaningful). MACs scale as (96/224)² × adjustment
+    factor ≈ 0.18× original. 27M × 0.18 = 4.9M MACs. At 30M MACs/sec on ESP32-S3: 4.9M/30M = 163ms. Still
+    over 100ms. Use MobileNetV1-0.25× + 64×64 input: 27M × (64/224)² = 2.2M MACs → 73ms. Fits SRAM: peak
+    activation 64×64×8×1B = 32KB << 512KB.'
+  common_mistake: Simply reducing input resolution without understanding that MobileNetV1's stride pattern
+    (stride-2 in first 5 conv layers) collapses a 96×96 input to 3×3 by the last layer, which is too small
+    for useful global average pooling — need to adjust the stride pattern for smaller inputs.
+  napkin_math: 'ESP32-S3 LX7 at 240MHz, TFLite Micro INT8 throughput: ~30–50M MACs/sec (with vector extensions
+    for INT8). MobileNetV1-0.25× at 64×64: MACs = 27M × (64/224)² × (0.25)² / (0.25)² = 27M × (64/224)²
+    = 27M × 0.0816 = 2.2M MACs. At 30M MACs/sec: 73ms. Fits <100ms. SRAM: peak activation in MV1 DW block
+    5 (after 2 stride-2): 64/4=16×16×32 = 8KB. Full forward SRAM budget: ~50KB for activations + 225KB×0.0625
+    = 225KB weights... wait: width multiplier 0.25 applies to weights: 225K × 0.0625 = 225K params × 1B
+    = 225KB. Total: 64KB << 512KB SRAM. Fits without PSRAM.'
+last_modified: '2026-04-01'

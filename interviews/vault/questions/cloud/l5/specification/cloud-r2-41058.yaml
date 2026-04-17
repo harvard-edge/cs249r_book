@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-r2-41058
+title: RDMA and Host Networking for ML Training Pods
+topic: container-orchestration
+status: published
+provenance: imported
+scenario: Your Kubernetes training pods use standard pod networking (Calico CNI) and achieve only 15 GB/s
+  between nodes for NCCL AllReduce, despite having 400 Gbps InfiniBand NICs. The theoretical maximum is
+  50 GB/s. Diagnose the bottleneck and describe the K8s configuration needed for full bandwidth.
+details:
+  realistic_solution: 'The bottleneck: NCCL over TCP/IP adds kernel network stack overhead. Data goes:
+    GPU → PCIe → CPU memory → kernel TCP/IP stack → Ethernet NIC → switch → Ethernet NIC → kernel → CPU
+    memory → PCIe → GPU. Each copy adds latency and CPU overhead. Fix: enable GPUDirect RDMA (GDR) + RDMA-capable
+    CNI. Configuration: (1) Install Multus CNI to attach multiple network interfaces to pods. (2) Install
+    RDMA/IB CNI (k8snetworkplumbingwg/sriov-network-device-plugin) to expose InfiniBand devices as schedulable
+    resources (rdma/hca_devices). (3) Create NetworkAttachmentDefinition for the IB network. (4) Pod spec:
+    annotations for Multus to attach IB interface, plus rdma/hca_devices: 1 in resources. (5) Enable hostNetwork:
+    true as a simpler alternative — the pod uses the host''s network stack directly, including IB devices.
+    Tradeoff: loses network namespace isolation. (6) Set NCCL environment variables: NCCL_IB_HCA=mlx5,
+    NCCL_IB_DISABLE=0, NCCL_NET_GDR_LEVEL=5. With GPUDirect RDMA: data flows GPU → NVLink → IB NIC → switch
+    → IB NIC → GPU. No CPU memory copies. Throughput: ~45 GB/s (90% of 50 GB/s theoretical).'
+  common_mistake: Assuming Kubernetes pod networking automatically uses InfiniBand. Standard CNIs (Calico,
+    Flannel, Cilium) only support TCP/IP over Ethernet. InfiniBand RDMA requires special CNI configuration
+    and host networking.
+  napkin_math: 'TCP/IP: 15 GB/s (30% of wire speed). RDMA: 45 GB/s (90% of wire speed). 3× improvement.
+    For 128-GPU training with 2 GB AllReduce: TCP = 133 ms, RDMA = 44 ms. Per-step savings: 89 ms.'
+last_modified: '2026-04-02'

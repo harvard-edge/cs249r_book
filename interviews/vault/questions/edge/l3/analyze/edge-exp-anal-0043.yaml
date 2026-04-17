@@ -1,0 +1,28 @@
+schema_version: 1
+id: edge-exp-anal-0043
+title: Unified Memory Bandwidth Starvation
+topic: streaming-ingestion
+status: published
+provenance: imported
+scenario: A real-time streaming pipeline on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP)
+  ingests 4 uncompressed 8K video streams at 60 FPS. The pipeline relies on a discrete GPU paradigm, explicitly
+  copying frames from the ingestion buffer to a 'device' buffer for Ampere GPU feature computation, and
+  then copying again to a separate buffer for the DLA accelerator. Even though the memory footprint is
+  under 15 GB (well within the 32 GB LPDDR5 limit) and total compute utilization is low, the system drops
+  frames continuously. Explain why this ingestion pattern causes starvation and calculate the memory bandwidth
+  consumed.
+details:
+  realistic_solution: The correct approach is to use zero-copy UMA memory sharing (e.g., using NvSciBuf,
+    V4L2 DMA-BUF, or pinned memory). Since the CPU, Ampere GPU, and DLA share the same physical 32 GB
+    LPDDR5 memory, passing pointers between pipeline stages eliminates the need for explicit copies, drastically
+    reducing memory bandwidth consumption and preventing frame drops.
+  common_mistake: Candidates often assume that since the total memory footprint is far below the 32 GB
+    capacity, memory cannot be the bottleneck. They fail to realize that explicit host-to-device memory
+    copies on a Unified Memory Architecture (UMA) multiply the memory bandwidth requirements and starve
+    the hardware.
+  napkin_math: '1 frame (8K RGB) = 7680 x 4320 x 3 bytes ≈ 100 MB. Base ingestion rate = 4 streams * 60
+    FPS * 100 MB = 24 GB/s. Pipeline bandwidth cost: Capture write (24 GB/s) + Copy to GPU (24 GB/s read
+    + 24 GB/s write) + GPU processing (24 GB/s read + 24 GB/s write) + Copy to DLA buffer (24 GB/s read
+    + 24 GB/s write) = 168 GB/s of continuous data movement. This approaches or exceeds the effective
+    memory bandwidth of the Orin module, causing system-wide stalls.'
+last_modified: '2026-04-01'

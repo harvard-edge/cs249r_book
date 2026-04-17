@@ -1,0 +1,22 @@
+schema_version: 1
+id: cloud-new-50006
+title: Warp Size Divergence When Porting CUDA Kernels to AMD CDNA
+topic: software-portability
+status: published
+provenance: imported
+scenario: After porting a reduction kernel from CUDA to HIP for MI300X, correctness tests pass but performance
+  is 40% worse than expected. The kernel uses __shfl_down_sync with a mask of 0xFFFFFFFF for warp-level
+  reductions. The MI300X uses 64-wide wavefronts.
+details:
+  realistic_solution: 'On CDNA3, wavefronts are 64 lanes wide. The mask must be 0xFFFFFFFFFFFFFFFF (64-bit).
+    Additionally, the reduction tree depth changes: log2(64)=6 steps instead of log2(32)=5 steps. Update
+    the kernel to use a 64-bit mask and add the 6th reduction step. Alternatively, use HIP''s __reduce_add_sync()
+    which handles wavefront width automatically. The fixed kernel should recover to within 5% of proportional
+    peak.'
+  common_mistake: Using a 32-bit mask (0xFFFFFFFF) that only covers the first 32 lanes of a 64-wide wavefront.
+    The upper 32 lanes are excluded from the shuffle, requiring an extra reduction step that the developer
+    didn't add.
+  napkin_math: 'Original CUDA: 5 shuffle steps for 32-lane reduction. MI300X needs 6 steps for 64 lanes.
+    But each step processes 2x more data. Net: same work per wavefront, but the buggy kernel was only
+    reducing 32 of 64 lanes, wasting 50% of lanes -> 50% efficiency loss.'
+last_modified: '2026-04-02'

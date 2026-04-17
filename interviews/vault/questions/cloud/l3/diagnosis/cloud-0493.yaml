@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-0493
+title: 'The Tensor Parallelism Topology Trap: Interconnect Topology'
+topic: interconnect-topology
+status: draft
+provenance: imported
+scenario: You are diagnosing poor scaling performance for a 70B LLM training job. The model uses 8-way
+  tensor parallelism (TP) and is deployed on 8-GPU H100 nodes. A single-node job runs well, but scaling
+  to multiple nodes for data parallelism (DP) yields almost no speedup. The network team insists the new
+  InfiniBand NDR fabric is fine. You run `nvidia-smi topo -m` and see that the 8 GPUs in each node are
+  not fully connected by NVLink; they form two groups of four, with the groups connected across a PCIe
+  Gen5 bus. What is the most likely cause of the poor scaling?
+details:
+  realistic_solution: The most likely cause is an intra-node communication bottleneck. 8-way tensor parallelism
+    requires extremely high bandwidth for the collective communication (All-Reduce) operations within
+    the TP group. By placing the 8 GPUs in a topology where they must communicate over a PCIe bus, the
+    effective bandwidth is throttled to PCIe speeds, not the expected NVLink speed. The entire training
+    step slows down to the speed of this weakest link, making the powerful GPUs wait and nullifying the
+    benefits of scaling out.
+  common_mistake: Engineers often blame the most obvious new component (the inter-node network) or assume
+    all GPUs in a server are connected uniformly. They might also jump to complex software/driver issues
+    (like NCCL tuning) without first verifying the underlying physical hardware topology and its limitations.
+  napkin_math: DP requires synchronizing 140GB of gradients (70B params in FP16). Over a 400 Gbps (50
+    GB/s) InfiniBand link, a 280GB all-reduce takes 280 / 50 = 5.6 seconds. If the compute for a microbatch
+    is only ~2 seconds, the 5.6s inter-node transfer dominates and caps DP scaling efficiency.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

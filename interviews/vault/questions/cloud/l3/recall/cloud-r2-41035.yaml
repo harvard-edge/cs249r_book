@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-r2-41035
+title: GPU Memory Oversubscription Dangers
+topic: scheduling-resource-management
+status: published
+provenance: imported
+scenario: 'A scheduler places two inference models on the same H100 GPU: Model A (30 GB) and Model B (35
+  GB). The GPU has 80 GB HBM3. Both models fit individually, but during peak traffic both receive concurrent
+  requests. What happens and why?'
+details:
+  realistic_solution: 'Model weights: 30 + 35 = 65 GB. But each model also needs: CUDA context overhead:
+    ~500 MB per context. KV cache: at batch_size=32, seq_len=2048, 32 layers, 32 heads, head_dim=128,
+    BF16: 2 × 32 × 2048 × 32 × 128 × 2B = 1 GB per model. Activation memory: ~500 MB per model during
+    forward pass. Total per model: weights + 2 GB overhead. Combined: 65 + 4 = 69 GB — still fits in 80
+    GB, but with only 11 GB headroom. During peak traffic: batch sizes increase, KV cache grows with longer
+    sequences. Model A at batch_size=128 with 4096-token sequences: KV cache grows to 4 GB. Model B similarly.
+    Total: 65 + 4 + 4 + 1 = 74 GB. Approaching 80 GB, CUDA''s memory allocator starts failing. Result:
+    OOM (Out of Memory) error crashes both models, not just the one that triggered it — no isolation between
+    CUDA contexts sharing a GPU. Fix: use MIG to partition the GPU with hardware memory isolation, or
+    enforce memory limits in the serving framework.'
+  common_mistake: Thinking 30 + 35 = 65 GB < 80 GB so everything is fine. Forgetting that inference requires
+    additional memory for activations, KV cache, and CUDA context that are not counted in model weight
+    size.
+  napkin_math: 'Weights: 65 GB. Peak KV cache (both): 8 GB. Contexts + activations: 3 GB. Total peak:
+    76 GB / 80 GB = 95% utilization — one burst away from OOM.'
+last_modified: '2026-04-02'

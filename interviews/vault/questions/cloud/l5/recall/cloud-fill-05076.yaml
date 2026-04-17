@@ -1,0 +1,23 @@
+schema_version: 1
+id: cloud-fill-05076
+title: Long-Context Attention with Ring Attention on H100 Multi-Node
+topic: attention-scaling
+status: published
+provenance: imported
+scenario: You're implementing Ring Attention to support 1M token context across 8 H100 nodes (8 GPUs each
+  = 64 GPUs). Each GPU holds seq_chunk = 1M/64 = 15,625 tokens. For one attention head (head_dim=128,
+  BF16), calculate the communication volume per ring step and total AllReduce time.
+details:
+  realistic_solution: 'Ring Attention: each GPU holds Q_chunk (15,625×128 BF16 = 4MB) and receives K,V
+    chunks from neighbors. Per ring step: send K_chunk (15,625×128×2B = 4MB) + V_chunk (4MB) = 8MB per
+    step. 64 GPUs: 63 ring steps. Intra-node NVLink: first 7 steps × 8MB = 56MB at 450 GB/s = 0.12ms.
+    Inter-node IB: 56 steps × 8MB = 448MB at 25 GB/s = 17.9ms. Total ring: ~18ms for all ring steps. Parallel:
+    compute and communicate overlap (Ring Attention is designed for overlap). Attention FLOPs per GPU:
+    2×15625×1M×128 = 4T FLOPs / GPU. H100 at 66 TFLOPS effective = 60ms compute. Overlap: 18ms comm <<
+    60ms compute → communication hidden.'
+  common_mistake: Treating Ring Attention communication as equivalent to standard attention memory cost;
+    Ring Attention replaces attention matrix materialization with point-to-point ring KV passing.
+  napkin_math: 'Per ring step KV: 8MB. 63 steps: 504MB total. Intra-node (7 steps): 56MB/450 GB/s = 0.12ms.
+    Inter-node (56 steps): 448MB/25 GB/s = 17.9ms. Compute: 4 TFLOP/GPU / 66 TFLOPS = 60ms. Comm (18ms)
+    << compute (60ms) → pipeline overlap hides all communication.'
+last_modified: '2026-04-01'

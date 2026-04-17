@@ -1,0 +1,38 @@
+schema_version: 1
+id: cloud-0633
+title: The Phantom Update
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: You are developing a high-performance, multi-threaded C++ training loop for a small MLP on a
+  single server with multiple CPU cores. In your custom gradient aggregation step, each thread computes
+  its local gradients and then writes them to distinct, non-overlapping sections of a shared global gradient
+  array. Despite each thread writing to its own designated memory region, you observe inconsistent or
+  incorrect gradient updates and significant performance degradation. There are no explicit race conditions
+  using mutexes or atomics. What is the most likely underlying hardware-level issue, and how would you
+  diagnose and mitigate it?
+details:
+  realistic_solution: "This is a classic case of **false sharing**. Modern CPUs use cache lines (typically\
+    \ 64 bytes) as the smallest unit of data transfer between main memory and CPU caches. When multiple\
+    \ threads access different variables that happen to reside within the *same cache line*, even if those\
+    \ variables are logically distinct and accessed without explicit contention, the cache coherence protocol\
+    \ (e.g., MESI) will cause the cache line to \"ping-pong\" between the CPU cores.\n  Specifically:\n\
+    \  1.  Thread A writes to `global_gradients[X]`. The cache line containing `global_gradients[X]` (and\
+    \ neighboring elements) is marked `Modified` in Thread A's cache.\n  2.  Thread B (on a different\
+    \ core) then writes to `global_gradients[Y]`, where `Y` is distinct from `X` but falls within the\
+    \ *same cache line* as `X`.\n  3.  Before Thread B can write, its cache must obtain the latest copy\
+    \ of that cache line. This invalidates Thread A's cache line and forces Thread B to fetch it from\
+    \ memory or Thread A's cache.\n  4.  This constant invalidation and re-fetching of the shared cache\
+    \ line (even though the threads are operating on logically independent data) incurs significant latency,\
+    \ leading to performance degradation and potentially stale data if the coherence protocol isn't strictly\
+    \ enforced or if reads occur between the ping-pongs."
+  common_mistake: '"It''s a subtle race condition, I need to add locks." While race conditions are common,
+    the scenario explicitly states distinct, non-overlapping writes, pointing to a more insidious problem.'
+  napkin_math: A cache line is 64 bytes. If `float` is 4 bytes, 16 floats fit in a cache line. If thread
+    A writes to `gradients[0]` and thread B writes to `gradients[15]`, they share a cache line. Each write
+    triggers an invalidation and fetch for the other core, costing ~100-200 cycles per write instead of
+    a few cycles for a cache hit. This can easily turn a few-cycle operation into a hundreds-of-cycles
+    stall.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

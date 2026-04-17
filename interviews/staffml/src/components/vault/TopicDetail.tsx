@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronRight, ChevronLeft, X, BookOpen, ExternalLink, Target, Play } from "lucide-react";
+import { ChevronRight, ChevronLeft, X, Target, Play } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 import Link from "next/link";
@@ -9,7 +9,6 @@ import type { Topic, AreaStyle } from "@/lib/taxonomy";
 import { LEVELS as LEVEL_DEFS } from "@/lib/levels";
 import LevelBadge from "@/components/LevelBadge";
 import SectionDivider from "./SectionDivider";
-import { safeHref } from "@/lib/url";
 
 const LEVEL_IDS = LEVEL_DEFS.map(l => l.id);
 
@@ -186,22 +185,6 @@ export default function TopicDetail({ topic, areaName, style, onClose, selectedT
                   })}
                 </div>
               </div>
-
-              {/* Deep dive — tertiary "learn first" affordance */}
-              {topic.chapterUrl && (
-                <div>
-                  <SectionDivider label="Learn first" />
-                  <a href={safeHref(topic.chapterUrl)} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-4 mt-3 rounded-xl border border-borderSubtle bg-surface hover:bg-surfaceElevated hover:border-borderHighlight transition-all group">
-                    <BookOpen className="w-5 h-5 text-textTertiary group-hover:text-accentBlue shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[14px] font-semibold text-textPrimary">{topic.name}</p>
-                      <p className="text-[12px] text-textTertiary mt-0.5">Read on MLSysBook.ai</p>
-                    </div>
-                    <ExternalLink className="w-4 h-4 text-textMuted group-hover:text-textSecondary shrink-0" />
-                  </a>
-                </div>
-              )}
 
               {/* Tracks — inline, compact (not a full section) */}
               <div className="flex items-center gap-2 flex-wrap pt-1">

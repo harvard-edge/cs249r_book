@@ -608,8 +608,9 @@ def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm
 
     APPROACH:
     1. Store model, optimizer, loss_fn, scheduler, and grad_clip_norm as attributes
-    2. Initialize epoch=0, step=0, training_mode=True
-    3. Create history dict with keys: 'train_loss', 'eval_loss', 'learning_rates'
+    2. Enable gradient tracking: set requires_grad=True on all model.parameters()
+    3. Initialize epoch=0, step=0, training_mode=True
+    4. Create history dict with keys: 'train_loss', 'eval_loss', 'learning_rates'
        (each mapping to an empty list)
 
     EXAMPLE:
@@ -627,6 +628,14 @@ def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm
     self.loss_fn = loss_fn
     self.scheduler = scheduler
     self.grad_clip_norm = grad_clip_norm
+
+    # Enable gradient tracking for all model parameters.
+    # Layers (e.g. Linear) may be created without requires_grad=True,
+    # so we set it explicitly here to ensure backward() populates param.grad.
+    # Guard against raw numpy arrays passed by test stubs or non-Tensor params.
+    for param in model.parameters():
+        if isinstance(param, Tensor):
+            param.requires_grad = True
 
     # Training state
     self.epoch = 0

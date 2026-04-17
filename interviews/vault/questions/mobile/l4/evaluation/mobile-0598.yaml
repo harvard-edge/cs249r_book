@@ -1,0 +1,42 @@
+schema_version: 1
+id: mobile-0598
+title: The Pruning Paradox
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: 'You are optimizing a small transformer model for on-device text completion on a Snapdragon
+  8 Gen 3 phone using the TensorFlow Lite Hexagon delegate. You compare two strategies: (A) 50% unstructured
+  magnitude pruning on the FFN layers, and (B) 25% structured pruning by removing entire attention heads.
+  Strategy A reduces total MACs more than B, but profiling shows B is 1.5x faster. Differentiate these
+  two pruning approaches and analyze their interaction with the mobile NPU hardware to explain why the
+  seemingly less aggressive pruning strategy wins.'
+details:
+  realistic_solution: 'The Hexagon NPU, like most mobile accelerators, is a DSP/VLIW-style architecture
+    optimized for dense, predictable computation. It achieves its high throughput (45 TOPS) by executing
+    large, parallel batches of instructions on dense tensors.
+
+    - **Strategy A (Unstructured):** Creates sparse weight matrices. To compute with these, the NPU either
+    needs native sparse matrix support (which is rare and often limited) or it must use a generic CPU
+    kernel. Even with NPU support, it involves expensive gather operations to fetch weights from scattered
+    memory locations, breaking the efficient pre-fetching and caching mechanisms. The overhead from index
+    calculations and irregular data access negates the FLOPs savings.
+
+    - **Strategy B (Structured):** Removing entire attention heads or FFN columns preserves the dense,
+    rectangular nature of all remaining matrix multiplications. The model is simply smaller, but all its
+    operations remain as dense, regular tensors. This is ideal for the Hexagon delegate, which can fuse
+    operations and use its full vector processing capabilities. The computation remains highly efficient
+    and predictable, leading to a much larger real-world speedup.'
+  common_mistake: Focusing solely on the MAC count or parameter reduction. Engineers often assume 'fewer
+    parameters equals faster' without considering the regularity of the computation. They underestimate
+    the severe penalty of irregular memory access and control flow overhead introduced by unstructured
+    sparsity on hardware designed for dense tensor operations.
+  napkin_math: 1M params = 1M * 2B (FP16) = 2MB. (A) 50% unstructured leaves 500k weights, but requires
+    500k 16-bit indices (1MB) + 1MB weights = 2MB total memory traffic! (B) 25% structured (e.g., 2:4)
+    reduces weights to 1.5MB with no index overhead. On Snapdragon 8 Gen 3 (77GB/s), structured wins on
+    latency.
+chain:
+  id: mobile-chain-021
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

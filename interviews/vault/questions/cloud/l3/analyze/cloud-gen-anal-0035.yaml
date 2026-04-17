@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-gen-anal-0035
+title: Analyzing Memory Bounds in Unfused Operations
+topic: kernel-fusion
+status: published
+provenance: imported
+scenario: You are profiling a sequence of three element-wise operations (GeLU, Dropout, Scale) on a tensor
+  of 50 million FP16 elements (100 MB total size) running on an A100 GPU. The A100 provides 2.0 TB/s memory
+  bandwidth, 312 TFLOPS FP16, and has a ridge point of ~156 FLOPs/Byte. When implemented as three separate
+  standard framework calls, the operations are heavily bottlenecked and GPU compute utilization is near
+  zero. Each operation performs only ~2 FLOPs per element. Analyze why the execution time is dominated
+  by memory rather than compute, and explain specifically how fusing these operations into a single kernel
+  changes the memory access patterns.
+details:
+  realistic_solution: Because the operations have an arithmetic intensity (~1 FLOP/Byte) far below the
+    A100's ridge point of 156 FLOPs/Byte, they are severely memory-bound. With separate kernels, the GPU
+    must write the 100 MB intermediate tensor to HBM and read it back for the next operation, multiplying
+    the memory traffic. Operator fusion solves this by loading the data from HBM once into fast on-chip
+    registers, sequentially applying all three operations, and writing the final result back to HBM once.
+  common_mistake: Candidates often attribute the slowness purely to kernel launch overhead (which is a
+    factor, usually ~2-5 microseconds per launch) but fail to identify the memory bandwidth bottleneck.
+    They may overlook that writing intermediate results to High Bandwidth Memory (HBM) and reading them
+    back is the primary cost for operations with low arithmetic intensity.
+  napkin_math: 'Unfused traffic: 3 kernels * (100 MB read + 100 MB write) = 600 MB total HBM traffic.
+    Minimum memory time = 600 MB / (2.0 TB/s) = 300 microseconds (plus 3x launch overhead). Fused traffic:
+    1 kernel * (100 MB read + 100 MB write) = 200 MB total HBM traffic. Minimum memory time = 200 MB /
+    (2.0 TB/s) = 100 microseconds. Fusion yields a 3x speedup purely from HBM traffic reduction.'
+last_modified: '2026-04-01'

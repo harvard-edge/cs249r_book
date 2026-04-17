@@ -1,0 +1,30 @@
+schema_version: 1
+id: global-0062
+title: Mitigating KV Cache Fragmentation
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: You are deploying a 13B parameter LLM for a multi-tenant chat application on a 40GB A100. The
+  FP16 weights consume 26GB. You pre-allocate a static, contiguous KV cache buffer for 8 concurrent requests,
+  assuming a maximum sequence length of 2048 tokens. Under production load, average sequence lengths are
+  only 256 tokens, meaning actual memory utilized is low, but the system cannot accept more than 8 concurrent
+  requests without OOMing, resulting in terrible serving infrastructure cost efficiency.
+details:
+  realistic_solution: The static allocation approach suffers from massive internal fragmentation; memory
+    is reserved for the worst-case 2048 tokens even when only 256 are used. To optimize memory capacity
+    and increase batch size, implement PagedAttention. This technique breaks the KV cache into fixed-size
+    non-contiguous physical blocks (e.g., 16 tokens per block) managed by a block table, decoupling logical
+    sequence length from physical memory allocation. This completely eliminates external fragmentation
+    and bounds internal fragmentation to at most one block per sequence. By allocating physical memory
+    dynamically only as sequences grow, you can fit nearly 10x more concurrent requests in the remaining
+    14GB of VRAM.
+  common_mistake: Dynamically allocating and freeing PyTorch tensors for the KV cache per request, which
+    leads to severe external fragmentation and eventually still causes OOMs.
+  napkin_math: 'KV cache size per token: 2 (K,V) * 40 layers * 40 heads * 128 dim * 2 bytes = 819 KB.
+    Static allocation for 2048 tokens: 2048 * 819 KB = 1.67 GB per request. Max requests in 14GB VRAM
+    = 14 GB / 1.67 GB = 8 requests. Wasted memory per average request (256 tokens): (2048 - 256) * 819
+    KB = 1.46 GB wasted (87% waste). With PagedAttention, memory per average request: 256 * 819 KB = ~210
+    MB. Max concurrent requests supported = 14 GB / 210 MB = ~66 requests. Throughput scales by over 8x.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

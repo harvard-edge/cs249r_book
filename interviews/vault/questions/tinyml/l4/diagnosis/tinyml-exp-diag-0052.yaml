@@ -1,0 +1,33 @@
+schema_version: 1
+id: tinyml-exp-diag-0052
+title: NPU Shared SRAM Bus Contention Side-Channel
+topic: adversarial-robustness
+status: published
+provenance: imported
+scenario: You are deploying a proprietary audio classification model on an ARM Cortex-M7 + Ethos-U55 (Corstone-300)
+  system. A security audit reveals that a malicious, unprivileged RTOS task running on the 480 MHz M7
+  can accurately reverse-engineer your proprietary model architecture and layer-by-layer weight sparsity.
+  The attacker's code does not have access to the model weights or the NPU registers; it simply executes
+  a tight loop repeatedly reading an array from the shared 512 KB SRAM and measuring the loop's execution
+  time using the CPU cycle counter. Diagnose the root cause of this vulnerability and explain the mechanism
+  of the attack.
+details:
+  realistic_solution: The root cause is a bus contention timing side-channel caused by the Ethos-U55's
+    offline weight compression. Because the M7 and U55 share the 512 KB SRAM, concurrent memory access
+    leads to bus arbitration stalls. The U55 fetches compressed weights layer-by-layer; highly sparse
+    layers compress better and require fewer memory bursts to fetch than dense layers. By timing the duration
+    of memory access stalls in the M7 loop, the attacker measures the length of the U55's burst transfers,
+    effectively extracting the compressed size of each layer and fingerprinting the model architecture.
+  common_mistake: Candidates often misdiagnose this as a standard L1 cache timing attack on the M7, forgetting
+    that the NPU executes the model, not the CPU. They may also incorrectly assume physical power analysis
+    (DPA/SPA) is being used, overlooking the software-only nature of the symptom and the architectural
+    detail that the M7 and U55 share the same SRAM bus.
+  napkin_math: Assume the Ethos-U55 is operating at 256 MACs/cycle at 480 MHz. Consider a layer with 64
+    KB of uncompressed weights. If the weights are highly sparse, the U55 compression might reduce this
+    to 16 KB. If dense, it might compress to 32 KB. Assuming a 32-bit (4 byte) wide bus to the shared
+    512 KB SRAM, fetching 32 KB takes 8,000 cycles, while 16 KB takes 4,000 cycles. While the U55 fetches
+    these weights, the M7 experiences bus contention. The attacker's M7 loop will observe elevated memory
+    latency for either 8,000 or 4,000 cycles depending on the layer. This 4,000-cycle difference equals
+    8.3 microseconds at 480 MHz, which is trivially measurable using the M7's DWT cycle counter, revealing
+    the layer's sparsity and size.
+last_modified: '2026-04-01'

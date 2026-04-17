@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-sus-60023
+title: Understanding graph break costs in torch.compile for a custom CUDA extension
+topic: autograd-computational-graphs
+status: published
+provenance: imported
+scenario: You have a custom CUDA extension for a specialized attention variant on H100 that calls torch.ops.custom_ext.attention_fwd().
+  After wrapping the model with torch.compile, you get a graph break at every custom op call. The compiler
+  cannot trace through the custom extension's C++ dispatch.
+details:
+  realistic_solution: 'Register the custom op using torch.library: define torch.ops.custom_ext.attention_fwd
+    with a schema via torch.library.Library and use torch.library.impl_abstract() to provide a shape-inference
+    function for TorchDynamo. This allows Dynamo to trace through the op symbolically without needing
+    to execute it. Alternatively, use torch._dynamo.allow_in_graph(custom_func) for simpler cases where
+    you want Dynamo to treat the function as an opaque leaf.'
+  common_mistake: Not registering the custom op with TorchDynamo's allow-list. By default, unknown Python
+    callables or C++ extensions cause graph breaks because TorchDynamo cannot symbolically trace through
+    them. Teams assume the custom op will be treated like any other torch op.
+  napkin_math: 'Without registration: every attention call (32 transformer layers) causes a graph break.
+    TorchInductor optimizes within each subgraph but cannot fuse across breaks. Lost fusion opportunities:
+    Q/K/V projection + attention could be 1 kernel; instead it is 4+ separate kernels. H100 fusion benefit:
+    4 kernels × 5μs launch overhead vs 1 kernel = 15μs saved × 32 layers = 480μs per step.'
+last_modified: '2026-04-02'
+tags:
+- scope:single-machine

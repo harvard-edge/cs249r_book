@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-r2-40002
+title: Incast Congestion During AllReduce Reduce-Scatter
+topic: congestion-control
+status: published
+provenance: imported
+scenario: During the reduce-scatter phase of ring AllReduce on a 128-H100 cluster, you observe periodic
+  50ms latency spikes on specific ToR switches. The pattern correlates with gradient synchronization boundaries.
+  Buffer utilization on affected switches spikes from 10% to 98%. Diagnose the incast pattern and explain
+  why reduce-scatter is more vulnerable than all-gather.
+details:
+  realistic_solution: In reduce-scatter, each GPU receives partial gradients from its predecessor and
+    forwards the accumulated result. At ring boundaries that cross ToR switches, N GPUs in a rack may
+    simultaneously send their chunks to a single destination port, creating N:1 incast. With H100s at
+    400Gbps each, 8 GPUs per ToR means 3.2 Tbps of instantaneous demand on a single 400G uplink. Solutions
+    include staggering send times with jitter (50-200μs random delay), using hierarchical AllReduce (intra-node
+    reduce first via NVLink at 900 GB/s, then inter-node), and configuring ECN thresholds at 30% buffer
+    occupancy to trigger DCQCN before buffers overflow.
+  common_mistake: 'Treating incast as a simple bandwidth problem. The issue is temporal correlation: during
+    reduce-scatter, multiple GPUs simultaneously send chunks to the same next-hop GPU in the ring, creating
+    a burst that exceeds switch buffer capacity even when average bandwidth is within limits.'
+  napkin_math: 8 H100s per ToR, each sending a 32MB gradient chunk simultaneously over 400Gbps links =
+    256MB burst arriving at one switch port. Typical ToR shared buffer = 32-64MB. 256MB / 64MB = 4x oversubscription,
+    guaranteeing packet drops without PFC or ECN.
+last_modified: '2026-04-02'

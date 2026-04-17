@@ -1,0 +1,32 @@
+schema_version: 1
+id: global-0063
+title: Optimizer State NVMe Offloading
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You are fine-tuning a 70B parameter model on an 8x 80GB A100 node (640GB total HBM) using DeepSpeed
+  ZeRO-Infinity. The node has 4x PCIe Gen4 NVMe drives providing an aggregate read/write bandwidth of
+  28 GB/s. Profiling shows that the forward/backward passes take 5 seconds, but the optimizer step takes
+  an agonizing 60 seconds, causing GPUs to sit idle 92% of the time. You must optimize the training loop
+  to reduce this bottleneck.
+details:
+  realistic_solution: The 60-second delay is caused by the memory bandwidth bottleneck between the NVMe
+    drives and GPU HBM. A 70B model requires 840GB of memory just for standard Adam optimizer states (FP32
+    momentum, FP32 variance, FP32 master weights), which exceeds the 640GB HBM and forces NVMe offloading.
+    During the optimizer step, these 840GB must be read from and written back to NVMe. To optimize this,
+    you should switch to an 8-bit optimizer (e.g., 8-bit Adam) to quantize the momentum and variance states,
+    and evaluate offloading to CPU RAM instead of NVMe if available. CPU RAM typically offers much higher
+    bandwidth (e.g., 8-channel DDR4 at ~200 GB/s) compared to NVMe.
+  common_mistake: Increasing the micro-batch size to improve GPU utilization, which increases activation
+    memory and forces even more data to be spilled to NVMe, worsening the I/O bottleneck.
+  napkin_math: 'Standard Adam states: 3 tensors * 4 bytes * 70B parameters = 840 GB. NVMe Read + Write
+    = 1680 GB of traffic. At 28 GB/s aggregate NVMe bandwidth: 1680 GB / 28 GB/s = 60 seconds (matching
+    the profile). Optimization 1 (8-bit Adam): 2 bytes (states) + 4 bytes (weights) = 6 bytes * 70B =
+    420 GB. Traffic = 840 GB. Time = 30 seconds (2x speedup). Optimization 2 (CPU RAM Offload): At 200
+    GB/s CPU memory bandwidth, reading and writing 840 GB takes 1680 GB / 200 GB/s = 8.4 seconds (7x speedup).'
+chain:
+  id: global-chain-041
+  position: 5
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

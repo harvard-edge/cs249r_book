@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-fill-03043
+title: Pod Disruption Budget Design for Zero-Downtime Model Rollouts
+topic: container-orchestration
+status: published
+provenance: imported
+scenario: You are rolling out a new version of a 7B inference model (14GB FP16) on A100 (80GB HBM2e, 400W)
+  pods in a Kubernetes cluster. The deployment has 12 replicas serving 8000 RPS. Each replica handles
+  ~670 RPS at 80% GPU utilization. During a rolling update, pods are terminated before new pods are ready.
+  Two simultaneous terminations cause P99 latency to spike above SLA.
+details:
+  realistic_solution: 'Set PodDisruptionBudget minAvailable=10 (maintain at least 10 of 12 replicas).
+    This limits simultaneous disruptions to 2. Combined with maxSurge=1 in the RollingUpdate strategy,
+    at most 1 old pod is terminated while 1 new pod starts. With 10 replicas at 8000 RPS: 800 RPS each
+    = 95% utilization — acceptable during rollout. Set readinessProbe with a warmup period of 30s for
+    new pods to load models before receiving traffic.'
+  common_mistake: Setting PodDisruptionBudget minAvailable=1, which allows Kubernetes to terminate up
+    to 11 of 12 replicas simultaneously during a cluster operation. This is a floor, not a maximum disruption
+    rate — it only guarantees at least 1 replica is running.
+  napkin_math: '12 replicas at 670 RPS each. If 2 terminate: 10 replicas at 800 RPS = 119% of normal load
+    → overloaded. If 1 terminates: 11 replicas at 727 RPS = 109% — marginally over, P99 stress. minAvailable=10
+    + maxSurge=1: during rollout, 10 old + 1 new (warming) = 10 active. 8000/10 = 800 RPS = 119% of 670.
+    Reduce to minAvailable=11: 11 active during transition = 727 RPS = 108%. A100 at 80% → 88% utilization
+    during rollout — acceptable. Model load time: 14GB / PCIe4 64GB/s = 0.22s + container init ~25s. ReadinessProbe
+    delay = 30s covers this.'
+last_modified: '2026-04-01'

@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-r2-40062
+title: RDMA Memory Registration with On-Demand Paging
+topic: rdma-transport
+status: published
+provenance: imported
+scenario: Traditional RDMA requires all memory to be pinned (non-swappable) and registered with the HCA
+  before use. For a 192GB MI300X GPU, registering all HBM with the RDMA subsystem creates a rigid allocation
+  that conflicts with PyTorch's dynamic memory allocator (caching allocator). Specify an on-demand paging
+  (ODP) architecture for GPUDirect RDMA that allows dynamic GPU memory allocation without pre-registration.
+details:
+  realistic_solution: 'Specification for GPU RDMA ODP: (1) Implicit MR: register the entire 192GB GPU
+    VRAM as a single implicit Memory Region at startup. This establishes the HCA↔GPU PCIe BAR mapping
+    for the full address range. Cost: one-time, ~50ms. (2) Page table callback: register nvidia_p2p_put_pages
+    callback with the GPU driver. When PyTorch''s caching allocator frees or reallocates a VRAM region,
+    the callback notifies the HCA to invalidate those page table entries. (3) Lazy validation: when an
+    RDMA operation references an invalidated page, the HCA traps to the kernel ODP handler, which calls
+    nvidia_p2p_get_pages to re-establish the mapping. This adds ~10μs per page fault — amortized over
+    subsequent accesses. (4) Prefault optimization: before starting AllReduce, NCCL calls ibv_advise_mr
+    on the gradient buffer addresses, pre-faulting all pages into the HCA''s MTT. Cost: 192GB / 2MB pages
+    = 96K entries × 100ns = 9.6ms. (5) Memory pressure: if GPU memory is heavily fragmented, page faults
+    during RDMA increase. Set a threshold: if fault rate exceeds 100/second, log a warning and pre-register
+    active buffers. Expected performance: first AllReduce iteration incurs ~10ms of page faults. Subsequent
+    iterations run at line rate (0 faults) as long as buffers aren''t reallocated.'
+  common_mistake: Assuming on-demand paging for GPU memory works like CPU ODP. CPU ODP leverages virtual
+    memory page faults, but GPU VRAM doesn't have a traditional MMU with page fault handling. GPUDirect
+    RDMA ODP requires a different mechanism based on page table invalidation callbacks.
+  napkin_math: 'Without ODP: register 64 × 32MB buffers = 2GB pinned, inflexible. With ODP: full 192GB
+    addressable, ~10ms first-use overhead. Page fault rate after warmup: 0 (steady-state buffers). PyTorch
+    caching allocator fragmentation trigger: when free_memory < 10% (19.2GB on MI300X), allocation churn
+    increases and ODP fault rate rises.'
+last_modified: '2026-04-02'

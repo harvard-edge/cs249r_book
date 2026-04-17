@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -42,7 +42,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_TDP_W, H100_TFLOPS_FP16,
         JETSON_TDP_W, JETSON_TFLOPS, LAB_CSS,
@@ -186,9 +186,7 @@ def _(COLORS, H100_TDP_W, H100_TFLOPS_FP16, JETSON_TDP_W, JETSON_TFLOPS, apply_p
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_weeks = mo.ui.slider(start=0, stop=26, value=0, step=1,
                                 label="Weeks since deployment")
     partA_drift_rate = mo.ui.slider(start=0.005, stop=0.05, value=0.02, step=0.005,
@@ -204,12 +202,10 @@ def _(mo, partA_pred):
         },
         label="Retraining costs $10K. Drift costs $500/day. Current cadence: 30 days. Optimal?",
     )
-    return (partB_pred,)
+    return (partA_drift_rate, partA_weeks, partB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_retrain_cost = mo.ui.slider(start=1000, stop=50000, value=10000, step=1000,
                                        label="Retraining cost ($)")
     partB_drift_cost = mo.ui.slider(start=100, stop=5000, value=500, step=100,
@@ -225,12 +221,10 @@ def _(mo, partB_pred):
         },
         label="Cloud retraining: $1K, T*=7 days. Edge: $100K. What is edge T*?",
     )
-    return (partC_pred,)
+    return (partB_drift_cost, partB_retrain_cost, partC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_cloud_cost = mo.ui.slider(start=500, stop=10000, value=1000, step=500,
                                      label="Cloud retrain cost ($)")
     partC_edge_cost = mo.ui.slider(start=10000, stop=500000, value=100000, step=10000,
@@ -248,18 +242,27 @@ def _(mo, partC_pred):
         },
         label="You defer retraining for 3 consecutive T* cycles. Total accuracy loss vs single miss?",
     )
-    return (partD_pred,)
+    return (partC_cloud_cost, partC_drift_cost, partC_edge_cost, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_missed = mo.ui.slider(start=1, stop=6, value=3, step=1,
                                  label="Missed retraining cycles")
     partD_downstream = mo.ui.slider(start=0, stop=5, value=2, step=1,
                                      label="Dependent downstream models")
     partD_base_loss = mo.ui.slider(start=1.0, stop=5.0, value=2.0, step=0.5,
                                     label="Accuracy loss per missed cycle (pp)")
+    return (partD_base_loss, partD_downstream, partD_missed)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_drift_rate, partA_pred, partA_weeks,
+    partB_drift_cost, partB_pred, partB_retrain_cost, partC_cloud_cost,
+    partC_drift_cost, partC_edge_cost, partC_pred, partD_pred,
+    partD_base_loss, partD_downstream, partD_missed,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — PSI Drift Detection

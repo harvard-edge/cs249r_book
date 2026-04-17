@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-0211
+title: The Structured Output Parsing Tax
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: You need your LLM to output strict JSON. You implement a constrained decoding wrapper (like
+  Guidance or Outlines) that forces the model to only select tokens valid under your JSON schema. The
+  outputs are now perfect JSON, but the Time-Per-Output-Token (TPOT) doubled. What is the CPU doing that
+  takes so much time?
+details:
+  realistic_solution: The bottleneck is CPU-side vocabulary masking. After each GPU forward pass (~15ms),
+    the logits for all 32k tokens are transferred to the CPU (~1ms), where a Python regex engine checks
+    every vocabulary string against the JSON schema grammar to build a valid-token mask (~25ms). This
+    mask is sent back to the GPU for sampling. The CPU parsing of 32k strings takes nearly double the
+    GPU's neural network computation. The fix is to precompile the grammar into a finite-state machine
+    and run the masking on the GPU, eliminating the CPU round-trip entirely.
+  common_mistake: '"The model has to think harder to generate JSON." The model is doing the exact same
+    neural network math. The delay is outside the model.'
+  napkin_math: 70B FP16 on 2xH100s memory-bound pass = 140GB / 6.7TB/s = 21ms. Transferring 32k FP16 logits
+    (64KB) over PCIe Gen4 (32GB/s) = 2μs. However, running a Python regex over 32,000 strings on the CPU
+    takes ~20ms. Total TPOT = 21ms + 20ms = 41ms. The CPU JSON parsing logic adds 100% overhead, effectively
+    halving the expensive H100 cluster's throughput.
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

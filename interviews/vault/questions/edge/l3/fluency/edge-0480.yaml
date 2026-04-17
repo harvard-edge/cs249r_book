@@ -1,0 +1,39 @@
+schema_version: 1
+id: edge-0480
+title: The Vision Transformer Deadline Miss
+topic: model-size-estimation
+status: published
+provenance: imported
+scenario: You are an ML Systems Engineer on an autonomous vehicle team using a Jetson AGX Orin (275 TOPS,
+  204.8 GB/s memory bandwidth) for the perception system. Your current object detector, a highly-optimized
+  MobileNet-style CNN, meets the 33ms per-frame hard-realtime deadline. Your team wants to upgrade to
+  a more accurate Vision Transformer (ViT) model. During testing, the ViT model misses the 33ms deadline.
+  A profiler reveals that 80% of the latency is spent in the self-attention layers when processing the
+  640x640 INT8 input images.
+details:
+  realistic_solution: The self-attention mechanism is **memory-bandwidth-bound**. To determine this, we
+    must calculate the Arithmetic Intensity (AI) of the operation and compare it to the hardware's ridge
+    point. The Jetson AGX Orin's ridge point is `~1,342 Ops/Byte` (275 TOPS / 204.8 GB/s). The AI of the
+    self-attention layer is significantly lower than this, meaning the memory system cannot supply data
+    fast enough to keep the compute units busy. The bottleneck is not the total number of operations,
+    but the rate at which we can move data to and from memory.
+  common_mistake: Engineers often focus exclusively on the quadratic scaling of FLOPs in transformers
+    (`O(N^2)`) and incorrectly assume the model is always compute-bound. They fail to analyze the memory
+    access patterns, especially the need to read/write the large intermediate attention score matrix (`N
+    x N`), which is often the true bottleneck on specialized hardware with high compute-to-memory ratios.
+  napkin_math: '**1. Sequence length (N):** 640x640 image with 16x16 patches: N = (640/16)^2 = 40^2 =
+    **1,600 tokens.** | **2. Self-attention FLOPs (per head, per layer):** Q*K^T: 2 x N x N x d = 2 x
+    1600 x 1600 x 64 = 327M FLOPs. Attn*V: 2 x N x N x d = 327M FLOPs. Total per head: ~654M FLOPs. With
+    12 heads: ~7.8 GFLOPs. | **3. Memory traffic:** Q, K, V matrices: 3 x N x d x 12 heads x 1 byte (INT8)
+    = 3 x 1600 x 64 x 12 = 3.7 MB. Attention scores (N x N x 12 heads): 1600 x 1600 x 12 x 1 byte = 30.7
+    MB. Total read+write: ~70 MB. | **4. Arithmetic Intensity:** AI = 7.8G / 70M = **~111 Ops/Byte.**
+    | **5. Orin ridge point:** 275 TOPS / 204.8 GB/s = **1,342 Ops/Byte.** | **6. Diagnosis:** AI (111)
+    << Ridge (1,342) => **memory-bandwidth bound.** The N x N attention matrix (30.7 MB) dominates memory
+    traffic. | **7. Attainable throughput:** 204.8 GB/s x 111 = 22.7 TOPS (8.3% of peak). | **8. Mitigation:**
+    Use Flash Attention to avoid materializing the N x N matrix, or reduce patch size to shrink N.'
+chain:
+  id: edge-chain-182
+  position: 1
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

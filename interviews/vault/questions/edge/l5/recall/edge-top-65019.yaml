@@ -1,0 +1,27 @@
+schema_version: 1
+id: edge-top-65019
+title: NUMA-Aware Runtime Scheduling on Embedded Chiplet
+topic: chiplet-architecture
+status: published
+provenance: imported
+scenario: An embedded chiplet with 2 CPU clusters (A76 x4 on die-0, A55 x4 on die-1) connected via proprietary
+  die-to-die link shows 25% higher ML inference latency than expected when the OS scheduler migrates threads
+  between dies mid-inference. Implement a fix.
+details:
+  realistic_solution: 'Multi-layered fix: (1) CPU affinity: set pthread_setaffinity_np to A76 cluster
+    CPUs (cores 0-3) for inference threads; (2) Memory affinity: use mbind() with MPOL_BIND to bind inference
+    tensor allocations to die-0 NUMA node; (3) Disable NUMA balancing: echo 0 > /proc/sys/kernel/numa_balancing
+    during inference to prevent automatic page migration; (4) Use isolcpus kernel parameter for the A76
+    cores to prevent any scheduling on those CPUs from non-inference tasks; (5) Pin inference worker threads
+    with SCHED_FIFO priority to prevent preemption by lower-priority tasks that could cause cache thrashing.'
+  common_mistake: Setting CPU affinity at the process level and assuming it prevents all migrations. Linux's
+    CFS scheduler can still migrate tasks within an affinity mask if load imbalance is detected, and memory
+    pages are not migrated when threads move — causing cross-die memory accesses even with affinity set.
+  napkin_math: 'Die-to-die latency: 400ns per cache line vs 10ns local. L3 cache size: 4MB per die. For
+    a 2MB model tensor, cold access = 2MB/64B = 32768 cache lines. If 30% are cross-die due to migration:
+    0.3 * 32768 * (400-10)ns = 3.8ms extra latency. Expected inference: 15ms. Observed: 15*1.25 = 18.75ms
+    → 3.75ms overhead. Matches calculation. With affinity: cross-die accesses → <1% → <0.3ms overhead
+    → 15.3ms (2% overhead).'
+last_modified: '2026-04-02'
+tags:
+- scope:Advanced

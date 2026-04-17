@@ -1,0 +1,44 @@
+schema_version: 1
+id: cloud-2237
+title: The 100K-GPU Storage Architecture
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: 'You are the Principal Storage Architect for a new 100,000-GPU training cluster that will train
+  frontier models (1T+ parameters). The cluster will run continuous pre-training jobs lasting 3-6 months.
+  Your requirements: (1) feed 100K GPUs at 200 MB/s each = 20 TB/s aggregate read bandwidth for training
+  data, (2) checkpoint 20 TB every 10 minutes with <5 seconds of GPU idle time, (3) survive up to 50 simultaneous
+  node failures without losing more than 30 seconds of training progress, (4) total storage budget is
+  $15M for 3 years. Design the complete storage hierarchy.'
+details:
+  realistic_solution: 'The architecture requires four tiers, each optimized for a different access pattern:
+    Tier 0 — Host DRAM (synchronous checkpoint staging): Each of the 12,500 nodes has 1-2 TB of DRAM.
+    Checkpoint path: GPU→DRAM memcpy takes <1s (200 MB/shard at 32 GB/s). This is the only synchronous
+    operation. Total DRAM capacity: ~15 PB across the cluster. Tier 1 — Local NVMe (async checkpoint +
+    data cache): 4× 3.84 TB NVMe per node = 15.36 TB/node, 192 PB aggregate. Serves two roles: async checkpoint
+    staging (DRAM→NVMe flush in background) and warm cache for training data. NVMe read: 25 GB/s per node
+    → 312 TB/s aggregate — exceeds the 20 TB/s requirement by 15×, ensuring data loading never bottlenecks
+    even with cache misses. Tier 2 — Parallel filesystem (Lustre/GPFS): 10 PB capacity, 4 TB/s aggregate
+    bandwidth. Purpose: checkpoint durability (NVMe→PFS flush) and cold data serving. 4 TB/s is sufficient
+    because checkpoint flushes are asynchronous and staggered. Recovery read: 20 TB checkpoint at 4 TB/s
+    = 5 seconds — fast enough for sub-30-second recovery. Tier 3 — Object storage (S3/MinIO): 50 PB capacity,
+    200 GB/s. Purpose: long-term checkpoint archival, dataset versioning, training logs. Cost: ~$0.02/GB/month.
+    Budget allocation: NVMe drives (192 PB at ~$50/TB): $9.6M. Lustre (10 PB at ~$200/TB for high-BW tier):
+    $2M. Object storage (50 PB at ~$20/TB): $1M. Networking (storage fabric): $2M. Total: $14.6M — under
+    budget.'
+  common_mistake: Designing a single monolithic storage tier (e.g., a massive Lustre filesystem). No single
+    tier can simultaneously provide 20 TB/s read throughput, fast checkpoint writes, and cost-effective
+    capacity. Another mistake is ignoring the failure recovery path — checkpoints are useless if you cannot
+    read them back fast enough to resume training within the MTBF window.
+  napkin_math: 'Data feed: 100K GPUs $\times$ 200 MB/s = 20 TB/s. NVMe aggregate: 12,500 nodes $\times$
+    25 GB/s = 312 TB/s — 15× headroom. Checkpoint flow: Phase 1 (sync, GPU→DRAM): 200 MB at 32 GB/s =
+    6ms. Phase 2 (async, DRAM→NVMe): 200 MB at 6 GB/s = 33ms. Phase 3 (async, NVMe→Lustre): 20 TB at 4
+    TB/s = 5s (background). GPU idle: <2s (Phase 1 + barrier). Recovery from 50-node failure: redistribute
+    shards from surviving DRAM copies (FSDP redundancy) or read from Lustre: 20 TB at 4 TB/s = 5s. Resume
+    training: <30s total.'
+chain:
+  id: cloud-chain-462
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Infrastructure

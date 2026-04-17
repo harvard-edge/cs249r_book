@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-cell-10002
+title: Designing Activation Offloading vs. Checkpointing Trade-off for Long-Sequence Training on H100
+topic: activation-memory
+status: published
+provenance: imported
+scenario: You are training a 13B Transformer with sequence length 32K tokens on a single H100 (80 GB HBM3,
+  3.35 TB/s bandwidth). Raw activation memory at batch size 1 exceeds 60 GB. You must choose between (A)
+  gradient checkpointing every 4 layers — recomputing activations during backward — or (B) offloading
+  activations to CPU DRAM over PCIe 5.0 (64 GB/s bidirectional). The training step must complete in under
+  2 seconds for your throughput target. Design the decision framework and justify your choice.
+details:
+  realistic_solution: 'Compute recompute cost: one forward pass through 4 checkpointed layers: 4 × 2 ×
+    1 × 32768 × 8192² = 17.6 TFLOPs / 989 TFLOPS ≈ 17.8 ms per checkpoint segment. PCIe offload time for
+    the same activation volume: ~4 × 8192 × 32768 × 2 bytes / 64 GB/s ≈ 4 × 512 MB / 64 GB/s ≈ 32 ms.
+    Recomputation wins at this sequence length. Use gradient checkpointing every 4 layers.'
+  common_mistake: Assuming PCIe offload is always slower than recomputation without computing the actual
+    bandwidth time versus the re-computation FLOPs time. At long sequences, recomputation cost scales
+    with sequence length while PCIe transfer time depends on activation tensor size, which also scales
+    with sequence length — they have the same asymptotic cost and the crossover depends on hardware ratios.
+  napkin_math: 'Activation tensor per 4-layer segment (residual + MLP): 4 × 32768 × 8192 × 2 B ≈ 2 GB.
+    PCIe 5.0 offload: 2 GB / 64 GB/s = 31 ms. Re-compute 4 layers: 4 × 2 × 1 × 32768 × 8192² FLOPs / 989
+    TFLOPS = 17.6 TFLOPs / 989 TFLOPS = 17.8ms. Checkpointing is slightly faster than PCIe offload (~32ms)
+    at S=32K on H100.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single H100 with PCIe 5.0 host; 13B model, sequence length 32K; excludes multi-GPU and NVLink
+  paths.

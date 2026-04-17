@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-0122
+title: The Chatbot Timeout Crisis
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: You are an MLE on a Generative AI platform team, responsible for a real-time chatbot service
+  built on a 13B parameter LLM. Your service has a strict P99 Time-To-First-Token (TTFT) SLO of 500ms.
+  You observe that while average TTFT is a healthy 250ms, the P99 latency is hitting 800ms, causing user-facing
+  timeouts. The service currently uses a static batching policy on H100 GPUs, where the server waits to
+  collect a full batch of 32 requests before running inference. Monitoring shows a single forward pass
+  for this full batch takes about 450ms, and GPU utilization is high. Given this data, diagnose the primary
+  cause of the SLO violation.
+details:
+  realistic_solution: The root cause is **head-of-line blocking** from the static batching policy. Requests
+    that arrive just after a 450ms batch-processing cycle has begun are forced to wait in a queue for
+    that entire cycle to complete before their own batch can even start forming. This waiting time is
+    the direct cause of the high P99 latency. The correct solution is to replace static batching with
+    **continuous batching** (or dynamic batching). This approach allows the server to iterate on all currently
+    active sequences in a single step, immediately adding new requests to the batch as they arrive. This
+    eliminates the queue, drastically reducing the wait time for all users and bringing the P99 TTFT much
+    closer to the average TTFT.
+  common_mistake: Engineers often misdiagnose queuing problems as compute problems. They see high latency
+    and immediately think 'the GPU is too slow' or 'the model is too big'. This leads them to propose
+    expensive hardware upgrades (e.g., more GPUs) or model changes (quantization) when the root cause
+    is an inefficient scheduling algorithm. The key indicator of a queuing bottleneck is a large gap between
+    average and tail (P99) latency, which points to some requests waiting much longer than others.
+  napkin_math: If average TTFT is 250ms but P99 > 500ms, queueing delay is the culprit. A 13B model on
+    H100 (3.35TB/s) prefill takes ~50ms for 1k tokens. In static batching (batch=16), worst-case wait
+    is 15 * 50ms = 750ms. The 16th request easily breaches 500ms. Continuous batching lowers wait time
+    by skipping artificial batch boundaries, keeping P99 close to the 50ms prefill.
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-crit-21034
+title: KV-Cache Eviction Under Memory Pressure
+topic: kv-cache-management
+status: published
+provenance: imported
+scenario: 'Your vLLM serving instance on a single H100 has 35 GB available for KV-cache after loading
+  model weights. At peak traffic, 80 concurrent requests each need up to 8K context (2.56 GB KV-cache
+  each). Total demand: 204 GB, far exceeding the 35 GB budget. Design an eviction and admission policy.'
+details:
+  realistic_solution: 'Design a multi-level policy: (1) Admission control: limit concurrent requests to
+    what fits in memory. At 35 GB / 2.56 GB max = 13 full-length requests. Accept up to 13 requests; queue
+    the rest. (2) Preemption policy (when memory is exhausted mid-generation): Use ''swap'' — move preempted
+    request''s KV blocks to CPU memory (host has >>35 GB). When GPU memory frees up, swap back without
+    recomputing. Swap bandwidth: PCIe Gen5 at 64 GB/s, a 2.56 GB cache swaps in 40ms. (3) Preemption priority:
+    preempt the request with the most remaining tokens to generate (longest remaining latency), preserving
+    requests close to completion. This minimizes wasted compute. (4) For prefix-shared requests: never
+    evict shared prefix blocks — they serve multiple requests. (5) Overcommit strategy: admit up to 40
+    requests assuming average context is 2K (not 8K max). Average KV = 640 MB × 40 = 25.6 GB (fits). Handle
+    the 5% of requests that reach 8K by swapping. This achieves 3× higher throughput than conservative
+    admission control.'
+  common_mistake: Using simple LRU eviction on individual KV blocks, which can preempt a nearly-complete
+    long request to admit a new short request — wasting all the compute already invested in the preempted
+    request.
+  napkin_math: 'Budget: 35 GB. Max KV per request: 8K × 320 KB = 2.56 GB. Conservative: 35/2.56 = 13 concurrent.
+    With swap overcommit at avg 2K context: 35 GB / 640 MB = 54 concurrent (4× more). Swap penalty: 2.56
+    GB / 64 GB/s = 40ms (once per preemption).'
+last_modified: '2026-04-01'

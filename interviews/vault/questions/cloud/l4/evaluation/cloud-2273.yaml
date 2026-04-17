@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-2273
+title: The Library vs Custom Kernel Decision
+topic: kernel-fusion
+status: published
+provenance: imported
+scenario: Your inference serving team runs a 70B MoE model. Profiling shows that the top-K expert routing
+  + scatter/gather operations account for 22% of per-token latency. These operations use PyTorch's native
+  indexing and scatter_ operators, which dispatch to generic cuBLAS/cuDNN routines. A kernel engineer
+  proposes writing a custom Triton kernel that fuses the routing decision, expert dispatch, and result
+  gathering into a single kernel. The library vendor (NVIDIA) says their next cuDNN release will include
+  optimized MoE primitives in 6 months. How do you make this build-vs-wait decision?
+details:
+  realistic_solution: 'Evaluate across four axes: (1) Performance gap: 22% of latency in routing means
+    a custom kernel could save 3.5ms per token on a 23ms budget — significant for SLA and fleet cost (saving
+    35 GPUs). (2) Maintenance cost: Triton kernels are ~10× easier to maintain than raw CUDA, but still
+    require updates per GPU generation. (3) Correctness risk: MoE routing has complex data-dependent control
+    flow; bugs cause silent accuracy loss. (4) Time value: 6 months of serving at 22% overhead costs real
+    money. Decision framework: if the operation is on the critical path AND vendor coverage is >3 months
+    away AND the operation''s data access pattern is non-standard (irregular scatter/gather, not dense
+    GEMM), write the custom kernel. Dense matmul → always use cuBLAS. Custom attention variants → use
+    FlashAttention or Triton. Non-standard data movement patterns (MoE routing, speculative decoding verification)
+    → custom kernel territory.'
+  common_mistake: Defaulting to 'always use vendor libraries' or 'always write custom kernels.' The correct
+    answer depends on the operation's position on the library-coverage spectrum and the business cost
+    of waiting.
+  napkin_math: 'Current: 23ms per token, routing = 5ms. Custom kernel (fused): routing drops to ~1.5ms.
+    New total: 19.5ms (15% end-to-end speedup). Savings: 3.5ms per token. At 10,000 QPS serving fleet:
+    saves 3.5ms × 10K = 35 GPU-seconds/second, meaning exactly 35 fewer GPUs needed. At $2/hr per GPU:
+    ~$613K/year savings. Triton kernel development cost: ~2 engineer-weeks. ROI: <1 week.'
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

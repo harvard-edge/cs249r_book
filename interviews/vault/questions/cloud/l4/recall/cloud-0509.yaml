@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0509
+title: The Profiler Trace Puzzle
+topic: roofline-analysis
+status: published
+provenance: imported
+scenario: 'You profile a transformer training step on an H100 and see: GEMM kernels occupy 45% of wall
+  time, attention kernels 20%, elementwise/normalization 10%, and 25% is ''gaps'' (no kernel running).
+  The achieved TFLOPS during GEMM kernels is 790 out of 989 peak. What''s the overall GPU compute utilization,
+  and where should you optimize first?'
+details:
+  realistic_solution: 'Overall GPU compute utilization must account for all wall-clock time, not just
+    the time when compute-heavy kernels are running. Weighted average: 0.45 × 790 + 0.20 × 500 + 0.10
+    × 50 + 0.25 × 0 = 460.5 TFLOPS. Overall utilization = 460.5 / 989 = 46.6%. The 25% gap time (no kernel
+    running) is pure waste — caused by CPU-side overhead (Python interpreter, framework dispatch), synchronization
+    barriers, or data loading stalls. Optimization priority: (1) Eliminate gaps first — they represent
+    25% of wall time with zero productive work. Use torch.compile, CUDA graphs, or overlapped data loading
+    to eliminate CPU-GPU synchronization stalls. This alone could push utilization to ~62%. (2) Fuse elementwise/normalization
+    ops into adjacent GEMM kernels to eliminate their memory round-trips. (3) Ensure FlashAttention is
+    enabled for the attention kernels to maximize their throughput.'
+  common_mistake: '"GPU utilization is 790/989 = 80% — that''s great." This only measures utilization
+    during GEMM kernels, ignoring the 55% of time spent on non-GEMM work and gaps.'
+  napkin_math: 'Effective FLOPS during each phase: GEMM (45% of time): 790 TFLOPS. Attention (20%): ~500
+    TFLOPS (memory-bound portions drag it down). Elementwise (10%): ~50 TFLOPS (bandwidth-bound, low arithmetic
+    intensity). Gaps (25%): 0 TFLOPS. Weighted average: $0.45 \times 790 + 0.20 \times 500 + 0.10 \times
+    50 + 0.25 \times 0 = 355.5 + 100 + 5 + 0 = 460.5$ TFLOPS. **Overall utilization: 460.5 / 989 = 46.6%**.
+    Optimization priority: (1) **Eliminate gaps** (25% → 0% with torch.compile, CUDA graphs, or overlapped
+    data loading) — potential 33% speedup. (2) **Fuse elementwise ops** into GEMM kernels — saves memory
+    round-trips. (3) **FlashAttention** for attention kernels — reduces memory-bound overhead. Fixing
+    gaps alone would push utilization to $460.5 / (989 \times 0.75) = 62\%$.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

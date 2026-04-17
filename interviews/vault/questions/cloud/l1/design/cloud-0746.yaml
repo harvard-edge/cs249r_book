@@ -1,0 +1,48 @@
+schema_version: 1
+id: cloud-0746
+title: The Bisection Bandwidth Requirement
+topic: collective-communication
+status: published
+provenance: imported
+scenario: 'You''re designing the network fabric for a 1,024-GPU training cluster. The workload uses 3D
+  parallelism: TP=8 (within node), PP=4 (across nodes), DP=32 (across nodes). Calculate the minimum bisection
+  bandwidth needed to avoid communication bottlenecks, and explain why a fat-tree topology might not be
+  sufficient.'
+details:
+  realistic_solution: The minimum bisection bandwidth is ~750 GB/s, driven primarily by DP AllReduce traffic
+    (542 GB/s) and PP activation forwarding (206 GB/s). TP is handled by intra-node NVLink and does not
+    use the network fabric. A standard fat-tree topology with 400 Gbps links IS sufficient — it provides
+    more than enough aggregate bisection bandwidth. However, fat-tree may not be the most cost-effective
+    choice because it treats all traffic identically. PP needs low-latency point-to-point paths (pipeline
+    bubbles grow with hop count), while DP needs high bandwidth but tolerates latency. A rail-optimized
+    or hybrid topology can reduce cost by ~30% while better matching these distinct traffic patterns.
+  common_mistake: '"Just add up the per-GPU bandwidth requirements and buy enough switches." This ignores
+    that different parallelism dimensions have vastly different communication patterns and bandwidth needs.'
+  napkin_math: '1024 GPUs, TP=8 (intra-node NVLink), PP=4, DP=32. Nodes = 128.
+
+
+    **PP traffic:** Activation per microbatch: 4 × 2048 × 8192 × 2 = 134 MB. 3 stage boundaries × 32 pipelines
+    = 96 boundaries. ~48 cross bisection. With 16 microbatches, step=500ms: each boundary = 16 × 134 /
+    0.5 = 4.29 GB/s. PP bisection ≈ 48 × 4.29 = 206 GB/s.
+
+
+    **DP traffic:** Per PP stage: 17.5B params = 35 GB FP16. Ring AllReduce volume per GPU = 2 × 31/32
+    × 35 = 67.8 GB in 500ms = 135.6 GB/s. 128 DP rings (32 groups × 4 stages), each with ~1 link crossing
+    bisection at ~4.24 GB/s. DP bisection ≈ 128 × 4.24 = 542 GB/s.
+
+
+    **Total bisection: ~750 GB/s.**
+
+
+    A standard fat-tree with 400 Gbps (50 GB/s) spine links needs ≥ 15 spine links. For 128 nodes, a 3-tier
+    fat-tree provides well over 15 bisection links — sufficient in aggregate bandwidth.
+
+
+    **Why fat-tree may not be optimal (but IS sufficient):** Fat-tree provides equal-cost multipath, treating
+    all traffic identically. PP traffic is latency-sensitive (pipeline bubbles grow with hops) while DP
+    is bandwidth-hungry but latency-tolerant. A rail-optimized topology with dedicated low-latency paths
+    for PP and ECMP for DP can reduce cost ~30% while better matching traffic patterns. The fat-tree works
+    but over-provisions for DP''s latency tolerance while under-optimizing for PP''s latency sensitivity.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

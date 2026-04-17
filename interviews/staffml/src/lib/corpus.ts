@@ -17,11 +17,16 @@ export interface Question {
     common_mistake: string;
     realistic_solution: string;
     napkin_math?: string;
-    deep_dive_title?: string;
-    deep_dive_url?: string;
+    resources?: Resource[];
     options?: string[];
     correct_index?: number;
   };
+}
+
+/** Author-curated external reference attached to a question. */
+export interface Resource {
+  name: string;
+  url: string;
 }
 
 const questions = corpusData as unknown as Question[];

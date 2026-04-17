@@ -1,0 +1,36 @@
+schema_version: 1
+id: tinyml-0718
+title: Multi-Model SRAM Partitioning
+topic: mcu-compute-constraints
+status: published
+provenance: imported
+scenario: 'Your smart home sensor hub on a Cortex-M7 (512 KB SRAM, 480 MHz) runs three models: (1) voice
+  activity detection (VAD, 20 KB weights, 8 KB peak activations, runs continuously at 16 kHz), (2) keyword
+  spotting (KWS, 80 KB weights, 45 KB peak activations, runs when VAD triggers), (3) command classification
+  (CMD, 120 KB weights, 60 KB peak activations, runs when KWS triggers). Design the SRAM partitioning
+  strategy. Can all three models coexist in memory?'
+details:
+  realistic_solution: 'Exploit the cascading trigger pattern: VAD runs continuously, KWS only when VAD
+    triggers, CMD only when KWS triggers. Since KWS and CMD never run simultaneously, share one arena:
+    max(45KB, 60KB) = 60KB. Total activation SRAM: 8KB (VAD, always resident) + 60KB (shared KWS/CMD)
+    = 68KB. Compare naive allocation: 8+45+60 = 113KB (40% more). Scheduling: VAD runs every 100ms. On
+    VAD trigger, swap the shared arena to KWS context. On KWS match, swap to CMD. Time-multiplexed approach
+    uses 88KB total SRAM (17% of 512KB), leaving 424KB for firmware, BLE buffers, and potential expansion
+    to a 4th model.'
+  common_mistake: '"Load all three models into SRAM: 20 + 80 + 120 = 220 KB for weights, plus activations.
+    Fits in 512 KB." This ignores that weights typically live in flash (not SRAM) for TinyML, and that
+    the activation arenas are the real SRAM consumers. But more critically, it ignores the cascading trigger
+    pattern — these models don''t all run simultaneously.'
+  napkin_math: 'SRAM layout exploits cascading triggers — only VAD runs continuously; KWS and CMD activate
+    sequentially. Activation arenas: VAD = 8 KB, KWS = 45 KB, CMD = 60 KB. Since KWS and CMD never run
+    simultaneously, share one arena: max(45, 60) = 60 KB. Total SRAM for activations: VAD arena (always
+    resident) + shared KWS/CMD arena = 8 + 60 = 68 KB. If all three arenas were separate: 8 + 45 + 60
+    = 113 KB. Shared saves 45 KB (40% reduction). Overhead: DMA descriptors, RTOS stack, sensor buffers
+    ~ 20 KB. Total SRAM: 68 + 20 = 88 KB / 512 KB = 17%. Leaves 424 KB headroom for a 4th model. Flash
+    usage: 20 + 80 + 120 = 200 KB for weights. On a typical 1 MB flash device: 22% for models, leaving
+    780 KB for firmware + OTA staging. Power: VAD always-on at 0.5ms/64ms = 0.78% duty cycle. Average
+    current: 0.0078 x 30 mA + 0.9922 x 0.5 mA = 0.73 mA. Battery life (225 mAh CR2032): 225 / 0.73 = 308
+    hours = 12.8 days.'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

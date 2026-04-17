@@ -1,0 +1,76 @@
+schema_version: 1
+id: cloud-2285
+title: The Full-Stack Compression Audit
+topic: extreme-quantization
+status: published
+provenance: imported
+scenario: 'You inherit a production serving system for a 30B parameter LLM. The previous team applied
+  the following compression techniques in this order: (1) LoRA fine-tuning (rank 64) on domain data, (2)
+  unstructured magnitude pruning to 40% sparsity, (3) GPTQ 4-bit quantization, (4) knowledge distillation
+  from the original 30B into the compressed model. The system works but quality is significantly below
+  expectations — 12% worse on domain benchmarks than a comparable 7B model trained from scratch. You are
+  asked to audit the compression pipeline and redesign it from first principles. Identify every mistake
+  in the current pipeline and propose the correct architecture.'
+details:
+  realistic_solution: 'There are at least 5 critical errors in the existing pipeline:
+
+
+    **Error 1: LoRA before pruning.** LoRA adapters modify the weight matrices by adding low-rank updates
+    ($W + BA$). Pruning after LoRA means you''re pruning the merged weights, which may remove the exact
+    dimensions that LoRA learned to update. The LoRA adaptation is partially destroyed. Fix: prune first,
+    then apply LoRA to the pruned model.
+
+
+    **Error 2: Unstructured pruning.** 40% unstructured sparsity provides zero acceleration on H100 Tensor
+    Cores (only 2:4 structured sparsity is hardware-accelerated). The weights are still stored and processed
+    as dense matrices. You got accuracy loss with no latency benefit. Fix: use structured pruning (remove
+    entire heads/FFN dimensions) or 2:4 semi-structured sparsity.
+
+
+    **Error 3: Quantization after unstructured pruning.** GPTQ calibration computes quantization ranges
+    from the weight distribution. Unstructured pruning creates a bimodal distribution (zeros + non-zeros)
+    that GPTQ calibration handles poorly — the zero-valued weights waste quantization bins. Fix: if using
+    structured pruning, the pruned dimensions are gone entirely and quantization operates on clean dense
+    submatrices.
+
+
+    **Error 4: Distillation last.** Distilling from the original 30B into the already-compressed model
+    means the student (the compressed model) has fixed architecture and fixed quantized weights — there''s
+    almost nothing the distillation loss can update (LoRA adapters are already merged, weights are quantized
+    to INT4). This step is nearly a no-op. Fix: distillation should happen during fine-tuning, before
+    quantization, when the model has full-precision gradients to learn from.
+
+
+    **Error 5: No intermediate accuracy checkpoints.** Without measuring accuracy after each step, you
+    can''t tell which technique caused the 12% degradation.
+
+
+    **Correct pipeline:**
+
+    1. Structured pruning (remove 30-40% of attention heads + FFN dimensions based on importance scoring)
+
+    2. Knowledge distillation fine-tuning (use original 30B as teacher, train pruned model on domain data
+    with soft labels, full precision)
+
+    3. LoRA adaptation (rank 64, if additional domain specialization needed)
+
+    4. Merge LoRA weights into base
+
+    5. GPTQ/AWQ 4-bit quantization (calibrate on representative domain data)
+
+    6. Validate accuracy at each step with rollback criteria'
+  common_mistake: Fixing one issue (e.g., 'just change unstructured to structured pruning') without recognizing
+    that the entire pipeline ordering and technique selection is fundamentally broken in multiple ways.
+  napkin_math: 'Current pipeline quality budget: Each step compounds error. LoRA fine-tune: +2% domain
+    accuracy. Unstructured pruning (40%): -8% accuracy, 0% speedup. GPTQ on pruned distribution: -5% (vs
+    typical -2% on clean weights). Dead-end distillation: ~0% recovery. Net: -11% domain accuracy = matches
+    the observed 12% degradation.
+
+
+    Redesigned pipeline: Structured pruning (30%): -4% accuracy. Distillation fine-tune: +3% recovery.
+    LoRA domain adapt: +2%. GPTQ on clean weights: -2%. Net: -1% from baseline. Plus actual speedup: 30%
+    fewer params as dense + 4-bit = model size drops from 60 GB (FP16) to ~10.5 GB (pruned INT4). Decode
+    throughput: ~6x improvement.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

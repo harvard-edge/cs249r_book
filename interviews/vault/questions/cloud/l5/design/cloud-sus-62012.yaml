@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-sus-62012
+title: Network Topology for KV Transfer at Scale
+topic: disaggregated-serving
+status: published
+provenance: imported
+scenario: You are deploying a disaggregated serving cluster with 64 prefill H100s and 128 decode MI300Xs
+  connected over a two-tier fat-tree InfiniBand network (400 Gbps per link, 2:1 oversubscription at the
+  spine). At peak load, 500 requests/s each transfer 384 MB of KV-cache from prefill to decode. Determine
+  whether the network is a bottleneck, and design a mitigation if it is.
+details:
+  realistic_solution: 'Total KV transfer bandwidth demand: 500 req/s × 384 MB = 192 GB/s. With 64 prefill
+    nodes each sending at most 192/64 = 3 GB/s — well within 400 Gbps (50 GB/s) per link. However, with
+    2:1 oversubscription, spine bandwidth = 400 Gbps × (number of leaf uplinks) / 2. If all prefill nodes
+    are on different ToR switches from decode nodes (worst case), all traffic crosses the spine. Effective
+    spine bandwidth per node-pair ≈ 25 GB/s. 3 GB/s << 25 GB/s — not a bottleneck in this scenario. However,
+    if a single prefill node is saturating (doing 500 req/s itself): 500 × 384 MB = 192 GB/s from one
+    node — exceeds 50 GB/s link rate by 3.8×. Solution: load-balance requests across prefill nodes. Max
+    per-node KV egress should be < 40 GB/s (80% of link rate). At 384 MB per transfer, one node can handle
+    40/0.384 ≈ 104 req/s. Require at least 500/104 = 5 prefill nodes minimum to avoid link saturation.'
+  common_mistake: Assuming full bisection bandwidth is available — 2:1 oversubscription halves the effective
+    bandwidth for cross-switch traffic, and not all prefill-to-decode transfers are local to the same
+    ToR switch.
+  napkin_math: 'Aggregate KV bandwidth: 500 × 384e6 = 192e9 bytes/s = 192 GB/s. 64 prefill nodes: 192/64
+    = 3 GB/s per node average. 400 Gbps = 50 GB/s per link. Per-node utilization: 3/50 = 6% — well within
+    limits. Spine bisection (2:1): 25 GB/s effective. 3 GB/s << 25 GB/s. Network is NOT a bottleneck at
+    uniform load. Hot-spot scenario: if 10% of requests go to 1 node: 50 × 384 MB/s = 19.2 GB/s — still
+    < 50 GB/s per link. System is safe up to ~130 req/s per prefill node.'
+last_modified: '2026-04-02'
+tags:
+- scope:Disaggregated Serving

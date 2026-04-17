@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# ┌─── DEPRECATED ────────────────────────────────────────────────────────────┐
+# │ Pre-YAML-migration script. Replaced by:                                   │
+# │     vault build --legacy-json                                             │
+# │ See ./DEPRECATED.md for the full map.                                     │
+# └───────────────────────────────────────────────────────────────────────────┘
 """Sync vault data → StaffML app data directory.
 
 Copies corpus.json and taxonomy.json from the vault (source of truth)

@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-2282
+title: The Activation Sparsity Mirage in MoE
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: Your team observes that a Mixture-of-Experts (MoE) model with 8 experts (top-2 routing) has
+  extremely high activation sparsity — at any given token, 75% of expert parameters are inactive. A systems
+  engineer proposes exploiting this by only loading the 2 active experts' weights into GPU memory per
+  token, keeping the other 6 experts in CPU DRAM. They claim this will reduce GPU memory usage by 75%.
+  In production serving with continuous batching at 200 QPS, this approach causes P99 latency to spike
+  to 5x the baseline. Diagnose the failure.
+details:
+  realistic_solution: 'The sparsity is per-token, not per-batch. With continuous batching at 200 QPS and
+    batch sizes of 32-64 tokens, every batch contains tokens routed to different experts. With top-2 routing
+    across 8 experts, the probability that all 8 experts are needed in a batch of just 20 tokens is already
+    >99% (birthday problem: each token independently picks 2 of 8 experts). So the ''sparse'' MoE is effectively
+    dense at the batch level. The CPU-offloading scheme must load all 8 experts from DRAM for nearly every
+    batch, incurring PCIe transfer latency (~12 GB/s on PCIe Gen4) per batch. For a model where each expert
+    is 10B parameters (20 GB in FP16), loading 6 experts from CPU DRAM = 120 GB / 12 GB/s = 10 seconds
+    per batch — catastrophic. The correct approach is to keep all expert weights resident in GPU HBM (or
+    shard across multiple GPUs using expert parallelism) and exploit the activation sparsity purely for
+    compute savings (only running 2 expert forward passes per token), not memory savings.'
+  common_mistake: Conflating per-token sparsity with per-batch sparsity. 'If each token only uses 2 of
+    8 experts, we only need to load 2 experts at a time.' This ignores what happens when you batch hundreds
+    of tokens together.
+  napkin_math: '8 experts, top-2 routing. Per-token: 2/8 = 25% active (75% sparse). Per-batch (n=32 tokens,
+    each picks 2 of 8): probability expert $i$ is NOT picked by any token = $(6/8)^{32} \approx 0.0001$.
+    Probability ALL 8 experts needed: $\approx (1 - 0.0001)^8 \approx 99.9\%$. At batch size 32, activation
+    sparsity is effectively 0% at the memory level. PCIe bottleneck: 120 GB at 12 GB/s = 10s per swap,
+    vs. target latency of ~50ms per batch.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

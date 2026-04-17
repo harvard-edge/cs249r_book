@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-1908
+title: Diagnosing DLRM Embedding Lookup Bottlenecks
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: Your team deploys a Deep Learning Recommendation Model (DLRM) to a single A100 (80GB HBM2e,
+  2 TB/s bandwidth) instance. The model contains a 40GB embedding table for categorical features (user
+  IDs, video IDs) using dimension D=128 in FP16. Each inference request requires 250 sparse embedding
+  lookups. Despite batching aggressively (batch size 2048), the GPU SM (Streaming Multiprocessor) compute
+  utilization stays below 5%, and end-to-end throughput is severely capped. What is the fundamental root
+  cause of this performance ceiling, and why doesn't increasing the batch size fix the SM utilization?
+details:
+  realistic_solution: The root cause is that sparse embedding lookups have an arithmetic intensity of
+    zero and utilize random memory accesses. The workload is entirely bottlenecked by HBM latency and
+    effective memory bandwidth, not compute. You must diagnose this via the Roofline model and solve it
+    by implementing fused embedding kernels (e.g., FBGEMM or HugeCTR) to coalesce memory reads, or by
+    shrinking the table via feature hashing/quantization to improve L2 cache hit rates.
+  common_mistake: Candidates often assume the low SM utilization is due to CPU-GPU PCIe transfer overhead,
+    Python GIL blocking, or simply needing an even larger batch size to saturate the matrix multiplication
+    units, failing to analyze the specific memory access pattern of embeddings.
+  napkin_math: 'For one lookup: Bytes read = 128 dims * 2 bytes (FP16) = 256 bytes. FLOPs = 0. Arithmetic
+    Intensity (AI) = 0 FLOPs / 256 bytes = 0 FLOPs/Byte. Total memory per query = 250 lookups * 256 B
+    = 64 KB. The A100 Roofline ridge point is ~150 FLOPs/Byte; an AI of 0 means the workload is completely
+    memory-bound. Furthermore, gathering scattered 256-byte vectors results in uncoalesced random reads,
+    dropping the effective HBM bandwidth well below the theoretical 2 TB/s peak.'
+chain:
+  id: cloud-chain-381
+  position: 2
+created_at: '2026-03-24T01:11:53.418906'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

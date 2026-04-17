@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -59,7 +59,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_TFLOPS_FP16,
         JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W, JETSON_TFLOPS,
@@ -212,9 +212,7 @@ def _(
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_rho = mo.ui.slider(start=0.10, stop=0.95, value=0.80, step=0.05,
                               label="Server utilization (rho)")
     partA_svc = mo.ui.slider(start=1.0, stop=20.0, value=5.0, step=1.0,
@@ -232,12 +230,10 @@ def _(mo, partA_pred):
         },
         label="Batch size 1 to 32, arrival 500 QPS, SLO 50 ms. What happens?",
     )
-    return (partB_pred,)
+    return (partA_rho, partA_slo, partA_svc, partB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     partB_arr = mo.ui.slider(start=100, stop=2000, value=500, step=50, label="Arrival rate (QPS)")
     partB_slo = mo.ui.slider(start=10, stop=100, value=50, step=5, label="SLO budget (ms)")
@@ -252,12 +248,10 @@ def _(mo, partB_pred):
         },
         label="Llama-2 70B, 128K context, 8xH100 (640 GB). Max concurrent batch?",
     )
-    return (partC_pred,)
+    return (partB_arr, partB_batch, partB_slo, partC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partC_prec = mo.ui.dropdown(
@@ -279,12 +273,11 @@ def _(mo, partC_pred):
         },
         label="Auto-scaling Llama-2 70B during traffic spike. First-user wait?",
     )
-    return (partD_pred,)
+    return (partC_ctx, partC_gpus, partC_model, partC_prec, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partD_stor = mo.ui.dropdown(
@@ -292,6 +285,17 @@ def _(mo, partD_pred):
         value="NVMe SSD", label="Storage type")
     partD_pcie = mo.ui.dropdown(options={"PCIe Gen4": "gen4", "PCIe Gen5": "gen5"},
                                  value="PCIe Gen5", label="Interconnect")
+    return (partD_model, partD_pcie, partD_stor)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_pred, partA_rho, partA_slo,
+    partA_svc, partB_arr, partB_batch, partB_pred,
+    partB_slo, partC_ctx, partC_gpus, partC_model,
+    partC_prec, partC_pred, partD_pred, partD_model,
+    partD_pcie, partD_stor,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — The Tail Latency Explosion

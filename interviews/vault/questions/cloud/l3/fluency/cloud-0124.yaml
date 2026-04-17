@@ -1,0 +1,47 @@
+schema_version: 1
+id: cloud-0124
+title: The Overloaded Translator
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: 'You are an ML Systems Engineer on a team launching a new real-time translation service using
+  a Llama-3-8B model on a single H100 GPU. The service has a P99 Time-to-First-Token (TTFT) target of
+  < 300ms. You use static batching with a batch size of 8. During a load test at 12 requests per second
+  (RPS), you observe: average prefill latency = 25ms per request, average output length = 40 tokens (but
+  the longest request in each batch generates 80 tokens), per-token decode latency = 8ms per token, and
+  GPU utilization hovering around 65%. Curiously, your TTFT P99 is climbing steadily over time, already
+  past 2 seconds and rising. Diagnose why the system is failing its latency target despite the GPU not
+  being fully utilized.'
+details:
+  realistic_solution: The system is overloaded because the incoming request rate (λ = 12 RPS) exceeds
+    the system's maximum possible throughput (μ). The reason for the low throughput is the inefficiency
+    of static batching. With static batching, the entire batch is blocked until the longest sequence (in
+    this case, 80 tokens) is complete. This leads to significant idle time on the GPU as shorter sequences
+    finish early but their batch slots cannot be reused, hence the ~65% utilization. Because the system
+    is unstable (λ > μ), the request queue grows indefinitely, causing the wait time (and thus TTFT) to
+    climb continuously. The solution is to move to a more advanced scheduling strategy like continuous
+    batching, which processes requests on a token-by-token basis and can immediately evict finished sequences
+    to onboard new ones, dramatically improving GPU utilization and overall throughput.
+  common_mistake: Engineers often see sub-100% GPU utilization and immediately rule out the GPU as a bottleneck.
+    They may misattribute the latency to a single component like prefill or suggest a simple parameter
+    tweak like reducing the batch size, without calculating the system's maximum theoretical throughput.
+    This fails to identify that the scheduling method itself can starve the hardware and create an overload
+    condition.
+  napkin_math: 1. **Calculate time to process one static batch:** The batch is not finished until the
+    longest sequence (80 tokens) completes all its decode steps. Batch processing time = prefill time
+    + (max_output_tokens * per_token_latency) = 25ms + (80 * 8ms) = 665ms. 2. **Calculate maximum throughput
+    (mu):** One batch of 8 requests takes 665ms. Throughput = 8 / 0.665s = ~12.0 RPS. 3. **Compare to
+    arrival rate (lambda):** lambda = 12 RPS, mu ≈ 12 RPS. The system is at its absolute theoretical limit
+    with zero headroom. In practice, variance in request lengths means mu is often slightly below lambda,
+    making the queue unstable (lambda >= mu). 4. **Explain the low GPU utilization:** With static batching,
+    all 8 slots are reserved until the longest sequence finishes. Requests that finish at 40 tokens (the
+    average) leave their GPU slots idle for the remaining 40 tokens of decode time — wasting ~50% of potential
+    compute, hence the ~65% utilization. 5. **Explain the climbing TTFT:** Because the system is at or
+    above capacity, Little's Law dictates queue depth grows without bound. Each new request waits longer
+    and longer in the queue before its batch even begins prefill, causing TTFT to climb continuously.
+    6. **Solution:** Switch to continuous batching, which evicts completed sequences immediately and onboards
+    new ones token-by-token. This can nearly double effective throughput by eliminating wasted slots,
+    bringing mu well above lambda and stabilizing the queue.
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

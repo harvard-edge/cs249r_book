@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-0168
+title: 'The Continuous Batching Paradox: Batching Strategies'
+topic: batching-strategies
+status: draft
+provenance: imported
+scenario: Your team is serving a 70B parameter summarization model on H100s. To improve GPU utilization,
+  you replace static batching with a continuous batching strategy (like vLLM's). Average throughput triples,
+  and utilization is stable at 80%. However, you receive an alert that P99 Time-To-First-Token (TTFT)
+  has increased by 500ms, violating your 250ms SLA for interactive (short prompt) users. Your manager
+  asks you to assess the situation. Why would a technique designed to improve performance catastrophically
+  degrade P99 TTFT for your most sensitive users?
+details:
+  realistic_solution: 'This is a classic ''Head-of-Line Blocking'' problem introduced by a naive FIFO
+    continuous batcher. Continuous batching combines requests that arrive close together into a single
+    dynamic batch. If a short, fast interactive query (e.g., 50 tokens) arrives right after a long, slow
+    summarization query (e.g., 4000 tokens), the batcher groups them. The GPU processes the entire batch
+    in parallel, but the total time is dictated by the longest job. The short query is ''stuck'' waiting
+    for the long query to finish its prefill, even though its own compute cost is trivial. This makes
+    the system ''fair'' from a FIFO perspective but disastrous for latency-sensitive applications. The
+    fix is not to remove continuous batching, but to evolve it: implement priority queuing where high-priority
+    (short) requests can form their own batches, preempting or bypassing the queue of long-running, low-priority
+    jobs.'
+  common_mistake: Blaming Python overhead, network latency, or other microsecond-scale factors. These
+    are orders of magnitude too small to explain a 500ms regression. Another common mistake is suggesting
+    turning off continuous batching, which throws away the massive throughput gains.
+  napkin_math: 'Model the prefill for a 70B model on H100 (989 TFLOPS). A long summarization query (e.g.,
+    20,000 tokens) enters prefill. Compute required: 2 * 70B * 20,000 = 2.8 PFLOPs. Prefill time is 2800
+    / 989 = 2.83 seconds. In naive FIFO continuous batching, a short interactive request arriving 1ms
+    later must wait this entire 2.83s for the GPU compute to free up.'
+chain:
+  id: cloud-chain-062
+  position: 5
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

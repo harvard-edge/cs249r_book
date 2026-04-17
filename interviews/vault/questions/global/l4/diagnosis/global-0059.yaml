@@ -1,0 +1,35 @@
+schema_version: 1
+id: global-0059
+title: The Phantom Memory Pool
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: A production recommendation model runs efficiently in PyTorch eager mode, using 60GB of an 80GB
+  A100 during the forward pass. To increase QPS, you enable CUDA graphs. You run a standard eager warmup
+  pass, then trigger the graph capture. Immediately, the system throws a CUDA Out of Memory (OOM) error,
+  even though the batch size and model architecture haven't changed. Model weights are 20GB, and peak
+  activations are 40GB.
+details:
+  realistic_solution: The symptom (OOM occurring exactly at graph capture time despite eager mode fitting
+    comfortably) is caused by how graph capture mechanisms handle memory planning. CUDA graphs require
+    stable virtual memory addresses to guarantee safe replay. Because of this, the framework allocates
+    a dedicated, contiguous memory pool specifically for the graph's intermediates. When you run the eager
+    warmup pass, the framework's caching allocator reserves 40GB for the activations. Unless explicitly
+    cleared, this 40GB remains in the reserved pool. When graph capture starts, it requests a *new* 40GB
+    memory pool for its private use. The hardware-compiler co-design fix is to call `torch.cuda.empty_cache()`
+    after the warmup and before capture, or to configure the allocator to share memory pools across graph
+    captures using memory pool APIs.
+  common_mistake: Assuming graph metadata takes up 20GB+ of VRAM, and arbitrarily reducing the batch size
+    to compensate, which destroys the throughput gains you wanted.
+  napkin_math: 'Total VRAM: 80GB. Weights footprint: 20GB. Forward pass activations: 40GB. Eager memory
+    state after warmup: 20GB (Weights) + 40GB (Eager caching allocator reserved) = 60GB. Graph capture
+    initiates and requests a private memory pool for its activations: +40GB. Total memory requested =
+    60GB + 40GB = 100GB. 100GB > 80GB, resulting in OOM. By emptying the cache prior to capture, the eager
+    allocator drops to 0GB reserved, meaning the capture only requires 20GB (W) + 40GB (Graph Pool) =
+    60GB, safely fitting in the 80GB limit.'
+chain:
+  id: global-chain-035
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

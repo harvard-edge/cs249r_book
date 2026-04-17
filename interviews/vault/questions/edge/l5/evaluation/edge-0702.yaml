@@ -1,0 +1,34 @@
+schema_version: 1
+id: edge-0702
+title: The Multi-Model Scheduling Problem
+topic: accelerator-comparison
+status: published
+provenance: imported
+scenario: 'Your autonomous vehicle''s Jetson AGX Orin runs 5 models simultaneously: (1) object detection
+  — YOLOv8m, 18ms on GPU, (2) lane detection — LaneNet, 6ms on DLA0, (3) depth estimation — MiDaS-small,
+  12ms on GPU, (4) traffic sign recognition — EfficientNet-B0, 4ms on DLA1, (5) driver monitoring — MediaPipe
+  Face, 8ms on GPU. All must complete within 33ms (30 FPS). The GPU models alone sum to 18 + 12 + 8 =
+  38ms sequential — over budget. How do you schedule these across the Orin''s GPU + 2 DLAs + CPU to meet
+  the deadline?'
+details:
+  realistic_solution: Use the Orin's heterogeneous compute to create a **dependency-aware schedule** that
+    maximizes parallelism across different hardware units. Offload LaneNet to DLA0 (6ms) and EfficientNet
+    to DLA1 (4ms). Run the remaining three models (YOLOv8m, MiDaS, Face) concurrently on the GPU using
+    CUDA streams. While sequential GPU time is 38ms, concurrent execution overlaps some compute and memory
+    access, taking ~28.5ms. Since the DLAs run in parallel with the GPU, the overall pipeline latency
+    is bottlenecked by the GPU at 28.5ms. This comfortably fits the 33ms budget (30 FPS) while saving
+    ~15W of power.
+  common_mistake: '"Run all GPU models in parallel using CUDA streams." The Orin''s GPU has 2048 CUDA
+    cores and 64 Tensor Cores. Running three models "in parallel" doesn''t mean 3× speedup — the models
+    compete for the same SMs (Streaming Multiprocessors), and the scheduler interleaves warps. In practice,
+    three concurrent models on one GPU take ~70-80% of the sequential time, not 33%. So 38ms × 0.75 =
+    28.5ms — barely under budget with zero margin.'
+  napkin_math: 'Sequential (all GPU): 18 + 12 + 8 + 6 + 4 = 48ms → 45% over budget. Naive parallel (all
+    GPU): ~36ms → still over. Heterogeneous schedule: GPU handles YOLO, MiDaS, Face concurrently (~28.5ms).
+    DLAs handle LaneNet (6ms) and EfficientNet (4ms) in parallel. Total time = 28.5ms → 14% under budget.
+    Power: GPU at 28.5ms/33ms = 86% utilization ≈ 40W. DLA0 at 6ms/33ms = 18% ≈ 2.5W. DLA1 at 4ms/33ms
+    = 12% ≈ 2W. CPU idle. Total: ~45W vs 60W+ if everything ran on GPU. DLA offloading saves ~15W — critical
+    for a vehicle''s thermal budget.'
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

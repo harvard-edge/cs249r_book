@@ -1,0 +1,35 @@
+schema_version: 1
+id: tinyml-exp-anal-0010
+title: Analyze Fallback Latency on Cortex-M4
+topic: graceful-degradation
+status: published
+provenance: imported
+scenario: 'An audio classification system on an ARM Cortex-M4 (STM32F4) processes 50ms audio frames. It
+  implements a fail-operational degradation ladder: a fast INT8 CNN (1 million MACs) runs first. If confidence
+  < 0.8, it triggers a fallback INT8 CNN (4 million MACs). The STM32F4 runs at 168 MHz, has 256 KB SRAM,
+  no FPU, and uses CMSIS-NN SIMD (2x INT8 MACs/cycle). During field tests in noisy environments, the system
+  drops audio frames because processing time exceeds the 50ms deadline, despite theoretical peak throughput
+  suggesting it should take less than 15ms. Explain why this latency overrun happens.'
+details:
+  realistic_solution: The theoretical peak performance assumes perfect data availability in registers,
+    which isn't realistic. The fallback scenario requires executing both models sequentially (1M + 4M
+    = 5M MACs). While the CMSIS-NN SIMD can do 2 MACs/cycle, keeping the pipeline fed requires constant
+    fetching of weights from the 1 MB flash and activations from the 256 KB SRAM. These memory bandwidth
+    bottlenecks and pipeline stalls reduce the effective MAC utilization. When combined with the sequential
+    execution overhead, the actual latency exceeds the 50ms frame budget.
+  common_mistake: Candidates often rely solely on the theoretical peak throughput of 336 MMACs/s and assume
+    computing 5 million total MACs takes only ~15ms. They fail to analyze the memory access bottlenecks
+    and pipeline stalls that prevent the CPU from sustaining the peak SIMD MAC rate.
+  napkin_math: '1. Fallback total MACs: 1M (fast model) + 4M (fallback model) = 5M total MACs.
+
+    2. Peak throughput: 168 MHz * 2 MACs/cycle = 336 MMACs/sec.
+
+    3. Theoretical minimum latency: 5M MACs / 336 MMACs/sec = 14.88 ms.
+
+    4. Realistic CMSIS-NN SIMD utilization bounded by SRAM/Flash memory bandwidth on Cortex-M4 is typically
+    30-40%. Effective throughput: ~100 MMACs/sec.
+
+    5. Realistic compute latency: 5M MACs / 100 MMACs/sec = 50 ms.
+
+    6. 50 ms compute + feature extraction overhead > 50 ms audio frame, causing dropped frames.'
+last_modified: '2026-04-01'

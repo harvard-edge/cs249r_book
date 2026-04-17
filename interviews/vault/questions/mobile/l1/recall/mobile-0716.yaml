@@ -1,0 +1,37 @@
+schema_version: 1
+id: mobile-0716
+title: The Cross-Platform Confidence Score Divergence
+topic: quantization-fundamentals
+status: published
+provenance: imported
+scenario: Your medical imaging app runs the same diagnostic model on iOS (Core ML, A17 Pro) and Android
+  (TFLite + NNAPI, Snapdragon 8 Gen 3). Both models are converted from the same PyTorch checkpoint. A
+  dermatologist reports that the same mole photo gets a 'high risk' score (0.87) on their iPhone but 'low
+  risk' (0.42) on their Samsung Galaxy S24. For a medical app, this inconsistency is a liability nightmare.
+  The model architecture and weights are identical pre-conversion. Why do the confidence scores diverge
+  by 0.45, and how do you guarantee cross-platform consistency for safety-critical applications?
+details:
+  realistic_solution: 'The 0.45 probability divergence comes from four compounding layers: (1) Conversion
+    — Core ML and TFLite fold BatchNorm differently (before vs after quantization), shifting logits ±0.05.
+    (2) Quantization — different calibration datasets and per-tensor vs per-channel defaults shift logits
+    ±0.3. (3) Accumulation — ANE uses FP16, Hexagon uses INT16, causing ±0.1 drift. (4) Sigmoid sensitivity
+    — combined ~2.0 logit shift maps to |sigmoid(2.0) - sigmoid(0)| = 0.38 probability difference near
+    the decision boundary. Fix: use ONNX Runtime on both platforms (eliminates conversion divergence)
+    + FP32 classification head + per-platform calibration. Residual divergence: <0.01.'
+  common_mistake: '"Use the same quantization scheme on both platforms." Even with identical quantization,
+    the *runtime execution* differs. Cross-platform numerical consistency requires controlling the entire
+    inference stack.'
+  napkin_math: 'Layer 1 Conversion divergence: BatchNorm folding order differs. Core ML folds BN before
+    quantization, TFLite after. Logit shift: +/-0.05. Layer 2 Quantization divergence: different calibration
+    algorithms. Core ML uses min-max, TFLite uses percentile. Scale factor differs by 3%. Per-tensor error:
+    0.03 * activation_range. Layer 3 Operator divergence: depthwise conv padding differs by 1 pixel on
+    edge. Affects 1/(H*W) of output = 0.5% of values. Cumulative divergence after 50 layers: per-layer
+    error compounds. Worst-case logit divergence: 0.8 on a [-5, 5] logit range. KL-divergence of output
+    distributions: 0.12. Inference latency: Core ML on ANE = 8 ms, TFLite on GPU = 12 ms. Agreement rate
+    on 10K test images: 94.2% (5.8% disagree on class).'
+chain:
+  id: mobile-chain-093
+  position: 6
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

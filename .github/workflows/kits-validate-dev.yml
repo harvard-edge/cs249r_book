@@ -47,6 +47,13 @@ concurrency:
   group: kits-validate-${{ github.ref }}
   cancel-in-progress: true
 
+# Workflow-level environment. Defined here rather than as a repository variable
+# because repository variables are not exposed to workflows triggered by
+# pull_request events from forks (GitHub security default). Workflow-level
+# env vars are available in all contexts.
+env:
+  KITS_ROOT: kits
+
 jobs:
   # ===========================================================================
   # Stage 1: Content validation (image refs, cross-refs)
@@ -107,17 +114,26 @@ jobs:
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: 🔨 Build Kits Site (HTML)
-        working-directory: ${{ vars.KITS_ROOT }}
+        working-directory: ${{ env.KITS_ROOT }}
         run: quarto render
 
       - name: 🔍 Validate build output
         run: |
-          if [ ! -f "${{ vars.KITS_ROOT }}/_build/index.html" ]; then
-            echo "❌ CRITICAL: index.html missing from build output."
+          KITS_ROOT="${{ env.KITS_ROOT }}"
+          echo "🔎 Resolved KITS_ROOT: '${KITS_ROOT}'"
+          if [ -z "${KITS_ROOT}" ]; then
+            echo "❌ FATAL: KITS_ROOT resolved to empty string."
+            echo "   If this is a fork PR, check that KITS_ROOT is declared in the workflow-level env: block."
+            echo "   Repository variables are not available on fork PR triggers."
+            exit 1
+          fi
+          if [ ! -f "${KITS_ROOT}/_build/index.html" ]; then
+            echo "❌ CRITICAL: ${KITS_ROOT}/_build/index.html missing from build output."
+            echo "   Quarto render may have exited nonzero. Check the build step above."
             exit 1
           fi
           echo "✅ Site built successfully"
-          echo "📊 Build size: $(du -sh ${{ vars.KITS_ROOT }}/_build | cut -f1)"
+          echo "📊 Build size: $(du -sh ${KITS_ROOT}/_build | cut -f1)"
 
   # ===========================================================================
   # Stage 3: PDF build validation (reuse existing workflow)

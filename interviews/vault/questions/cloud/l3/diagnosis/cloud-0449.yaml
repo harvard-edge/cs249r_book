@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-0449
+title: The Multi-Node Scaling Cliff
+topic: collective-communication
+status: draft
+provenance: imported
+scenario: You are a Staff ML Engineer scaling an LLM training job from a single 8-GPU H100 node to a 2-node,
+  16-GPU setup. You observe that moving from 1 to 8 GPUs gave a 7.5x speedup, but adding the second node
+  only increased the total speedup to 9x, far from the expected ~15x. Your profiling tools confirm that
+  GPU utilization is consistently high (>90%) on all 16 GPUs, and there are no memory errors. The nodes
+  are connected with InfiniBand NDR. Given this data, diagnose the most likely cause of the disappointing
+  scaling performance.
+details:
+  realistic_solution: The bottleneck is the InfiniBand interconnect between the two nodes. Intra-node
+    communication for the first 8 GPUs happens over the extremely high-bandwidth NVLink bus (~900 GB/s).
+    When you scale to a second node, the collective operations (like All-Reduce for gradient synchronization)
+    must traverse the much slower InfiniBand link (~50 GB/s). This massive drop in bandwidth (~18x) means
+    the communication phase of training now dominates the total step time, destroying the linear scaling
+    you saw on a single node. High GPU utilization is misleading; the GPUs are busy, but much of that
+    'work' is waiting for the All-Reduce to complete across the slow network.
+  common_mistake: Blaming the model, the GPUs, or the network switch. A common mistake is to assume high
+    GPU utilization means no bottleneck, but it can mask a severe communication bottleneck where GPUs
+    are spinning, waiting for data from peers. Another error is to confuse the roles of different interconnects,
+    like blaming PCIe for a multi-node problem.
+  napkin_math: A 70B model has 140GB of FP16 gradients. Within one node, NVLink provides 900GB/s, so an
+    All-Reduce takes ~140GB / 900GB/s = 155ms (excluding scaling factors). Across 2 nodes, traffic must
+    traverse IB NDR at 50GB/s. The inter-node step takes ~140GB / 50GB/s = 2.8s. The 18x bandwidth drop
+    from NVLink to IB causes massive communication stalls, ruining scaling.
+chain:
+  id: cloud-chain-204
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

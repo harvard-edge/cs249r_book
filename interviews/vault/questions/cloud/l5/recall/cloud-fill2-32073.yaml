@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-fill2-32073
+title: MoE Serving with Expert Caching
+topic: mixture-of-experts
+status: published
+provenance: imported
+scenario: You serve a large MoE model (64 experts, top-2) where the total model is 400 GB FP16 — too large
+  for a single MI300X (192 GB). You observe that for most conversations, only 12-15 unique experts are
+  activated across all tokens. Design an expert caching system that keeps hot experts on GPU and cold
+  experts on CPU, minimizing PCIe transfers.
+details:
+  realistic_solution: 'Architecture: (1) Partition MI300X memory: ~100 GB for shared attention layers,
+    ~80 GB for expert cache (holds ~12 FP16 experts of 12.5 GB each, or ~25 INT8 experts of 6.25 GB each).
+    Remaining for KV cache and activations. (2) Expert cache policy: use LFU (Least Frequently Used) with
+    exponential decay — recent expert activations are weighted higher. Track per-expert activation frequency
+    over a sliding window of 100 tokens. (3) Prefetch pipeline: while the current MoE layer computes,
+    the router for the next MoE layer runs ahead and predicts which experts are needed. If a needed expert
+    is not in cache, initiate PCIe prefetch (12.5 GB / 64 GB/s PCIe 5.0 = 195ms). This is too slow for
+    interactive — so maintain a ''shadow predictor'' that predicts expert needs 2-3 layers ahead, giving
+    3 layers × 5ms/layer = 15ms prefetch window. (4) Fallback: if an expert misses the cache, use the
+    closest cached expert (by router score) as an approximation. Cache hit rate with 30/64 experts cached:
+    if 15 unique experts handle 95% of tokens, keeping top-30 gives near-100% hit rate.'
+  common_mistake: Using a simple LRU cache for experts. Expert popularity follows a power-law distribution,
+    and the next token's expert selections are correlated with the current token's — a frequency-based
+    cache outperforms LRU.
+  napkin_math: '64 experts × 12.5 GB = 800 GB total. GPU cache (INT8, 6.25 GB/expert): 192 GB / 6.25 GB
+    = ~30 experts cached on MI300X. Hit rate (top-30 of ~15 active): near 100%. Miss penalty: 6.25 GB
+    / 64 GB/s = 98ms. At 90% hit rate: avg penalty = 0.1 × 98ms = 9.8ms/token. Target: 50ms/token. Feasible.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving

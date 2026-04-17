@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
 
     # ── Load Design Ledger from prior labs with defaults ────────────────────
     _ch14 = ledger.get_design(14) or {}
@@ -269,14 +269,12 @@ def _(mo):
         options={"8 GPUs": 8, "64 GPUs": 64, "1,000 GPUs": 1000, "10,000 GPUs": 10000},
         value="1,000 GPUs", label="Fleet size:", inline=True,
     )
-    return (partA_pred, partA_fleet_toggle,)
+    return (partA_fleet_toggle, partA_pred)
 
 
 # ─── CELL 5: Part B prediction + Part B sliders ──────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_pred = mo.ui.number(
         start=0.01, stop=1000, value=100, step=1,
         label="10,000 GPUs, each with 10,000-hour MTBF. What is the cluster MTBF (hours)?",
@@ -284,14 +282,12 @@ def _(mo, partA_pred):
     partB_fleet_slider = mo.ui.slider(start=10, stop=100000, value=10000, step=100, label="Fleet size (GPUs)")
     partB_mtbf_slider = mo.ui.slider(start=1000, stop=100000, value=10000, step=1000, label="Per-GPU MTBF (hours)")
     partB_ckpt_slider = mo.ui.slider(start=1, stop=30, value=10, step=1, label="Checkpoint interval (minutes)")
-    return (partB_pred, partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider,)
+    return (partB_ckpt_slider, partB_fleet_slider, partB_mtbf_slider, partB_pred)
 
 
 # ─── CELL 6: Part C prediction + Part C sliders ──────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_pred = mo.ui.radio(
         options={
             "A) No effect -- they are independent": "independent",
@@ -307,14 +303,12 @@ def _(mo, partB_pred):
     partC_sched = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Scheduling (%)")
     partC_sustain = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Sustainability (%)")
     partC_fair = mo.ui.slider(start=30, stop=100, value=70, step=5, label="Fairness (%)")
-    return (partC_pred, partC_compute, partC_comm, partC_fault, partC_sched, partC_sustain, partC_fair,)
+    return (partC_comm, partC_compute, partC_fair, partC_fault, partC_pred, partC_sched, partC_sustain)
 
 
 # ─── CELL 7: Part D prediction + Part D controls ─────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_refl = mo.ui.radio(
         options={
             "A) Yes -- fairness overhead for communication efficiency": "yes_trade",
@@ -333,7 +327,7 @@ def _(mo, partC_pred):
         options={"Static": "static", "Elastic": "elastic"},
         value="Static", label="Scheduling mode:",
     )
-    return (partD_refl, partD_gpus, partD_comm_strategy, partD_ckpt_freq, partD_scheduling,)
+    return (partD_ckpt_freq, partD_comm_strategy, partD_gpus, partD_refl, partD_scheduling)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -343,17 +337,16 @@ def _(mo, partC_pred):
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, apply_plotly_theme, COLORS,
-    CARBON_CAP, CARBON_STRATEGY, FAIRNESS_METRIC,
-    FAIRNESS_OVERHEAD_MS, FAIRNESS_THRESHOLD,
-    H100_TFLOPS_FP16, H100_RAM_GB, H100_TDP_W,
-    NVLINK_BW_GBS, IB_BW_GBPS, MTBF_GPU_HOURS, CHECKPOINT_COST_S,
-    ALLREDUCE_RING_EFF, GRADIENT_COMPRESS,
-    partA_pred, partA_fleet_toggle,
-    partB_pred, partB_fleet_slider, partB_mtbf_slider, partB_ckpt_slider,
-    partC_pred, partC_compute, partC_comm, partC_fault, partC_sched, partC_sustain, partC_fair,
-    partD_refl, partD_gpus, partD_comm_strategy, partD_ckpt_freq, partD_scheduling,
-    ledger,
+    mo, go, np, math,
+    apply_plotly_theme, COLORS, CARBON_CAP, CARBON_STRATEGY,
+    FAIRNESS_METRIC, FAIRNESS_OVERHEAD_MS, FAIRNESS_THRESHOLD, H100_TFLOPS_FP16,
+    H100_RAM_GB, H100_TDP_W, NVLINK_BW_GBS, IB_BW_GBPS,
+    MTBF_GPU_HOURS, CHECKPOINT_COST_S, ALLREDUCE_RING_EFF, GRADIENT_COMPRESS,
+    ledger, partA_fleet_toggle, partA_pred, partB_ckpt_slider,
+    partB_fleet_slider, partB_mtbf_slider, partB_pred, partC_comm,
+    partC_compute, partC_fair, partC_fault, partC_pred,
+    partC_sched, partC_sustain, partD_ckpt_freq, partD_comm_strategy,
+    partD_gpus, partD_refl, partD_scheduling,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Sensitivity Wall

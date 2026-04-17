@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-2424
+title: CTR Embedding QAT Pipeline Bottleneck
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: A cloud-based Click-Through Rate (CTR) prediction model has 500GB of FP32 embedding tables.
+  PTQ to INT8 drops AUC by 1.5% (unacceptable). You introduce QAT with FakeQuant operations. Training
+  throughput plummets from 10,000 batches/sec to 2,500 batches/sec, missing daily retraining SLAs.
+details:
+  realistic_solution: The FakeQuant operation in standard deep learning frameworks is extremely slow on
+    massive embedding tables because it involves scattered memory reads/writes, casting, and rounding
+    operations that are completely memory-bandwidth bound. In QAT for embeddings, simulating quantization
+    on every forward pass is unnecessary. The architectural fix is to implement a delayed or stochastic
+    QAT. Instead of FakeQuant on every lookup, you maintain FP32 master weights but only update the INT8
+    materialized weights periodically (e.g., every 1000 steps), or write a custom fused CUDA kernel that
+    performs the embedding lookup and FakeQuant in a single memory transaction.
+  common_mistake: Switching back to PTQ and trying to use a much larger calibration set, which still won't
+    recover the AUC for long-tail sparse embeddings.
+  napkin_math: 'Embedding lookup for BS=2048, 100 features. 204,800 rows accessed. Standard FakeQuant:
+    Read FP32 (819KB) -> compute min/max -> scale/round -> Write FP32 (819KB). Requires 3 kernel launches.
+    Custom fused kernel: Read FP32, scale/round in registers, return simulated FP32. Cuts memory traffic
+    by 66% and kernel launch overhead by 3x.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

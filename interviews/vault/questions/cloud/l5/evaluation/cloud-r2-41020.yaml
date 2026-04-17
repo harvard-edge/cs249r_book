@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-r2-41020
+title: Context Parallelism vs Sequence Parallelism
+topic: model-tensor-parallelism
+status: published
+provenance: imported
+scenario: Distinguish between Megatron's 'sequence parallelism' and 'context parallelism' (also called
+  Ring Attention). Both split the sequence dimension, but they solve different problems. When would you
+  use each?
+details:
+  realistic_solution: 'Sequence Parallelism (SP): Splits the sequence dimension ONLY for non-TP operations
+    (LayerNorm, Dropout, residual connections). Each TP rank processes seq_len/TP tokens for these ops.
+    The GEMM operations still use standard TP. SP is always used WITH TP and requires no additional GPUs
+    — it reuses the TP group. Purpose: reduce activation memory from replicated LayerNorm/Dropout activations.
+    Context Parallelism (CP) / Ring Attention: Splits the actual attention computation across GPUs along
+    the sequence dimension. Each GPU holds seq_len/CP tokens and computes attention by ring-passing KV
+    blocks. Requires dedicated GPUs beyond the TP group. Purpose: enable training with sequence lengths
+    that exceed single-GPU memory (e.g., 128K+ tokens). When to use: SP is essentially free (no extra
+    GPUs, minimal extra comms) — always use with TP. CP is needed when sequence length × hidden_dim ×
+    num_layers × bytes_per_element > available_GPU_memory for activations, typically at seq_len > 32K
+    with large models.'
+  common_mistake: Using the terms interchangeably. Sequence parallelism is tightly coupled with TP and
+    only affects LayerNorm/Dropout activations. Context parallelism is an independent parallelism dimension
+    that splits the attention computation itself across GPUs.
+  napkin_math: 'KV cache for 128K context, 80 layers, 8 KV heads, head_dim=128, BF16: 2 × 128K × 80 ×
+    8 × 128 × 2B = 2 × 131072 × 80 × 8 × 128 × 2 = 42,949,672,960 bytes ≈ 40 GiB (42.9 GB) per GPU. With
+    CP=4: ~10.7 GB per GPU.'
+last_modified: '2026-04-02'

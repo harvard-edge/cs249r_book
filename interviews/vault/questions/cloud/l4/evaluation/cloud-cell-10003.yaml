@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-cell-10003
+title: Evaluating Gradient Checkpointing Overhead on Training Throughput for GPT-Scale Models
+topic: activation-memory
+status: published
+provenance: imported
+scenario: Your team reports that enabling gradient checkpointing reduced peak activation memory by 8×
+  on A100 (80 GB HBM2e) but also reduced training throughput from 380 tokens/sec to 298 tokens/sec on
+  a 13B GPT model (40 layers, H=5120, S=2048, B=4). Your manager asks you to evaluate whether the 21.6%
+  throughput loss is acceptable given that without checkpointing the job OOMs, and to identify if the
+  overhead matches theoretical expectations.
+details:
+  realistic_solution: 'Theoretical overhead for full layer-level checkpointing: total FLOPs go from F+2F=3F
+    to F+F+2F=4F, a 33% increase. Measured overhead is (380-298)/380 = 21.6%, implying checkpointing every
+    1.5 layers on average, consistent with selective attention-only checkpointing. Verify by profiling
+    nsys/Nsight to confirm which operations are being recomputed. If 21.6% is acceptable given the OOM
+    alternative, accept; if not, explore FlashAttention (eliminates attention score storage entirely)
+    to reduce activation memory without recomputation overhead.'
+  common_mistake: Accepting the measured overhead without verifying it against theory. Standard gradient
+    checkpointing (checkpoint every layer) adds exactly one additional forward pass worth of FLOPs to
+    the backward pass, which should increase total training time by approximately 33% (backward was already
+    ~2× forward). If measured overhead is 21.6%, that implies selective or partial checkpointing, not
+    full layer-level checkpointing.
+  napkin_math: '33% theoretical overhead vs 21.6% measured → actual checkpoint granularity is approximately
+    every ceil(1/0.216 × 0.333) ≈ 1.5 layers. FlashAttention saves S² attention score tensors: 64 heads
+    × 2048² × 2 B × 40 layers ≈ 21.5 GB, which alone may allow removing attention checkpointing and recovering
+    most throughput.'
+last_modified: '2026-04-01'
+tags:
+- scope:13B GPT on single A100 80GB; excludes distributed training complexity.

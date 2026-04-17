@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-1793
+title: Diagnosing Autograd Memory Leaks in Training Loops
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: A machine learning team is training a massive Transformer model on a cloud node with 8x A100
+  (80GB) GPUs. The batch size is fixed at 64 per GPU. While GPU memory utilization starts at 45GB per
+  device, it steadily increases by about 8GB per validation step, eventually crashing with a CUDA Out
+  of Memory (OOM) error. The validation loop accumulates the total loss for logging using the code `epoch_loss
+  += loss`. Diagnose the architectural root cause of the linear memory growth.
+details:
+  realistic_solution: The `loss` tensor retains a pointer (e.g., `grad_fn` in PyTorch) to the entire reverse-linked
+    computational graph built during the forward pass to maintain state for backpropagation. By accumulating
+    `epoch_loss += loss`, the engineer unintentionally keeps the intermediate activations for every batch
+    alive in VRAM. The fix is to decouple the scalar value from the reverse graph using `epoch_loss +=
+    loss.item()` or `loss.detach()`, allowing the framework to immediately free the forward pass activations.
+  common_mistake: Candidates often misdiagnose this as dataset loader memory leaks, GPU memory fragmentation,
+    or uncollected garbage, missing the fundamental mechanics of how framework tensors implicitly retain
+    the full computational graph.
+  napkin_math: Forward pass intermediate activations for batch=64 ≈ 8GB. If validation accumulates `loss`
+    over 5 steps, it retains 5 distinct reverse-linked graphs. Total memory = Baseline (45GB) + 5 * 8GB
+    = 85GB > 80GB A100 limit, triggering OOM.
+chain:
+  id: cloud-chain-337
+  position: 2
+created_at: '2026-03-24T00:44:21.882884'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

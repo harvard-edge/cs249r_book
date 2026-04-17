@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-0136
+title: 'The Chatbot Latency Spike: Model Serving Infrastructure'
+topic: model-serving-infrastructure
+status: draft
+provenance: imported
+scenario: You are an ML Systems Engineer diagnosing a performance issue in a new AI chatbot. The service
+  uses a Llama 70B model served on H100 GPUs and has a strict P99 Time-To-First-Token (TTFT) SLA of 300ms.
+  Your team chose a static batching strategy, collecting requests for up to 50ms before dispatching a
+  batch to the GPU. During load testing with spiky user traffic, your dashboard shows that while average
+  TTFT is acceptable (~200ms), the P99 TTFT balloons to over 800ms. During these spikes, GPU utilization
+  is pegged at 100% and the incoming request queue grows rapidly. Based on this data, diagnose the most
+  likely cause of the SLA violation.
+details:
+  realistic_solution: The root cause is head-of-line blocking induced by the static batching policy. Static
+    batching optimizes for throughput by waiting to form a full batch, but this imposes a waiting 'tax'
+    on every request. Under spiky load, a large number of requests can arrive just after a batch has been
+    dispatched, forcing them to wait for the entire duration of the current batch's processing *plus*
+    their own batch formation time. This delay cascades, causing the request queue to grow and P99 latency
+    to explode. The correct solution is to switch to a continuous batching (or 'in-flight' batching) scheduler,
+    which adds incoming requests to the currently running batch, minimizing queue time and decoupling
+    TTFT from batch formation.
+  common_mistake: Engineers often blame the most expensive component first. They'll claim the H100 GPU
+    is too slow, the model is too big, or the network is the bottleneck. This ignores the fact that the
+    system's queueing strategy, not just the raw hardware speed, governs tail latency.
+  napkin_math: 70B FP16 = 140GB (requires 2x 80GB H100s via NVLink). NVLink provides 900GB/s. Tensor parallelism
+    adds 2x NVLink transfers per layer. 80 layers * 2 * 10MB = 1.6GB transferred per token. Over 900GB/s,
+    this takes 1.7ms just in network overhead. If prefill compute takes 200ms, network adds ~2ms. But
+    static batching wait time (e.g., 200ms) pushes TTFT past 300ms SLA.
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

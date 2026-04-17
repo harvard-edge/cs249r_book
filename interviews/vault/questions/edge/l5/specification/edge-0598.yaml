@@ -1,0 +1,39 @@
+schema_version: 1
+id: edge-0598
+title: The Fusion Priority Inversion
+topic: kernel-fusion
+status: published
+provenance: imported
+scenario: 'You are optimizing a multi-task perception system on a Jetson AGX Orin for an autonomous vehicle.
+  The system runs two models concurrently on separate, prioritized CUDA streams: a high-priority `PedestrianDetector`
+  (20ms hard real-time deadline) and a low-priority `SignClassifier` (100ms deadline). To reduce kernel
+  launch overhead, your team fuses their identical YOLO-style backbones into a single, large kernel, leaving
+  the detection/classification heads separate. After deployment, `ncu` profiling shows the average latency
+  across both tasks has dropped by 5%. However, the vehicle''s safety monitor starts logging critical
+  faults: the `PedestrianDetector` is now missing its 20ms deadline in 1% of frames. Evaluate the team''s
+  design decision. Why would an optimization that improved average performance cause a catastrophic failure
+  in the system''s P99 latency?'
+details:
+  realistic_solution: This is a classic **Priority Inversion** failure in a real-time system, created
+    by the operator fusion. Before fusion, the device's scheduler could ensure the high-priority `PedestrianDetector`
+    stream preempted or ran ahead of the low-priority `SignClassifier` stream, guaranteeing its deadline.
+    By creating a single, monolithic, non-preemptible fused kernel, you destroyed this fine-grained scheduling.
+    In the P99 worst-case scenario, the low-priority stream gets scheduled first and launches the giant
+    fused kernel. The high-priority stream, even with its camera frame ready, is now blocked. It must
+    wait for the *entire* fused kernel to complete its run for the low-priority task before it can even
+    begin its own work. The optimization saved microseconds on kernel launch overhead on average, but
+    introduced tens of milliseconds of blocking latency at the tail, violating the safety-critical deadline.
+  common_mistake: The fused kernel is too large and is causing L2 cache misses or register spilling. While
+    a valid concern, this would likely increase *average* latency as well by making the kernel memory-bound.
+    The key to this problem is the *divergence* between the average (mean) and the tail (P99) latency,
+    which points to a systemic scheduling conflict, not just a microarchitectural bottleneck.
+  napkin_math: PedDetector takes 0.5 TFLOPs / 137 = 3.6ms. SignClassifier takes 2.0 TFLOPs / 137 = 14.6ms.
+    Operator fusion compiles SignClassifier into a monolithic 14.6ms kernel. GPUs execute kernels non-preemptively.
+    If Sign starts at t=0, Ped (arriving t=1ms) waits until t=14.6ms. Total Ped latency = 14.6 + 3.6 =
+    18.2ms.
+chain:
+  id: edge-chain-126
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

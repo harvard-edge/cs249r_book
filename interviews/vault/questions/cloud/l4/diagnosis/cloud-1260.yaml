@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-1260
+title: Diagnosing MMD Fairness Bottlenecks
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You are training a 150M parameter fraud detection model on 8x A100 (80GB) GPUs using PyTorch
+  DDP. To enforce Demographic Parity, you add a Maximum Mean Discrepancy (MMD) fairness penalty to the
+  loss function to penalize distribution differences between demographic groups. With a global batch size
+  of 8192 (1024 per GPU), adding this in-processing constraint causes iteration time to jump from 150ms
+  to 1200ms, and GPU utilization plummets from 95% to 25%. Diagnose the root cause of this massive performance
+  regression.
+details:
+  realistic_solution: The bottleneck is the cross-GPU `all_gather` required to collect features for the
+    global MMD calculation. This creates a severe synchronization barrier that stalls the compute stream
+    and breaks DDP's gradient communication overlap. The solution is to compute the MMD penalty locally
+    per GPU (N=1024) or use momentum-based running statistics for group distributions to entirely eliminate
+    the forward-pass synchronization barrier.
+  common_mistake: Assuming the performance drop is purely due to the O(N^2) computational complexity of
+    the MMD penalty and attempting to optimize the pairwise distance CUDA kernel.
+  napkin_math: Global batch N=8192 requires an 8192x8192 distance matrix (~268MB FP32). The `all_gather`
+    blocks DDP's backward pass overlap. Local MMD (N=1024) reduces the matrix to 1024x1024 (4MB) and removes
+    the 8-GPU sync barrier, dropping iteration time back down to ~160ms.
+chain:
+  id: cloud-chain-145
+  position: 2
+created_at: '2026-03-23T22:21:40.573380'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

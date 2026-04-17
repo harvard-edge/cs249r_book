@@ -49,6 +49,13 @@ concurrency:
   group: labs-validate-${{ github.ref }}
   cancel-in-progress: true
 
+# Workflow-level environment. Defined here rather than as a repository variable
+# because repository variables are not exposed to workflows triggered by
+# pull_request events from forks (GitHub security default). Workflow-level
+# env vars are available in all contexts.
+env:
+  LABS_ROOT: labs
+
 jobs:
   # ===========================================================================
   # Stage 1: Python syntax + import validation
@@ -118,17 +125,26 @@ jobs:
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: 🔨 Build Labs Site
-        working-directory: ${{ vars.LABS_ROOT }}
+        working-directory: ${{ env.LABS_ROOT }}
         run: quarto render
 
       - name: 🔍 Validate build output
         run: |
-          if [ ! -f "${{ vars.LABS_ROOT }}/_build/index.html" ]; then
-            echo "❌ CRITICAL: index.html missing from build output."
+          LABS_ROOT="${{ env.LABS_ROOT }}"
+          echo "🔎 Resolved LABS_ROOT: '${LABS_ROOT}'"
+          if [ -z "${LABS_ROOT}" ]; then
+            echo "❌ FATAL: LABS_ROOT resolved to empty string."
+            echo "   If this is a fork PR, check that LABS_ROOT is declared in the workflow-level env: block."
+            echo "   Repository variables are not available on fork PR triggers."
+            exit 1
+          fi
+          if [ ! -f "${LABS_ROOT}/_build/index.html" ]; then
+            echo "❌ CRITICAL: ${LABS_ROOT}/_build/index.html missing from build output."
+            echo "   Quarto render may have exited nonzero. Check the build step above."
             exit 1
           fi
           echo "✅ Site built successfully"
-          echo "📊 Build size: $(du -sh ${{ vars.LABS_ROOT }}/_build | cut -f1)"
+          echo "📊 Build size: $(du -sh ${LABS_ROOT}/_build | cut -f1)"
 
   # ===========================================================================
   # Stage 3: WASM export smoke test
@@ -136,7 +152,7 @@ jobs:
   wasm-smoke-test:
     name: '🌐 WASM Export Smoke Test'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: 📥 Checkout
@@ -201,9 +217,11 @@ jobs:
 
       - name: 🌐 Export representative labs to WASM HTML
         run: |
-          SMOKE_LABS="labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol2/lab_01_introduction.py"
+          # lab_05_dist_train is the regression guard: it shipped broken to
+          # prod when plotly was imported before micropip.install(). See #1353.
+          SMOKE_LABS="labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol2/lab_01_introduction.py labs/vol2/lab_05_dist_train.py"
           FAILED=""
-          
+
           # Setup wheel directory so relative paths work
           mkdir -p /tmp/wasm-smoke/wheels
           cp mlsysim/dist/*.whl /tmp/wasm-smoke/wheels/
@@ -236,6 +254,25 @@ jobs:
           fi
           echo ""
           echo "✅ All WASM smoke tests passed"
+
+      # =====================================================================
+      # Browser-level Pyodide verification
+      # =====================================================================
+      # lab_05 shipped broken to prod (#1353): plotly imported before
+      # micropip.install() in a WASM runtime. Every static/engine/Node-Pyodide
+      # check passed — only a real browser caught it. This step runs the
+      # exported labs in headless Chromium behind the same cross-origin
+      # isolation headers the prod dev-preview uses, so SharedArrayBuffer is
+      # enabled and Pyodide threading works. A lab is considered healthy when
+      # a marimo DOM signal (tab, cell, or island) attaches within 180s.
+      - name: 🎭 Install Playwright + Chromium
+        run: |
+          pip install playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: 🌐 Browser smoke test (real Chromium + Pyodide)
+        run: |
+          python3 labs/tests/browser_smoke.py --labs-dir /tmp/wasm-smoke
 
   # ===========================================================================
   # Summary

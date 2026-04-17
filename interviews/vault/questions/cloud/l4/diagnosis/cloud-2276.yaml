@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-2276
+title: The Autograd Overhead in Serving
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: A production inference service running a 7B model in PyTorch shows that `torch.cuda.memory_allocated()`
+  reports 28GB, but the model weights are only 14GB in FP16. The serving code uses a simple `model(input)`
+  call. No optimizer or gradient accumulation is present. Where is the extra 14GB coming from, and how
+  do you reclaim it?
+details:
+  realistic_solution: 'The extra 14GB is autograd''s activation stash. By default, PyTorch''s autograd
+    system records intermediate tensors (activations at each layer boundary) during the forward pass so
+    gradients can be computed during backward. For a 7B transformer at batch=1 with sequence length 2048,
+    activations consume roughly 1× the model size. Fix: wrap inference in `torch.inference_mode()` (preferred
+    over `torch.no_grad()` because it also disables version counting and view tracking, saving additional
+    memory and CPU overhead). This eliminates the activation stash entirely. Additional optimization:
+    set `model.eval()` to switch BatchNorm/Dropout to inference behavior, and ensure `requires_grad=False`
+    on all parameters.'
+  common_mistake: Assuming PyTorch automatically skips gradient tracking during inference. Without explicit
+    `torch.no_grad()` or `torch.inference_mode()`, PyTorch's autograd engine records the computational
+    graph for every forward pass, storing intermediate activations for potential backward passes that
+    will never happen.
+  napkin_math: '7B model in FP16 = 14GB weights. Without inference_mode: autograd stores ~1 activation
+    tensor per layer. 32 transformer layers × ~430MB activations per layer ≈ 13.8GB. Total: 14 + 13.8
+    ≈ 28GB. With inference_mode: 14GB weights only. Memory savings: 50%. Latency improvement: ~5-15% from
+    eliminated autograd bookkeeping CPU overhead.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

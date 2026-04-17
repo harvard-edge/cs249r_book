@@ -1,0 +1,35 @@
+schema_version: 1
+id: mobile-0123
+title: The Dynamic Shape Inference
+topic: graph-compilation
+status: published
+provenance: imported
+scenario: You're deploying a text classification model on the Apple ANE via CoreML. With a fixed input
+  shape of 128 tokens, inference takes 2ms. When you enable dynamic input shapes (1-512 tokens), the same
+  128-token input takes 6ms — 3× slower on identical hardware and identical input. Why does dynamic shape
+  support cost so much, and when is padding to a fixed shape the better strategy despite wasting compute?
+details:
+  realistic_solution: 'The ANE is a fixed-function accelerator with hardwired data paths. Its performance
+    depends on compile-time optimizations that require known tensor shapes. With fixed shapes, CoreML''s
+    compiler pre-computes optimal tiling, fuses operations, and pre-allocates all internal buffers at
+    compile time — zero runtime overhead. With dynamic shapes, the compiler must: (1) allocate buffers
+    at runtime for each new shape (+0.5ms), (2) perform shape validation and compatibility checks (+0.5ms),
+    (3) use conservative tiling that works for any shape in the range, not the optimal tiling for 128
+    tokens (+1ms from suboptimal scheduling), (4) disable operator fusion across shape-dependent boundaries
+    (+2ms from unfused kernels). Total: 6ms vs 2ms. Fix: use shape bucketing. Define 4 fixed shapes (32,
+    128, 256, 512 tokens) and compile a separate ANE plan for each. At runtime, pad input to the next
+    bucket. The 128-token input hits the 128 bucket exactly: 2ms. A 65-token input pads to 128: 2ms with
+    ~50% wasted compute, still faster than dynamic''s 6ms. Tradeoff: 4 compiled models use ~4x storage
+    (~80 MB vs 20 MB) but eliminate the 3x latency penalty.'
+  common_mistake: '"Dynamic shapes are slower because the model has to handle more tokens." The input
+    is the same 128 tokens in both cases — the slowdown comes from the compilation and scheduling path,
+    not the computation itself.'
+  napkin_math: 'Fixed 128 tokens: 2ms (optimized schedule, pre-allocated buffers). Dynamic 128 tokens:
+    0.5ms (allocation) + 0.5ms (shape checks) + 3ms (suboptimal tiling/scheduling) + 2ms (unfused kernels)
+    = **6ms**. Bucketed (4 fixed shapes): 128-token input → 128 bucket → 2ms. 65-token input → 128 bucket
+    → 2ms (50% compute wasted, but still 3× faster than dynamic). Break-even: dynamic is better only if
+    inputs vary so widely that you''d need >10 buckets, making the model binary unacceptably large (10
+    × compiled model size).'
+last_modified: '2026-04-01'
+tags:
+- scope:App Experience

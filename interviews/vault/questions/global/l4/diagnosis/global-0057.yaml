@@ -1,0 +1,34 @@
+schema_version: 1
+id: global-0057
+title: The CPU Overhead Anomaly
+topic: latency-decomposition
+status: published
+provenance: imported
+scenario: You deploy a 7B LLM on a single A100 (80GB) using a serving framework configured with CUDA graphs
+  to minimize latency. Production traffic consists of heavily mixed sequence lengths (input lengths vary
+  continuously between 32 and 1024 tokens). Profiling reveals that average token generation latency has
+  unexpectedly spiked from 45ms to 120ms, CPU utilization on the inference worker is pinned at 100%, and
+  GPU SM utilization has plummeted to 25%.
+details:
+  realistic_solution: 'The symptom (100% CPU, low GPU utilization, high latency) points directly to graph
+    recompilation and framework dispatch overhead. CUDA graphs require fixed memory addresses and grid
+    dimensions. When input tensor shapes change dynamically (e.g., varying sequence lengths), the graph
+    capture mechanism cannot replay the existing graph. Instead, the framework either falls back to eager
+    mode dispatch (incurring high CPU overhead per operation) or, worse, triggers a full recompilation
+    of the computation graph for the new shape. The solution requires hardware-compiler-algorithm co-design:
+    Algorithmically bucket incoming requests into fixed sequence length buckets (e.g., 128, 256, 512,
+    1024), pad the inputs to match the bucket size, and compile a separate, static CUDA graph for each
+    bucket at startup.'
+  common_mistake: Assuming the GPU is compute-bound by the varying sequence lengths and attempting to
+    optimize the attention kernel, or adding more CPU threads.
+  napkin_math: 'Eager dispatch overhead per layer is ~15µs. For a 32-layer model with 6 ops per layer
+    = 192 ops. Dispatch overhead = 192 * 15µs = 2.88ms per token. CUDA graph replay overhead is ~10µs
+    total. However, graph recompilation costs ~200ms. If 50% of the varying requests trigger a recompilation:
+    (0.5 * 200ms) + (0.5 * 10µs) = ~100ms of average overhead added per request. Bucketing to 4 fixed
+    sizes reduces runtime recompilations to 0, ensuring the 10µs replay path is always taken.'
+chain:
+  id: global-chain-050
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

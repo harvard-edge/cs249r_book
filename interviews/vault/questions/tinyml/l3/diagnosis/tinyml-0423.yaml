@@ -1,0 +1,28 @@
+schema_version: 1
+id: tinyml-0423
+title: The Mixed-Precision Memory Spike
+topic: mcu-compute-constraints
+status: published
+provenance: imported
+scenario: You are a TinyML engineer optimizing a keyword-spotting model for a Cortex-M4 microcontroller
+  with 256KB of SRAM. Your fully INT8-quantized model runs perfectly, with a peak Tensor Arena usage of
+  72KB. To improve accuracy, you change a single `Conv2D` layer in the middle of the network to execute
+  in FP32. The model now fails during interpreter initialization, crashing with a memory allocation error.
+  You've confirmed the problematic FP32 layer receives a `[1, 25, 40, 16]` INT8 tensor from the previous
+  layer. Using napkin math, diagnose the most likely cause for the memory allocation failure.
+details:
+  realistic_solution: The root cause is the memory spike during the de-quantization of the input tensor
+    for the FP32 `Conv2D` layer. The TensorFlow Lite for Microcontrollers interpreter must create a temporary
+    FP32 copy of the INT8 input tensor *before* it can execute the operation. At that moment, both the
+    original INT8 tensor and the new, 4x larger FP32 tensor are simultaneously live in the Tensor Arena.
+    This transient spike, not the final output size, is what exhausts the SRAM.
+  common_mistake: Engineers often focus only on the memory cost of a layer's *weights* (which live in
+    Flash) or its final *output* tensor. They forget that mixed-precision execution requires temporary
+    buffers for type conversion. The de-quantization of a large INT8 input tensor into an FP32 tensor
+    creates a massive, transient memory peak that is often the true, non-obvious cause of failure.
+  napkin_math: 'Input [1,25,40,16] INT8: 25*40*16=16KB. De-quantize to FP32: 16*4=64KB. Both live simultaneously:
+    16+64=80KB. Previous arena peak was 72KB. Transient peak: 72+64=136KB. If arena budget ~128KB from
+    256KB SRAM: 136>128 → OOM. Fix: use FP16 (32KB copy, peak=104KB fits), or QAT to keep layer INT8.'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

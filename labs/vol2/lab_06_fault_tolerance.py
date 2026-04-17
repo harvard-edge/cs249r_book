@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ async def _():
     GPU_COST_HR = 3.0     # $/GPU-hour cloud pricing
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPU_MTTF_HOURS, GPU_COST_HR, DecisionLog, Hardware, H100, A100, EDGE, H100_RAM_GB, EDGE_RAM_GB
 
 
@@ -208,14 +208,12 @@ def _(mo):
     a1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=16000, step=1000, label="Cluster GPUs")
     a1_write_time_s = mo.ui.slider(start=10, stop=300, value=120, step=10, label="Checkpoint write time (seconds)")
     a1_interval_s = mo.ui.slider(start=60, stop=10800, value=600, step=60, label="Your checkpoint interval (seconds)")
-    return (partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s)
+    return (a1_cluster_gpus, a1_interval_s, a1_write_time_s, partA_prediction)
 
 
 # ─── CELL 5: PART A REFLECTION + PART B PREDICTION WIDGETS ──────────────────
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_reflection = mo.ui.radio(
         options={
             "A) Double the checkpoint frequency to protect against failures": "A",
@@ -240,9 +238,7 @@ def _(mo, partA_prediction):
 
 # ─── CELL 6: PART B CONTROLS + SYNTHESIS WIDGETS ────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     a2_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model size (B params)")
     a2_cluster_gpus = mo.ui.slider(start=100, stop=25000, value=1000, step=100, label="Cluster GPUs")
     a2_storage = mo.ui.dropdown(
@@ -260,14 +256,12 @@ def _(mo, partB_prediction):
         },
         label="What is the most practical solution to the checkpoint storm?",
     )
-    return (a2_model_b, a2_cluster_gpus, a2_storage, partB_reflection)
+    return (a2_cluster_gpus, a2_model_b, a2_storage, partB_reflection)
 
 
 # ─── CELL 6b: PART C WIDGETS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_reflection):
-    mo.stop(partB_reflection.value is None, mo.md("**Complete Part B reflection to unlock Part C.**"))
-
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) 10 seconds -- NVMe is fast": "A",
@@ -289,14 +283,12 @@ def _(mo, partB_reflection):
         },
         label="What is the key requirement for async checkpointing to work?",
     )
-    return (partC_prediction, c1_nvme_bw, c1_drain_bw, c1_cluster_gpus, partC_reflection)
+    return (c1_cluster_gpus, c1_drain_bw, c1_nvme_bw, partC_prediction, partC_reflection)
 
 
 # ─── CELL 6c: PART D WIDGETS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_reflection):
-    mo.stop(partC_reflection.value is None, mo.md("**Complete Part C reflection to unlock Part D.**"))
-
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) 1 replica -- just restart the failed one": "A",
@@ -319,7 +311,7 @@ def _(mo, partC_reflection):
         },
         label="How does serving fault tolerance differ from training fault tolerance?",
     )
-    return (partD_prediction, d1_replicas, d1_qps, d1_recovery_s, d1_slo_p99_ms, partD_reflection)
+    return (d1_qps, d1_recovery_s, d1_replicas, d1_slo_p99_ms, partD_prediction, partD_reflection)
 
 
 # ─── CELL 7: DECISION LOG WIDGET ────────────────────────────────────────────
@@ -340,18 +332,15 @@ def _(DecisionLog, mo, partD_reflection):
 # ─── CELL 8: TABS ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np,
-    GPU_MTTF_HOURS, GPU_COST_HR, H100_RAM_GB,
-    partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s,
-    partA_reflection,
-    partB_prediction, a2_model_b, a2_cluster_gpus, a2_storage,
-    partB_reflection,
-    partC_prediction, c1_nvme_bw, c1_drain_bw, c1_cluster_gpus,
-    partC_reflection,
-    partD_prediction, d1_replicas, d1_qps, d1_recovery_s, d1_slo_p99_ms,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, GPU_MTTF_HOURS, GPU_COST_HR,
+    H100_RAM_GB, synth_decision_input, synth_decision_ui, ledger,
+    a1_cluster_gpus, a1_interval_s, a1_write_time_s, a2_cluster_gpus,
+    a2_model_b, a2_storage, c1_cluster_gpus, c1_drain_bw,
+    c1_nvme_bw, d1_qps, d1_recovery_s, d1_replicas,
+    d1_slo_p99_ms, partA_prediction, partA_reflection, partB_prediction,
+    partB_reflection, partC_prediction, partC_reflection, partD_prediction,
     partD_reflection,
-    synth_decision_input, synth_decision_ui,
-    ledger,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Young-Daly Sweet Spot
@@ -1467,8 +1456,6 @@ def _(
 # ─── CELL 9: LEDGER_HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, partA_prediction, partB_prediction, mo):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     _a1_ok = partA_prediction.value == "C"
     _a2_ok = partB_prediction.value == "C"
     _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")

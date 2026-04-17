@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
 
     # ── Hardware from registry ──────────────────────────────────────────────
     _phone = Hardware.Edge.Generic_Phone   # iPhone 15 Pro (A17 Pro)
@@ -271,9 +271,7 @@ def _(mo):
 
 # ─── CELL 5: PART A CONTROLS + PART B WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_params = mo.ui.slider(
         start=1, stop=100, value=10, step=1,
         label="Model parameters (millions)",
@@ -301,14 +299,12 @@ def _(mo, pA_pred):
             "the adapter weights. What is the total LoRA storage?"
         ),
     )
-    return (pA_params, pA_batch, pA_strategy, pB_pred)
+    return (pA_batch, pA_params, pA_strategy, pB_pred)
 
 
 # ─── CELL 6: PART B CONTROLS + PART C WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_contexts = mo.ui.slider(
         start=1, stop=20, value=10, step=1,
         label="Number of user contexts",
@@ -327,9 +323,7 @@ def _(mo, pB_pred):
 
 # ─── CELL 7: PART C CONTROLS + PART D WIDGETS ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_target = mo.ui.radio(
         options={"CPU": "cpu", "GPU (mobile)": "gpu", "NPU": "npu"},
         value="CPU",
@@ -354,9 +348,7 @@ def _(mo, pC_pred):
 
 # ─── CELL 8: PART D CONTROLS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_beta = mo.ui.slider(
         start=0.1, stop=2.0, value=0.5, step=0.1,
         label="Data heterogeneity (beta) -- lower = more non-IID",
@@ -375,7 +367,7 @@ def _(mo, pD_pred):
         value="No compression",
         label="Gradient compression",
     )
-    return (pD_beta, pD_epochs, pD_compress)
+    return (pD_beta, pD_compress, pD_epochs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -385,17 +377,15 @@ def _(mo, pD_pred):
 # ─── CELL 9: TABS CELL ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np, ledger,
-    ACTIVATION_RATIO, ADAM_MULTIPLIER, BYTES_FP16, BYTES_FP32,
-    BIAS_FRACTION, LORA_FRACTION,
-    MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH,
-    MOBILE_CPU_POWER_W, MOBILE_NPU_POWER_W,
-    NPU_SPEEDUP, NPU_ENERGY_GAIN,
-    IID_ROUNDS, FL_TARGET_ACC,
-    pA_pred, pA_params, pA_batch, pA_strategy,
-    pB_pred, pB_contexts,
-    pC_pred, pC_target,
-    pD_pred, pD_beta, pD_epochs, pD_compress,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, ledger, ACTIVATION_RATIO,
+    ADAM_MULTIPLIER, BYTES_FP16, BYTES_FP32, BIAS_FRACTION,
+    LORA_FRACTION, MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH, MOBILE_CPU_POWER_W,
+    MOBILE_NPU_POWER_W, NPU_SPEEDUP, NPU_ENERGY_GAIN, IID_ROUNDS,
+    FL_TARGET_ACC, pA_batch, pA_params, pA_pred,
+    pA_strategy, pB_contexts, pB_pred, pC_pred,
+    pC_target, pD_beta, pD_compress, pD_epochs,
+    pD_pred,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Memory Amplification Tax

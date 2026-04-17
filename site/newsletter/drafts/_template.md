@@ -1,12 +1,18 @@
 ---
 title: "Newsletter Title Here"
-subtitle: "Optional subtitle"
 date: "YYYY-MM-DD"
 author: "Vijay Janapa Reddi"
-categories: [update]
+categories: ["essay"]
 description: "Brief description for the archive listing page."
 draft: true
 ---
+
+<!--
+  Categories (pick one):
+    "essay"     — Original essays on the shifts reshaping AI engineering
+    "community" — People, projects, events from the global ML systems community
+    "hands-on"  — TinyTorch, hardware kits, labs, tools — the buildable stuff
+-->
 
 Write your newsletter content here in Markdown.
 
@@ -18,14 +24,8 @@ Body text goes here. You can use all standard Markdown:
 - **Bold** and *italic*
 - [Links](https://mlsysbook.ai)
 
-## What's New
-
-Highlight recent updates to the textbook, TinyTorch, hardware kits, or labs.
-
-## Coming Up
-
-Tease what's next for the ML Systems curriculum.
-
 ---
 
-*Thanks for reading! Share this with anyone interested in ML systems.*
+*[Machine Learning Systems](https://mlsysbook.ai) is a two-volume open textbook on the physics of AI engineering.*
+
+[Subscribe](https://buttondown.com/mlsysbook) | [GitHub](https://github.com/harvard-edge/cs249r_book) | [TinyTorch](https://mlsysbook.ai/tinytorch/)

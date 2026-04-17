@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -66,7 +66,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
         H100_TFLOPS, A100_TFLOPS, B200_TFLOPS, V100_TFLOPS, NVME_GBS,
@@ -229,9 +229,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_gen = mo.ui.dropdown(
         options={"V100 (2017)": "v100", "A100 (2020)": "a100", "H100 (2022)": "h100", "B200 (2024)": "b200"},
         value="H100 (2022)", label="GPU generation",
@@ -246,12 +244,10 @@ def _(mo, pA_pred):
         },
         label="128 GPUs at 80% utilization. Double to 256 without upgrading storage. What happens?",
     )
-    return (pB_pred,)
+    return (pA_gen, pB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_gpus = mo.ui.slider(start=8, stop=1024, value=128, step=8, label="GPU count")
     pB_target = mo.ui.slider(start=50, stop=95, value=80, step=5, label="Target utilization (%)")
 
@@ -264,12 +260,10 @@ def _(mo, pB_pred):
         },
         label="256 GPUs, 1,000 shards, random selection. Collision probability?",
     )
-    return (pC_pred,)
+    return (pB_gpus, pB_target, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_workers = mo.ui.slider(start=8, stop=256, value=256, step=8, label="GPU workers")
     pC_shards = mo.ui.slider(start=100, stop=10000, value=1000, step=100, label="Dataset shards")
 
@@ -282,12 +276,10 @@ def _(mo, pC_pred):
         },
         label="200 ms compute, 300 ms I/O. Add prefetch depth 4. Does the stall disappear?",
     )
-    return (pD_pred,)
+    return (pC_shards, pC_workers, pD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_compute = mo.ui.slider(start=100, stop=500, value=200, step=10, label="Compute time (ms)")
     pD_io = mo.ui.slider(start=50, stop=1000, value=300, step=10, label="I/O time (ms)")
     pD_prefetch = mo.ui.slider(start=0, stop=8, value=0, step=1, label="Prefetch depth")
@@ -301,15 +293,25 @@ def _(mo, pD_pred):
         },
         label="1,000-GPU cluster, MTBF = 5 hours, checkpoint write = 2 min. Optimal interval?",
     )
-    return (pE_pred,)
+    return (pD_compute, pD_io, pD_prefetch, pE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pE_mtbf = mo.ui.slider(start=1, stop=24, value=5, step=1, label="Cluster MTBF (hours)")
     pE_write = mo.ui.slider(start=30, stop=300, value=120, step=10, label="Checkpoint write time (s)")
     pE_interval = mo.ui.slider(start=1, stop=120, value=30, step=1, label="Checkpoint interval (min)")
+    return (pE_interval, pE_mtbf, pE_write)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, pA_gen, pA_pred, pB_gpus,
+    pB_pred, pB_target, pC_pred, pC_shards,
+    pC_workers, pD_compute, pD_io, pD_pred,
+    pD_prefetch, pE_pred, pE_interval, pE_mtbf,
+    pE_write,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE STORAGE-COMPUTE CHASM

@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-2272
+title: The Framework Dispatch Overhead
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You profile a small transformer model (125M parameters) doing inference with batch size 1 in
+  PyTorch eager mode. The nsys trace shows that GPU kernels occupy only 35% of the wall-clock time — the
+  rest is CPU-side overhead between kernel launches. Your colleague says 'the model is too small to saturate
+  the GPU.' Is that the whole story? What specifically is happening in the 65% of time the GPU is idle,
+  and what are your options to fix it?
+details:
+  realistic_solution: 'The 65% idle time is the PyTorch dispatch overhead: (1) Python interpreter overhead
+    per operator call (~10-20μs), (2) PyTorch''s dispatcher traverses multiple dispatch keys (autograd,
+    autocast, batched, vmap) even in inference mode (~5-15μs), (3) operator selection and argument marshaling
+    (~5μs), (4) CUDA kernel launch latency (~5-10μs). For a 125M model with ~100 operators per forward
+    pass, each taking ~20μs of GPU compute, the CPU overhead of ~40μs per operator dominates. Fixes: (1)
+    `torch.compile()` to trace and fuse the graph, eliminating per-operator dispatch, (2) CUDA graphs
+    to replay a captured kernel sequence with zero dispatch overhead, (3) TorchScript or export to remove
+    Python entirely, (4) `torch.inference_mode()` to skip autograd dispatch keys.'
+  common_mistake: 'Blaming ''Python overhead'' generically. The real issue is the framework dispatch stack:
+    Python → PyTorch dispatcher → ATen operator selection → cuBLAS/cuDNN call → CUDA driver → kernel launch.
+    Each hop adds latency, and with small/fast kernels, this overhead dominates.'
+  napkin_math: '100 operators × 20μs GPU each = 2ms of GPU compute. 100 operators × 40μs CPU dispatch
+    = 4ms overhead. Total = 6ms, GPU utilization = 2/6 = 33%. With torch.compile: CPU overhead drops to
+    ~0.5ms (graph dispatch once). Total = 2.5ms, GPU utilization = 80%. With CUDA Graphs: CPU overhead
+    ≈ 0. Total ≈ 2.1ms, GPU utilization ≈ 95%.'
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform
