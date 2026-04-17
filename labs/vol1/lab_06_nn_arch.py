@@ -250,7 +250,7 @@ def _(mo):
         label="Doubling a Transformer's context from 4,096 to 8,192 tokens -- "
               "how much more memory does attention require?",
     )
-    return (partB_prediction,)
+    return (partA_arch, partA_resolution, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -272,7 +272,7 @@ def _(mo):
         label="Two networks: identical FLOPs/params. One is 128 layers deep (width 32). "
               "The other is 2 layers deep (width 512). Which is faster at inference?",
     )
-    return (partC_prediction,)
+    return (partB_heads, partB_seq_len, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -294,10 +294,14 @@ def _(mo):
         },
         label="Which architecture family achieves the highest GPU utilization (MFU) at batch=1?",
     )
-    return (partD_prediction,)
+    return (partC_context_c, partC_depth, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(
+    mo, partA_arch, partA_prediction, partA_resolution,
+    partB_heads, partB_prediction, partB_seq_len, partC_context_c,
+    partC_depth, partC_prediction, partD_prediction,
+):
     partD_batch_d = mo.ui.slider(
         start=1, stop=256, value=1, step=1, label="Batch size",
     )

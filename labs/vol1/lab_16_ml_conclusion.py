@@ -217,7 +217,7 @@ def _(mo):
         },
         label="You quantized MobileNetV2 to INT8, deployed on mobile. After 6 months without monitoring?",
     )
-    return (partB_pred,)
+    return (partA_batch, partA_model, partA_prec, partB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -242,7 +242,7 @@ def _(mo):
         value="Memory Wall",
         label="Which invariant do you think you most consistently underestimated?",
     )
-    return (partC_pred,)
+    return (partB_monitoring, partB_months, partB_quant, partC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -287,10 +287,16 @@ def _(mo):
         },
         label="Quantize Llama-2 70B FP16 to INT4 (35 GB < 80 GB HBM). New binding constraint?",
     )
-    return (partE_pred,)
+    return (partD_inference, partD_logging, partD_optimize, partD_postprocess, partD_preprocess, partD_speedup, partE_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partE_pred):
+def _(
+    mo, partA_batch, partA_model, partA_prec,
+    partA_pred, partB_monitoring, partB_months, partB_pred,
+    partB_quant, partC_pred, partD_inference, partD_logging,
+    partD_optimize, partD_postprocess, partD_pred, partD_preprocess,
+    partD_speedup, partE_pred,
+):
     partE_int4 = mo.ui.checkbox(label="INT4 Quantization", value=False)
     partE_pruning = mo.ui.checkbox(label="Structured Pruning (50%)", value=False)
     partE_distill = mo.ui.checkbox(label="Knowledge Distillation", value=False)

@@ -257,7 +257,7 @@ def _(mo):
         label="GPT-2 training on V100 with SSD storage and 4 GPUs over PCIe. "
               "Which stage is the bottleneck?",
     )
-    return (partB_prediction,)
+    return (partA_model_size, partA_optimizer, partA_precision_a, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -285,7 +285,7 @@ def _(mo):
         label="GPT-2 (1.5B) requires ~77 GB in full FP32 (with activations). "
               "Mixed precision (FP16 forward + FP32 master + FP32 Adam) requires how much?",
     )
-    return (partC_prediction,)
+    return (partB_compute_ms, partB_data_ms, partB_pcie_ms, partB_sync_ms, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -308,10 +308,15 @@ def _(mo):
         label="Training on 8 GPUs with r=0.15 (gradient sync = 15% of step time). "
               "What speedup over 1 GPU?",
     )
-    return (partD_prediction,)
+    return (partC_model_c, partC_precision_c, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(
+    mo, partA_model_size, partA_optimizer, partA_precision_a,
+    partA_prediction, partB_compute_ms, partB_data_ms, partB_pcie_ms,
+    partB_prediction, partB_sync_ms, partC_model_c, partC_precision_c,
+    partC_prediction, partD_prediction,
+):
     partD_gpus = mo.ui.slider(
         start=1, stop=256, value=8, step=1, label="Number of GPUs",
     )

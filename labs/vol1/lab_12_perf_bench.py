@@ -238,7 +238,7 @@ def _(mo):
         label="Edge device benchmarks at 30 FPS (1-min vendor test). "
               "Sustained FPS after 10 min in fanless enclosure at 35C?",
     )
-    return (pB_pred,)
+    return (pA_serial, pA_speedup, pB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -259,7 +259,7 @@ def _(mo):
         },
         label="Config A has highest accuracy (94%). Is it deployable?",
     )
-    return (pC_pred,)
+    return (pB_ambient, pB_cooling, pB_time, pC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -279,10 +279,14 @@ def _(mo):
         },
         label="Inference service: 50 ms average latency. SLO: 200 ms p99. Is the SLO satisfied?",
     )
-    return (pD_pred,)
+    return (pC_batch, pC_precision, pD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
+def _(
+    mo, pA_pred, pA_serial, pA_speedup,
+    pB_ambient, pB_cooling, pB_pred, pB_time,
+    pC_batch, pC_precision, pC_pred, pD_pred,
+):
     pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=0.8, step=0.05, label="Tail heaviness (sigma)")
     pD_slo = mo.ui.slider(start=50, stop=500, value=200, step=10, label="SLO threshold (ms)")
 

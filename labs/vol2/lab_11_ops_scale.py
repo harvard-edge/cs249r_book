@@ -264,7 +264,7 @@ def _(mo):
         options={"Platform OFF": "off", "Platform ON": "on"},
         value="Platform OFF", label="Shared ML Platform", inline=True,
     )
-    return (pA_pred, pA_models, pA_platform)
+    return (pA_models, pA_platform, pA_pred)
 
 
 # ─── CELL 5: Part B prediction + Part B controls ─────────────────────────────
@@ -281,7 +281,7 @@ def _(mo):
     pB_ctr_drop = mo.ui.slider(start=0.1, stop=2.0, value=0.5, step=0.1, label="CTR drop (%)")
     pB_rev = mo.ui.slider(start=0.10, stop=2.00, value=0.50, step=0.10, label="Revenue per click ($)")
     pB_detect = mo.ui.slider(start=1, stop=48, value=24, step=1, label="Detection time (hours)")
-    return (pB_pred, pB_qps, pB_ctr_drop, pB_rev, pB_detect)
+    return (pB_ctr_drop, pB_detect, pB_pred, pB_qps, pB_rev)
 
 
 # ─── CELL 6: Part C prediction + Part C controls ─────────────────────────────
@@ -304,7 +304,7 @@ def _(mo):
         options={"$1M/year": 1_000_000, "$2M/year": 2_000_000, "$5M/year": 5_000_000},
         value="$2M/year", label="Platform cost tier",
     )
-    return (pC_pred, pC_models, pC_platform_cost)
+    return (pC_models, pC_platform_cost, pC_pred)
 
 
 # ─── CELL 7: Part D prediction + Part D controls ─────────────────────────────
@@ -325,7 +325,7 @@ def _(mo):
     pD_req_rate = mo.ui.slider(start=100_000, stop=10_000_000, value=1_000_000, step=100_000,
                                label="Total request rate (req/hour)")
     pD_canary_pct = mo.ui.slider(start=1, stop=50, value=1, step=1, label="Canary percentage (%)")
-    return (pD_pred, pD_req_rate, pD_canary_pct)
+    return (pD_canary_pct, pD_pred, pD_req_rate)
 
 
 # ─── CELL 8: Part E controls + Synthesis decision log ────────────────────────
@@ -346,7 +346,7 @@ def _(DecisionLog, mo):
         placeholder="Based on what I learned in this lab, the most important insight about "
                     "fleet-scale ML operations is..."
     )
-    return (pE_models, pE_metrics, pE_sigma, pE_hier, synth_decision_input, synth_decision_ui)
+    return (pE_hier, pE_metrics, pE_models, pE_sigma)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -356,16 +356,15 @@ def _(DecisionLog, mo):
 # ─── CELL 9: ALL PARTS + TABS ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np, ledger,
-    TEAM_CAPACITY_HOURS, ALERT_COST_PER_MODEL,
-    COORD_COST_LOG, DEP_COST_QUAD,
-    PER_MODEL_SAVINGS, REQUIRED_SAMPLES, HUMAN_CAPACITY,
-    pA_pred, pA_models, pA_platform,
-    pB_pred, pB_qps, pB_ctr_drop, pB_rev, pB_detect,
-    pC_pred, pC_models, pC_platform_cost,
-    pD_pred, pD_req_rate, pD_canary_pct,
-    pE_models, pE_metrics, pE_sigma, pE_hier,
-    synth_decision_input, synth_decision_ui,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, ledger, TEAM_CAPACITY_HOURS,
+    ALERT_COST_PER_MODEL, COORD_COST_LOG, DEP_COST_QUAD, PER_MODEL_SAVINGS,
+    REQUIRED_SAMPLES, HUMAN_CAPACITY, synth_decision_input, synth_decision_ui,
+    pA_models, pA_platform, pA_pred, pB_ctr_drop,
+    pB_detect, pB_pred, pB_qps, pB_rev,
+    pC_models, pC_platform_cost, pC_pred, pD_canary_pct,
+    pD_pred, pD_req_rate, pE_hier, pE_metrics,
+    pE_models, pE_sigma,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Complexity Explosion

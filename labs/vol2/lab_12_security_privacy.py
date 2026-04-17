@@ -290,7 +290,7 @@ def _(mo):
             "what accuracy does DP-SGD achieve?"
         ),
     )
-    return (pA_epsilon, pA_N, pB_pred)
+    return (pA_N, pA_epsilon, pB_pred)
 
 
 # ─── WIDGET CELL 3: Part C prediction ────────────────────────────────────────
@@ -329,7 +329,7 @@ def _(mo):
             "(Enter days, e.g., 0.1 for 2.4 hours.)"
         ),
     )
-    return (pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd, pD_pred)
+    return (pC_dpsgd, pC_mig, pC_monitor, pC_output, pC_rate, pD_pred)
 
 
 # ─── WIDGET CELL 5: Part D controls ─────────────────────────────────────────
@@ -345,7 +345,7 @@ def _(mo):
         options={"Basic Composition": "basic", "Advanced Composition": "advanced"},
         value="Basic Composition", label="Composition theorem", inline=True,
     )
-    return (pD_queries, pD_eps_q, pD_budget, pD_comp)
+    return (pD_budget, pD_comp, pD_eps_q, pD_queries)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -354,17 +354,15 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, COLORS, apply_plotly_theme,
-    DEFAULT_SENSITIVITY, DEFAULT_DELTA,
-    MNIST_NO_DP, MNIST_EPS1, MNIST_EPS01,
-    CIFAR_NO_DP, CIFAR_EPS8, CIFAR_EPS1,
-    MIG_OVERHEAD, DPSGD_OVERHEAD, MONITORING_OVERHEAD_MS,
-    OUTPUT_PERTURB_MS, RATE_LIMIT_OVERHEAD,
-    BASELINE_THROUGHPUT, SLO_THROUGHPUT,
-    pA_pred, pA_epsilon, pA_N,
-    pB_pred,
-    pC_pred, pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd,
-    pD_pred, pD_queries, pD_eps_q, pD_budget, pD_comp,
+    mo, go, np, math,
+    COLORS, apply_plotly_theme, DEFAULT_SENSITIVITY, DEFAULT_DELTA,
+    MNIST_NO_DP, MNIST_EPS1, MNIST_EPS01, CIFAR_NO_DP,
+    CIFAR_EPS8, CIFAR_EPS1, MIG_OVERHEAD, DPSGD_OVERHEAD,
+    MONITORING_OVERHEAD_MS, OUTPUT_PERTURB_MS, RATE_LIMIT_OVERHEAD, BASELINE_THROUGHPUT,
+    SLO_THROUGHPUT, pA_N, pA_epsilon, pA_pred,
+    pB_pred, pC_dpsgd, pC_mig, pC_monitor,
+    pC_output, pC_pred, pC_rate, pD_budget,
+    pD_comp, pD_eps_q, pD_pred, pD_queries,
 ):
 
     # ═════════════════════════════════════════════════════════════════════════

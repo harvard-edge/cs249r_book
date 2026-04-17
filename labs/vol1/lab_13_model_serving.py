@@ -230,7 +230,7 @@ def _(mo):
         },
         label="Batch size 1 to 32, arrival 500 QPS, SLO 50 ms. What happens?",
     )
-    return (partB_pred,)
+    return (partA_rho, partA_slo, partA_svc, partB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -248,7 +248,7 @@ def _(mo):
         },
         label="Llama-2 70B, 128K context, 8xH100 (640 GB). Max concurrent batch?",
     )
-    return (partC_pred,)
+    return (partB_arr, partB_batch, partB_slo, partC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -273,10 +273,15 @@ def _(mo):
         },
         label="Auto-scaling Llama-2 70B during traffic spike. First-user wait?",
     )
-    return (partD_pred,)
+    return (partC_ctx, partC_gpus, partC_model, partC_prec, partD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
+def _(
+    mo, partA_pred, partA_rho, partA_slo,
+    partA_svc, partB_arr, partB_batch, partB_pred,
+    partB_slo, partC_ctx, partC_gpus, partC_model,
+    partC_prec, partC_pred, partD_pred,
+):
     partD_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partD_stor = mo.ui.dropdown(

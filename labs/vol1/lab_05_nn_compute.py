@@ -273,7 +273,7 @@ def _(mo):
         label="A layer produces a 16 KB activation tensor in L2 cache. You double the "
               "batch size (32 KB now). How does latency change on a mobile NPU?",
     )
-    return (partB_prediction,)
+    return (partA_act_l1, partA_act_l2, partA_act_l3, partA_act_l4, partA_context, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -301,7 +301,7 @@ def _(mo):
         label="A 3-layer MLP has hidden layers of width 128. You double the hidden "
               "width to 256. By how much do total FLOPs increase?",
     )
-    return (partC_prediction,)
+    return (partB_batch, partB_context, partB_width, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -320,10 +320,15 @@ def _(mo):
         label="A 20-layer model uses 50 MB for inference. How much memory does training "
               "require (weights + gradients + activations, ignoring optimizer state)?",
     )
-    return (partD_prediction,)
+    return (partC_width, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(
+    mo, partA_act_l1, partA_act_l2, partA_act_l3,
+    partA_act_l4, partA_context, partA_prediction, partB_batch,
+    partB_context, partB_prediction, partB_width, partC_prediction,
+    partC_width, partD_prediction,
+):
     partD_depth = mo.ui.slider(
         start=3, stop=50, value=20, step=1, label="Network depth (layers)",
     )

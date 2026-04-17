@@ -260,7 +260,7 @@ def _(mo):
         label="Fusing 3 element-wise operations into one kernel eliminates intermediate "
               "HBM writes. What speedup do you expect?",
     )
-    return (partB_prediction,)
+    return (partA_compute_us, partA_kernels, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -282,7 +282,7 @@ def _(mo):
         label="torch.compile gives 48% speedup on ResNet-50 but takes 30s to compile. "
               "How many inferences before compilation pays off?",
     )
-    return (partC_prediction,)
+    return (partB_num_ops, partB_tensor_mb, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -304,10 +304,14 @@ def _(mo):
         label="PyTorch runtime alone requires ~1,800 MB. The ESP32 has 512 KB. "
               "By what factor does the runtime exceed device memory?",
     )
-    return (partD_prediction,)
+    return (partC_compile_time, partC_volume, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(
+    mo, partA_compute_us, partA_kernels, partA_prediction,
+    partB_num_ops, partB_prediction, partB_tensor_mb, partC_compile_time,
+    partC_prediction, partC_volume, partD_prediction,
+):
     partD_framework = mo.ui.dropdown(
         options={"PyTorch": "PyTorch", "TensorFlow": "TensorFlow",
                  "ONNX Runtime": "ONNX Runtime", "TF Lite": "TF Lite",

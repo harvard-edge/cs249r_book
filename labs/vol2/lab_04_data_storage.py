@@ -244,7 +244,7 @@ def _(mo):
         },
         label="128 GPUs at 80% utilization. Double to 256 without upgrading storage. What happens?",
     )
-    return (pB_pred,)
+    return (pA_gen, pB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -260,7 +260,7 @@ def _(mo):
         },
         label="256 GPUs, 1,000 shards, random selection. Collision probability?",
     )
-    return (pC_pred,)
+    return (pB_gpus, pB_target, pC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -276,7 +276,7 @@ def _(mo):
         },
         label="200 ms compute, 300 ms I/O. Add prefetch depth 4. Does the stall disappear?",
     )
-    return (pD_pred,)
+    return (pC_shards, pC_workers, pD_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -293,10 +293,15 @@ def _(mo):
         },
         label="1,000-GPU cluster, MTBF = 5 hours, checkpoint write = 2 min. Optimal interval?",
     )
-    return (pE_pred,)
+    return (pD_compute, pD_io, pD_prefetch, pE_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
+def _(
+    mo, pA_gen, pA_pred, pB_gpus,
+    pB_pred, pB_target, pC_pred, pC_shards,
+    pC_workers, pD_compute, pD_io, pD_pred,
+    pD_prefetch, pE_pred,
+):
     pE_mtbf = mo.ui.slider(start=1, stop=24, value=5, step=1, label="Cluster MTBF (hours)")
     pE_write = mo.ui.slider(start=30, stop=300, value=120, step=10, label="Checkpoint write time (s)")
     pE_interval = mo.ui.slider(start=1, stop=120, value=30, step=1, label="Checkpoint interval (min)")

@@ -279,7 +279,7 @@ def _(mo):
         },
         label="Which fleet-scale workloads fall above the H100 ridge point?",
     )
-    return (pB_pred,)
+    return (pA_batch, pA_model, pB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -297,7 +297,7 @@ def _(mo):
         },
         label="How much slower is a 10 GB AllReduce over IB NDR vs NVLink 4.0?",
     )
-    return (pC_pred,)
+    return (pB_hw, pC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -313,7 +313,7 @@ def _(mo):
         label="Can a single 8-GPU DGX H100 node (640 GB HBM) train a 175B "
               "model with Adam in FP16 without ZeRO?",
     )
-    return (pD_pred,)
+    return (pC_size, pD_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -333,10 +333,15 @@ def _(mo):
         },
         label="For a 1,000-GPU H100 cluster over 3 years: GPUs or electricity costs more?",
     )
-    return (pE_pred,)
+    return (pD_gpus, pD_model_b, pD_zero, pE_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
+def _(
+    mo, pA_batch, pA_model, pA_pred,
+    pB_hw, pB_pred, pC_pred, pC_size,
+    pD_gpus, pD_model_b, pD_pred, pD_zero,
+    pE_pred,
+):
     pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
     pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
     pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")
