@@ -30,6 +30,8 @@ from __future__ import annotations
 import argparse
 import functools
 import http.server
+import json
+import re
 import socketserver
 import sys
 import threading
@@ -90,6 +92,29 @@ SHELL_SELECTORS = [
 ]
 
 
+# Marimo routes Python cell stderr to console.log, not console.error. The
+# JSON blob it emits after a traceback is the cleanest machine-readable
+# signal: a line containing `{"type":"exception", ...}` means a cell raised
+# uncaught. This matches the shape marimo 0.23.x emits; kept permissive so
+# minor schema drift does not silently mask errors.
+PYTHON_EXCEPTION_RE = re.compile(r'\{"type"\s*:\s*"exception"[^}]*\}')
+
+
+def _extract_python_exception(text: str) -> str | None:
+    """If this console line carries a marimo-structured Python exception,
+    return a compact one-line summary; otherwise None."""
+    match = PYTHON_EXCEPTION_RE.search(text)
+    if not match:
+        return None
+    try:
+        payload = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return match.group(0)[:200]
+    exc_type = payload.get("exception_type") or "Exception"
+    msg = payload.get("msg") or ""
+    return f"{exc_type}: {msg}"
+
+
 def verify_lab(page, name: str, url: str) -> list[str]:
     """Navigate to a lab, let Pyodide boot, then report any captured errors."""
     errors: list[str] = []
@@ -98,8 +123,14 @@ def verify_lab(page, name: str, url: str) -> list[str]:
         errors.append(f"[pageerror] {exc}")
 
     def record_console(msg):
-        if msg.type == "error":
-            errors.append(f"[console.error] {msg.text}")
+        # Marimo emits Python exceptions through styled console.log, not
+        # console.error, so we have to scan every log line for the structured
+        # exception marker instead of filtering on msg.type.
+        py_err = _extract_python_exception(msg.text)
+        if py_err:
+            errors.append(f"[python] {py_err}")
+        elif msg.type == "error":
+            errors.append(f"[console.error] {msg.text[:300]}")
 
     page.on("pageerror", record_error)
     page.on("console", record_console)
