@@ -71,6 +71,33 @@ CREATE TABLE tags (
   FOREIGN KEY (question_id) REFERENCES questions(id)
 );
 
+CREATE TABLE taxonomy (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  area TEXT NOT NULL,
+  prerequisites_json TEXT,
+  tracks_json TEXT,
+  question_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_taxonomy_area ON taxonomy(area);
+
+CREATE TABLE taxonomy_edges (
+  source TEXT NOT NULL,
+  target TEXT NOT NULL,
+  PRIMARY KEY (source, target),
+  FOREIGN KEY (source) REFERENCES taxonomy(id),
+  FOREIGN KEY (target) REFERENCES taxonomy(id)
+);
+
+CREATE TABLE zones (
+  id TEXT PRIMARY KEY,
+  description TEXT,
+  skills_json TEXT,
+  levels_json TEXT
+);
+
 CREATE TABLE release_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -159,6 +186,58 @@ def _compile_questions(
     return leaves
 
 
+def _populate_taxonomy(conn: sqlite3.Connection, data_dir: Path) -> None:
+    """Load taxonomy.json into the taxonomy + taxonomy_edges tables."""
+    tax_path = data_dir / "taxonomy.json"
+    if not tax_path.exists():
+        return
+    data = json.loads(tax_path.read_text(encoding="utf-8"))
+    concepts = data.get("concepts", [])
+    cur = conn.cursor()
+    for c in concepts:
+        cur.execute(
+            "INSERT OR REPLACE INTO taxonomy(id, name, description, area, "
+            "prerequisites_json, tracks_json, question_count) VALUES (?,?,?,?,?,?,?)",
+            (
+                c["id"],
+                c["name"],
+                c.get("description", ""),
+                c["area"],
+                json.dumps(c.get("prerequisites", [])),
+                json.dumps(c.get("tracks", [])),
+                c.get("question_count", 0),
+            ),
+        )
+        for prereq in c.get("prerequisites", []):
+            cur.execute(
+                "INSERT OR IGNORE INTO taxonomy_edges(source, target) VALUES (?,?)",
+                (prereq, c["id"]),
+            )
+    conn.commit()
+
+
+def _populate_zones(conn: sqlite3.Connection, data_dir: Path) -> None:
+    """Load zones.json into the zones table."""
+    zones_path = data_dir / "zones.json"
+    if not zones_path.exists():
+        return
+    data = json.loads(zones_path.read_text(encoding="utf-8"))
+    zones = data.get("zones", {})
+    cur = conn.cursor()
+    for zone_id, info in zones.items():
+        cur.execute(
+            "INSERT OR REPLACE INTO zones(id, description, skills_json, levels_json) "
+            "VALUES (?,?,?,?)",
+            (
+                zone_id,
+                info.get("description", ""),
+                json.dumps(info.get("skills", [])),
+                json.dumps(info.get("levels", [])),
+            ),
+        )
+    conn.commit()
+
+
 def build(
     *,
     vault_dir: Path,
@@ -180,6 +259,11 @@ def build(
     try:
         conn.executescript(DDL)
         leaves = _compile_questions(conn, released)
+
+        # ── Populate taxonomy + zones tables from StaffML JSON data ──
+        staffml_data = (vault_dir / ".." / "staffml" / "src" / "data").resolve()
+        _populate_taxonomy(conn, staffml_data)
+        _populate_zones(conn, staffml_data)
 
         taxonomy_path = vault_dir / "taxonomy.yaml"
         chains_path = vault_dir / "chains.yaml"
