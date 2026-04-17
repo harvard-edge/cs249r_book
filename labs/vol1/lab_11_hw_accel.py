@@ -243,7 +243,7 @@ def _(mo):
         },
         label="Fuse LayerNorm + Dropout + ReLU into one kernel, eliminating 2 HBM writes. Speedup?",
     )
-    return (pB_pred,)
+    return (pA_dim, pA_prec, pB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -262,7 +262,7 @@ def _(mo):
         },
         label="GEMM at N=1024 is compute-bound on Jetson Orin NX. Is it compute-bound on H100?",
     )
-    return (pC_pred,)
+    return (pB_batch, pB_mode, pC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -280,7 +280,7 @@ def _(mo):
         },
         label="Memory-bound (AI=10) and compute-bound (AI=500) do the same FLOPs. Which uses more energy?",
     )
-    return (pD_pred,)
+    return (pC_hw, pD_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -296,7 +296,11 @@ def _(mo):
     return (pE_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
+def _(
+    mo, pA_dim, pA_prec, pA_pred,
+    pB_batch, pB_mode, pB_pred, pC_hw,
+    pC_pred, pD_pred, pE_pred,
+):
     pE_tile = mo.ui.slider(start=32, stop=2048, value=256, step=32, label="Tile size (elements)")
     pE_seq = mo.ui.slider(start=512, stop=16384, value=4096, step=512, label="Sequence length")
 

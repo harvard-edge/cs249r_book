@@ -365,26 +365,22 @@ def _(DecisionLog, mo):
         placeholder="Based on what I learned in this lab, the most important diagnostic "
                     "question before investing in hardware is..."
     )
-    return (partA_scenario, partA_fix, partB_batch, partC_target, partD_scale, synth_decision_input, synth_decision_ui)
+    return (partA_fix, partA_scenario, partB_batch, partC_target, partD_scale)
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-    A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
+    COLORS, H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB,
+    H100_TDP_W, A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
     JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
     IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-    HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-    RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-    partA_prediction, partA_scenario, partA_fix,
-    partB_prediction, partB_batch,
-    partC_prediction, partC_target,
-    partD_prediction, partD_scale,
-    synth_decision_input, synth_decision_ui,
-    ledger,
+    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB,
+    ESP32_TDP_W, HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB,
+    HIMAX_TDP_W, RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
+    Engine, Models, Hardware, apply_plotly_theme,
+    go, math, mo, np,
+    synth_decision_input, synth_decision_ui, ledger, partA_fix,
+    partA_prediction, partA_scenario, partB_batch, partB_prediction,
+    partC_prediction, partC_target, partD_prediction, partD_scale,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- Three Axes, One System

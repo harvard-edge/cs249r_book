@@ -208,7 +208,7 @@ def _(mo):
     a1_cluster_gpus = mo.ui.slider(start=1000, stop=25000, value=16000, step=1000, label="Cluster GPUs")
     a1_write_time_s = mo.ui.slider(start=10, stop=300, value=120, step=10, label="Checkpoint write time (seconds)")
     a1_interval_s = mo.ui.slider(start=60, stop=10800, value=600, step=60, label="Your checkpoint interval (seconds)")
-    return (partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s)
+    return (a1_cluster_gpus, a1_interval_s, a1_write_time_s, partA_prediction)
 
 
 # ─── CELL 5: PART A REFLECTION + PART B PREDICTION WIDGETS ──────────────────
@@ -256,7 +256,7 @@ def _(mo):
         },
         label="What is the most practical solution to the checkpoint storm?",
     )
-    return (a2_model_b, a2_cluster_gpus, a2_storage, partB_reflection)
+    return (a2_cluster_gpus, a2_model_b, a2_storage, partB_reflection)
 
 
 # ─── CELL 6b: PART C WIDGETS ─────────────────────────────────────────────────
@@ -283,7 +283,7 @@ def _(mo):
         },
         label="What is the key requirement for async checkpointing to work?",
     )
-    return (partC_prediction, c1_nvme_bw, c1_drain_bw, c1_cluster_gpus, partC_reflection)
+    return (c1_cluster_gpus, c1_drain_bw, c1_nvme_bw, partC_prediction, partC_reflection)
 
 
 # ─── CELL 6c: PART D WIDGETS ─────────────────────────────────────────────────
@@ -311,7 +311,7 @@ def _(mo):
         },
         label="How does serving fault tolerance differ from training fault tolerance?",
     )
-    return (partD_prediction, d1_replicas, d1_qps, d1_recovery_s, d1_slo_p99_ms, partD_reflection)
+    return (d1_qps, d1_recovery_s, d1_replicas, d1_slo_p99_ms, partD_prediction, partD_reflection)
 
 
 # ─── CELL 7: DECISION LOG WIDGET ────────────────────────────────────────────
@@ -332,18 +332,15 @@ def _(DecisionLog, mo, partD_reflection):
 # ─── CELL 8: TABS ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np,
-    GPU_MTTF_HOURS, GPU_COST_HR, H100_RAM_GB,
-    partA_prediction, a1_cluster_gpus, a1_write_time_s, a1_interval_s,
-    partA_reflection,
-    partB_prediction, a2_model_b, a2_cluster_gpus, a2_storage,
-    partB_reflection,
-    partC_prediction, c1_nvme_bw, c1_drain_bw, c1_cluster_gpus,
-    partC_reflection,
-    partD_prediction, d1_replicas, d1_qps, d1_recovery_s, d1_slo_p99_ms,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, GPU_MTTF_HOURS, GPU_COST_HR,
+    H100_RAM_GB, synth_decision_input, synth_decision_ui, ledger,
+    a1_cluster_gpus, a1_interval_s, a1_write_time_s, a2_cluster_gpus,
+    a2_model_b, a2_storage, c1_cluster_gpus, c1_drain_bw,
+    c1_nvme_bw, d1_qps, d1_recovery_s, d1_replicas,
+    d1_slo_p99_ms, partA_prediction, partA_reflection, partB_prediction,
+    partB_reflection, partC_prediction, partC_reflection, partD_prediction,
     partD_reflection,
-    synth_decision_input, synth_decision_ui,
-    ledger,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Young-Daly Sweet Spot

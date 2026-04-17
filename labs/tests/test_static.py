@@ -516,3 +516,85 @@ class TestMarimoDataflow:
                 "canonical pattern: each gated cell returns only the next "
                 "prediction widget."
             )
+
+
+# ── Test: Widget Return Completeness ─────────────────────────────────────────
+
+# Cells whose mo.ui.* assignment is a render sink (tabs composition) do not
+# need to be in the return tuple. Widgets defined inside the tabs cell itself
+# are also local to that cell's closures and do not flow outward.
+_SINK_WIDGET_NAMES = {"tabs", "_tabs", "_tour_tabs"}
+
+
+def _is_tabs_cell_function(func):
+    """True if this cell defines `build_*` closures or calls `mo.ui.tabs`."""
+    for node in ast.walk(func):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node is not func:
+            if node.name.startswith("build_"):
+                return True
+        if isinstance(node, ast.Call):
+            f = node.func
+            if (
+                isinstance(f, ast.Attribute)
+                and f.attr == "tabs"
+                and isinstance(f.value, ast.Attribute)
+                and f.value.attr == "ui"
+                and isinstance(f.value.value, ast.Name)
+                and f.value.value.id == "mo"
+            ):
+                return True
+    return False
+
+
+class TestWidgetReturnCompleteness:
+    """Every `mo.ui.*` widget defined in a cell must appear in that cell's
+    return tuple (or be a render-sink name like `tabs`). When a cell defines
+    N widgets but only returns M < N, marimo's dataflow never routes the
+    unreturned widgets to downstream cells, so sliders and dropdowns gated
+    behind a prediction radio never render — even though the prediction
+    itself works and tests pass. Peter Koellner (#1332) hit this for lab_02
+    and lab_03; a sweep across all 33 labs found it in 17 of them.
+
+    This test blocks new regressions of the same class.
+    """
+
+    def test_widget_return_complete(self, lab_path):
+        tree = parse_tree(lab_path)
+        violations = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not _has_app_cell_decorator(node):
+                continue
+            # The tabs cell's internal widgets are consumed by its own
+            # closures and do not need to be returned outward.
+            if _is_tabs_cell_function(node):
+                continue
+            defined: list[str] = []
+            for stmt in node.body:
+                name = _is_mo_ui_assign(stmt)
+                if name is not None:
+                    defined.append(name)
+            if not defined:
+                continue
+            returned = _returned_names(node)
+            missing = [
+                n for n in defined
+                if n not in returned and n not in _SINK_WIDGET_NAMES
+            ]
+            if missing:
+                violations.append((node.lineno, missing))
+
+        if violations:
+            summary = "\n".join(
+                f"  cell at line {line}: defined but NOT returned: {names}"
+                for line, names in violations
+            )
+            pytest.fail(
+                "widgets defined but not returned from their cell (marimo dataflow breaks):\n"
+                + summary
+                + "\n\nfix: add each defined widget to the cell's `return (...)` "
+                "tuple. downstream cells can only see widgets that are exported "
+                "via the return statement. see #1332 for the class of bug this "
+                "prevents."
+            )

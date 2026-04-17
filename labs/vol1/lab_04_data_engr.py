@@ -232,7 +232,7 @@ def _(mo):
         },
         label="50 TB dataset, 10 Gbps link. How long to transfer?",
     )
-    return (partB_prediction,)
+    return (partA_storage, partA_workers, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -256,7 +256,7 @@ def _(mo):
         },
         label="A pipeline has 2% error at ingestion. What accuracy degradation at output?",
     )
-    return (partC_prediction,)
+    return (partB_bandwidth, partB_dataset, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -280,10 +280,14 @@ def _(mo):
         label="Always-on speaker, 1 false wake per month max. "
               "What rejection rate is required?",
     )
-    return (partD_prediction,)
+    return (partC_error_rate, partC_stages, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(
+    mo, partA_prediction, partA_storage, partA_workers,
+    partB_bandwidth, partB_dataset, partB_prediction, partC_error_rate,
+    partC_prediction, partC_stages, partD_prediction,
+):
     partD_tolerance = mo.ui.slider(
         start=1, stop=50, value=1, step=1,
         label="False wake-ups per month (tolerance)",

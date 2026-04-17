@@ -264,7 +264,7 @@ def _(mo):
         label="AI compute demand doubles every ~3.4 months. Hardware efficiency doubles every ~24 months. Over 7 years (2012-2019), how large is the gap?",
     )
     partA_years_slider = mo.ui.slider(start=1, stop=10, value=7, step=1, label="Timeline (years)")
-    return (partA_pred, partA_years_slider,)
+    return (partA_pred, partA_years_slider)
 
 
 # ─── CELL 5: PART B WIDGETS ──────────────────────────────────────────────────
@@ -282,7 +282,7 @@ def _(mo):
     )
     partB_energy_slider = mo.ui.slider(start=1000, stop=100000, value=10000, step=1000, label="Training energy (MWh)")
     partB_pue_slider = mo.ui.slider(start=1.0, stop=2.0, value=1.12, step=0.02, label="PUE")
-    return (partB_pred, partB_energy_slider, partB_pue_slider,)
+    return (partB_energy_slider, partB_pred, partB_pue_slider)
 
 
 # ─── CELL 6: PART C WIDGETS ──────────────────────────────────────────────────
@@ -301,7 +301,7 @@ def _(mo):
     partC_refresh_slider = mo.ui.slider(start=2, stop=5, value=3, step=1, label="Hardware refresh cycle (years)")
     partC_util_slider = mo.ui.slider(start=30, stop=90, value=60, step=5, label="GPU utilization (%)")
     partC_gpu_count = mo.ui.slider(start=100, stop=10000, value=1000, step=100, label="GPU count")
-    return (partC_pred, partC_refresh_slider, partC_util_slider, partC_gpu_count,)
+    return (partC_gpu_count, partC_pred, partC_refresh_slider, partC_util_slider)
 
 
 # ─── CELL 7: PART D WIDGETS ──────────────────────────────────────────────────
@@ -316,7 +316,7 @@ def _(mo):
     partD_elast_slider = mo.ui.slider(start=0.1, stop=3.0, value=2.0, step=0.1, label="Demand elasticity")
     partD_cap_toggle = mo.ui.switch(label="Carbon cap enabled", value=False)
     partD_cap_level = mo.ui.slider(start=0.5, stop=2.0, value=1.0, step=0.1, label="Cap level (fraction of baseline)")
-    return (partD_pred, partD_eff_slider, partD_elast_slider, partD_cap_toggle, partD_cap_level,)
+    return (partD_cap_level, partD_cap_toggle, partD_eff_slider, partD_elast_slider, partD_pred)
 
 
 # ─── CELL 8: PART E WIDGETS ──────────────────────────────────────────────────
@@ -331,7 +331,7 @@ def _(mo):
     partE_temporal = mo.ui.slider(start=0, stop=60, value=0, step=5, label="Temporal shift (% of jobs to off-peak)")
     partE_eff_gain = mo.ui.slider(start=1.0, stop=4.0, value=1.0, step=0.5, label="Efficiency improvement (x)")
     partE_cap = mo.ui.slider(start=0.3, stop=1.5, value=1.0, step=0.1, label="Carbon cap (fraction of baseline)")
-    return (partE_geo, partE_temporal, partE_eff_gain, partE_cap,)
+    return (partE_cap, partE_eff_gain, partE_geo, partE_temporal)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -343,18 +343,17 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, COLORS, apply_plotly_theme,
-    CI_QUEBEC, CI_ICELAND, CI_FRANCE, CI_US_AVG, CI_TEXAS,
-    CI_GERMANY, CI_CHINA_AVG, CI_POLAND, CI_INDIA,
-    PUE_LIQUID, PUE_AIR, PUE_LEGACY,
-    H100_EMBODIED_KG, H100_TDP_W,
-    DEMAND_DOUBLING_MONTHS, EFFICIENCY_DOUBLING_MONTHS,
-    JEVONS_ELASTICITY_INELASTIC, JEVONS_ELASTICITY_UNIT, JEVONS_ELASTICITY_ELASTIC,
-    partA_pred, partA_years_slider,
-    partB_pred, partB_energy_slider, partB_pue_slider,
-    partC_pred, partC_refresh_slider, partC_util_slider, partC_gpu_count,
-    partD_pred, partD_eff_slider, partD_elast_slider, partD_cap_toggle, partD_cap_level,
-    partE_geo, partE_temporal, partE_eff_gain, partE_cap,
+    mo, go, np, math,
+    COLORS, apply_plotly_theme, CI_QUEBEC, CI_ICELAND,
+    CI_FRANCE, CI_US_AVG, CI_TEXAS, CI_GERMANY,
+    CI_CHINA_AVG, CI_POLAND, CI_INDIA, PUE_LIQUID,
+    PUE_AIR, PUE_LEGACY, H100_EMBODIED_KG, H100_TDP_W,
+    DEMAND_DOUBLING_MONTHS, EFFICIENCY_DOUBLING_MONTHS, JEVONS_ELASTICITY_INELASTIC, JEVONS_ELASTICITY_UNIT,
+    JEVONS_ELASTICITY_ELASTIC, partA_pred, partA_years_slider, partB_energy_slider,
+    partB_pred, partB_pue_slider, partC_gpu_count, partC_pred,
+    partC_refresh_slider, partC_util_slider, partD_cap_level, partD_cap_toggle,
+    partD_eff_slider, partD_elast_slider, partD_pred, partE_cap,
+    partE_eff_gain, partE_geo, partE_temporal,
 ):
 
     # ─────────────────────────────────────────────────────────────────────

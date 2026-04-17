@@ -277,7 +277,7 @@ def _(mo):
         },
         label="Which statement best describes the cost profiles of PGD vs randomized smoothing?",
     )
-    return (partA_pred, partA_eps_slider, partA_refl)
+    return (partA_eps_slider, partA_pred, partA_refl)
 
 
 # ─── CELL 5: PART B WIDGETS ──────────────────────────────────────────────────
@@ -297,7 +297,7 @@ def _(mo):
         start=100, stop=100_000, value=10_000, step=100,
         label="Cluster size (GPUs)",
     )
-    return (partB_pred, partB_cluster_slider)
+    return (partB_cluster_slider, partB_pred)
 
 
 # ─── CELL 6: PART C WIDGETS ──────────────────────────────────────────────────
@@ -322,7 +322,7 @@ def _(mo):
         start=100, stop=10_000, value=1000, step=100,
         label="Labeled samples per hour:",
     )
-    return (partC_pred, partC_drift_rate, partC_monitoring, partC_sample_rate)
+    return (partC_drift_rate, partC_monitoring, partC_pred, partC_sample_rate)
 
 
 # ─── CELL 7: PART D WIDGETS ──────────────────────────────────────────────────
@@ -345,7 +345,7 @@ def _(mo):
         options={"None": "none", "Hourly": "hourly", "Real-time": "realtime"},
         value="None", label="Monitoring frequency",
     )
-    return (partD_pred, partD_adv_train, partD_feat_squeeze, partD_conf_thresh, partD_monitoring)
+    return (partD_adv_train, partD_conf_thresh, partD_feat_squeeze, partD_monitoring, partD_pred)
 
 
 # ─── CELL 8: PART E WIDGETS ──────────────────────────────────────────────────
@@ -371,18 +371,16 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, apply_plotly_theme, COLORS, ledger,
-    CLEAN_ACC_BASELINE, ADV_TRAINED_CLEAN_ACC, ADV_TRAINED_ROBUST_ACC,
-    ROBUST_TAX_PP, PGD_STEPS, PGD_COMPUTE_MULT, SMOOTHING_INFERENCE_MULT,
-    FEATURE_SQUEEZE_CLEAN, FEATURE_SQUEEZE_ROBUST,
-    SDC_RATE_PER_HOUR, ACC_AFTER_BITFLIP,
-    DRIFT_RATE_MODERATE, PSI_THRESHOLD,
-    FP32_ADV_ACC_EPS4, INT8_ADV_ACC_EPS4, INT8_CLEAN_DELTA,
-    partA_pred, partA_eps_slider, partA_refl,
-    partB_pred, partB_cluster_slider,
-    partC_pred, partC_drift_rate, partC_monitoring, partC_sample_rate,
-    partD_pred, partD_adv_train, partD_feat_squeeze, partD_conf_thresh, partD_monitoring,
-    partE_eps_slider, partE_precision,
+    mo, go, np, math,
+    apply_plotly_theme, COLORS, ledger, CLEAN_ACC_BASELINE,
+    ADV_TRAINED_CLEAN_ACC, ADV_TRAINED_ROBUST_ACC, ROBUST_TAX_PP, PGD_STEPS,
+    PGD_COMPUTE_MULT, SMOOTHING_INFERENCE_MULT, FEATURE_SQUEEZE_CLEAN, FEATURE_SQUEEZE_ROBUST,
+    SDC_RATE_PER_HOUR, ACC_AFTER_BITFLIP, DRIFT_RATE_MODERATE, PSI_THRESHOLD,
+    FP32_ADV_ACC_EPS4, INT8_ADV_ACC_EPS4, INT8_CLEAN_DELTA, partA_eps_slider,
+    partA_pred, partA_refl, partB_cluster_slider, partB_pred,
+    partC_drift_rate, partC_monitoring, partC_pred, partC_sample_rate,
+    partD_adv_train, partD_conf_thresh, partD_feat_squeeze, partD_monitoring,
+    partD_pred, partE_eps_slider, partE_precision,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Robustness Tax

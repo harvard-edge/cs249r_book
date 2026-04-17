@@ -438,7 +438,7 @@ def _(mo):
         value="FlashAttention (reduces HBM traffic)",
         label="Select optimization",
     )
-    return (pE_workload, pE_optim)
+    return (pE_optim, pE_workload)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -447,19 +447,16 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np,
-    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_RIDGE,
-    V100_TFLOPS_FP16, V100_BW_GBS, V100_RIDGE,
-    A100_TFLOPS_FP16, A100_BW_GBS, A100_RIDGE,
-    B200_TFLOPS_FP16, B200_BW_GBS, B200_RIDGE,
-    HEAD_DIM, NUM_HEADS, BYTES_FP16, ELEM_FUSION_SAVE_MB,
-    PPL_FP16, PPL_INT8_NAIVE, PPL_INT8_OUTLIER,
-    PPL_INT4_NAIVE, PPL_INT4_OUTLIER,
-    pA_pred, pA_batch, pA_gpu, pA_op,
-    pB_pred, pB_seqlen,
-    pC_pred,
-    pD_pred, pD_precision,
-    pE_pred, pE_workload, pE_optim,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, H100_TFLOPS_FP16, H100_BW_GBS,
+    H100_RAM_GB, H100_RIDGE, V100_TFLOPS_FP16, V100_BW_GBS,
+    V100_RIDGE, A100_TFLOPS_FP16, A100_BW_GBS, A100_RIDGE,
+    B200_TFLOPS_FP16, B200_BW_GBS, B200_RIDGE, HEAD_DIM,
+    NUM_HEADS, BYTES_FP16, ELEM_FUSION_SAVE_MB, PPL_FP16,
+    PPL_INT8_NAIVE, PPL_INT8_OUTLIER, PPL_INT4_NAIVE, PPL_INT4_OUTLIER,
+    pA_batch, pA_gpu, pA_op, pA_pred,
+    pB_pred, pB_seqlen, pC_pred, pD_precision,
+    pD_pred, pE_optim, pE_pred, pE_workload,
 ):
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE ROOFLINE DIAGNOSTIC

@@ -240,7 +240,7 @@ def _(mo):
         start=1, stop=168, value=1, step=1,
         label="Team B cycle time (hours)",
     )
-    return partB_cycle_a, partB_cycle_b
+    return (partB_cycle_a, partB_cycle_b)
 
 
 @app.cell(hide_code=True)
@@ -303,13 +303,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(
     COLORS, H100_TFLOPS, H100_RAM, ESP32_RAM_KB,
-    RESNET50_PARAMS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-    partA_prediction, partA_stage,
-    partB_prediction, partB_cycle_a, partB_cycle_b,
-    partC_prediction, partC_sliders,
-    partD_prediction, partD_months,
+    RESNET50_PARAMS, RESNET50_SIZE_MB, Engine, Models,
+    Hardware, apply_plotly_theme, go, math,
+    mo, np, partA_prediction, partA_stage,
+    partB_cycle_a, partB_cycle_b, partB_prediction, partC_prediction,
+    partC_sliders, partD_months, partD_prediction,
 ):
 
     # ═════════════════════════════════════════════════════════════════════

@@ -313,7 +313,7 @@ def _(mo):
         value="10 ms (AV safety)",
         label="SLA budget:",
     )
-    return partB_distance, partB_sla
+    return (partB_distance, partB_sla)
 
 
 @app.cell(hide_code=True)
@@ -352,7 +352,7 @@ def _(mo):
         value="ResNet-50 (4.1 GFLOPs)",
         label="Model:",
     )
-    return partC_model, partC_target
+    return (partC_model, partC_target)
 
 
 @app.cell(hide_code=True)
@@ -384,27 +384,23 @@ def _(mo):
         value="BLE (1 Mbps)",
         label="Wireless technology:",
     )
-    return partD_data_size, partD_wireless
+    return (partD_data_size, partD_wireless)
 
 
 # ─── CELL N: TABS COMPOSITION ────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    H100_TFLOPS, H100_BW, H100_RAM, H100_TDP,
-    A100_TFLOPS, A100_BW, A100_RAM,
+    COLORS, H100_TFLOPS, H100_BW, H100_RAM,
+    H100_TDP, A100_TFLOPS, A100_BW, A100_RAM,
     JETSON_TFLOPS, JETSON_BW, JETSON_RAM, JETSON_TDP,
-    IPHONE_TFLOPS, IPHONE_TDP,
-    ESP32_TFLOPS, ESP32_TDP, ESP32_RAM_KB,
-    RESNET50_FLOPS, RESNET50_SIZE_MB,
-    MOBILENET_FLOPS, DSCNN_FLOPS,
-    SPEED_OF_LIGHT_KM_S, FIBER_FACTOR,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-    partA_prediction, partA_ai,
-    partB_prediction, partB_distance, partB_sla,
-    partC_prediction, partC_target, partC_model,
-    partD_prediction, partD_data_size, partD_wireless,
+    IPHONE_TFLOPS, IPHONE_TDP, ESP32_TFLOPS, ESP32_TDP,
+    ESP32_RAM_KB, RESNET50_FLOPS, RESNET50_SIZE_MB, MOBILENET_FLOPS,
+    DSCNN_FLOPS, SPEED_OF_LIGHT_KM_S, FIBER_FACTOR, Engine,
+    Models, Hardware, apply_plotly_theme, go,
+    math, mo, np, partA_ai,
+    partA_prediction, partB_distance, partB_prediction, partB_sla,
+    partC_model, partC_prediction, partC_target, partD_data_size,
+    partD_prediction, partD_wireless,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A -- The Memory Wall Revelation

@@ -258,7 +258,7 @@ def _(mo):
         label="You prune ResNet-50 to 90% sparsity (unstructured). "
               "What inference speedup on an H100?",
     )
-    return (pB_pred,)
+    return (pA_model_sel, pA_precision, pB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -278,7 +278,7 @@ def _(mo):
         },
         label="Deploy Llama-3 8B on 4 GB RAM. Which strategy fits?",
     )
-    return (pC_pred,)
+    return (pB_sparsity, pB_type, pC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -315,10 +315,14 @@ def _(mo):
         },
         label="ResNet-50 teacher: 76.1% ImageNet. Distill to MobileNetV2 student. Student accuracy?",
     )
-    return (pE_pred,)
+    return (pD_hw, pD_precision_e, pE_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
+def _(
+    mo, pA_model_sel, pA_precision, pA_pred,
+    pB_pred, pB_sparsity, pB_type, pC_pred,
+    pD_hw, pD_precision_e, pD_pred, pE_pred,
+):
     pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
 
     # ─────────────────────────────────────────────────────────────────────

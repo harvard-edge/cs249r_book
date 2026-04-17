@@ -412,7 +412,7 @@ def _(mo):
         value=False,
         label="Deploy the model directly on the vehicle"
     )
-    return edge_deploy, faster_gpu, model_size, move_server, quantization
+    return (edge_deploy, faster_gpu, model_size, move_server, quantization)
 
 
 @app.cell
@@ -778,7 +778,10 @@ def _(check1, check2empty, check3, mo):
 
 
 @app.cell
-def _(COLORS, check1, check2empty, check3, mo):
+def _(
+    COLORS, check2empty, mo, check1,
+    check3,
+):
     mo.stop(check1.value is None or check2empty() or check3.value is None)
 
     # ── ZONE ANATOMY DIAGRAM ─────────────────────────────────────────

@@ -280,7 +280,7 @@ def _(mo):
         label="You scale a 175B model from 1 GPU to 256 GPUs on InfiniBand NDR. "
               "What fleet efficiency do you expect?",
     )
-    return (partB_prediction,)
+    return (partA_fleet_size, partA_node_rel, partB_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -311,7 +311,7 @@ def _(mo):
         label="Fixed budget of 10^23 FLOPs. Which achieves lower loss: "
               "a 10B model on 200B tokens, or a 3B model on 600B tokens?",
     )
-    return (partC_prediction,)
+    return (partB_gpu_count, partB_model_size, partB_network, partC_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -329,7 +329,7 @@ def _(mo):
         label="For a workload with 20% communication overhead (r = 0.20), "
               "how many GPUs before scaling efficiency drops below 50%?",
     )
-    return (partD_prediction,)
+    return (partC_params, partC_tokens, partD_prediction)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -350,10 +350,16 @@ def _(mo):
         options={"Computation": "comp", "Communication": "comm", "Coordination": "coord"},
         label="Federated MobileNet (edge devices) -- dominant bottleneck?",
     )
-    return (partE_llm, partE_dlrm, partE_fed)
+    return (partD_comm_frac, partD_n_gpus, partD_overlap, partE_dlrm, partE_fed, partE_llm)
 
 @app.cell(hide_code=True)
-def _(mo, partE_llm, partE_dlrm, partE_fed):
+def _(
+    mo, partA_fleet_size, partA_node_rel, partA_prediction,
+    partB_gpu_count, partB_model_size, partB_network, partB_prediction,
+    partC_params, partC_prediction, partC_tokens, partD_comm_frac,
+    partD_n_gpus, partD_overlap, partD_prediction, partE_dlrm,
+    partE_fed, partE_llm,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE RELIABILITY COLLAPSE

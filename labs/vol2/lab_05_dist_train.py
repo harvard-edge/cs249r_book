@@ -280,7 +280,7 @@ def _(mo):
         },
         label="What is the most effective strategy to overcome the DP communication wall for frontier models?",
     )
-    return (partA_prediction, a1_model_select, a1_gpu_slider, a1_interconnect, partA_reflection)
+    return (a1_gpu_slider, a1_interconnect, a1_model_select, partA_prediction, partA_reflection)
 
 
 # ─── CELL 5: PART B WIDGETS ───────────────────────────────────────────────────
@@ -318,7 +318,7 @@ def _(mo, partB_prediction):
         },
         label="Why must TP map to NVLink, PP to InfiniBand, and DP to the remaining bandwidth?",
     )
-    return (a2_tp, a2_pp, a2_microbatches, a2_zero_stage, partC_reflection)
+    return (a2_microbatches, a2_pp, a2_tp, a2_zero_stage, partC_reflection)
 
 
 # ─── CELL 6b: PART D WIDGETS ─────────────────────────────────────────────────
@@ -357,7 +357,7 @@ def _(mo, partC_reflection):
         },
         label="What principle governs hardware tier selection for distributed training?",
     )
-    return (partD_prediction, d1_hw_tier, d1_model_size, d1_gpu_count, partD_reflection)
+    return (d1_gpu_count, d1_hw_tier, d1_model_size, partD_prediction, partD_reflection)
 
 
 # ─── CELL 7: SYNTHESIS WIDGETS ────────────────────────────────────────────────
@@ -379,13 +379,13 @@ def _(DecisionLog, mo, partD_reflection):
 # ─── CELL 8: ALL PARTS + TABS COMPOSITION ─────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np,
-    H100_TFLOPS_FP16, H100_RAM_GB, NVLINK4_BW_GBS, GPUS_PER_NODE,
-    partA_prediction, a1_model_select, a1_gpu_slider, a1_interconnect, partA_reflection,
-    partB_prediction,
-    a2_tp, a2_pp, a2_microbatches, a2_zero_stage, partC_reflection,
-    partD_prediction, d1_hw_tier, d1_model_size, d1_gpu_count, partD_reflection,
-    synth_decision_input, synth_decision_ui,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, H100_TFLOPS_FP16, H100_RAM_GB,
+    NVLINK4_BW_GBS, GPUS_PER_NODE, synth_decision_input, synth_decision_ui,
+    a1_gpu_slider, a1_interconnect, a1_model_select, a2_microbatches,
+    a2_pp, a2_tp, a2_zero_stage, d1_gpu_count,
+    d1_hw_tier, d1_model_size, partA_prediction, partA_reflection,
+    partB_prediction, partC_reflection, partD_prediction, partD_reflection,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Communication Wall

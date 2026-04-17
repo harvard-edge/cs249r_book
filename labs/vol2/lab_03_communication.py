@@ -253,7 +253,7 @@ def _(mo):
         },
         label="256 GPUs on IB NDR. Which AllReduce is faster for a 1 MB message?",
     )
-    return (pB_pred,)
+    return (pA_gpus, pA_model, pA_prec, pB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -272,7 +272,7 @@ def _(mo):
         },
         label="Hierarchical AllReduce vs flat ring for 64 GPUs (8 nodes x 8). Speedup?",
     )
-    return (pC_pred,)
+    return (pB_msg_exp, pB_n_gpus, pC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -296,7 +296,7 @@ def _(mo):
         label="INT8 gradient compression (4x BW reduction) for 70B on 64 GPUs with IB NDR. "
               "Does total training time decrease?",
     )
-    return (pD_pred,)
+    return (pC_gpus_per_node, pC_oversub, pC_topo, pD_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -316,10 +316,15 @@ def _(mo):
         label="Starting from 11s AllReduce for 70B: how many optimizations "
               "to get under 20% of step time?",
     )
-    return (pE_pred,)
+    return (pD_bw, pD_comp, pE_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
+def _(
+    mo, pA_gpus, pA_model, pA_prec,
+    pA_pred, pB_msg_exp, pB_n_gpus, pB_pred,
+    pC_gpus_per_node, pC_oversub, pC_pred, pC_topo,
+    pD_bw, pD_comp, pD_pred, pE_pred,
+):
     pE_hier = mo.ui.checkbox(label="Hierarchical AllReduce")
     pE_fp16 = mo.ui.checkbox(label="FP16 gradients")
     pE_bucket = mo.ui.checkbox(label="Bucket fusion")

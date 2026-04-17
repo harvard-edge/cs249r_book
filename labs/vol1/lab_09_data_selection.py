@@ -250,7 +250,7 @@ def _(mo):
         label="ResNet-50 scores 1M images on A100 (2.8 hrs). Full training: 8.0 hrs. "
               "Coreset (50%) training: 4.2 hrs. Is selection worth it?",
     )
-    return (partB_pred,)
+    return (partA_frac, partA_redundancy, partB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -286,7 +286,7 @@ def _(mo):
               "feeding an A100 GPU. GPU forward-backward: 12 ms/batch. "
               "What fraction of step time is GPU compute?",
     )
-    return (partC_pred,)
+    return (partB_coreset, partB_hw, partB_scorer, partC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -320,10 +320,15 @@ def _(mo):
         },
         label="Fixed budget: 10^21 FLOPs. Which achieves lower loss?",
     )
-    return (partD_pred,)
+    return (partC_augment, partC_model, partC_workers, partD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
+def _(
+    mo, partA_frac, partA_pred, partA_redundancy,
+    partB_coreset, partB_hw, partB_pred, partB_scorer,
+    partC_augment, partC_model, partC_pred, partC_workers,
+    partD_pred,
+):
     partD_params_b = mo.ui.slider(
         start=0.5, stop=50, value=10, step=0.5,
         label="Model size (B parameters)",

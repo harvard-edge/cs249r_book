@@ -203,7 +203,7 @@ def _(mo):
         },
         label="Apply equalized odds to reduce FPR gap from 15% to 5%. Accuracy loss?",
     )
-    return (partB_pred,)
+    return (partA_base_a, partA_base_b, partA_threshold, partB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -224,7 +224,7 @@ def _(mo):
         },
         label="Loan model has 50 features. How much does SHAP add to inference latency?",
     )
-    return (partC_pred,)
+    return (partB_method, partB_target_gap, partC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -245,10 +245,14 @@ def _(mo):
         },
         label="Weekly retraining + SHAP for 10% of predictions. Carbon vs baseline?",
     )
-    return (partD_pred,)
+    return (partC_features, partC_method, partD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
+def _(
+    mo, partA_base_a, partA_base_b, partA_pred,
+    partA_threshold, partB_method, partB_pred, partB_target_gap,
+    partC_features, partC_method, partC_pred, partD_pred,
+):
     partD_retrain_freq = mo.ui.dropdown(
         options={"Weekly": 52, "Monthly": 12, "Quarterly": 4, "Once": 1},
         value="Weekly", label="Retraining frequency")

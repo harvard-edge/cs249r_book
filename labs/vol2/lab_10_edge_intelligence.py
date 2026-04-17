@@ -299,7 +299,7 @@ def _(mo):
             "the adapter weights. What is the total LoRA storage?"
         ),
     )
-    return (pA_params, pA_batch, pA_strategy, pB_pred)
+    return (pA_batch, pA_params, pA_strategy, pB_pred)
 
 
 # ─── CELL 6: PART B CONTROLS + PART C WIDGETS ────────────────────────────────
@@ -367,7 +367,7 @@ def _(mo):
         value="No compression",
         label="Gradient compression",
     )
-    return (pD_beta, pD_epochs, pD_compress)
+    return (pD_beta, pD_compress, pD_epochs)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -377,17 +377,15 @@ def _(mo):
 # ─── CELL 9: TABS CELL ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math, mo, np, ledger,
-    ACTIVATION_RATIO, ADAM_MULTIPLIER, BYTES_FP16, BYTES_FP32,
-    BIAS_FRACTION, LORA_FRACTION,
-    MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH,
-    MOBILE_CPU_POWER_W, MOBILE_NPU_POWER_W,
-    NPU_SPEEDUP, NPU_ENERGY_GAIN,
-    IID_ROUNDS, FL_TARGET_ACC,
-    pA_pred, pA_params, pA_batch, pA_strategy,
-    pB_pred, pB_contexts,
-    pC_pred, pC_target,
-    pD_pred, pD_beta, pD_epochs, pD_compress,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, ledger, ACTIVATION_RATIO,
+    ADAM_MULTIPLIER, BYTES_FP16, BYTES_FP32, BIAS_FRACTION,
+    LORA_FRACTION, MOBILE_RAM_AVAIL_MB, MOBILE_BATTERY_WH, MOBILE_CPU_POWER_W,
+    MOBILE_NPU_POWER_W, NPU_SPEEDUP, NPU_ENERGY_GAIN, IID_ROUNDS,
+    FL_TARGET_ACC, pA_batch, pA_params, pA_pred,
+    pA_strategy, pB_contexts, pB_pred, pC_pred,
+    pC_target, pD_beta, pD_compress, pD_epochs,
+    pD_pred,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Memory Amplification Tax

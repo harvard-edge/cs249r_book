@@ -238,7 +238,7 @@ def _(mo):
         },
         label="70B model (FP16) on 8xH100 (640 GB). Weights = 140 GB. At 128K context, how many concurrent requests?",
     )
-    return (a1_qps, a1_cost_query, a1_weeks, a1_optimization, partA_reflection, partB_prediction)
+    return (a1_cost_query, a1_optimization, a1_qps, a1_weeks, partA_reflection, partB_prediction)
 
 
 # ─── CELL 6: Part B controls + Part B reflection ────────────────────────────
@@ -267,7 +267,7 @@ def _(mo):
         },
         label="What is the most effective way to increase concurrent serving capacity at 128K context?",
     )
-    return (a2_model_size, a2_precision, a2_context_len, a2_n_gpus, partB_reflection)
+    return (a2_context_len, a2_model_size, a2_n_gpus, a2_precision, partB_reflection)
 
 
 # ─── CELL 6b: Part C prediction + controls ─────────────────────────────────
@@ -294,7 +294,7 @@ def _(mo):
         },
         label="Why is continuous batching the standard for production LLM serving?",
     )
-    return (partC_prediction, c1_avg_len, c1_max_len, c1_batch_size, partC_reflection)
+    return (c1_avg_len, c1_batch_size, c1_max_len, partC_prediction, partC_reflection)
 
 
 # ─── CELL 6c: Part D prediction + controls ─────────────────────────────────
@@ -330,7 +330,7 @@ def _(mo):
         },
         label="What is the correct objective function for fleet design?",
     )
-    return (partD_prediction, d1_target_qps, d1_quant, d1_batching, d1_gpus_per_replica, partD_reflection)
+    return (d1_batching, d1_gpus_per_replica, d1_quant, d1_target_qps, partD_prediction, partD_reflection)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -339,38 +339,14 @@ def _(mo):
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    H100_RAM_GB,
-    H100_COST_HR,
-    TRAINING_COST_2M,
-    a1_cost_query,
-    a1_optimization,
-    a1_qps,
-    a1_weeks,
-    a2_context_len,
-    a2_model_size,
-    a2_n_gpus,
-    a2_precision,
-    apply_plotly_theme,
-    go,
-    math,
-    mo,
-    np,
-    partA_prediction,
-    partA_reflection,
-    partB_prediction,
-    partB_reflection,
-    partC_prediction,
-    c1_avg_len,
-    c1_max_len,
-    c1_batch_size,
-    partC_reflection,
-    partD_prediction,
-    d1_target_qps,
-    d1_quant,
-    d1_batching,
-    d1_gpus_per_replica,
-    partD_reflection,
+    COLORS, H100_RAM_GB, H100_COST_HR, TRAINING_COST_2M,
+    apply_plotly_theme, go, math, mo,
+    np, a1_cost_query, a1_optimization, a1_qps,
+    a1_weeks, a2_context_len, a2_model_size, a2_n_gpus,
+    a2_precision, c1_avg_len, c1_batch_size, c1_max_len,
+    d1_batching, d1_gpus_per_replica, d1_quant, d1_target_qps,
+    partA_prediction, partA_reflection, partB_prediction, partB_reflection,
+    partC_prediction, partC_reflection, partD_prediction, partD_reflection,
 ):
 
     # ═════════════════════════════════════════════════════════════════════════

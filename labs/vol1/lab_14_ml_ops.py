@@ -202,7 +202,7 @@ def _(mo):
         },
         label="Retraining costs $10K. Drift costs $500/day. Current cadence: 30 days. Optimal?",
     )
-    return (partB_pred,)
+    return (partA_drift_rate, partA_weeks, partB_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -221,7 +221,7 @@ def _(mo):
         },
         label="Cloud retraining: $1K, T*=7 days. Edge: $100K. What is edge T*?",
     )
-    return (partC_pred,)
+    return (partB_drift_cost, partB_retrain_cost, partC_pred)
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -242,10 +242,14 @@ def _(mo):
         },
         label="You defer retraining for 3 consecutive T* cycles. Total accuracy loss vs single miss?",
     )
-    return (partD_pred,)
+    return (partC_cloud_cost, partC_drift_cost, partC_edge_cost, partD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
+def _(
+    mo, partA_drift_rate, partA_pred, partA_weeks,
+    partB_drift_cost, partB_pred, partB_retrain_cost, partC_cloud_cost,
+    partC_drift_cost, partC_edge_cost, partC_pred, partD_pred,
+):
     partD_missed = mo.ui.slider(start=1, stop=6, value=3, step=1,
                                  label="Missed retraining cycles")
     partD_downstream = mo.ui.slider(start=0, stop=5, value=2, step=1,
