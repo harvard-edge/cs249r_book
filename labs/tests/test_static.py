@@ -478,29 +478,11 @@ class TestMarimoDataflow:
     are allowed.
     """
 
-    # Labs with known multi-widget-leak debt, grandfathered until refactored
-    # per-lab (tracked in #1347). As each lab is converted to the
-    # one-widget-per-gated-cell pattern (see lab_01 post-#1339 or lab_05_dist_train),
-    # remove it from this set. When the set is empty the bug class is closed.
-    # Only vol1/lab_00 remains. Its check1/check2/check3 pattern is structurally
-    # different from the partX_prediction idiom and the mechanical Pattern C
-    # transformation breaks test_engine.py. Needs manual per-cell refactor.
-    _KNOWN_MULTI_LEAK_LABS = frozenset({
-        "vol1/lab_00_introduction.py",
-    })
+    # #1347 closed 2026-04-16: all 33 labs now follow the one-widget-per-gated-cell
+    # pattern. The grandfather mechanism was removed when the set went empty.
+    # New labs and refactors are strictly enforced against this rule.
 
     def test_no_multi_widget_leak_in_gated_cell(self, lab_path):
-        # Grandfather known-debt labs: skip with a pointer to the tracking issue
-        # rather than fail. New labs and labs that have been refactored are
-        # strictly enforced.
-        rel_path = str(Path(lab_path).resolve().relative_to(REPO_ROOT / "labs"))
-        if rel_path in self._KNOWN_MULTI_LEAK_LABS:
-            pytest.skip(
-                f"{rel_path} has known multi-widget-leak debt, tracked in #1347. "
-                "remove from _KNOWN_MULTI_LEAK_LABS once refactored to the "
-                "one-widget-per-gated-cell pattern."
-            )
-
         tree = parse_tree(lab_path)
         violations = []
         for node in ast.walk(tree):

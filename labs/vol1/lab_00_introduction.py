@@ -383,10 +383,11 @@ def _(check1, mo):
 
 # ─── CHECK 2 (multi-select) ────────────────────────────────────────────────────
 
+# Pattern C: widget definitions are ungated so they are always defined at
+# module load. Downstream helpers (check2empty, check2value_list) and render
+# cells depend on these being globally available even before check1 is answered.
 @app.cell
-def _(check1, mo):
-    mo.stop(check1.value is None)
-
+def _(mo):
     model_size = mo.ui.checkbox(
         value=False,
         label="Use a smaller model with fewer parameters"
@@ -411,6 +412,20 @@ def _(check1, mo):
         value=False,
         label="Deploy the model directly on the vehicle"
     )
+    return edge_deploy, faster_gpu, model_size, move_server, quantization
+
+
+@app.cell
+def _(
+    check1,
+    edge_deploy,
+    faster_gpu,
+    mo,
+    model_size,
+    move_server,
+    quantization,
+):
+    mo.stop(check1.value is None)
 
     mo.vstack([
         mo.md("""**Check your understanding.** An autonomous vehicle perception system
@@ -424,7 +439,7 @@ def _(check1, mo):
         faster_gpu,
         edge_deploy
     ])
-    return edge_deploy, faster_gpu, model_size, move_server, quantization
+    return
 
 
 @app.cell
