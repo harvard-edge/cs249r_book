@@ -513,7 +513,11 @@ def _(
     _border = "#16a34a" if _exactly_right else ("#f59e0b" if not _has_wrong else "#ef4444")
     _bg_outer = "#f0fdf4" if _exactly_right else ("#fffbeb" if not _has_wrong else "#fef2f2")
 
-    mo.vstack([
+    # The physics-violation callout reinforces *why* cloud-side fixes don't
+    # work. It reads as scolding when the student already picked the two
+    # correct answers, so we suppress it on an exactly-right submission and
+    # let the prose explanation + math peek carry the point (#1305).
+    _items = [
         mo.Html(f"""
         <div style="background:{_bg_outer}; border:1.5px solid {_border};
                     border-radius:10px; padding:18px 20px; margin-top:8px;">
@@ -522,16 +526,20 @@ def _(
             {_explanation}
         </div>
         """),
-        mo.callout(mo.md(
+    ]
+
+    if not _exactly_right:
+        _items.append(mo.callout(mo.md(
             "**INFEASIBLE — Cloud inference violates physics.**\n\n"
             "Distance: 2,000 km | Speed in fiber: ~200,000 km/s | "
             "Round-trip: 2 × 2,000 / 200,000 = **20 ms** | "
             "AV SLA: 10 ms | **Verdict: physically impossible.** "
             "No GPU upgrade, no model compression, no software optimization "
             "can fix this. The model must move to the vehicle."
-        ), kind="danger"),
-        mo.accordion({
-            "Math Peek: Propagation Delay": mo.md("""
+        ), kind="danger"))
+
+    _items.append(mo.accordion({
+        "Math Peek: Propagation Delay": mo.md("""
     **Formula:**
     $$
     t_{\\text{round-trip}} = \\frac{2d}{c \\cdot n}
@@ -543,8 +551,9 @@ def _(
     - **n**: fiber refractive index factor (~0.67)
     - At d = 2,000 km: t = 2 × 2,000 / (299,792 × 0.67) ≈ 20 ms — exceeds 10 ms SLA by 2x
     """)
-        }),
-    ])
+    }))
+
+    mo.vstack(_items)
     return
 
 
