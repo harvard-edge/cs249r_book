@@ -310,19 +310,25 @@ def _(mo):
     )
     return (partC_model_c, partC_precision_c, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_model_size, partA_optimizer, partA_precision_a,
-    partA_prediction, partB_compute_ms, partB_data_ms, partB_pcie_ms,
-    partB_prediction, partB_sync_ms, partC_model_c, partC_precision_c,
-    partC_prediction, partD_prediction,
-):
+def _(mo):
     partD_gpus = mo.ui.slider(
         start=1, stop=256, value=8, step=1, label="Number of GPUs",
     )
     partD_r = mo.ui.slider(
         start=0.01, stop=0.50, value=0.15, step=0.01, label="Communication fraction (r)",
     )
+    return (partD_gpus, partD_r)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_model_size, partA_optimizer, partA_precision_a,
+    partA_prediction, partB_compute_ms, partB_data_ms, partB_pcie_ms,
+    partB_prediction, partB_sync_ms, partC_model_c, partC_precision_c,
+    partC_prediction, partD_prediction, partD_gpus, partD_r,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Memory Budget Shock

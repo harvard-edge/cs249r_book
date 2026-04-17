@@ -282,12 +282,9 @@ def _(mo):
     )
     return (partC_error_rate, partC_stages, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_prediction, partA_storage, partA_workers,
-    partB_bandwidth, partB_dataset, partB_prediction, partC_error_rate,
-    partC_prediction, partC_stages, partD_prediction,
-):
+def _(mo):
     partD_tolerance = mo.ui.slider(
         start=1, stop=50, value=1, step=1,
         label="False wake-ups per month (tolerance)",
@@ -296,6 +293,16 @@ def _(
         start=1, stop=24, value=24, step=1,
         label="Duty cycle (hours per day)",
     )
+    return (partD_duty, partD_tolerance)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_prediction, partA_storage, partA_workers,
+    partB_bandwidth, partB_dataset, partB_prediction, partC_error_rate,
+    partC_prediction, partC_stages, partD_prediction, partD_duty,
+    partD_tolerance,
+):
 
     # ═════════════════════════════════════════════════════════════════════
     # PART A -- The Feeding Tax

@@ -335,16 +335,22 @@ def _(mo):
     )
     return (pD_gpus, pD_model_b, pD_zero, pE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
+    pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
+    pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")
+    return (pE_n_gpus, pE_pue, pE_util)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, pA_batch, pA_model, pA_pred,
     pB_hw, pB_pred, pC_pred, pC_size,
     pD_gpus, pD_model_b, pD_pred, pD_zero,
-    pE_pred,
+    pE_pred, pE_n_gpus, pE_pue, pE_util,
 ):
-    pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
-    pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
-    pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE MEMORY WALL

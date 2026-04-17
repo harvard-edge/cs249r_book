@@ -281,14 +281,21 @@ def _(mo):
     )
     return (pC_batch, pC_precision, pD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=0.8, step=0.05, label="Tail heaviness (sigma)")
+    pD_slo = mo.ui.slider(start=50, stop=500, value=200, step=10, label="SLO threshold (ms)")
+    return (pD_sigma, pD_slo)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, pA_pred, pA_serial, pA_speedup,
     pB_ambient, pB_cooling, pB_pred, pB_time,
     pC_batch, pC_precision, pC_pred, pD_pred,
+    pD_sigma, pD_slo,
 ):
-    pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=0.8, step=0.05, label="Tail heaviness (sigma)")
-    pD_slo = mo.ui.slider(start=50, stop=500, value=200, step=10, label="SLO threshold (ms)")
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A: The Amdahl Ceiling

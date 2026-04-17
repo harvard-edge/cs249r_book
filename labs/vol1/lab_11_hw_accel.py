@@ -295,14 +295,21 @@ def _(mo):
     )
     return (pE_pred,)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pE_tile = mo.ui.slider(start=32, stop=2048, value=256, step=32, label="Tile size (elements)")
+    pE_seq = mo.ui.slider(start=512, stop=16384, value=4096, step=512, label="Sequence length")
+    return (pE_seq, pE_tile)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, pA_dim, pA_prec, pA_pred,
     pB_batch, pB_mode, pB_pred, pC_hw,
-    pC_pred, pD_pred, pE_pred,
+    pC_pred, pD_pred, pE_pred, pE_seq,
+    pE_tile,
 ):
-    pE_tile = mo.ui.slider(start=32, stop=2048, value=256, step=32, label="Tile size (elements)")
-    pE_seq = mo.ui.slider(start=512, stop=16384, value=4096, step=512, label="Sequence length")
 
     # ── Helper: draw roofline ─────────────────────────────────────────────
     def _draw_roofline(fig, peak_tflops, bw_gbs, ridge, color, name):

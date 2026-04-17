@@ -322,17 +322,23 @@ def _(mo):
     )
     return (partC_augment, partC_model, partC_workers, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    partD_params_b = mo.ui.slider(
+        start=0.5, stop=50, value=10, step=0.5,
+        label="Model size (B parameters)",
+    )
+    return (partD_params_b,)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, partA_frac, partA_pred, partA_redundancy,
     partB_coreset, partB_hw, partB_pred, partB_scorer,
     partC_augment, partC_model, partC_pred, partC_workers,
-    partD_pred,
+    partD_pred, partD_params_b,
 ):
-    partD_params_b = mo.ui.slider(
-        start=0.5, stop=50, value=10, step=0.5,
-        label="Model size (B parameters)",
-    )
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A: ICR Frontier

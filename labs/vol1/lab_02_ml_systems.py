@@ -175,7 +175,7 @@ def _(COLORS, ledger, mo):
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
                 <div style="margin-bottom: 3px;">1. <strong>Diagnose the Memory Wall</strong> &mdash;
-                    show that a 6x GPU upgrade (A100 to H100) yields only ~8% latency improvement
+                    show that a 3x GPU upgrade (A100 to H100) yields only ~1.6x latency improvement
                     for a memory-bound workload (AI = 5 FLOPs/Byte).</div>
                 <div style="margin-bottom: 3px;">2. <strong>Calculate the Light Barrier</strong> &mdash;
                     compute the propagation delay floor for a given datacenter distance and determine
@@ -258,14 +258,18 @@ def _(mo):
 # marimo's dataflow can route them to the tabs cell. #1332.
 @app.cell(hide_code=True)
 def _(mo):
+    # Options aligned to actual Hardware registry specs (A100 312 TFLOPS /
+    # 2039 GB/s, H100 989 TFLOPS / 3350 GB/s): compute ratio is 3.17x, BW
+    # ratio is 1.64x. For an AI=5 workload both GPUs are deeply memory-bound
+    # so the speedup collapses to the BW ratio. Option C is correct (#1332).
     partA_prediction = mo.ui.radio(
         options={
-            "A) ~6x (proportional to compute increase)":  "6x",
-            "B) ~3x (half the compute gain)":              "3x",
-            "C) ~1.5x (modest improvement)":               "1.5x",
-            "D) <1.1x (almost no improvement)":            "1.1x",
+            "A) ~3x (proportional to compute increase)":     "3x",
+            "B) ~2x (partial benefit from compute bump)":    "2x",
+            "C) ~1.6x (approximately the BW ratio)":         "1.6x",
+            "D) <1.1x (no improvement at all)":              "1.1x",
         },
-        label=r"Upgrading from A100 (\$15K) to H100 (\$30K) -- a 6x compute increase. "
+        label=r"Upgrading from A100 (\$15K) to H100 (\$30K) -- a 3x compute increase. "
               "For a workload with AI = 5 FLOPs/Byte, what latency improvement?",
     )
     return (partA_prediction,)
@@ -418,7 +422,7 @@ def _(
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
                 &ldquo;We are considering upgrading our inference fleet from A100s ($15K each)
-                to H100s ($30K each). The H100 has 6x the compute throughput. Engineering
+                to H100s ($30K each). The H100 has 3x the compute throughput. Engineering
                 says we should see proportional latency reduction. Finance wants your analysis
                 before approving $2M in hardware spend.&rdquo;
             </div>
@@ -507,8 +511,8 @@ def _(
             name="A100 to H100 Speedup",
             line=dict(color=COLORS["BlueLine"], width=2.5),
         ))
-        _fig.add_hline(y=6, line_dash="dash", line_color=COLORS["GreenLine"], line_width=1,
-                       annotation_text="Ideal 6x", annotation_position="top right",
+        _fig.add_hline(y=3, line_dash="dash", line_color=COLORS["GreenLine"], line_width=1,
+                       annotation_text="Ideal 3x (compute ratio)", annotation_position="top right",
                        annotation_font_color=COLORS["GreenLine"])
         _fig.add_hline(y=1, line_dash="dot", line_color=COLORS["TextMuted"], line_width=1)
         _fig.add_vline(x=_ridge_a100, line_dash="dash", line_color=COLORS["OrangeLine"], line_width=1.5,
@@ -576,19 +580,20 @@ Speedup = {_speedup:.2f}x   Improvement = {_improvement_pct:.1f}%
 ```
 
 At AI=5: BW ratio is {H100_BW/A100_BW:.2f}x ({H100_BW:,.0f} vs {A100_BW:,.0f} GB/s).
-The 6x compute upgrade is almost entirely wasted.
+The 3x compute upgrade collapses to just the BW ratio.
 """))
 
         _pred = partA_prediction.value
-        if _pred == "1.1x":
-            _rev = ("**Correct.** At AI=5, both GPUs are deeply memory-bound. "
-                    f"The speedup is only {_speedup_at_5:.2f}x because bandwidth, not compute, "
-                    "is the binding constraint.")
+        if _pred == "1.6x":
+            _rev = ("**Correct.** At AI=5, both GPUs are deeply memory-bound, so "
+                    f"the speedup collapses to the bandwidth ratio ({_speedup_at_5:.2f}x). "
+                    "Compute throughput is irrelevant in this regime.")
             _rkind = "success"
         else:
             _rev = (f"**The actual speedup at AI=5 is only ~{_speedup_at_5:.2f}x.** "
-                    "The workload is memory-bound. Slide AI above the ridge point "
-                    "to see where the 6x upgrade actually pays off.")
+                    "The workload is memory-bound, so the speedup tracks the BW "
+                    "ratio (1.64x), not the compute ratio. Slide AI above the "
+                    "ridge point to see where the 3x upgrade actually pays off.")
             _rkind = "warn"
 
         items.append(mo.callout(mo.md(_rev), kind=_rkind))
@@ -1112,8 +1117,9 @@ The energy ratio is often **~1,000x**, making local inference the only viable op
                 <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
                     <div style="margin-bottom: 10px;">
                         <strong>1. The Memory Wall makes compute upgrades worthless for
-                        memory-bound workloads.</strong> At AI=5, a 6x GPU upgrade yields
-                        only ~8% improvement.
+                        memory-bound workloads.</strong> At AI=5, a 3x GPU compute upgrade
+                        (A100 to H100) only delivers the 1.64x BW ratio speedup -- roughly
+                        half the hardware gain, because bandwidth is the binding constraint.
                     </div>
                     <div style="margin-bottom: 10px;">
                         <strong>2. The speed of light is irreducible.</strong>
@@ -1189,7 +1195,7 @@ def _(COLORS, ledger, mo, partA_prediction, partB_prediction, partC_prediction, 
             "light_barrier_prediction": partB_prediction.value,
             "power_wall_prediction": partC_prediction.value,
             "energy_wall_prediction": partD_prediction.value,
-            "memory_wall_correct": partA_prediction.value == "1.1x",
+            "memory_wall_correct": partA_prediction.value == "1.6x",
             "light_barrier_correct": partB_prediction.value == "no_physics",
             "power_wall_correct": partC_prediction.value == "15fps",
             "energy_wall_correct": partD_prediction.value == "1000x",

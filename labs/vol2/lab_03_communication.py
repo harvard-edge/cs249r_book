@@ -318,17 +318,24 @@ def _(mo):
     )
     return (pD_bw, pD_comp, pE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pE_hier = mo.ui.checkbox(label="Hierarchical AllReduce")
+    pE_fp16 = mo.ui.checkbox(label="FP16 gradients")
+    pE_bucket = mo.ui.checkbox(label="Bucket fusion")
+    pE_overlap = mo.ui.checkbox(label="Backward overlap")
+    return (pE_bucket, pE_fp16, pE_hier, pE_overlap)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, pA_gpus, pA_model, pA_prec,
     pA_pred, pB_msg_exp, pB_n_gpus, pB_pred,
     pC_gpus_per_node, pC_oversub, pC_pred, pC_topo,
     pD_bw, pD_comp, pD_pred, pE_pred,
+    pE_bucket, pE_fp16, pE_hier, pE_overlap,
 ):
-    pE_hier = mo.ui.checkbox(label="Hierarchical AllReduce")
-    pE_fp16 = mo.ui.checkbox(label="FP16 gradients")
-    pE_bucket = mo.ui.checkbox(label="Bucket fusion")
-    pE_overlap = mo.ui.checkbox(label="Backward overlap")
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE NETWORK TIME BUDGET

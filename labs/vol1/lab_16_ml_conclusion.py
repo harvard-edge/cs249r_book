@@ -289,14 +289,9 @@ def _(mo):
     )
     return (partD_inference, partD_logging, partD_optimize, partD_postprocess, partD_preprocess, partD_speedup, partE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_batch, partA_model, partA_prec,
-    partA_pred, partB_monitoring, partB_months, partB_pred,
-    partB_quant, partC_pred, partD_inference, partD_logging,
-    partD_optimize, partD_postprocess, partD_pred, partD_preprocess,
-    partD_speedup, partE_pred,
-):
+def _(mo):
     partE_int4 = mo.ui.checkbox(label="INT4 Quantization", value=False)
     partE_pruning = mo.ui.checkbox(label="Structured Pruning (50%)", value=False)
     partE_distill = mo.ui.checkbox(label="Knowledge Distillation", value=False)
@@ -304,6 +299,18 @@ def _(
     partE_shap = mo.ui.checkbox(label="SHAP Explanations", value=False)
     partE_ctx = mo.ui.slider(start=2048, stop=131072, value=32768, step=2048,
                               label="Context length (tokens)")
+    return (partE_ctx, partE_distill, partE_int4, partE_pruning, partE_retrain, partE_shap)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_batch, partA_model, partA_prec,
+    partA_pred, partB_monitoring, partB_months, partB_pred,
+    partB_quant, partC_pred, partD_inference, partD_logging,
+    partD_optimize, partD_postprocess, partD_pred, partD_preprocess,
+    partD_speedup, partE_pred, partE_ctx, partE_distill,
+    partE_int4, partE_pruning, partE_retrain, partE_shap,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — The Cost of a Token

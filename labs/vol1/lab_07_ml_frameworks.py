@@ -306,12 +306,9 @@ def _(mo):
     )
     return (partC_compile_time, partC_volume, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_compute_us, partA_kernels, partA_prediction,
-    partB_num_ops, partB_prediction, partB_tensor_mb, partC_compile_time,
-    partC_prediction, partC_volume, partD_prediction,
-):
+def _(mo):
     partD_framework = mo.ui.dropdown(
         options={"PyTorch": "PyTorch", "TensorFlow": "TensorFlow",
                  "ONNX Runtime": "ONNX Runtime", "TF Lite": "TF Lite",
@@ -322,6 +319,16 @@ def _(
         options={"Cloud (H100)": "cloud", "Edge (Jetson 16GB)": "edge", "MCU (ESP32 512KB)": "mcu"},
         value="MCU (ESP32 512KB)", label="Deployment target:", inline=True,
     )
+    return (partD_framework, partD_target)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_compute_us, partA_kernels, partA_prediction,
+    partB_num_ops, partB_prediction, partB_tensor_mb, partC_compile_time,
+    partC_prediction, partC_volume, partD_prediction, partD_framework,
+    partD_target,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Dispatch Tax

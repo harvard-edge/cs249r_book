@@ -317,13 +317,20 @@ def _(mo):
     )
     return (pD_hw, pD_precision_e, pE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
+    return (pE_temp,)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, pA_model_sel, pA_precision, pA_pred,
     pB_pred, pB_sparsity, pB_type, pC_pred,
     pD_hw, pD_precision_e, pD_pred, pE_pred,
+    pE_temp,
 ):
-    pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A: Quantization Free Lunch
