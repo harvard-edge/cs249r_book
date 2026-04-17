@@ -244,18 +244,25 @@ def _(mo):
     )
     return (partC_cloud_cost, partC_drift_cost, partC_edge_cost, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_drift_rate, partA_pred, partA_weeks,
-    partB_drift_cost, partB_pred, partB_retrain_cost, partC_cloud_cost,
-    partC_drift_cost, partC_edge_cost, partC_pred, partD_pred,
-):
+def _(mo):
     partD_missed = mo.ui.slider(start=1, stop=6, value=3, step=1,
                                  label="Missed retraining cycles")
     partD_downstream = mo.ui.slider(start=0, stop=5, value=2, step=1,
                                      label="Dependent downstream models")
     partD_base_loss = mo.ui.slider(start=1.0, stop=5.0, value=2.0, step=0.5,
                                     label="Accuracy loss per missed cycle (pp)")
+    return (partD_base_loss, partD_downstream, partD_missed)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_drift_rate, partA_pred, partA_weeks,
+    partB_drift_cost, partB_pred, partB_retrain_cost, partC_cloud_cost,
+    partC_drift_cost, partC_edge_cost, partC_pred, partD_pred,
+    partD_base_loss, partD_downstream, partD_missed,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — PSI Drift Detection

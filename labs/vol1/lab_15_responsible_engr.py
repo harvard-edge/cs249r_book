@@ -247,12 +247,9 @@ def _(mo):
     )
     return (partC_features, partC_method, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_base_a, partA_base_b, partA_pred,
-    partA_threshold, partB_method, partB_pred, partB_target_gap,
-    partC_features, partC_method, partC_pred, partD_pred,
-):
+def _(mo):
     partD_retrain_freq = mo.ui.dropdown(
         options={"Weekly": 52, "Monthly": 12, "Quarterly": 4, "Once": 1},
         value="Weekly", label="Retraining frequency")
@@ -262,6 +259,16 @@ def _(
         options={"Clean (hydro, 20 gCO2/kWh)": 20, "Mixed (400 gCO2/kWh)": 400,
                  "Coal-heavy (800 gCO2/kWh)": 800},
         value="Mixed (400 gCO2/kWh)", label="Grid carbon intensity")
+    return (partD_explain_pct, partD_grid_mix, partD_retrain_freq)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_base_a, partA_base_b, partA_pred,
+    partA_threshold, partB_method, partB_pred, partB_target_gap,
+    partC_features, partC_method, partC_pred, partD_pred,
+    partD_explain_pct, partD_grid_mix, partD_retrain_freq,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — The Fairness Illusion

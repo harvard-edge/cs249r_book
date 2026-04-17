@@ -275,13 +275,9 @@ def _(mo):
     )
     return (partC_ctx, partC_gpus, partC_model, partC_prec, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_pred, partA_rho, partA_slo,
-    partA_svc, partB_arr, partB_batch, partB_pred,
-    partB_slo, partC_ctx, partC_gpus, partC_model,
-    partC_prec, partC_pred, partD_pred,
-):
+def _(mo):
     partD_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partD_stor = mo.ui.dropdown(
@@ -289,6 +285,17 @@ def _(
         value="NVMe SSD", label="Storage type")
     partD_pcie = mo.ui.dropdown(options={"PCIe Gen4": "gen4", "PCIe Gen5": "gen5"},
                                  value="PCIe Gen5", label="Interconnect")
+    return (partD_model, partD_pcie, partD_stor)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_pred, partA_rho, partA_slo,
+    partA_svc, partB_arr, partB_batch, partB_pred,
+    partB_slo, partC_ctx, partC_gpus, partC_model,
+    partC_prec, partC_pred, partD_pred, partD_model,
+    partD_pcie, partD_stor,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — The Tail Latency Explosion

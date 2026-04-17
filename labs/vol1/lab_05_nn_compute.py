@@ -322,13 +322,9 @@ def _(mo):
     )
     return (partC_width, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(
-    mo, partA_act_l1, partA_act_l2, partA_act_l3,
-    partA_act_l4, partA_context, partA_prediction, partB_batch,
-    partB_context, partB_prediction, partB_width, partC_prediction,
-    partC_width, partD_prediction,
-):
+def _(mo):
     partD_depth = mo.ui.slider(
         start=3, stop=50, value=20, step=1, label="Network depth (layers)",
     )
@@ -344,6 +340,17 @@ def _(
     partD_width_d = mo.ui.slider(
         start=64, stop=2048, value=512, step=64, label="Layer width",
     )
+    return (partD_batch, partD_depth, partD_phase, partD_width_d)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_act_l1, partA_act_l2, partA_act_l3,
+    partA_act_l4, partA_context, partA_prediction, partB_batch,
+    partB_context, partB_prediction, partB_width, partC_prediction,
+    partC_width, partD_prediction, partD_batch, partD_depth,
+    partD_phase, partD_width_d,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Transistor Tax

@@ -296,15 +296,21 @@ def _(mo):
     )
     return (partC_context_c, partC_depth, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    partD_batch_d = mo.ui.slider(
+        start=1, stop=256, value=1, step=1, label="Batch size",
+    )
+    return (partD_batch_d,)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, partA_arch, partA_prediction, partA_resolution,
     partB_heads, partB_prediction, partB_seq_len, partC_context_c,
-    partC_depth, partC_prediction, partD_prediction,
+    partC_depth, partC_prediction, partD_prediction, partD_batch_d,
 ):
-    partD_batch_d = mo.ui.slider(
-        start=1, stop=256, value=1, step=1, label="Batch size",
-    )
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Cost of No Structure

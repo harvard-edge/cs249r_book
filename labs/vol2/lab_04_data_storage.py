@@ -295,16 +295,23 @@ def _(mo):
     )
     return (pD_compute, pD_io, pD_prefetch, pE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pE_mtbf = mo.ui.slider(start=1, stop=24, value=5, step=1, label="Cluster MTBF (hours)")
+    pE_write = mo.ui.slider(start=30, stop=300, value=120, step=10, label="Checkpoint write time (s)")
+    pE_interval = mo.ui.slider(start=1, stop=120, value=30, step=1, label="Checkpoint interval (min)")
+    return (pE_interval, pE_mtbf, pE_write)
+
+
 @app.cell(hide_code=True)
 def _(
     mo, pA_gen, pA_pred, pB_gpus,
     pB_pred, pB_target, pC_pred, pC_shards,
     pC_workers, pD_compute, pD_io, pD_pred,
-    pD_prefetch, pE_pred,
+    pD_prefetch, pE_pred, pE_interval, pE_mtbf,
+    pE_write,
 ):
-    pE_mtbf = mo.ui.slider(start=1, stop=24, value=5, step=1, label="Cluster MTBF (hours)")
-    pE_write = mo.ui.slider(start=30, stop=300, value=120, step=10, label="Checkpoint write time (s)")
-    pE_interval = mo.ui.slider(start=1, stop=120, value=30, step=1, label="Checkpoint interval (min)")
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE STORAGE-COMPUTE CHASM
