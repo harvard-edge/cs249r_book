@@ -15,7 +15,7 @@
 import { Link } from "lucide-react";
 import clsx from "clsx";
 
-import { trackEvent } from "@/lib/analytics";
+import { track } from "@/lib/analytics";
 
 export interface ChainBadgeProps {
   chainId: string;
@@ -37,7 +37,7 @@ export default function ChainBadge({
   // Fire shown-event on mount (debounced per-session by analytics layer).
   if (typeof window !== "undefined") {
     queueMicrotask(() => {
-      trackEvent({
+      track({
         type: "chain_badge_shown",
         chainId,
         position,
@@ -54,7 +54,7 @@ export default function ChainBadge({
       data-testid="chain-badge"
       aria-label={`Chained question: ${label}. Click to view chain siblings.`}
       onClick={() => {
-        trackEvent({
+        track({
           type: "chain_badge_clicked",
           chainId,
           position,
