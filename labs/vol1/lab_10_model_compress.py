@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -58,7 +58,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_BW, H100_RAM, H100_TDP, H100_TFLOPS,
         IPHONE_BW, IPHONE_RAM, IPHONE_TDP, IPHONE_TFLOPS,
@@ -236,9 +236,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4", "INT2": "int2"},
         value="FP32",
@@ -260,12 +258,10 @@ def _(mo, pA_pred):
         label="You prune ResNet-50 to 90% sparsity (unstructured). "
               "What inference speedup on an H100?",
     )
-    return (pB_pred,)
+    return (pA_model_sel, pA_precision, pB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_sparsity = mo.ui.slider(start=0, stop=95, value=0, step=5, label="Sparsity (%)")
     pB_type = mo.ui.dropdown(
         options={"Unstructured": "unstructured", "Structured": "structured", "2:4 Structured": "2_4"},
@@ -282,12 +278,10 @@ def _(mo, pB_pred):
         },
         label="Deploy Llama-3 8B on 4 GB RAM. Which strategy fits?",
     )
-    return (pC_pred,)
+    return (pB_sparsity, pB_type, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_pred = mo.ui.radio(
         options={
             "A) 50/50 -- balanced": "50_50",
@@ -300,9 +294,7 @@ def _(mo, pC_pred):
     return (pD_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_precision_e = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="FP32",
@@ -323,13 +315,22 @@ def _(mo, pD_pred):
         },
         label="ResNet-50 teacher: 76.1% ImageNet. Distill to MobileNetV2 student. Student accuracy?",
     )
-    return (pE_pred,)
+    return (pD_hw, pD_precision_e, pE_pred)
+
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
+@app.cell(hide_code=True)
+def _(mo):
+    pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
+    return (pE_temp,)
+
 
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
-    pE_temp = mo.ui.slider(start=1.0, stop=20.0, value=4.0, step=0.5, label="Temperature")
+def _(
+    mo, pA_model_sel, pA_precision, pA_pred,
+    pB_pred, pB_sparsity, pB_type, pC_pred,
+    pD_hw, pD_precision_e, pD_pred, pE_pred,
+    pE_temp,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A: Quantization Free Lunch

@@ -1,0 +1,30 @@
+schema_version: 1
+id: edge-exp2-opti-0174
+title: Dataflow Pipeline Bottlenecks in Mixed-Precision
+topic: mixed-precision-training
+status: published
+provenance: imported
+scenario: You are deploying an object detection model to a smart camera powered by a Hailo-8 accelerator
+  (26 TOPS INT8, 2.5W). The Hailo-8 is a pure dataflow architecture with no local DRAM, streaming weights
+  and activations directly from host memory via PCIe. Post-training quantization to INT8 causes an unacceptable
+  drop in accuracy, so the team proposes running the sensitive attention layers in FP16 on the host CPU
+  while the rest of the convolutions run on the Hailo-8. Analyze the system-level performance impact of
+  this mixed-precision deployment and quantify the bottleneck.
+details:
+  realistic_solution: The correct diagnosis is that context-switching between the host CPU (FP16) and
+    Hailo-8 (INT8) destroys the dataflow efficiency. Instead of fallback, the solution is to apply Quantization-Aware
+    Training (QAT) with learnable clipping parameters, or use per-channel quantization to keep the entire
+    network in INT8 on the Hailo-8. This maintains a single continuous stream from host memory, maximizing
+    the 26 TOPS compute without latency-heavy pipeline breaks.
+  common_mistake: Candidates often assume that because the host CPU can handle FP16 mathematically, the
+    only cost is the CPU computation time. They fail to recognize that breaking the dataflow pipeline
+    on the Hailo-8 forces intermediate activations to be flushed back to host memory and then re-streamed,
+    destroying the accelerator's utilization and saturating the PCIe bus.
+  napkin_math: Consider an intermediate activation tensor of 128x128x256. In INT8, this is 4MB; in FP16
+    on the host, it's 8MB. If an attention layer runs on the host, the Hailo-8 must write 4MB out, the
+    CPU processes it, and streams 4MB back in (8MB total transfer per break). On a typical edge PCIe Gen2
+    x2 bus (~1 GB/s), this transfer takes 8ms. If the network requires 3 such breaks, that's 24ms of sheer
+    transfer overhead per frame. To hit 30 FPS (33ms budget), you are left with only 9ms for compute.
+    Even with 26 TOPS, the accelerator sits idle waiting for memory, reducing effective utilization to
+    under 30%.
+last_modified: '2026-04-01'

@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -51,7 +51,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         A100_BW, A100_TFLOPS,
         COLORS, H100_BW, H100_TDP, H100_TFLOPS,
@@ -224,9 +224,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_speedup = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Inference speedup (x)")
     pA_serial = mo.ui.slider(start=5, stop=80, value=45, step=5, label="Non-inference fraction (%)")
 
@@ -240,12 +238,10 @@ def _(mo, pA_pred):
         label="Edge device benchmarks at 30 FPS (1-min vendor test). "
               "Sustained FPS after 10 min in fanless enclosure at 35C?",
     )
-    return (pB_pred,)
+    return (pA_serial, pA_speedup, pB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_time = mo.ui.slider(start=0, stop=600, value=0, step=10, label="Time (seconds)")
     pB_ambient = mo.ui.slider(start=20, stop=45, value=35, step=1, label="Ambient temp (C)")
     pB_cooling = mo.ui.dropdown(
@@ -263,12 +259,10 @@ def _(mo, pB_pred):
         },
         label="Config A has highest accuracy (94%). Is it deployable?",
     )
-    return (pC_pred,)
+    return (pB_ambient, pB_cooling, pB_time, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_batch = mo.ui.slider(start=1, stop=64, value=1, step=1, label="Batch size")
     pC_precision = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
@@ -285,14 +279,23 @@ def _(mo, pC_pred):
         },
         label="Inference service: 50 ms average latency. SLO: 200 ms p99. Is the SLO satisfied?",
     )
-    return (pD_pred,)
+    return (pC_batch, pC_precision, pD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_sigma = mo.ui.slider(start=0.1, stop=1.5, value=0.8, step=0.05, label="Tail heaviness (sigma)")
     pD_slo = mo.ui.slider(start=50, stop=500, value=200, step=10, label="SLO threshold (ms)")
+    return (pD_sigma, pD_slo)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, pA_pred, pA_serial, pA_speedup,
+    pB_ambient, pB_cooling, pB_pred, pB_time,
+    pC_batch, pC_precision, pC_pred, pD_pred,
+    pD_sigma, pD_slo,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A: The Amdahl Ceiling

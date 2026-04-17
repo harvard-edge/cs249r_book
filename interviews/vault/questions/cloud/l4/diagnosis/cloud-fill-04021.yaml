@@ -1,0 +1,23 @@
+schema_version: 1
+id: cloud-fill-04021
+title: Stage Imbalance in Heterogeneous Pipeline
+topic: pipeline-parallelism
+status: published
+provenance: imported
+scenario: You deploy a 48-layer transformer in a 4-stage pipeline on 4x A100 (80GB HBM2e). Stages 1-3
+  hold 12 layers each but Stage 4 holds the 12 final transformer layers PLUS the language model head (unembedding,
+  50K vocab × 4096 = 800M parameters in BF16 = 1.6 GB extra). Stage 4 takes 35% longer than Stages 1-3.
+  Quantify the throughput loss and fix the imbalance.
+details:
+  realistic_solution: 'Move 2 transformer layers from Stage 4 to Stage 3 to compensate for the LM head
+    overhead. New split: Stage 1: 13 layers, Stage 2: 13 layers, Stage 3: 14 layers, Stage 4: 8 layers
+    + LM head. Profile Stage 4 time before and after to confirm balance. Alternatively, use pipeline schedule
+    load balancing tools (e.g., Megatron-LM''s automatic stage profiler).'
+  common_mistake: Assuming equal layer counts mean equal stage time. The LM head often has more parameters
+    than a transformer layer (50K vocab × 4096 > typical FFN size) and a large softmax over 50K logits
+    that is memory-bandwidth-bound. Teams split layers evenly and ignore the head.
+  napkin_math: 'Stage time ratio: Stage4/Stage1-3 = 1.35. Pipeline throughput is determined by the slowest
+    stage. Current throughput = 1 / t_stage4. Ideal throughput = 1 / t_stage (balanced). Throughput loss
+    = (t_stage4 - t_stage_balanced) / t_stage4 = (1.35 - 1.0) / 1.35 = 25.9% throughput loss. With 4 A100s
+    at $10/hr each: 0.26 × 4 × $10 = $10.4/hr wasted due to imbalance.'
+last_modified: '2026-04-01'

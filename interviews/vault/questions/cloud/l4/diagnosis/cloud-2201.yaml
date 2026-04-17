@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-2201
+title: The Nsys Timeline Mystery
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You open an Nsight Systems timeline for a distributed training step on 8 H100s. You see tight,
+  back-to-back GEMM kernels for the forward pass, then a 120ms gap where no GPU kernels are running, followed
+  by the backward pass. GPU utilization during this gap is 0%. The training step takes 500ms total, so
+  this gap is 24% of your iteration time. What are the three most likely causes of this gap, and how do
+  you distinguish between them using the nsys timeline?
+details:
+  realistic_solution: 'The three most likely causes: (1) CPU-bound loss computation: If the loss function
+    involves operations that fall back to CPU (e.g., custom Python loss with non-trivial control flow,
+    or a metric computation that triggers a GPU-to-CPU synchronization), the GPU stalls waiting for the
+    CPU to finish and launch the backward kernels. On the nsys timeline, you''d see a CPU thread active
+    during the gap with cudaStreamSynchronize or cudaMemcpy D2H calls. (2) Dynamic graph recompilation:
+    If using torch.compile() or a JIT, a shape change (e.g., the last mini-batch has a different size)
+    can trigger recompilation. On the timeline, you''d see CPU activity in the TorchDynamo/Inductor threads
+    but no GPU kernels. (3) Host-side data pipeline stall: If the next batch isn''t ready, the GPU idles
+    waiting for data. On the timeline, you''d see the DataLoader worker threads blocked on I/O or the
+    CPU preprocessing taking longer than the forward pass. The diagnostic: look at CPU thread activity
+    during the gap. Active CPU + no GPU = cause 1 or 2. Idle CPU + idle GPU = cause 3 (data starvation).'
+  common_mistake: Immediately blaming NCCL communication. While AllReduce can cause gaps, a gap with zero
+    GPU activity between forward and backward suggests the GPU is waiting for the host, not for the network.
+  napkin_math: 'Gap cost: 120ms / 500ms = 24% of training time wasted. At $2/hr/GPU x 8 GPUs = $16/hr.
+    Over a 30-day training run: 24% x $16 x 720 hours = $2,765 wasted on idle GPUs. Eliminating this gap
+    would reduce training time by ~24%, saving ~$2,800 and 7 days of wall-clock time.'
+chain:
+  id: cloud-chain-459
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Performance Engineering

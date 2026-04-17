@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -64,7 +64,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS,
         EDGE_TFLOPS,
@@ -259,9 +259,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_fleet_size = mo.ui.slider(
         start=100, stop=25000, value=1000, step=100,
         label="Fleet size (GPUs)",
@@ -282,12 +280,10 @@ def _(mo, partA_prediction):
         label="You scale a 175B model from 1 GPU to 256 GPUs on InfiniBand NDR. "
               "What fleet efficiency do you expect?",
     )
-    return (partB_prediction,)
+    return (partA_fleet_size, partA_node_rel, partB_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_gpu_count = mo.ui.slider(
         start=1, stop=1024, value=256, step=1, label="Number of GPUs",
     )
@@ -315,12 +311,10 @@ def _(mo, partB_prediction):
         label="Fixed budget of 10^23 FLOPs. Which achieves lower loss: "
               "a 10B model on 200B tokens, or a 3B model on 600B tokens?",
     )
-    return (partC_prediction,)
+    return (partB_gpu_count, partB_model_size, partB_network, partC_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_params = mo.ui.slider(start=1, stop=100, value=10, step=1, label="Model params (B)")
     partC_tokens = mo.ui.slider(start=10, stop=10000, value=200, step=10, label="Training tokens (B)")
 
@@ -335,12 +329,10 @@ def _(mo, partC_prediction):
         label="For a workload with 20% communication overhead (r = 0.20), "
               "how many GPUs before scaling efficiency drops below 50%?",
     )
-    return (partD_prediction,)
+    return (partC_params, partC_tokens, partD_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_comm_frac = mo.ui.slider(start=0.01, stop=0.50, value=0.20, step=0.01, label="Communication fraction (r)")
     partD_n_gpus = mo.ui.slider(start=1, stop=512, value=64, step=1, label="Number of GPUs")
     partD_overlap = mo.ui.slider(start=0, stop=80, value=0, step=10, label="Overlap (%)")
@@ -358,10 +350,16 @@ def _(mo, partD_prediction):
         options={"Computation": "comp", "Communication": "comm", "Coordination": "coord"},
         label="Federated MobileNet (edge devices) -- dominant bottleneck?",
     )
-    return (partE_llm, partE_dlrm, partE_fed)
+    return (partD_comm_frac, partD_n_gpus, partD_overlap, partE_dlrm, partE_fed, partE_llm)
 
 @app.cell(hide_code=True)
-def _(mo, partE_llm, partE_dlrm, partE_fed):
+def _(
+    mo, partA_fleet_size, partA_node_rel, partA_prediction,
+    partB_gpu_count, partB_model_size, partB_network, partB_prediction,
+    partC_params, partC_prediction, partC_tokens, partD_comm_frac,
+    partD_n_gpus, partD_overlap, partD_prediction, partE_dlrm,
+    partE_fed, partE_llm,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE RELIABILITY COLLAPSE

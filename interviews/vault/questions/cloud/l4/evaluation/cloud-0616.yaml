@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-0616
+title: The AMD MI300X Memory Advantage
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: Your team is serving Llama-2-70B. On NVIDIA H100 80 GB, you need 2-way tensor parallelism —
+  the 140 GB of FP16 weights simply don't fit on one GPU. AMD just offered you MI300X nodes with 192 GB
+  HBM3 per GPU. The sales rep says 'you can serve 70B on a single GPU now.' Is this true, and what's the
+  real systems impact of going from 2 GPUs to 1?
+details:
+  realistic_solution: 'On H100, Llama-2-70B in FP16 requires 140 GB for weights alone. With KV-cache for
+    even a modest batch, you exceed 80 GB and must shard across 2 GPUs using tensor parallelism (TP=2).
+    TP introduces two costs: (1) an AllReduce after every attention and FFN block — 160 AllReduces per
+    forward pass for an 80-layer model, each paying NVLink latency (~5 μs) plus transfer time; (2) you
+    halve the effective memory bandwidth because each GPU only holds half the weights but must synchronize
+    at every layer. On MI300X with 192 GB HBM3, the 140 GB of weights fit on a single GPU with 52 GB remaining
+    for KV-cache and activations. Eliminating TP removes all inter-GPU communication, reduces tail latency
+    variance (no synchronization jitter), and the MI300X''s 5.3 TB/s HBM3 bandwidth (vs H100''s 3.35 TB/s)
+    directly accelerates the memory-bound decode phase.'
+  common_mistake: '"More memory just means we can serve larger models — the latency and throughput stay
+    the same." This ignores the cascading systems effects of eliminating tensor parallelism.'
+  napkin_math: '**H100 TP=2:** Weights = 140 GB sharded to 70 GB/GPU. KV-cache per request (4096 tokens,
+    80 layers, 8 KV-heads via GQA, d=128, FP16) = $2 \times 80 \times 8 \times 128 \times 4096 \times
+    2$ ≈ **1.34 GB**. Max batch on 80 GB: $(80 - 70) / 1.34 \approx$ **7 requests** per GPU. Communication
+    overhead: 160 AllReduces × ~10 μs each = **1.6 ms** added latency per token. **MI300X TP=1:** Weights
+    = 140 GB on 1 GPU. Free memory = 192 - 140 = **52 GB**. Max batch = $52 / 1.34 \approx$ **38 concurrent
+    requests** with no communication overhead. Decode bandwidth: MI300X at 5.3 TB/s reads 140 GB of weights
+    in **26.4 ms**; H100 at 3.35 TB/s reads 70 GB (sharded) in 20.9 ms + sync overhead ≈ **22.5 ms**.
+    Single-GPU MI300X is only 17% slower per token but serves 5× the batch — **throughput per dollar shifts
+    dramatically**.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

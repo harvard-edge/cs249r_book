@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2325
+title: INT4 KV Cache Group Size Architecture
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: To serve a 70B model with a massive batch size, you implement INT4 KV cache, shrinking the cache
+  from 80GB to 20GB. Per-channel quantization (quantizing across the sequence dimension for each head)
+  yields terrible perplexity. Changing to 'group size 128' quantization fixes the perplexity but increases
+  memory overhead by 5%. Why does per-channel fail here?
+details:
+  realistic_solution: In KV caching, the sequence dimension grows dynamically, and attention involves
+    comparing tokens across time. Outliers do not just occur in specific feature channels; they also occur
+    at specific token positions (e.g., punctuation or start-of-sequence tokens). If you quantize an entire
+    channel across a long sequence length (e.g., 4096 tokens) using a single scale factor, one temporal
+    outlier in that channel will force a massive scale factor, crushing the precision of the other 4095
+    tokens in that channel into the tiny 16-value INT4 space. Grouped quantization (e.g., group size 128)
+    breaks the sequence into smaller chunks, calculating a new scale factor every 128 tokens, localizing
+    the destructive impact of temporal outliers.
+  common_mistake: Assuming per-channel quantization limits the dynamic range of the model's hidden dimensions,
+    which INT4 requires to represent extreme feature values.
+  napkin_math: INT4 has 16 bins [-8, 7]. If max value in 4096 tokens is 40.0, scale = 40/7 = 5.7. A normal
+    token value of 2.0 quantizes to round(2.0/5.7) = 0. With group size 128, a group without the outlier
+    might have max 3.5. Scale = 0.5. The 2.0 token quantizes to 4, preserving its information.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

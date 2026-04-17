@@ -1,0 +1,36 @@
+schema_version: 1
+id: cloud-2376
+title: RDMA Memory Registration Overhead
+topic: mlops-lifecycle
+status: published
+provenance: imported
+scenario: You are optimizing a Graph Neural Network (GNN) training pipeline across 64 nodes. The workload
+  dynamically samples subgraphs, generating variable-sized tensors (between 10 MB and 500 MB) that must
+  be transferred via RDMA (RoCEv2) every 10 milliseconds. You notice the transfer latency is highly erratic.
+  You can either (A) register memory dynamically right before each RDMA transfer, or (B) pre-allocate
+  and pin a massive static 100 GB memory pool on every GPU. Analyze the tradeoff between these memory
+  registration strategies.
+details:
+  realistic_solution: "For RDMA to bypass the CPU and securely access GPU memory, the memory pages must\
+    \ be 'pinned' (preventing the OS from swapping them out) and registered with the NIC (Memory Region\
+    \ / MR registration). This process creates a mapping table in the NIC's hardware. \n\nOption A (Dynamic\
+    \ Registration): Registering and deregistering MRs on the fly requires kernel context switches, PCIe\
+    \ transactions to update NIC page tables, and cache invalidations. This process takes tens to hundreds\
+    \ of microseconds per operation. If done every 10ms for variable tensors, it introduces massive jitter\
+    \ and CPU overhead, completely destroying the low-latency benefit of RDMA.\n\nOption B (Static Pre-allocation):\
+    \ Allocating a 100 GB pinned memory pool at startup registers the MR once. All subsequent transfers\
+    \ just write into this buffer with zero registration overhead. \n\nThe Tradeoff: Option B guarantees\
+    \ deterministic, microsecond-level RDMA latency, drastically speeding up the GNN communication phase.\
+    \ However, pinning 100 GB of VRAM permanently consumes expensive GPU memory that could otherwise be\
+    \ used for larger batch sizes or deeper models. Furthermore, managing fragmentation within this custom\
+    \ memory pool adds complexity to the application code. For high-frequency (every 10ms) communication,\
+    \ pre-registration is mandatory, and the loss of usable VRAM is the necessary cost of RDMA speed."
+  common_mistake: Choosing dynamic registration to save GPU memory without realizing that RDMA memory
+    registration requires OS kernel involvement and PCIe syncs, adding massive latency to the critical
+    path.
+  napkin_math: 'Dynamic MR registration overhead: ~50us. Transferring 10MB over 400Gbps (50GB/s) takes
+    200us. The registration adds 25% overhead (50us / 200us). If 100 tensors are sent dynamically, registration
+    overhead alone is 5ms, consuming 50% of the 10ms step budget.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

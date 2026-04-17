@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-0764
+title: The Silent Data Corruption at Scale
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: We're 60 days into a 90-day training run on 10,000 H100 GPUs. The loss curve looks normal, but
+  when we evaluate on our held-out benchmark, accuracy is 8 points below the expected scaling law prediction.
+  No crashes, no NaNs, no obvious errors in the logs. What could cause a model to silently underperform,
+  and how would you detect it?
+details:
+  realistic_solution: 'At 10,000-GPU scale, silent hardware errors are not rare events — they''re statistical
+    certainties. HBM bit flips, intermittent PCIe errors, and faulty Tensor Cores can corrupt individual
+    gradient or activation values without triggering ECC errors or NaN checks. A single corrupted gradient
+    in one AllReduce poisons the update for all GPUs. The training loss may still decrease (SGD is robust
+    to some noise), but the model learns subtly wrong representations. Detection requires **active monitoring
+    beyond loss curves**: (1) periodic evaluation on a fixed validation set (not just training loss);
+    (2) gradient norm tracking per GPU — a GPU with faulty memory will show anomalous gradient statistics;
+    (3) checksum-based AllReduce verification — compare AllReduce results across redundant computation
+    paths; (4) "canary" computations — run a fixed input through the model every N steps and compare output
+    to a known-good reference.'
+  common_mistake: '"The scaling law prediction must be wrong, or the benchmark is noisy." This dismisses
+    the most dangerous failure mode in large-scale training: silent data corruption (SDC).'
+  napkin_math: '**Failure rates:** Google''s 2023 study reported ~1-2 silent data corruption events per
+    1,000 GPU-days for A100-class hardware. At 10,000 GPUs over 90 days: expected SDC events = $10000
+    \times 90 / 1000 \times 1.5 = $ **1,350 silent corruption events** during the training run. Even if
+    99% are benign (corrupted values that get averaged away), 1% causing meaningful gradient corruption
+    = **~14 events** that shift the model. Each corrupted AllReduce affects all 10,000 GPUs simultaneously.
+    **Detection cost:** Running a 1,000-example validation eval every 100 steps: 1,000 × $2 \times 70\text{B}$
+    = 140 TFLOPs per eval. At 989 TFLOPS per GPU, this takes ~0.14 seconds — negligible. Gradient norm
+    monitoring: one `torch.norm()` per GPU per step = microseconds. The monitoring overhead is <0.1% of
+    training time; the cost of *not* monitoring is potentially discarding a $50M+ training run.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

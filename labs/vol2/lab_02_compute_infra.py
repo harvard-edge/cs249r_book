@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -93,7 +93,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, ureg,
         H100_TFLOPS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_RIDGE,
@@ -263,9 +263,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_model = mo.ui.dropdown(
         options={"7B": 7, "70B": 70, "175B": 175},
         value="70B", label="Model size (B params)",
@@ -281,12 +279,10 @@ def _(mo, pA_pred):
         },
         label="Which fleet-scale workloads fall above the H100 ridge point?",
     )
-    return (pB_pred,)
+    return (pA_batch, pA_model, pB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_hw = mo.ui.dropdown(
         options={"V100": "v100", "A100": "a100", "H100": "h100", "B200": "b200"},
         value="H100", label="Accelerator",
@@ -301,12 +297,10 @@ def _(mo, pB_pred):
         },
         label="How much slower is a 10 GB AllReduce over IB NDR vs NVLink 4.0?",
     )
-    return (pC_pred,)
+    return (pB_hw, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_size = mo.ui.slider(start=1, stop=10000, value=10000, step=100, label="Transfer size (MB)")
 
     pD_pred = mo.ui.radio(
@@ -319,12 +313,10 @@ def _(mo, pC_pred):
         label="Can a single 8-GPU DGX H100 node (640 GB HBM) train a 175B "
               "model with Adam in FP16 without ZeRO?",
     )
-    return (pD_pred,)
+    return (pC_size, pD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_model_b = mo.ui.slider(start=1, stop=175, value=175, step=1, label="Model params (B)")
     pD_gpus = mo.ui.slider(start=1, stop=8, value=8, step=1, label="GPUs per node")
     pD_zero = mo.ui.dropdown(
@@ -341,15 +333,24 @@ def _(mo, pD_pred):
         },
         label="For a 1,000-GPU H100 cluster over 3 years: GPUs or electricity costs more?",
     )
-    return (pE_pred,)
+    return (pD_gpus, pD_model_b, pD_zero, pE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pE_n_gpus = mo.ui.slider(start=100, stop=5000, value=1000, step=100, label="GPU count")
     pE_util = mo.ui.slider(start=30, stop=90, value=70, step=5, label="Utilization (%)")
     pE_pue = mo.ui.slider(start=1.06, stop=1.60, value=1.12, step=0.02, label="PUE")
+    return (pE_n_gpus, pE_pue, pE_util)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, pA_batch, pA_model, pA_pred,
+    pB_hw, pB_pred, pC_pred, pC_size,
+    pD_gpus, pD_model_b, pD_pred, pD_zero,
+    pE_pred, pE_n_gpus, pE_pue, pE_util,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A: THE MEMORY WALL

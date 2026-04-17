@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-2448
+title: The W16A8 Quantization Trap
+topic: quantization-fundamentals
+status: published
+provenance: imported
+scenario: Your team is optimizing a 70B parameter LLM for single-batch autoregressive decoding on an H100
+  GPU (3.35 TB/s, 989 TFLOPS FP16, 1978 TOPS INT8). They implement W16A8 quantization (weights remain
+  FP16, activations are dynamically quantized to INT8) to leverage the 2x faster INT8 Tensor Cores. They
+  expect a noticeable decrease in token generation latency. Instead, latency remains at exactly ~42ms
+  per token, with a slight CPU overhead increase.
+details:
+  realistic_solution: The failure occurs because autoregressive decoding at batch size 1 is fundamentally
+    weight-memory-bandwidth bound, not compute-bound. The arithmetic intensity of BS=1 decoding is approximately
+    1 FLOP/byte. The H100's ridge point for FP16 is ~295 FLOPs/byte (989 T / 3.35 T). Since 1 << 295,
+    the time is entirely dictated by reading the weights from HBM. Because the implementation used W16A8,
+    the weights are still stored and loaded in FP16. The memory traffic (140GB) is completely unchanged.
+    Speeding up the math units from 989 TFLOPS to 1978 TOPS does absolutely nothing for end-to-end latency
+    because the SMs were already starved for data. To speed up BS=1 decoding, you must use Weight-Only
+    Quantization (e.g., W8A16 or W4A16) to reduce the memory payload.
+  common_mistake: Assuming that doubling the compute throughput (TOPS) via activation quantization will
+    speed up all operations, regardless of where they sit on the roofline.
+  napkin_math: FP16 Memory Time = 70B params * 2 bytes = 140 GB. 140 GB / 3.35 TB/s = 41.7 ms. FP16 Compute
+    Time = 140 GFLOPs / 989 TFLOPS = 0.14 ms. Total Time ~ max(41.7, 0.14) = 41.7 ms. W16A8 INT8 Compute
+    Time = 140 GFLOPs / 1978 TOPS = 0.07 ms. Total Time ~ max(41.7, 0.07) = 41.7 ms. 0% improvement.
+chain:
+  id: cloud-chain-437
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

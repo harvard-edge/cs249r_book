@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-sus-63046
+title: 'MI300X for Mixture-of-Experts: Expert Capacity and Memory Layout'
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: 'A Mixtral 8×7B MoE model has 8 experts, each 7B parameters, with top-2 routing (2 experts activated
+  per token). Full model size: 8 × 14GB (FP16) = 112GB. On an H100 (80GB), this requires 2-GPU tensor
+  parallel to hold the model. On a single MI300X (192GB), the full model fits with 80GB spare. Design
+  the optimal serving configuration for each platform and calculate expected decode throughput.'
+details:
+  realistic_solution: 'Effective model for compute: 2 active experts × 7B = 14B effective parameters per
+    forward pass. But all 112GB must reside in memory for routing. H100 TP=2 configuration: each GPU holds
+    56GB (half of 112GB). Expert routing requires AllReduce across GPUs if the activated expert is on
+    the other GPU. Cross-GPU expert routing: 50% probability that a token''s top-2 experts span both GPUs
+    → 50% of tokens require data transfer. Transfer: token activation (8192×2 bytes = 16KB per token).
+    At 200 tok/batch: 200×16KB×0.5 = 1.6MB per AllReduce. NVLink latency: 1.6MB/450 = 3.6µs — negligible.
+    H100 TP=2 decode throughput: effective BW per GPU for active experts: 3,350/2 = 1,675 GB/s, loading
+    14GB active weights per forward: 1,675/14 = 119.6 tok/sec. MI300X single-card: load 14GB active experts
+    from 192GB pool. BW: 5,300 GB/s. Throughput: 5,300/14 = 378.6 tok/sec — 3.2× higher than H100 TP=2.
+    No cross-GPU expert routing needed. MI300X is massively superior for MoE serving at this scale.'
+  common_mistake: Treating MoE serving the same as dense model serving and ignoring expert routing overhead.
+    Only 2 of 8 experts are activated per token — the inactive expert weights still occupy memory but
+    don't contribute to compute. The effective arithmetic intensity is that of a 2×7B model, not 8×7B.
+  napkin_math: 'MoE effective weight per token: 2 active experts × 7B × 2 bytes = 28GB loaded per forward
+    pass. H100 (TP=2): each GPU holds 56GB, serves 14GB per GPU per forward. Per GPU: 3350/14 = 239 tok/sec
+    per GPU = 239/2 × 2 = 239 tok/sec total (TP=2 doesn''t double throughput, both GPUs load their half
+    simultaneously). Actually TP=2: both GPUs load in parallel → total BW = 2×3350 = 6700 GB/s loading
+    28GB → 6700/28 = 239 tok/sec. MI300X (single): 5300 GB/s loading 28GB → 5300/28 = 189 tok/sec. H100
+    TP=2 wins slightly (239 vs 189)! But MI300X uses 1 GPU vs 2 H100s. Per-GPU cost: MI300X at $5.50/hr,
+    H100 at $3.50/hr×2=$7.00/hr. MI300X cost per million tokens: (1/189)hr/1M×$5.50 = $0.029/1M. H100:
+    (1/239)×$7.00 = $0.029/1M — exactly tied on cost per token.'
+last_modified: '2026-04-02'
+tags:
+- scope:Hardware Platform

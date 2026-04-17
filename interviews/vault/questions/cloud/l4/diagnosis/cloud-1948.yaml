@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-1948
+title: Diagnosing Static Graph Compilation OOM
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: Your team is migrating a massive multimodal model from PyTorch eager mode to a static graph
+  execution framework (e.g., PyTorch/XLA) to optimize serving on a fleet of A100 80GB GPUs. In eager mode,
+  the model successfully runs inference with a peak memory of 65GB. However, during the `jit` compilation
+  phase of the static graph, the compiler repeatedly crashes with an Out-Of-Memory (OOM) error on the
+  compilation host machine (which has 256GB of system RAM). The model features heavy data-dependent control
+  flow and processes dynamic sequence lengths ranging from 128 to 8192 tokens. What is the root cause
+  of this host compilation failure, and how do you analyze the bottleneck?
+details:
+  realistic_solution: Analyze the compilation traces for dynamic shapes and control flow. The root cause
+    is shape-induced recompilation and loop unrolling overhead on the host. The solution involves padding
+    input sequences to fixed buckets (e.g., 512, 1024, 2048, 4096, 8192) to bound the number of uniquely
+    compiled graphs, and utilizing explicit structured control flow primitives (like `jax.lax.scan` or
+    `torch.cond`) instead of Python-native loops to prevent extreme graph unrolling, thereby keeping the
+    host compilation footprint well below 256GB.
+  common_mistake: Candidates often misdiagnose this as a GPU execution memory issue (activation/parameter
+    size) rather than understanding that static graph compilers (like XLA) unroll data-dependent loops
+    and compile separate sub-graphs for every unique dynamic shape, leading to a combinatorial explosion
+    in host memory during the compilation phase itself.
+  napkin_math: With sequence lengths varying from 128 to 8192, there are 8,065 distinct shapes. If the
+    compiler's intermediate representation (IR) state for each unique shape takes 50MB of host memory,
+    8065 shapes * 50MB/shape ≈ 403GB of RAM required, crashing the 256GB host. Bucketing to 5 sizes reduces
+    the host memory to 5 * 50MB = 250MB.
+chain:
+  id: cloud-chain-395
+  position: 2
+created_at: '2026-03-24T01:25:15.078661'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

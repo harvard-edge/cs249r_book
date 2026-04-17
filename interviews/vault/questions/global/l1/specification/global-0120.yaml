@@ -1,0 +1,32 @@
+schema_version: 1
+id: global-0120
+title: MoE Weight Fetching Bottleneck
+topic: extreme-quantization
+status: published
+provenance: imported
+scenario: Your startup is serving an 8x7B Mixture-of-Experts (MoE) model for code generation. At batch
+  size 1 (interactive local testing), the token generation rate is 8 tokens/sec, far below the 40 tokens/sec
+  SLA. Profiling reveals the GPU compute units are idle 90% of the time. Evaluate the memory hierarchy
+  bottleneck and propose an architectural solution to hit the SLA.
+details:
+  realistic_solution: 'At batch size 1, autoregressive decoding is memory-bandwidth bound (low arithmetic
+    intensity). For an MoE, each token routes to a subset of experts (e.g., 2 out of 8). The GPU must
+    fetch the weights of these specific experts from HBM to SRAM for every single token. To hit the SLA,
+    we must increase arithmetic intensity or reduce memory footprint. Solutions: 1) Implement continuous
+    batching to serve multiple requests concurrently, amortizing the cost of fetching expert weights across
+    multiple tokens. 2) If strictly single-user, apply 4-bit weight-only quantization (e.g., AWQ/GPTQ)
+    to reduce the HBM read volume by 4x. 3) Implement speculative decoding, which processes multiple tokens
+    in a single forward pass, fetching the massive expert weights once for a batch of draft tokens.'
+  common_mistake: Focusing on optimizing the attention kernel or upgrading the CPU, ignoring that batch
+    size 1 MoE decoding is fundamentally bottlenecked by HBM memory bandwidth for weight loading.
+  napkin_math: 8x7B MoE. Total params = 56B (~112GB in FP16). Active params per token (2 experts + dense
+    layers) = ~14B params = 28GB in FP16. HBM bandwidth on an A100 is ~2000 GB/s. Time to read 28GB =
+    28 / 2000 = 14ms per token. 1000ms / 14ms = ~71 tokens/sec theoretical max, but overheads drop this
+    to 8-10. Quantizing weights to 4-bit reduces active payload to 7GB. 7 / 2000 = 3.5ms per token, raising
+    the theoretical ceiling to 285 tokens/sec, easily meeting the 40 tokens/sec SLA.
+chain:
+  id: global-chain-015
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

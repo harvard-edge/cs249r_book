@@ -1,0 +1,41 @@
+schema_version: 1
+id: cloud-2250
+title: The Curriculum Ordering vs Random Shuffling Tradeoff
+topic: data-efficiency-selection
+status: published
+provenance: imported
+scenario: 'Your research team proposes curriculum learning for a 70B LLM pre-training run: start with
+  ''easy'' documents (short, simple vocabulary, low perplexity) and gradually increase difficulty. The
+  hypothesis is that this will improve convergence speed. However, your infrastructure team pushes back:
+  the standard pipeline randomly shuffles shards to ensure each training batch is i.i.d., which is critical
+  for SGD convergence guarantees. The curriculum approach requires reading shards in a specific order,
+  which breaks i.i.d. sampling AND forces sequential reads from the storage system (eliminating the ability
+  to prefetch random shards). Evaluate both positions. Under what conditions does curriculum ordering
+  beat random shuffling, and what are the systems costs?'
+details:
+  realistic_solution: 'The tension is between statistical efficiency (curriculum ordering may improve
+    learning per token) and systems efficiency (random shuffling enables optimal data pipeline throughput).
+    The key insight: at the scale of LLM pre-training (trillions of tokens, thousands of GPUs), the systems
+    costs dominate unless the curriculum provides substantial per-token learning improvement. Systems
+    costs of curriculum ordering: (1) Sequential shard access eliminates random prefetching — throughput
+    drops because the data pipeline cannot read-ahead from arbitrary shards. (2) All GPUs in a data-parallel
+    group must read from the ''current difficulty level'' simultaneously, creating storage hotspots on
+    a subset of shards. (3) If using global ordering, the data pipeline becomes a centralized bottleneck
+    (a coordinator must track global position). Resolution: use a soft curriculum — within each difficulty
+    tier (e.g., 10 tiers by perplexity), randomly shuffle shards. This preserves i.i.d. within each tier
+    while gradually increasing difficulty across tiers. Systems cost is minimal: the pipeline pre-computes
+    tier assignments, and each epoch reads tiers sequentially but shuffles within tiers.'
+  common_mistake: '"Curriculum learning is strictly better — it''s been proven to help in supervised learning."
+    The evidence for curriculum learning in large-scale LLM pre-training is mixed, and the systems costs
+    are significant. Also, ''i.i.d. is required for SGD convergence'' is an oversimplification — large
+    enough batches approximate i.i.d. even with ordered data.'
+  napkin_math: 'Random shuffling throughput: 500 nodes reading random 1 GB shards from a 10 PB corpus
+    — each node issues 1 random read/second from any of 10M shards. Parallel filesystem handles this easily
+    at 500 GB/s aggregate. Strict curriculum throughput: 500 nodes must read from the same ''easy'' tier
+    (1 PB, 1M shards) simultaneously. Storage hotspot: 500 GB/s concentrated on 10% of the filesystem.
+    If the PFS has non-uniform shard placement, throughput drops to ~200 GB/s (60% degradation). Soft
+    curriculum (tier-shuffled): 500 nodes read randomly within the current tier. As long as the tier has
+    >5,000 shards (each node reads different shards), throughput remains near 500 GB/s.'
+last_modified: '2026-04-01'
+tags:
+- scope:Data Engineering

@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# ┌─── DEPRECATED ────────────────────────────────────────────────────────────┐
+# │ Pre-YAML-migration script. Replaced by:                                   │
+# │     vault build --legacy-json                                             │
+# │ See ./DEPRECATED.md for the full map.                                     │
+# └───────────────────────────────────────────────────────────────────────────┘
 """Export vault corpus to StaffML web app format.
 
 Converts vault data files to the JSON format consumed by the Next.js app:

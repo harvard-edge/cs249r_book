@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
 
     # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
     _cloud = Hardware.Cloud.H100
@@ -277,15 +277,13 @@ def _(mo):
         },
         label="Which statement best describes the cost profiles of PGD vs randomized smoothing?",
     )
-    return (partA_pred, partA_eps_slider, partA_refl)
+    return (partA_eps_slider, partA_pred, partA_refl)
 
 
 # ─── CELL 5: PART B WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_pred = mo.ui.radio(
         options={
             "A) ~0.1% -- very rare": "0.1",
@@ -299,15 +297,13 @@ def _(mo, partA_pred):
         start=100, stop=100_000, value=10_000, step=100,
         label="Cluster size (GPUs)",
     )
-    return (partB_pred, partB_cluster_slider)
+    return (partB_cluster_slider, partB_pred)
 
 
 # ─── CELL 6: PART C WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_pred = mo.ui.number(
         start=20, stop=95, value=85, step=1,
         label="A model deployed without monitoring degrades from 76% over 6 months. What accuracy (%) remains?",
@@ -326,15 +322,13 @@ def _(mo, partB_pred):
         start=100, stop=10_000, value=1000, step=100,
         label="Labeled samples per hour:",
     )
-    return (partC_pred, partC_drift_rate, partC_monitoring, partC_sample_rate)
+    return (partC_drift_rate, partC_monitoring, partC_pred, partC_sample_rate)
 
 
 # ─── CELL 7: PART D WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_pred = mo.ui.radio(
         options={
             "A) Adversarial training -- direct defense is always cheapest": "adv_train",
@@ -351,15 +345,13 @@ def _(mo, partC_pred):
         options={"None": "none", "Hourly": "hourly", "Real-time": "realtime"},
         value="None", label="Monitoring frequency",
     )
-    return (partD_pred, partD_adv_train, partD_feat_squeeze, partD_conf_thresh, partD_monitoring)
+    return (partD_adv_train, partD_conf_thresh, partD_feat_squeeze, partD_monitoring, partD_pred)
 
 
 # ─── CELL 8: PART E WIDGETS ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partE_eps_slider = mo.ui.slider(
         start=0, stop=16, value=4, step=1,
         label="Adversarial perturbation (eps, in units of /255)",
@@ -379,18 +371,16 @@ def _(mo, partD_pred):
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, apply_plotly_theme, COLORS, ledger,
-    CLEAN_ACC_BASELINE, ADV_TRAINED_CLEAN_ACC, ADV_TRAINED_ROBUST_ACC,
-    ROBUST_TAX_PP, PGD_STEPS, PGD_COMPUTE_MULT, SMOOTHING_INFERENCE_MULT,
-    FEATURE_SQUEEZE_CLEAN, FEATURE_SQUEEZE_ROBUST,
-    SDC_RATE_PER_HOUR, ACC_AFTER_BITFLIP,
-    DRIFT_RATE_MODERATE, PSI_THRESHOLD,
-    FP32_ADV_ACC_EPS4, INT8_ADV_ACC_EPS4, INT8_CLEAN_DELTA,
-    partA_pred, partA_eps_slider, partA_refl,
-    partB_pred, partB_cluster_slider,
-    partC_pred, partC_drift_rate, partC_monitoring, partC_sample_rate,
-    partD_pred, partD_adv_train, partD_feat_squeeze, partD_conf_thresh, partD_monitoring,
-    partE_eps_slider, partE_precision,
+    mo, go, np, math,
+    apply_plotly_theme, COLORS, ledger, CLEAN_ACC_BASELINE,
+    ADV_TRAINED_CLEAN_ACC, ADV_TRAINED_ROBUST_ACC, ROBUST_TAX_PP, PGD_STEPS,
+    PGD_COMPUTE_MULT, SMOOTHING_INFERENCE_MULT, FEATURE_SQUEEZE_CLEAN, FEATURE_SQUEEZE_ROBUST,
+    SDC_RATE_PER_HOUR, ACC_AFTER_BITFLIP, DRIFT_RATE_MODERATE, PSI_THRESHOLD,
+    FP32_ADV_ACC_EPS4, INT8_ADV_ACC_EPS4, INT8_CLEAN_DELTA, partA_eps_slider,
+    partA_pred, partA_refl, partB_cluster_slider, partB_pred,
+    partC_drift_rate, partC_monitoring, partC_pred, partC_sample_rate,
+    partD_adv_train, partD_conf_thresh, partD_feat_squeeze, partD_monitoring,
+    partD_pred, partE_eps_slider, partE_precision,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Robustness Tax

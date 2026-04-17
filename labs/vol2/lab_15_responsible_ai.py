@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
 
     # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
     _cloud = Hardware.Cloud.H100
@@ -243,27 +243,23 @@ def _(mo):
     partA_threshold_slider = mo.ui.slider(start=0.05, stop=0.95, value=0.5, step=0.05, label="Classification threshold")
     partA_base_rate_a = mo.ui.slider(start=0.1, stop=0.9, value=0.6, step=0.05, label="Group A base rate")
     partA_base_rate_b = mo.ui.slider(start=0.1, stop=0.9, value=0.3, step=0.05, label="Group B base rate")
-    return (partA_pred, partA_threshold_slider, partA_base_rate_a, partA_base_rate_b)
+    return (partA_base_rate_a, partA_base_rate_b, partA_pred, partA_threshold_slider)
 
 
 # ─── CELL 5: Part B prediction + controls ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_pred = mo.ui.number(
         start=60, stop=90, value=83, step=1,
         label="Baseline accuracy 85%. Groups: 60% vs 30% base rate. After enforcing Demographic Parity, accuracy = ?%",
     )
     partB_gap_slider = mo.ui.slider(start=0.0, stop=0.5, value=0.3, step=0.05, label="Base rate gap (|rate_A - rate_B|)")
-    return (partB_pred, partB_gap_slider)
+    return (partB_gap_slider, partB_pred)
 
 
 # ─── CELL 6: Part C prediction + controls ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_pred = mo.ui.radio(
         options={
             "A) ~8% -- modest growth": "8",
@@ -277,14 +273,12 @@ def _(mo, partB_pred):
     partC_fairness_constraint = mo.ui.switch(label="Fairness Constraint", value=False)
     partC_output_monitor = mo.ui.switch(label="Output Monitoring", value=False)
     partC_feedback_gov = mo.ui.switch(label="Feedback Governance", value=False)
-    return (partC_pred, partC_data_audit, partC_fairness_constraint, partC_output_monitor, partC_feedback_gov)
+    return (partC_data_audit, partC_fairness_constraint, partC_feedback_gov, partC_output_monitor, partC_pred)
 
 
 # ─── CELL 7: Part D prediction + controls ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_pred = mo.ui.radio(
         options={
             "A) Yes -- 30+15+50 = 95ms, under budget": "yes_simple",
@@ -306,14 +300,12 @@ def _(mo, partC_pred):
         options={"None (0ms)": "none", "LIME (25ms)": "lime", "SHAP (50ms)": "shap"},
         value="None (0ms)", label="Explainability:",
     )
-    return (partD_pred, partD_metric, partD_monitor, partD_explain)
+    return (partD_explain, partD_metric, partD_monitor, partD_pred)
 
 
 # ─── CELL 8: Part E controls ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partE_sample = mo.ui.dropdown(
         options={"1% of traffic": 0.01, "5% of traffic": 0.05, "10% of traffic": 0.10},
         value="5% of traffic", label="Sampling rate:",
@@ -324,7 +316,7 @@ def _(mo, partD_pred):
     )
     partE_threshold = mo.ui.slider(start=0.01, stop=0.10, value=0.05, step=0.01, label="Disparity trigger threshold")
     partE_ab_days = mo.ui.slider(start=1, stop=7, value=3, step=1, label="A/B test duration (days)")
-    return (partE_sample, partE_test, partE_threshold, partE_ab_days)
+    return (partE_ab_days, partE_sample, partE_test, partE_threshold)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -335,17 +327,16 @@ def _(mo, partD_pred):
 # ─── CELL 9: TABS CELL ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, apply_plotly_theme, COLORS, ledger,
-    BASELINE_ACCURACY, DP_TAX_PER_GAP, EO_TAX_PER_GAP, EQOP_TAX_PER_GAP,
-    INITIAL_BIAS, AMPLIFICATION_RATE,
-    INFERENCE_LATENCY_MS, MONITORING_BASIC_MS, MONITORING_FULL_MS,
+    mo, go, np, math,
+    apply_plotly_theme, COLORS, ledger, BASELINE_ACCURACY,
+    DP_TAX_PER_GAP, EO_TAX_PER_GAP, EQOP_TAX_PER_GAP, INITIAL_BIAS,
+    AMPLIFICATION_RATE, INFERENCE_LATENCY_MS, MONITORING_BASIC_MS, MONITORING_FULL_MS,
     LIME_OVERHEAD_MS, SHAP_OVERHEAD_MS, NETWORK_OVERHEAD_MS, SLA_MS,
-    AUDIT_COMPUTE_BASE,
-    partA_pred, partA_threshold_slider, partA_base_rate_a, partA_base_rate_b,
-    partB_pred, partB_gap_slider,
-    partC_pred, partC_data_audit, partC_fairness_constraint, partC_output_monitor, partC_feedback_gov,
-    partD_pred, partD_metric, partD_monitor, partD_explain,
-    partE_sample, partE_test, partE_threshold, partE_ab_days,
+    AUDIT_COMPUTE_BASE, partA_base_rate_a, partA_base_rate_b, partA_pred,
+    partA_threshold_slider, partB_gap_slider, partB_pred, partC_data_audit,
+    partC_fairness_constraint, partC_feedback_gov, partC_output_monitor, partC_pred,
+    partD_explain, partD_metric, partD_monitor, partD_pred,
+    partE_ab_days, partE_sample, partE_test, partE_threshold,
 ):
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER -- The Impossibility Wall

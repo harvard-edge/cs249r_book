@@ -1,0 +1,38 @@
+schema_version: 1
+id: mobile-0468
+title: The Disappearing Cyclist
+topic: quantization-fundamentals
+status: published
+provenance: imported
+scenario: You are a Mobile ML Engineer optimizing a pedestrian detection model for a smart dashcam app.
+  To reduce latency and power-drain on an Apple A17 Pro SoC, you convert the model from FP16 to INT8 using
+  post-training quantization (PTQ). After deployment, you receive critical bug reports that the app fails
+  to detect cyclists, but only at night. Your offline tests confirm a >50% drop in recall for the `cyclist`
+  class, specifically when headlights are present. Other classes are unaffected. You analyze the activation
+  values of a key convolutional layer and find that for these problematic night-time images, a small number
+  of activation values are dramatically higher than the typical range observed in your daytime-heavy calibration
+  set. What is the most likely cause for this specific, catastrophic failure?
+details:
+  realistic_solution: The root cause is a quantization-calibration mismatch leading to activation clipping
+    (overflow). The post-training quantization process determines the scaling factor from FP16 to INT8
+    based on the dynamic range of activations seen in the calibration dataset. Because your calibration
+    set was missing high-contrast night images, the bright headlights of oncoming cars create activation
+    values far outside this calibrated range. These outliers are 'clipped' or 'clamped' to the maximum
+    INT8 value (127). This massive loss of information completely destroys the features the model needs
+    to identify the cyclist. The correct fix is not to abandon INT8, but to create a more representative
+    calibration dataset that includes these high-dynamic-range night-time scenes and then re-quantize
+    the model.
+  common_mistake: Engineers often jump to blaming the hardware or the precision format itself (e.g., 'INT8
+    is just not good enough'). They may also suggest a full model retrain, which is expensive and unnecessary.
+    The most common mistake is failing to suspect the calibration data, which is the most frequent point
+    of failure in real-world PTQ.
+  napkin_math: Assume during calibration, your activations were observed to be in the range `[-20.0, 20.0]`.
+    The symmetric INT8 quantization scale would be `scale = 20.0 / 127 ≈ 0.157`. A normal activation of
+    `15.0` would be quantized to `round(15.0 / 0.157) = 96`. Now, a bike's headlight causes a new activation
+    of `50.0`. When quantized, this becomes `round(50.0 / 0.157) = 318`. Since INT8's max value is 127,
+    this is hard-clipped to `127`. When de-quantized back to FP16 for analysis (or for the next layer
+    if in mixed-precision), the value is `127 * 0.157 ≈ 20.0`, NOT the original `50.0`. This >60% error
+    erases the signal, causing the detection to fail.
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

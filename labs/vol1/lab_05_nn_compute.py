@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -60,7 +60,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_TFLOPS, H100_BW_GBS, H100_RAM_GB,
         MOBILE_TFLOPS, MOBILE_BW_GBS, MOBILE_RAM_GB,
@@ -238,9 +238,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_context = mo.ui.radio(
         options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
         value="Cloud GPU (H100)",
@@ -275,12 +273,10 @@ def _(mo, partA_prediction):
         label="A layer produces a 16 KB activation tensor in L2 cache. You double the "
               "batch size (32 KB now). How does latency change on a mobile NPU?",
     )
-    return (partB_prediction,)
+    return (partA_act_l1, partA_act_l2, partA_act_l3, partA_act_l4, partA_context, partB_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_context = mo.ui.radio(
         options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
         value="Mobile NPU (iPhone)",
@@ -305,12 +301,10 @@ def _(mo, partB_prediction):
         label="A 3-layer MLP has hidden layers of width 128. You double the hidden "
               "width to 256. By how much do total FLOPs increase?",
     )
-    return (partC_prediction,)
+    return (partB_batch, partB_context, partB_width, partC_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_width = mo.ui.slider(
         start=32, stop=2048, value=128, step=32, label="Hidden layer width",
     )
@@ -326,12 +320,11 @@ def _(mo, partC_prediction):
         label="A 20-layer model uses 50 MB for inference. How much memory does training "
               "require (weights + gradients + activations, ignoring optimizer state)?",
     )
-    return (partD_prediction,)
+    return (partC_width, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_depth = mo.ui.slider(
         start=3, stop=50, value=20, step=1, label="Network depth (layers)",
     )
@@ -347,6 +340,17 @@ def _(mo, partD_prediction):
     partD_width_d = mo.ui.slider(
         start=64, stop=2048, value=512, step=64, label="Layer width",
     )
+    return (partD_batch, partD_depth, partD_phase, partD_width_d)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_act_l1, partA_act_l2, partA_act_l3,
+    partA_act_l4, partA_context, partA_prediction, partB_batch,
+    partB_context, partB_prediction, partB_width, partC_prediction,
+    partC_width, partD_prediction, partD_batch, partD_depth,
+    partD_phase, partD_width_d,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Transistor Tax

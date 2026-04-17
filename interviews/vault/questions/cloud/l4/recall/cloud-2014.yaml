@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-2014
+title: CPU Bottleneck in Tensor Format Transformation
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You are serving a TensorRT-optimized Vision Transformer on an NVIDIA A10G using a Python FastAPI
+  inference server. The GPU compute takes only 1.5ms per image. However, under peak load (batch size 16),
+  end-to-end latency spikes to 45ms. Profiling reveals the GPU utilization is at 15%, while the single
+  CPU core handling the Python worker is pegged at 100%. Clients are sending image pixels as JSON arrays
+  in NHWC (Height-Width-Channel) format. The server uses `numpy.array(json_data).transpose(0, 3, 1, 2).astype(np.float16)`
+  to convert the incoming data to the contiguous NCHW FP16 memory layout expected by the TensorRT engine.
+details:
+  realistic_solution: Switch the payload transport from JSON to a binary format like gRPC/Protobuf. More
+    importantly, offload the format transformation (NHWC to NCHW transpose and uint8 to FP16 cast) to
+    the GPU by either exporting the model to accept NHWC directly or using NVIDIA DALI for GPU-accelerated
+    tensor layout transformation.
+  common_mistake: Candidates often suggest scaling up the number of CPU nodes, adding more GPU workers,
+    or switching web frameworks, failing to realize that JSON string parsing and cache-unfriendly memory
+    transpositions on the CPU are the mathematical root cause of the latency.
+  napkin_math: 1 image (224x224x3) = ~150K integers. In JSON (e.g., '255, '), this is ~750KB. Batch 16
+    = 12MB text payload. Python `json.loads` on 12MB takes ~15-20ms. `np.transpose` on NHWC creates a
+    strided, non-contiguous memory view. The subsequent `.astype(np.float16)` forces a cache-unfriendly
+    copy across 12MB of non-contiguous RAM, adding another ~15ms. Total CPU tax is >30ms, completely dwarfing
+    the 1.5ms GPU inference.
+chain:
+  id: cloud-chain-416
+  position: 2
+created_at: '2026-03-24T01:43:52.196504'
+last_modified: '2026-04-01'
+tags:
+- scope:Deployment

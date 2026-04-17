@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-gen-desi-0091
+title: KV-Cache Aware LLM Routing
+topic: load-balancing
+status: published
+provenance: imported
+scenario: Architect a request routing layer for a multi-tenant LLM inference service backed by clusters
+  of 8x H100 (80 GB HBM3, 989 TFLOPS) nodes connected via InfiniBand NDR (50 GB/s). Requests vary heavily
+  from 100 to 50,000 tokens in prompt length. The current least-connections load balancer causes severe
+  tail latency and frequent out-of-memory errors due to redundant KV cache allocations. Design a routing
+  system that optimizes cache hit rates and cluster utilization while preventing hot spots.
+details:
+  realistic_solution: Implement a stateful routing layer that uses prefix-based consistent hashing to
+    route requests sharing common system prompts or document contexts to the same 8x H100 node. The router
+    maintains a lightweight view of each node's KV cache state and queue depth. If the primary node is
+    overloaded, it can redirect to an idle node and trigger a fast KV cache transfer over the InfiniBand
+    network rather than recomputing.
+  common_mistake: Applying traditional stateless load balancing (round-robin or least-connections) without
+    considering the stateful nature of LLM inference. Candidates often fail to incorporate the cost of
+    KV cache reconstruction or ignore the asynchronous nature of continuous batching queues.
+  napkin_math: For a 20,000 token prefix on a 70B model (using GQA with 8 KV heads, 80 layers, 128 dim),
+    the KV cache size is 20,000 * 2 * 80 * 8 * 128 * 2B = 6.55 GB. Recomputing this prefix requires 20,000
+    * 70B * 2 = 2.8 PFLOPs. On 8x H100s (7.9 PFLOPS total), recompute takes ~354 ms. Transferring the
+    6.55 GB cache over 50 GB/s InfiniBand NDR takes only 131 ms. The router evaluates this tradeoff (131ms
+    transfer vs 354ms compute) when shedding load to idle nodes.
+last_modified: '2026-04-01'

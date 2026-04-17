@@ -1,0 +1,37 @@
+schema_version: 1
+id: tinyml-fill-00302
+title: Optimizing DMA and Data Movement for Real-time ML Inference on Cortex-M7 + Ethos-U55
+topic: dma-data-movement
+status: published
+provenance: imported
+scenario: A tinyML model for anomaly detection is deployed on a system featuring an ARM Cortex-M7 processor
+  (480 MHz, 512 KB SRAM) paired with an Ethos-U55 NPU (configured for 256 MAC/cycle). The system needs
+  to process a continuous stream of 128x128 grayscale images (16 KB each) from an external camera sensor.
+  The images are initially buffered in a slow external SPI Flash memory. The current software implementation
+  uses the Cortex-M7 CPU to sequentially copy each image from SPI Flash to an SRAM buffer, then copies
+  this buffer to the Ethos-U55's input tensor memory region for inference. The NPU completes inference
+  in approximately 30 ms per frame. However, the system only achieves a processing rate of ~10 frames
+  per second (100 ms per frame), falling short of the target 20 FPS (50 ms per frame). Performance analysis
+  points to significant CPU utilization during data transfer phases as the primary bottleneck.
+details:
+  realistic_solution: 'Implement DMA (Direct Memory Access) for all significant data transfers: from SPI
+    Flash to Cortex-M7 SRAM, and from SRAM to the Ethos-U55''s input buffer. Utilize a ping-pong (double)
+    buffering scheme to overlap DMA transfers with NPU computation, allowing the CPU to initiate the next
+    transfer while the NPU is processing the current frame. Configure DMA buffers in non-cacheable or
+    write-through memory regions in SRAM to prevent cache coherency issues with the Cortex-M7. Explore
+    Ethos-U55 specific API calls or memory-mapped regions that facilitate true zero-copy data transfer
+    directly to the NPU''s internal processing elements, minimizing intermediate copies.'
+  common_mistake: Relying solely on CPU-bound `memcpy` operations for data movement between external memory,
+    SRAM, and the NPU input buffer. This blocks the Cortex-M7 CPU from performing other tasks or preparing
+    the next frame, leading to inefficient use of the Ethos-U55 and overall lower frame rates. Neglecting
+    memory alignment, cache coherency, and not leveraging platform-specific DMA controllers or the NPU's
+    zero-copy capabilities when moving data to/from the NPU.
+  napkin_math: The target frame time for 20 FPS is 50 ms. With the Ethos-U55 NPU inference taking 30 ms,
+    only 20 ms remain for data movement and other overheads. The current system's observed frame time
+    is 100 ms, implying a ~70 ms overhead beyond NPU computation. If the CPU-bound copies (SPI Flash to
+    SRAM, then SRAM to NPU) each consume approximately 25 ms of blocking time (total 50 ms), these transfers
+    represent the primary bottleneck. By offloading these 50 ms of blocking transfers to the DMA controller
+    and overlapping them with NPU computation using double buffering, we can effectively eliminate their
+    contribution to the critical path. This would reduce the total frame time from ~100 ms to ~30 ms (NPU)
+    + ~20 ms (residual overhead/setup) = ~50 ms, thereby achieving the desired 20 FPS.
+last_modified: '2026-04-01'

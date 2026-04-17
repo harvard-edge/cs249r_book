@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-1615
+title: Diagnosing Asymmetric OOM in Tensor Parallel Inference
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: You are deploying a 70B Llama-2 model (BF16) on an 8x A100 (80GB) node using Tensor Parallelism
+  (TP=8). Weights consume ~140GB (17.5GB/GPU). During a load test with batch size 128 and sequence length
+  2048, the system crashes with a CUDA OutOfMemoryError specifically on GPU 0. GPUs 1-7 report only ~40GB
+  utilization. Analyze the root cause of this asymmetric memory crash.
+details:
+  realistic_solution: The final unembedding layer produces logits for the entire vocabulary. If all logits
+    are gathered on GPU 0 for sampling, it creates a massive temporary memory spike. The fix is to compute
+    the argmax or sample locally within the vocab-parallel shards, communicating only the final selected
+    token IDs.
+  common_mistake: Blaming the KV cache size or weight imbalance without analyzing the final layer memory
+    profile, missing the fact that full-vocabulary logits are often gathered on a single device for token
+    sampling.
+  napkin_math: 'Logits shape: [batch=128, seq=2048, vocab=32000]. Memory = 128 * 2048 * 32,000 * 2 bytes
+    (BF16) = 16.77 GB. With FP32 upcasting for softmax, this spikes to 33.5 GB on GPU 0 alone, pushing
+    it past the 80GB limit when combined with weights, KV cache, and activations.'
+chain:
+  id: cloud-chain-272
+  position: 2
+created_at: '2026-03-23T23:52:01.582331'
+last_modified: '2026-04-01'
+tags:
+- scope:Inference

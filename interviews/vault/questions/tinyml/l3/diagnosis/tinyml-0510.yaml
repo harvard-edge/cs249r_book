@@ -1,0 +1,31 @@
+schema_version: 1
+id: tinyml-0510
+title: The Silent Saturation (tinyml-0510)
+topic: mcu-compute-constraints
+status: draft
+provenance: imported
+scenario: You are a TinyML engineer working on a keyword spotting device using a Cortex-M4 with 256KB
+  of SRAM. Your CNN model achieves 96% accuracy in FP32 simulation. To meet the memory constraints, you
+  apply post-training static quantization to convert the model to INT8. The model now fits on the device,
+  but its accuracy plummets to less than 20% (near-random guessing). You have already verified that the
+  model's *weights* were quantized correctly. Using your knowledge of the quantization process, diagnose
+  the most likely cause of this catastrophic performance drop.
+details:
+  realistic_solution: The most likely cause is activation saturation due to an unrepresentative calibration
+    dataset. Post-training static quantization uses a small set of data to determine the dynamic range
+    (min/max values) of each layer's activations. If the real-world audio contains sounds that are louder
+    or have a different frequency profile than the calibration set, the activation values in an intermediate
+    layer (e.g., after a ReLU) can exceed the range observed during calibration. These values are then
+    'clipped' or 'saturated' to the INT8 min/max value (-128 or 127), destroying the information in that
+    layer and causing a catastrophic failure downstream. The fix is to provide a calibration dataset that
+    is truly representative of the inputs the device will see in production.
+  common_mistake: Engineers often blame the tooling (`tflite_convert` has a bug), the hardware (stack
+    overflow corrupting the tensor arena), or the model architecture itself. They frequently forget that
+    quantization applies to both weights *and activations*, and that a mismatch between the calibration
+    data's distribution and the real-world data's distribution can be fatal for activations.
+  napkin_math: 'Clean calibration [-4,4]: scale=8/256=0.031/step. Noisy input +8.0: quantized=8/0.031=256
+    → clipped to 127. Dequant=127*0.031=3.97. Error: 8→3.97, 50% value lost. All values >4.0 map to 127
+    — signal destroyed. Fix: recalibrate with noisy data, range [-8,8], scale=0.0625. Now +8→128→127=7.94.'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

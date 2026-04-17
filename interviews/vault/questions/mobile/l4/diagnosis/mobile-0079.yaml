@@ -1,0 +1,36 @@
+schema_version: 1
+id: mobile-0079
+title: The Camera Preview Stutter
+topic: real-time-deadlines
+status: draft
+provenance: imported
+scenario: 'Your photo app runs a real-time beauty filter (face landmark detection + skin smoothing) on
+  a Snapdragon 8 Elite. The camera preview runs at 30 FPS (33ms budget). The ML model takes 8ms on the
+  Hexagon NPU. The skin smoothing shader takes 5ms on the Adreno GPU. Total: 13ms — well within budget.
+  But users report visible stutter every 2-3 seconds. Instruments shows the frame time spiking to 80ms
+  periodically. What''s causing the spikes?'
+details:
+  realistic_solution: 'The periodic spikes are caused by **garbage collection and memory compaction**
+    colliding with the real-time pipeline. Normal frame: 8ms NPU + 5ms GPU + 3ms overhead = 16ms, well
+    within the 33ms budget. But every 5-10 seconds, the Java/Kotlin GC triggers a 10-15ms stop-the-world
+    pause. If this coincides with frame processing, the total jumps to 59-80ms, dropping 1-2 frames and
+    causing visible stutter. Auto-exposure adjustments from the ISP add another 33ms stall when lighting
+    changes. Fix: (1) Eliminate allocations in the hot path — use pre-allocated ring buffers for camera
+    frames, model I/O tensors, and GPU textures. Zero-alloc callbacks avoid triggering GC. (2) Use a quad-buffer
+    pipeline: while frame N displays, frame N+1 does GPU post-processing, frame N+2 runs NPU inference,
+    and frame N+3 captures from camera. This absorbs single-frame GC pauses without visible drops. (3)
+    Pin ML buffers outside the managed heap using native memory (NDK) so they''re invisible to GC. Result:
+    P99 latency drops from 80ms to 28ms, eliminating user-visible stutter.'
+  common_mistake: '"The model occasionally takes longer due to thermal throttling." Thermal throttling
+    is gradual — it doesn''t cause periodic 80ms spikes every 2-3 seconds. The pattern is too regular.'
+  napkin_math: 'Normal frame: 8ms NPU + 5ms GPU + 3ms overhead = 16ms < 33ms budget ✓. GC spike: 10ms
+    GC pause + 33ms missed frame + 16ms processing = **59ms** (drops 1 frame, visible stutter). With AE
+    adjustment: 33ms ISP stall + 10ms GC + 16ms = **59-80ms** (drops 2 frames). Fix: zero-alloc callback
+    + quad-buffer. GC still runs but doesn''t affect the camera thread. AE stall absorbed by the extra
+    buffer. Worst case: 16ms + 5ms (buffer swap) = **21ms** < 33ms ✓. Zero visible stutter.'
+chain:
+  id: mobile-chain-046
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:App Experience

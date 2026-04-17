@@ -1,0 +1,44 @@
+schema_version: 1
+id: cloud-2178
+title: The Custom Fused Kernel Design
+topic: systolic-dataflow
+status: published
+provenance: imported
+scenario: 'You need to implement a fused RMSNorm + Rotary Position Embedding (RoPE) + attention score
+  computation kernel in Triton for a LLaMA-70B deployment. The three operations are currently separate
+  kernels, each reading and writing the full hidden state (8,192 dims) to HBM. Your target is an H100
+  with 3.35 TB/s HBM bandwidth and 228 KB shared memory per SM. Design the tiling strategy for the fused
+  kernel: what are the tile dimensions, how do you partition work across thread blocks, what is the expected
+  HBM traffic reduction, and what is the primary risk of this fusion?'
+details:
+  realistic_solution: 'The fusion strategy keeps the entire hidden state for a group of tokens in SRAM
+    across all three operations, eliminating two round-trips to HBM. Design: (1) Tile dimensions: Each
+    thread block processes a tile of [BLOCK_SIZE_TOKENS x hidden_dim]. For hidden_dim=8192 in FP16, one
+    token = 16 KB. Shared memory = 228 KB, so BLOCK_SIZE_TOKENS = floor(228 / 16) = 14 tokens per block.
+    Round down to 8 for alignment (8 x 16 = 128 KB, leaving room for RoPE frequency tables and scratch).
+    (2) Work partition: Each thread block loads 8 tokens of the Q or K tensor from HBM into shared memory,
+    computes RMSNorm in-place (requires a reduction across the hidden dimension for the RMS statistic
+    — use warp-level reductions), applies RoPE (element-wise multiply with precomputed sin/cos frequencies,
+    stored in shared memory or registers), then computes partial attention scores Q@K^T for those tokens.
+    (3) HBM reduction: Separate kernels: 3 reads + 3 writes = 6 x (tokens x 8192 x 2 bytes) per head.
+    Fused: 1 read + 1 write = 2 x (tokens x 8192 x 2 bytes) + attention score output. Reduction: 3x less
+    HBM traffic. (4) Primary risk: The RMSNorm reduction across hidden_dim=8192 requires cross-warp synchronization
+    within the thread block (__syncthreads), which serializes and may become the bottleneck if not carefully
+    pipelined with the subsequent RoPE computation. Additionally, the fused kernel is model-specific and
+    must be rewritten for any architecture change.'
+  common_mistake: Naively concatenating the three kernels' code into one without restructuring the data
+    flow. Engineers may also choose tiles that exceed shared memory capacity, or fail to account for the
+    fact that RoPE requires both the element value AND its position index, adding register pressure.
+  napkin_math: 'Separate kernels per token (hidden_dim=8192, FP16): RMSNorm: read 16 KB + write 16 KB
+    = 32 KB. RoPE: read 16 KB + write 16 KB = 32 KB. QK^T prep: read 16 KB + write 16 KB = 32 KB. Total:
+    96 KB per token to HBM. Fused kernel: read 16 KB + write 16 KB (QK scores much smaller) ≈ 34 KB per
+    token. Reduction: 96/34 = 2.8x. For batch=256, seq=4096: separate = 256 × 4096 × 96 KB = 100.7 GB
+    HBM traffic. Fused = 256 × 4096 × 34 KB = 35.7 GB. Savings: 65 GB at 3.35 TB/s = 19.4 ms saved per
+    forward pass. Note: per-token HBM traffic is computed over the full hidden_dim (all heads combined),
+    so there is no additional factor for the number of heads.'
+chain:
+  id: cloud-chain-458
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

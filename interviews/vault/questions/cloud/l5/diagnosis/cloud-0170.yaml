@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-0170
+title: The Continuous Batching Paradox (cloud-0170)
+topic: batching-strategies
+status: draft
+provenance: imported
+scenario: Your team just deployed a new LLM inference server using continuous batching to improve GPU
+  utilization for a 7B parameter model on an H100. As expected, average throughput (tokens/sec) has increased
+  by 50% and GPU utilization is stable at 95%. However, you receive an alert that P99 Time-To-First-Token
+  (TTFT) has increased from 150ms to 400ms, violating your 250ms SLA. Your on-call playbook suggests increasing
+  the maximum batch size to improve throughput further. Justify why the playbook is wrong and predict
+  why this 'more efficient' batching scheme has degraded your P99 latency.
+details:
+  realistic_solution: The playbook is wrong because increasing the maximum batch size typically worsens
+    P99 Time-To-First-Token (TTFT) due to **prefill blocking** (or prefill-decode interference). In continuous
+    batching, when new requests arrive, they must undergo a compute-intensive prefill phase to compute
+    their initial KV cache. If the maximum batch size is large, the scheduler may group a massive number
+    of prefill tokens together, or cram a heavy prefill phase alongside ongoing decode steps. This large
+    compute block monopolizes the GPU for a long duration, delaying the first token generation for newly
+    arrived requests in the queue and causing P99 TTFT to spike. While average throughput is high, tail
+    latency suffers because requests must wait through longer, heavier batched iterations.
+  common_mistake: Assuming continuous batching completely eliminates all blocking. While it eliminates
+    generation-phase padding waste (Head-of-Line blocking), it introduces prefill-decode interference
+    where massive prefill computations can block latency-sensitive decode steps or newly arriving requests.
+  napkin_math: Let's model the trap. In continuous batching, newly arriving requests must undergo a prefill
+    phase. If max batch size is increased significantly, the system might schedule a massive prefill block
+    (e.g., thousands of tokens) that monopolizes the SMs for hundreds of milliseconds. Any request waiting
+    in the queue, or any ongoing generation request, sees its TTFT or inter-token latency delayed by the
+    entire duration of this massive prefill iteration, directly driving P99 TTFT from 150ms to 400ms.
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

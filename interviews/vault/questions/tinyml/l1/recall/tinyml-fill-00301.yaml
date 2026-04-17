@@ -1,0 +1,38 @@
+schema_version: 1
+id: tinyml-fill-00301
+title: Optimizing Sensor Data Ingest for TinyML on ESP32-S3
+topic: dma-data-movement
+status: published
+provenance: imported
+scenario: You are tasked with deploying a real-time anomaly detection model (a small CNN with a 100KB
+  input tensor) on an ESP32-S3 microcontroller. The system continuously samples data from an external
+  high-speed ADC, generating approximately 200KB of raw sensor data per inference cycle, which needs to
+  be processed every 50ms. The ESP32-S3 features a 240 MHz dual-core Xtensa processor, 512 KB of internal
+  SRAM (with some reserved for system), and 8 MB of external PSRAM. Currently, data is being transferred
+  from the ADC to PSRAM, then copied byte-by-byte into internal SRAM before model inference, leading to
+  missed deadlines.
+details:
+  realistic_solution: The most realistic solution involves leveraging the ESP32-S3's DMA capabilities.
+    Configure the external ADC interface (e.g., SPI or I2S) to use DMA to transfer data directly into
+    a dedicated buffer in PSRAM. Implement a double-buffering scheme for continuous data acquisition.
+    For the model input, utilize zero-copy techniques where the inference engine (if compatible) can directly
+    access the sensor data in PSRAM. If a partial copy to SRAM is unavoidable, use DMA-capable memory
+    regions (`DMA_ATTR` in ESP-IDF) and configure a DMA transfer from PSRAM to SRAM for the required 100KB
+    input tensor, allowing the CPU to prepare for the next inference cycle concurrently.
+  common_mistake: A common mistake is to rely solely on CPU-driven data copying between PSRAM and internal
+    SRAM or to use blocking I/O for sensor data acquisition. This approach consumes significant CPU cycles
+    and introduces latency, especially when dealing with larger datasets like the 200KB sensor input,
+    preventing the dual-core processor from performing concurrent inference or other critical tasks.
+  napkin_math: "Let's analyze the impact of CPU-driven copies vs. DMA for a 200KB (204,800 bytes) data\
+    \ transfer. \n\n1.  **CPU-driven copy:** Assuming an optimistic 10 CPU cycles per byte for a `memcpy`\
+    \ operation (including cache misses and overhead) on the 240 MHz CPU:\n    Total cycles = 204,800\
+    \ bytes * 10 cycles/byte = 2,048,000 cycles.\n    Time taken = 2,048,000 cycles / 240,000,000 cycles/sec\
+    \ ≈ 8.53 ms. \n    This time is spent purely on data movement, significantly eating into the 50ms\
+    \ inference budget and blocking one core.\n\n2.  **DMA transfer:** DMA setup typically involves a\
+    \ few hundred to a few thousand CPU cycles. Once configured, the DMA controller handles the transfer\
+    \ independently. For 200KB, the actual transfer time might be very low (e.g., if external PSRAM is\
+    \ accessed at close to CPU speeds, a 240MHz bus could theoretically transfer 200KB in ~0.83ms for\
+    \ 1 byte/cycle). The key benefit is that the CPU is largely free during this transfer, estimated at\
+    \ <1ms of CPU overhead for setup and completion interrupt. This frees up the CPU for inference, allowing\
+    \ parallel data acquisition and model execution within the 50ms deadline."
+last_modified: '2026-04-01'

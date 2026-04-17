@@ -1,0 +1,46 @@
+schema_version: 1
+id: cloud-fill-00800
+title: 'H100 Deployment Strategy: Encoder-Decoder Tradeoffs for LLM Cost Optimization'
+topic: encoder-decoder-tradeoffs
+status: published
+provenance: imported
+scenario: 'Your team is tasked with deploying a large language model (LLM) for a high-throughput, low-latency
+  API endpoint. The primary use case involves processing user queries for a complex recommendation system,
+  which requires both understanding the query (encoding) and generating a personalized, context-aware
+  response (decoding). You have access to a cluster of NVIDIA H100 GPUs, each with 80 GB HBM3, 989 TFLOPS
+  FP16 dense compute, and 3.35 TB/s memory bandwidth. The business objective is to minimize inference
+  costs while maintaining target latency (e.g., <500ms for 99th percentile) and achieving a high query
+  per second (QPS) rate. You need to evaluate the architectural choices: encoder-only (e.g., for query
+  embedding/retrieval followed by a smaller decoder), decoder-only (e.g., a large generative model for
+  both), or a full encoder-decoder model. Diagnose the potential bottlenecks for each architecture on
+  the H100 and quantify how your chosen optimizations would impact cost per inference.'
+details:
+  realistic_solution: 'An L4 architect would first break down the task: query understanding and response
+    generation. For query understanding, an encoder-only model could provide high-quality embeddings.
+    For response generation, a smaller, fine-tuned decoder-only model could be sufficient, potentially
+    dramatically reducing the inference cost compared to an end-to-end large decoder-only model. Alternatively,
+    a carefully pruned or quantized encoder-decoder model might be viable. The architect would quantify
+    the FLOPs and memory footprint (weights + KV cache) for each segment (encoder, decoder) and model
+    type. They would benchmark these on a single H100, varying batch sizes and sequence lengths to identify
+    compute vs. memory bottlenecks. Optimizations would include FP8 quantization to leverage H100''s Hopper
+    FP8 engines, tensor parallelism/pipeline parallelism for models exceeding 80GB VRAM, efficient KV
+    caching strategies, and potentially model distillation.'
+  common_mistake: A common mistake is to blindly pick a decoder-only model due to its prevalence for generative
+    tasks, without fully analyzing if an encoder-only phase (e.g., for semantic search, filtering, or
+    routing) followed by a smaller, specialized decoder could be significantly more cost-effective. Another
+    mistake is to only focus on FLOPs without considering the impact of HBM3 memory bandwidth on large
+    model inference, especially for varying sequence lengths and batch sizes, which can easily become
+    the bottleneck on H100s with models exceeding its 80GB VRAM.
+  napkin_math: 'Given an H100''s 989 TFLOPS FP16, a model requiring 100 billion FP16 operations per token
+    would theoretically process 989 * 10^12 / 10^11 = 9,890 tokens/second at theoretical peak. For memory,
+    an 80B parameter FP16 model uses 80B * 2 bytes/param = 160 GB, exceeding a single H100''s 80GB HBM3.
+    This immediately implies tensor/pipeline parallelism or aggressive quantization. If a decoder-only
+    model generates 100 tokens with a context of 500 tokens, and each token involves a 100B FLOPs computation,
+    that''s roughly 600 * 100B FLOPs. With FP8 quantization, this could reduce memory footprint and increase
+    effective TFLOPS. For a specific query, if a 7B parameter FP16 decoder-only model has weights ~14GB,
+    it fits on H100. If generating 100 tokens at 100 QPS (single H100), the FLOPs/sec and memory bandwidth
+    (3.35 TB/s) needed for KV cache and weight loading become critical to check against. A simple calculation
+    for memory bandwidth for loading weights: 14GB / (inference time) = required bandwidth. If inference
+    time is 100ms, then 14GB / 0.1s = 140 GB/s, well within 3.35 TB/s. However, KV cache for long sequences
+    quickly adds up.'
+last_modified: '2026-04-01'

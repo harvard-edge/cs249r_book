@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2360
+title: Diagnosing PCIe Contention from Checkpointing
+topic: transformer-systems-cost
+status: published
+provenance: imported
+scenario: During an LLM training run on a 4x GPU node, iteration time is perfectly stable at 2.5s, except
+  every 1000 steps it spikes to 18.5 seconds. Asynchronous checkpointing is enabled, offloading 80GB of
+  optimizer states from GPU memory to the host, and then writing to a local NVMe RAID. GPU utilization
+  drops to 0% during the spike.
+details:
+  realistic_solution: The root cause is PCIe bus contention. The asynchronous checkpointing process initiates
+    a massive 80GB DMA transfer from Device-to-Host over the PCIe Gen4 x16 bus. This completely saturates
+    the PCIe root complex. Simultaneously, the dataloader is trying to send the next batch's data from
+    Host-to-Device over the same shared PCIe lanes. Because the upstream (D2H) transfer hogs the switch
+    bandwidth and CPU I/O resources, the downstream (H2D) dataloader transfer is starved, blocking the
+    next training iteration until the D2H transfer completes. The solution is to explicitly rate-limit/throttle
+    the DMA copy of the checkpoint (e.g., chunking the copy with sleeps) or pin the checkpointing thread
+    to a separate NUMA node's PCIe lanes to isolate the traffic.
+  common_mistake: Blaming the NVMe write speed and attempting to upgrade the drives or switch to an in-memory
+    Redis cache.
+  napkin_math: 80GB optimizer state. PCIe Gen4 x16 effective bandwidth ~20 GB/s for bulk transfers. Time
+    to transfer 80GB D2H = 80GB / 20 GB/s = 4 seconds. During these 4 seconds, the dataloader (which needs
+    ~2GB/s) gets < 100MB/s, causing a 4+ second stall. If the NVMe write (5 GB/s) holds locks or blocks
+    the thread, the total stall extends to 80GB / 5 GB/s = 16 seconds. 2.5s normal + 16s stall = 18.5s
+    total iteration time.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

@@ -108,4 +108,3 @@ Vijay
 *This newsletter closes the builder's gap in public, essay by essay, from silicon to serving. Forward this to someone debugging a system they cannot see through. If you are not on the list yet, [subscribe](https://mlsysbook.ai/book/#subscribe). The next essay goes to the fleet, with more to follow on benchmarks, inference, and the return of the hardware lottery.*
 
 [MLSysBook](https://mlsysbook.ai) · [Subscribe](https://mlsysbook.ai/book/#subscribe) · [TinyTorch](https://mlsysbook.ai/tinytorch/) · [GitHub](https://github.com/harvard-edge/cs249r_book)
-

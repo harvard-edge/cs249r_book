@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0879
+title: Evaluating Async Prefetching for H100 Starvation
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: 'You are training a large vision model on an 8x H100 node. Profiling shows that a forward/backward
+  pass takes 45ms per batch. However, fetching and augmenting a batch of 1024 high-resolution images from
+  network storage takes 110ms on the CPU. The current sequential pipeline yields ~29% GPU utilization.
+  Evaluate the trade-offs between three optimization strategies to prevent accelerator starvation: 1)
+  Increasing CPU DataLoader workers and `prefetch_factor` queues, 2) Moving all image augmentation to
+  an offline pre-processing step stored on local NVMe, and 3) Implementing asynchronous prefetching combined
+  with GPU-accelerated decoding (e.g., NVIDIA DALI). Justify your architectural choice quantitatively.'
+details:
+  realistic_solution: Evaluate based on bottleneck location. Simple async prefetching overlaps I/O but
+    is bounded by `max(T_data, T_compute)`. Since 110ms > 45ms, standard CPU prefetching only improves
+    utilization to 41%. Offline augmentation requires massive storage overhead and limits training flexibility.
+    The optimal solution is to combine async prefetching with DALI to shift the decode/augmentation compute
+    to the GPU, dropping CPU pipeline time below 45ms and achieving near 100% compute saturation.
+  common_mistake: Assuming that simply adding `prefetch_factor` and more CPU workers will infinitely scale
+    throughput, ignoring that CPU thread contention and memory bandwidth eventually become the bottleneck,
+    which still leaves the H100 starved if CPU processing time exceeds GPU compute time.
+  napkin_math: 'With sequential dataloading, a step takes 110ms (CPU fetch) + 45ms (GPU compute) = 155ms.
+    H100 util = 45/155 = 29%. Using async CPU prefetch hides compute: max(110, 45) = 110ms step (41% util).
+    By offloading JPEG decode/augmentations to GPU hardware decoders (via NVIDIA DALI), CPU time drops
+    to 30ms and GPU compute slightly increases to 50ms. Step = 50ms. H100 util = 90%!'
+chain:
+  id: cloud-chain-012
+  position: 3
+created_at: '2026-03-23T20:58:44.000404'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

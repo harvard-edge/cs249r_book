@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-0534
+title: The Megatron-LM Tensor Parallelism
+topic: 3d-parallelism
+status: published
+provenance: imported
+scenario: Your colleague suggests using tensor parallelism with $T=16$ across two DGX H100 nodes to train
+  a 70B model, arguing 'more parallelism is always better.' The model fits in 8 GPUs with $T=8$. Why is
+  $T=16$ likely slower than $T=8$, and what is the exact communication cost per transformer layer?
+details:
+  realistic_solution: Megatron-style tensor parallelism splits each transformer layer's weight matrices
+    column-wise (for the first GEMM) and row-wise (for the second GEMM), requiring two AllReduce operations
+    per layer (one in forward, one in backward — four total counting both passes). Within a DGX H100 node,
+    NVSwitch provides 900 GB/s all-to-all bandwidth. Crossing to a second node drops to 400 Gbps InfiniBand
+    (50 GB/s) — an **18× bandwidth reduction**. The AllReduce that took microseconds intra-node now takes
+    milliseconds inter-node, and this happens at *every single layer*.
+  common_mistake: '"Doubling tensor parallelism halves the compute per GPU, so it should be faster." This
+    treats communication as free and ignores the NVLink domain boundary.'
+  napkin_math: '70B model, hidden dim $h = 8192$, 80 layers. Per-layer AllReduce payload: $2 \times \text{batch}
+    \times \text{seq} \times h \times 2\text{B}$ (FP16). With batch=1, seq=4096: payload = $2 \times 4096
+    \times 8192 \times 2 = 128\text{ MB}$ per AllReduce, 4 per layer (fwd+bwd), 80 layers = 320 AllReduces
+    per step. **$T=8$ (intra-node):** 128 MB / 900 GB/s = 0.14 ms per AllReduce × 320 = **44.8 ms** total.
+    **$T=16$ (cross-node):** 128 MB / 50 GB/s = 2.56 ms per AllReduce × 320 = **819 ms** total — an 18×
+    communication increase that dwarfs the 2× compute reduction.'
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

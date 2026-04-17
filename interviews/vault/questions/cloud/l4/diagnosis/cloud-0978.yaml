@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-0978
+title: Diagnosing Stalled Computation During NCCL AllGather
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You are analyzing an Nsight Systems trace of a distributed LLM training step on an 8x H100 node.
+  You implemented communication-computation overlap by placing a 2GB `ncclAllGather` on a dedicated CUDA
+  communication stream and an attention `matmul` on the default compute stream. However, the trace shows
+  the `ncclAllGather` waiting to start until the `matmul` is completely finished, leaving the network
+  idle for 5ms. Why is the hardware failing to overlap these operations?
+details:
+  realistic_solution: The large `matmul` kernel is launching with enough thread blocks to fully occupy
+    all 132 SMs on the H100. Because the GPU scheduler has no available SMs, the NCCL kernel cannot launch
+    until the compute kernel finishes. To fix this, create the communication stream with a higher priority
+    (e.g., `torch.cuda.Stream(priority=-1)`) so the GPU scheduler prioritizes the NCCL thread blocks concurrently,
+    enabling true overlap.
+  common_mistake: Assuming independent CUDA streams guarantee concurrency. Many candidates fail to realize
+    that NCCL operations over NVLink are executed as CUDA kernels, not just pure DMA engine transfers,
+    and thus compete for Streaming Multiprocessors (SMs).
+  napkin_math: 'H100 NVLink bandwidth is 900GB/s. For a 2GB `ncclAllGather` communication step: Comm time
+    = 2GB / 900GB/s = 2.22ms. The attention `matmul` compute takes 5.0ms. If executed serially, total
+    step time = 5.0ms + 2.22ms = 7.22ms. By using separate CUDA streams, communication fully overlaps
+    with computation. New step time = max(5.0ms, 2.22ms) = 5.0ms. This yields a 30.7% speedup (2.22/7.22).'
+chain:
+  id: cloud-chain-046
+  position: 2
+created_at: '2026-03-23T21:20:16.498371'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-0882
+title: Diagnosing Autograd Tape Memory Leaks in Gradient Accumulation
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: You are training a 3B parameter Transformer on an A100 (80GB) GPU. To maintain a large effective
+  batch size, you implement gradient accumulation over 16 micro-batches. During the forward pass, GPU
+  memory usage grows linearly with each micro-batch, and the job crashes with a CUDA OutOfMemoryError
+  at micro-batch 14. Your training loop accumulates the loss via `total_loss += loss` in order to compute
+  the average before calling `.backward()`. Diagnose the root cause of this memory scaling and explain
+  how the autograd tape mechanism contributes to the failure.
+details:
+  realistic_solution: The `total_loss += loss` operation links the autograd tape across all micro-batches,
+    preventing activation memory from being freed. The fix is to call `loss.backward()` independently
+    per micro-batch (which consumes the tape and frees activations) and only accumulate the detached scalar
+    `loss.item()` for logging. This caps activation memory at a constant ~2GB regardless of the number
+    of accumulation steps.
+  common_mistake: Assuming gradient accumulation inherently requires linearly increasing memory, or failing
+    to recognize that the Python `+=` operator on a loss tensor extends the computational graph and prevents
+    garbage collection of intermediate activations.
+  napkin_math: 3B params (FP16) = 6GB. FP32 master weights = 12GB. FP32 gradients = 12GB. Adam FP32 states
+    (m + v) = 24GB. Total static memory = 54GB. Remaining for activations = 26GB. If one micro-batch stores
+    ~2GB of activations in the tape, step 13 requires 13 * 2GB = 26GB. Total = 54GB + 26GB = 80GB (OOM).
+    Releasing the tape per micro-batch caps activation memory at 2GB.
+chain:
+  id: cloud-chain-013
+  position: 2
+created_at: '2026-03-23T20:59:02.324566'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

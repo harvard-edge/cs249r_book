@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-fill-05062
+title: Multi-Level Memory Hierarchy Specification for 405B LLM Inference
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: 'Specify a memory hierarchy system for serving Llama-3-405B (FP8 = 405GB) on a production cluster.
+  The model must serve 500 concurrent users with 8192 context. Available: H100 80GB (3.35 TB/s HBM3),
+  NVMe SSD (7 GB/s), DRAM (300 GB/s). Design the tiered memory strategy.'
+details:
+  realistic_solution: 'Model: 405GB FP8. Single H100: 80GB — only 20% of model fits. Strategy: tensor
+    parallelism across 8 H100s = 640GB HBM total > 405GB. Full model in HBM. KV cache: 500 users × 8192
+    tokens × 2 × 128 layers × 64 heads × 128 dim × 1B (FP8 KV) = 500×8192×2×128×64×128 = 500×8192×2097152B
+    = ... recalculate: per token per layer KV = 2×64×128×1B = 16KB. 128 layers: 2MB/token. 500 users ×
+    8192 = 4096MB × 2MB = no: 500×8192×2MB = 8192GB — impossible. Fix: KV cache at INT4 = 1MB/token/500
+    = 500×8192×1MB = 4TB — still too large. Must limit to 64 context or batch differently. Realistic:
+    50 concurrent, 4096 context, INT8 KV. KV: 50×4096×128 layers×64H×128D×2×1B = 50×4096×2MB = 410GB —
+    need 460GB total. Use 6×H100 for model (360GB) + 2×H100 for KV cache.'
+  common_mistake: Trying to fit the full model in GPU HBM without considering tiered inference where inactive
+    layers reside in CPU DRAM and are streamed to GPU on demand.
+  napkin_math: 'Model FP8: 405GB. 8×H100 = 640GB — fits model + some KV. Per-token KV (FP8, all layers):
+    2 (K+V) × 128 layers × 64 heads × 128 dim × 1B = 2MB/token. 500 users × 8192 tokens = 500×8192×2MB
+    = 8,192GB KV. Total: 405+8,192 = 8,597GB — far beyond 8×H100 (640GB). Must limit concurrency: 100
+    users × 8192 tokens × 2MB = 1,638GB; use FP4 KV (0.5x): 819GB → needs 10 H100s. Alternatively: 50
+    users, 4096 ctx, FP8: 205GB + 405GB = 610GB → 8 H100s.'
+last_modified: '2026-04-01'

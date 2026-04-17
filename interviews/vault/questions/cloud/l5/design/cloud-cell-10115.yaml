@@ -1,0 +1,25 @@
+schema_version: 1
+id: cloud-cell-10115
+title: Implement custom depthwise conv CUDA kernel with shared memory optimization
+topic: cnn-efficient-design
+status: published
+provenance: imported
+scenario: The standard cuDNN depthwise conv achieves only 18% SM utilization on H100 for a 3×3 depthwise
+  layer with C=512 channels, 14×14 spatial resolution, batch=32. You need to write or configure a higher-performance
+  implementation. Describe the key optimizations for a CUDA kernel targeting H100's architecture.
+details:
+  realistic_solution: 'H100 SM has 228KB shared memory per SM. Key optimizations: (1) load input halo
+    into shared memory, coalesced global → shared memory load; (2) use warp-level parallelism across the
+    spatial dimension; (3) fuse BN + ReLU6 into the depthwise kernel; (4) use __half2 or __nv_bfloat162
+    vectorized loads for 2× memory bandwidth; (5) tile along channel dimension so each thread block handles
+    32 channels. Alternatively, use torch.compile with triton which auto-generates fused depthwise+BN+activation
+    kernels. PyTorch 2.x with inductor backend achieves ~2× over cuDNN for these small depthwise shapes.'
+  common_mistake: Trying to use tensor cores for depthwise convolutions — tensor cores require matmul
+    patterns (MMA instructions) and cannot be used for depthwise ops where each output channel depends
+    only on one input channel.
+  napkin_math: 'Input: 32×512×14×14 = 3.2M elements × 2B = 6.4MB. Output: same = 6.4MB. Total HBM traffic:
+    12.8MB. At 3.35TB/s (H100): 3.8 μs minimum. FLOPs: 2×32×512×9×196 = 57.5M FLOPs. At 18% of 989 TFLOPS
+    = 178 TFLOPS: 57.5M/178T = 0.32 μs compute. Ratio: memory is 12× slower → severely memory-bound. Shared
+    memory tiling reduces HBM traffic by 3×3=9× for spatial halo. Target: <0.5 μs per invocation at 70%
+    HBM bandwidth utilization.'
+last_modified: '2026-04-01'

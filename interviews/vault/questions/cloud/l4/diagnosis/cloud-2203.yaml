@@ -1,0 +1,30 @@
+schema_version: 1
+id: cloud-2203
+title: The Conservation of Bottlenecks
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: You profile a training step and find the GEMM kernels in the FFN layers are the bottleneck,
+  consuming 45% of step time. You apply operator fusion to the FFN, reducing GEMM time by 40%. After re-profiling,
+  total step time decreased by only 12%, and now the AllReduce communication takes 38% of step time (up
+  from 22% before). Your manager asks why the optimization 'didn't work.' Explain what happened using
+  the principle of Conservation of Complexity.
+details:
+  realistic_solution: 'This is Conservation of Complexity (or Liebig''s Law applied to systems). Before
+    optimization: GEMM = 45%, AllReduce = 22%, other = 33% of a 500ms step. After fusing FFN GEMMs (40%
+    faster): GEMM = 27% of the new step time, but AllReduce time didn''t change — its absolute time is
+    the same (~110ms), but it''s now a larger fraction because the denominator shrank. The step went from
+    500ms to 440ms (12% faster), which is exactly what Amdahl''s Law predicts: S = 1 / (0.55 + 0.45/1.67)
+    = 1 / (0.55 + 0.27) = 1.22x. The remaining gap from 1.22x theoretical to 1.12x actual is the added
+    overhead of the fused kernel (launch cost, register pressure). The optimization did work — it just
+    shifted the binding constraint from compute to communication. The next optimization should target
+    AllReduce: gradient compression, communication-computation overlap, or topology-aware placement.'
+  common_mistake: Expecting a 40% reduction in the bottleneck to yield a proportional E2E improvement.
+    This ignores that fixing one bottleneck reveals the next one.
+  napkin_math: 'Before: 500ms total = 225ms GEMM + 110ms AllReduce + 165ms other. After fusion: GEMM =
+    225ms x 0.6 = 135ms. New total = 135 + 110 + 165 = 410ms (18% faster theoretical). Actual = 440ms
+    (12% faster) due to fusion overhead. AllReduce share: 110/440 = 25% -> next bottleneck. To get another
+    20% speedup, need to cut AllReduce by 80ms => requires gradient compression or async overlap.'
+last_modified: '2026-04-01'
+tags:
+- scope:Performance Engineering

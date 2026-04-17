@@ -1,0 +1,39 @@
+schema_version: 1
+id: cloud-0216
+title: The One-Replica Meltdown
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: You have 8 replicas of a 7B model behind an L7 load balancer, each on its own A100. Monitoring
+  shows total QPS is normal, but P99 latency spiked from 80 ms to 2.4 seconds. Seven replicas report healthy
+  latency. One replica's average latency is 18 seconds. The load balancer is configured for round-robin.
+  Why is one slow replica destroying the P99 for the entire fleet?
+details:
+  realistic_solution: 'Round-robin sends exactly 1/8 of all requests to the slow replica. P99 means 1%
+    of requests exceed the threshold. If 12.5% of requests (those hitting the slow replica) have 18-second
+    latency, then *all* of those requests are in the worst 12.5% — far exceeding the 1% P99 threshold.
+    The P99 is entirely determined by the slow replica. Worse, the slow replica creates *cascading* damage:
+    (1) clients waiting 18 seconds for the slow replica hold open HTTP connections, consuming connection
+    pool slots on the load balancer; (2) if clients have a 5-second timeout and retry, the retried request
+    has a 1/8 chance of hitting the slow replica again, amplifying load; (3) the slow replica''s request
+    queue grows, making each subsequent request even slower (queuing theory: latency → ∞ as utilization
+    → 1). Fix: (1) switch from round-robin to least-connections or latency-weighted routing — the slow
+    replica naturally receives fewer requests; (2) implement health-check-based ejection: if a replica''s
+    P50 exceeds 2× the fleet median, remove it from the pool; (3) add client-side hedging: send the request
+    to 2 replicas simultaneously and take the first response.'
+  common_mistake: '"Round-robin distributes traffic evenly, so the slow replica only affects 1/8 of requests
+    — P99 should only increase slightly." This misunderstands how percentiles work with heterogeneous
+    backends.'
+  napkin_math: '8 replicas, round-robin, total 1000 QPS → 125 QPS per replica. 7 healthy replicas: latency
+    ~40 ms (P50), ~80 ms (P99). 1 slow replica: latency ~18 s. **P99 calculation:** Sort all 1000 requests
+    by latency. The slowest 1% = 10 requests. The slow replica handles 125 requests — *all* 125 are slower
+    than any healthy replica''s request. P99 = the 10th-slowest request, which is from the slow replica:
+    **~18 s**. Even P87.5 is terrible: the 125th-slowest request is still from the slow replica. **With
+    least-connections routing:** The slow replica accumulates connections (each held for 18 s). At steady
+    state: slow replica has $125 \times 18 = 2250$ open connections. Healthy replicas have $125 \times
+    0.04 = 5$ each. Least-connections routes new requests to healthy replicas (5 connections) instead
+    of the slow one (2250). The slow replica effectively drains to ~1 QPS. P99 drops back to **~80 ms**
+    because <0.1% of traffic hits the slow replica.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

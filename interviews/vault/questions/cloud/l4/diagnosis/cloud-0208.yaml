@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-0208
+title: The Structured Output Constraint
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: Our API must return valid JSON for downstream systems. We're using constrained decoding (grammar-guided
+  generation) to guarantee valid JSON output. The team reports that constrained decoding adds 15ms per
+  token on top of the normal 30ms TPOT. For a 500-token JSON response, that's 7.5 extra seconds. Is this
+  overhead acceptable, and can we reduce it?
+details:
+  realistic_solution: 'Constrained decoding works by masking invalid tokens at each step according to
+    a grammar (e.g., JSON CFG). The overhead comes from: (1) computing the valid token mask by traversing
+    the grammar state machine against the full vocabulary (~32K–128K tokens), and (2) applying the mask
+    before sampling. The 15ms/token overhead is typical for naive implementations. Optimizations include:
+    pre-computing grammar state transitions into a lookup table, using a compressed vocabulary trie, or
+    using speculative grammar checking (validate only the top-K tokens instead of the full vocabulary).
+    Alternatively, for simple schemas, use structured output mode with retry: generate unconstrained,
+    parse, retry on failure — cheaper if failure rate is <10%.'
+  common_mistake: '"Constrained decoding is always worth the overhead because it guarantees valid output."
+    For long structured outputs, the cumulative overhead can exceed the cost of simply retrying on parse
+    failure.'
+  napkin_math: '**500-token JSON response on H100 (70B model):** | Baseline TPOT (no constraint): 30 ms/token
+    | Constrained decoding overhead: 15 ms/token | Total TPOT with constraint: 45 ms/token | **Constrained
+    decoding cost:** | Total generation time: 500 × 45 ms = 22.5 seconds | Overhead portion: 500 × 15
+    ms = 7.5 seconds added latency | Without constraint: 500 × 30 ms = 15.0 seconds | **Retry strategy
+    comparison:** | Assume unconstrained generation fails JSON parse ~10% of the time | Expected attempts
+    to get valid JSON: 1/(1-0.10) ≈ 1.11 attempts | Expected time with retry: 1.11 × 15.0s = 16.65 seconds
+    | **Breakeven analysis:** | Constrained: 22.5s (guaranteed valid) | Retry at 10% failure: 16.65s average
+    → 5.85s faster | Retry at 30% failure: 1.43 × 15.0 = 21.4s → still faster, but P99 could be 3+ attempts
+    = 45s | **Verdict:** For failure rates < ~30%, retry is faster on average. But constrained decoding
+    has bounded latency (no tail risk). Choose based on whether P99 or average latency matters more.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

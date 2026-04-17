@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2455
+title: KV Cache PCIe Offloading
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: To support long-context chat sessions (up to 100K tokens) on an 8x H100 GPU node, you frequently
+  hit KV cache OOM errors. You propose offloading inactive KV cache blocks to the host CPU's DDR5 RAM
+  over PCIe Gen5 x16, fetching them back to the GPU only when the user sends a follow-up message.
+details:
+  realistic_solution: The tradeoff here is between GPU memory capacity (supporting larger context/more
+    users) and the massive latency penalty of PCIe bandwidth limits. PCIe Gen5 x16 has a theoretical bandwidth
+    of 64 GB/s. Fetching a large KV cache from CPU to GPU will severely bottleneck the prefill/decode
+    phases if not hidden via asynchronous prefetching. The solution requires a predictive swap-in mechanism.
+    When a request arrives at the router, the system must trigger an asynchronous DMA transfer of the
+    KV cache from CPU to GPU before scheduling the compute kernel. If done synchronously, the TTFT will
+    be dominated by the PCIe transfer time rather than the compute.
+  common_mistake: Offloading synchronously during the attention computation phase, assuming PCIe bandwidth
+    is fast enough to not impact the decode latency.
+  napkin_math: 'KV cache size for 100K tokens (70B model, FP16): ~320 KB/token (2 × 8 KV heads × 128 head_dim
+    × 80 layers × 2 bytes = 327,680 bytes) × 100,000 = ~32.77 GB. PCIe Gen5 x16 practical bandwidth =
+    ~50 GB/s. Transfer time = 32.77 GB / 50 GB/s = 655 ms. If fetched synchronously upon request, TTFT
+    incurs a guaranteed 655ms penalty just for data movement. Asynchronous prefetching overlaps this with
+    network routing and queue waiting.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

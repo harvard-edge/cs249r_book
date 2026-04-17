@@ -1,0 +1,26 @@
+schema_version: 1
+id: cloud-cell-13065
+title: 'Systolic Array Mastery: Roofline Analysis for Custom LLM Kernel'
+topic: systolic-dataflow
+status: published
+provenance: imported
+scenario: 'A custom fused LLM decoding kernel on TPU v5e (197 TFLOPS BF16, 819 GB/s) shows 12 TFLOPS effective
+  throughput during profiling (6.1% MFU). The kernel does: load attention KV cache (L=512, H=16, D=128,
+  BF16), compute 1 decode step. Is this compute or memory bound? What is the attainable performance, and
+  what optimization achieves the highest gain?'
+details:
+  realistic_solution: 'Decode step (batch=1): load KV for all 512 context tokens. KV size: 512 * 16 heads
+    * 128 * 2 * 2 bytes = 4MB. Weight loads (1-layer): 4 projection matrices * 4096^2 * 2 = 134MB total
+    per layer. Attention compute: 2*1*512*128*16 = 2M FLOPs. Weight FLOPs: 2*4096^2*4 = 134G FLOPs. AI
+    = 134G/134MB = 1000 FLOPs/byte — compute bound for weights. But KV: 2M/4MB = 0.5 FLOPs/byte — heavily
+    memory bound. The combined kernel is mixed. Bottleneck: KV cache loading. Fix: GQA (Grouped Query
+    Attention) reduces KV heads from 16 to 4 → 4x less KV bandwidth.'
+  common_mistake: Blaming compute efficiency (low MFU) when the system is actually memory-bandwidth bound
+    during decode, where MFU will always appear low because most time is spent loading weights, not computing.
+  napkin_math: 'KV cache: 512 tokens * 16 heads * 128 * 2 (K+V) * 2 bytes = 4.19MB. Weight: 4*4096*4096*2=134MB.
+    Total memory: 138MB. Compute: 2*512*16*128 (attn) + 2*4096*4096*4 (proj) = 2.1M + 134G ≈ 134G FLOPs.
+    AI = 134G/138M = 971. TPU compute bound: 134G/197T = 0.68ms per decode step. BW bound check: 138MB/819GB/s
+    = 0.168ms. Compute bound (0.68 > 0.168). Actual: 12 TFLOPS → time = 134G/12T = 11ms. MFU = 0.68/11
+    = 6.1% (matches). Real bottleneck: inefficient tiling/scheduling for 1-token decode. Fix: increase
+    batch size.'
+last_modified: '2026-04-01'

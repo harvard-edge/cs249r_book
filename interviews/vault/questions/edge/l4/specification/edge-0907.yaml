@@ -1,0 +1,31 @@
+schema_version: 1
+id: edge-0907
+title: Edge TPU Spatial Tiling Overhead
+topic: real-time-deadlines
+status: published
+provenance: imported
+scenario: You are deploying a U-Net based super-resolution model on a Google Edge TPU (8MB SRAM, 4 TOPS,
+  USB 3.0 interface). To fit the 1080p input image, the host CPU spatially tiles the image into 16x16
+  overlapping patches and sends them to the TPU sequentially. The system targets 30 FPS but only achieves
+  4 FPS. USB bandwidth monitoring shows 1.8 GB/s of sustained bidirectional transfer.
+details:
+  realistic_solution: The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused
+    by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial
+    tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially
+    with depth. If the host tiles the input, it must transmit the massive overlapping regions repeatedly,
+    saturating the USB 3.0 bandwidth. The co-design solution is 'Fused Layer Execution' or 'Depth-First
+    Scheduling' inside the compiler. Instead of host-side tiling, send the entire image (or large chunks)
+    to the TPU's DRAM. The TPU compiler should be configured to tile the computation internally inside
+    the 8MB SRAM, calculating a tile all the way through the depth of the network before evicting. This
+    keeps the intermediate halo exchanges entirely within the high-bandwidth on-chip SRAM, drastically
+    reducing USB I/O.
+  common_mistake: Compressing the image data over the USB bus using JPEG, which introduces latency and
+    compression artifacts ruining the super-resolution.
+  napkin_math: 1080p image = 1920x1080x3 = 6,220,800 bytes (~6.22 MB). USB 3.0 practical bandwidth ~400
+    MB/s. At 30 FPS, raw input is ~186.6 MB/s. However, with a deep network (e.g., receptive field of
+    64 pixels), a 128x128 tile needs a 256x256 input patch. Area ratio = 65536 / 16384 = 4x redundancy.
+    186.6 MB/s * 4 (input) + output transfers easily exceeds the 400 MB/s limit, dropping framerate to
+    ~4 FPS.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

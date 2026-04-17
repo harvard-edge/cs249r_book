@@ -170,22 +170,9 @@ KA_RCS = {
     "E3": ["RC-8", "RC-10"], "F1": ["RC-8", "RC-6", "RC-11"],
 }
 
-# Deep dive URLs per KA (most common from corpus)
-KA_URLS = {}  # Will be populated from corpus
-
-
-def load_ka_urls(corpus: list[dict]) -> dict[str, str]:
-    """Build KA → most common deep_dive_url mapping."""
-    ka_url_counts = defaultdict(Counter)
-    for q in corpus:
-        ka = q.get("knowledge_area")
-        url = q["details"].get("deep_dive_url", "")
-        if ka and url:
-            ka_url_counts[ka][url] += 1
-    result = {}
-    for ka, urls in ka_url_counts.items():
-        result[ka] = max(urls, key=urls.get)
-    return result
+# KA-based resource auto-fill was removed during the deep_dive → resources
+# migration. Resources are now author-curated per question, not derived from
+# hostname heuristics across a knowledge area.
 
 
 # ─── Deficit Calculation ──────────────────────────────────────
@@ -299,8 +286,7 @@ Return a JSON array of {count} question objects. Each object must have these EXA
     "common_mistake": "<plausible wrong answer ≥30 chars>",
     "realistic_solution": "<detailed correct answer ≥250 chars with quantitative reasoning, step-by-step>",
     "napkin_math": "<step-by-step calculation with actual numbers>",
-    "deep_dive_title": "<relevant paper or resource title>",
-    "deep_dive_url": "{KA_URLS.get(ka, '')}"
+    "resources": []
   }},
   "status": "published",
   "version": 1,
@@ -423,9 +409,10 @@ def generate_batch(batch: dict, corpus: list[dict], ka_tags_map: dict[str, list[
             if len(scenario) < 30 or len(solution) < 50 or len(mistake) < 10:
                 continue
 
-            # Set deep_dive_url if missing
-            if not details.get("deep_dive_url"):
-                details["deep_dive_url"] = KA_URLS.get(ka, "")
+            # Resources default to [] when generator omits them; authors
+            # curate post-generation. No auto-fill by knowledge area.
+            if "resources" not in details:
+                details["resources"] = []
 
             q["details"] = details
 
@@ -477,10 +464,6 @@ def main():
     ka_tags_map = defaultdict(list)
     for tag in tags_data.get("tags", []):
         ka_tags_map[tag["knowledge_area"]].append(tag["id"])
-
-    # Load KA URLs
-    global KA_URLS
-    KA_URLS = load_ka_urls(corpus)
 
     # Build generation plan
     plan = build_generation_plan(corpus, target_ka=args.ka)

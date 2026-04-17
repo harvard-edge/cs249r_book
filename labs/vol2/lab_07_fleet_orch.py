@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ async def _():
     EDGE_TFLOPS = EDGE.compute.peak_flops.m_as("TFLOPs/s")
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, GPUS_PER_NODE, GPU_COST_HR, DecisionLog, Hardware, H100, T4, EDGE, EDGE_TFLOPS
 
 
@@ -215,14 +215,12 @@ def _(mo):
         },
         label="What is the most effective way to reduce queue wait for ML workloads?",
     )
-    return (partA_prediction, a1_utilization, a1_workload, a1_service_min, partA_reflection)
+    return (a1_service_min, a1_utilization, a1_workload, partA_prediction, partA_reflection)
 
 
 # ─── CELL 5: Part B prediction + controls ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_prediction = mo.ui.radio(
         options={
             "A) Yes -- a good scheduler can achieve all three simultaneously": "A",
@@ -245,14 +243,12 @@ def _(mo, partA_prediction):
         },
         label="Given the impossibility of simultaneous optimization, what is the best operational approach?",
     )
-    return (partB_prediction, a2_w_throughput, a2_w_fairness, a2_w_latency, a2_n_teams, partB_reflection)
+    return (a2_n_teams, a2_w_fairness, a2_w_latency, a2_w_throughput, partB_prediction, partB_reflection)
 
 
 # ─── CELL 5b: Part C prediction + controls ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partB_reflection):
-    mo.stop(partB_reflection.value is None, mo.md("**Complete Part B reflection to unlock Part C.**"))
-
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) Zero cost -- preemption just moves jobs around": "A",
@@ -274,14 +270,12 @@ def _(mo, partB_reflection):
         },
         label="What is the correct preemption strategy?",
     )
-    return (partC_prediction, c1_preempt_interval_h, c1_job_gpus, c1_preemptions_day, partC_reflection)
+    return (c1_job_gpus, c1_preempt_interval_h, c1_preemptions_day, partC_prediction, partC_reflection)
 
 
 # ─── CELL 5c: Part D prediction + controls ────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_reflection):
-    mo.stop(partC_reflection.value is None, mo.md("**Complete Part C reflection to unlock Part D.**"))
-
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) 30% -- same as single cluster": "A",
@@ -303,7 +297,7 @@ def _(mo, partC_reflection):
         },
         label="What is the correct fleet composition strategy?",
     )
-    return (partD_prediction, d1_h100_count, d1_t4_count, d1_small_job_pct, partD_reflection)
+    return (d1_h100_count, d1_small_job_pct, d1_t4_count, partD_prediction, partD_reflection)
 
 
 # ─── CELL 5d: DECISION LOG WIDGET ─────────────────────────────────────────
@@ -319,34 +313,13 @@ def _(DecisionLog, mo, partD_reflection):
 
 @app.cell(hide_code=True)
 def _(
-    COLORS,
-    apply_plotly_theme,
-    go,
-    math,
-    mo,
-    np,
-    GPU_COST_HR,
-    partA_prediction,
-    a1_utilization,
-    a1_workload,
-    a1_service_min,
-    partA_reflection,
-    partB_prediction,
-    a2_w_throughput,
-    a2_w_fairness,
-    a2_w_latency,
-    a2_n_teams,
-    partB_reflection,
-    partC_prediction,
-    c1_preempt_interval_h,
-    c1_job_gpus,
-    c1_preemptions_day,
-    partC_reflection,
-    partD_prediction,
-    d1_h100_count,
-    d1_t4_count,
-    d1_small_job_pct,
-    partD_reflection,
+    COLORS, apply_plotly_theme, go, math,
+    mo, np, GPU_COST_HR, a1_service_min,
+    a1_utilization, a1_workload, a2_n_teams, a2_w_fairness,
+    a2_w_latency, a2_w_throughput, c1_job_gpus, c1_preempt_interval_h,
+    c1_preemptions_day, d1_h100_count, d1_small_job_pct, d1_t4_count,
+    partA_prediction, partA_reflection, partB_prediction, partB_reflection,
+    partC_prediction, partC_reflection, partD_prediction, partD_reflection,
 ):
 
     # ═════════════════════════════════════════════════════════════════════════

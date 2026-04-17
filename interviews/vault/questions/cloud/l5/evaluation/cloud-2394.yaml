@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-2394
+title: Eliminating Non-Determinism in ML CI/CD
+topic: mlops-lifecycle
+status: published
+provenance: imported
+scenario: Your ML engineering team added an automated integration test in the CI/CD pipeline that runs
+  a forward pass of a new Transformer model against a 'golden' dataset on a T4 GPU. The test asserts that
+  the output logits match the golden logits with a strict `1e-6` tolerance. The pipeline randomly fails
+  15% of the time, blocking critical deployments.
+details:
+  realistic_solution: Architect the CI/CD pipeline to handle the inherent non-determinism of GPU parallel
+    processing. GPU operations utilizing atomic additions (like `scatter_add` or certain cuDNN convolution
+    algorithms) return slightly different floating-point results depending on thread scheduling. 1) Relax
+    the numerical tolerance (`atol` and `rtol` in `torch.testing.assert_close`) to a realistic bound for
+    FP16/FP32 operations (e.g., `1e-3`). 2) Force deterministic algorithms during the CI test suite by
+    setting environment variables (`CUBLAS_WORKSPACE_CONFIG=:4096:8`) and framework flags (`torch.use_deterministic_algorithms(True)`),
+    accepting the slight performance hit in CI for guaranteed test stability.
+  common_mistake: Assuming the model weights are corrupted and adding retry loops to the CI/CD pipeline,
+    wasting expensive GPU hours.
+  napkin_math: Standard FP32 precision has about 7 decimal digits of precision (~1e-7). However, summing
+    10,000 values in a dot product (common in attention mechanisms) accumulates rounding errors. The error
+    bound grows roughly by sqrt(N) * precision. sqrt(10000) * 1e-7 = 100 * 1e-7 = 1e-5. Therefore, a tolerance
+    of 1e-6 is mathematically guaranteed to fail randomly based on operation order. Setting `atol=1e-4`
+    prevents these flaky failures.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

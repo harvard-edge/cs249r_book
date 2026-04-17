@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
 
     # ── Hardware from registry (Cloud + Edge tiers) ─────────────────────────
     _cloud = Hardware.Cloud.H100
@@ -273,9 +273,7 @@ def _(mo):
 
 # ─── WIDGET CELL 2: Part A controls + Part B prediction ──────────────────────
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_epsilon = mo.ui.slider(start=0.1, stop=10.0, value=1.0, step=0.1, label="Epsilon")
     pA_N = mo.ui.slider(start=10, stop=10000, value=1000, step=10, label="Dataset size (N)")
 
@@ -292,14 +290,12 @@ def _(mo, pA_pred):
             "what accuracy does DP-SGD achieve?"
         ),
     )
-    return (pA_epsilon, pA_N, pB_pred)
+    return (pA_N, pA_epsilon, pB_pred)
 
 
 # ─── WIDGET CELL 3: Part C prediction ────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_pred = mo.ui.radio(
         options={
             "A: ~900 tok/s -- overhead is small": "A",
@@ -317,9 +313,7 @@ def _(mo, pB_pred):
 
 # ─── WIDGET CELL 4: Part C controls + Part D prediction ─────────────────────
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_mig = mo.ui.checkbox(label="MIG Isolation (-15%)", value=True)
     pC_monitor = mo.ui.checkbox(label="Monitoring (+1.5ms/req)", value=True)
     pC_output = mo.ui.checkbox(label="Output Perturbation (+1.0ms/req)", value=True)
@@ -335,14 +329,12 @@ def _(mo, pC_pred):
             "(Enter days, e.g., 0.1 for 2.4 hours.)"
         ),
     )
-    return (pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd, pD_pred)
+    return (pC_dpsgd, pC_mig, pC_monitor, pC_output, pC_rate, pD_pred)
 
 
 # ─── WIDGET CELL 5: Part D controls ─────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pD_queries = mo.ui.slider(start=100, stop=100_000, value=10_000, step=100,
                               label="Daily query volume")
     pD_eps_q = mo.ui.slider(start=0.001, stop=0.1, value=0.01, step=0.001,
@@ -353,7 +345,7 @@ def _(mo, pD_pred):
         options={"Basic Composition": "basic", "Advanced Composition": "advanced"},
         value="Basic Composition", label="Composition theorem", inline=True,
     )
-    return (pD_queries, pD_eps_q, pD_budget, pD_comp)
+    return (pD_budget, pD_comp, pD_eps_q, pD_queries)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -362,17 +354,15 @@ def _(mo, pD_pred):
 
 @app.cell(hide_code=True)
 def _(
-    mo, go, np, math, COLORS, apply_plotly_theme,
-    DEFAULT_SENSITIVITY, DEFAULT_DELTA,
-    MNIST_NO_DP, MNIST_EPS1, MNIST_EPS01,
-    CIFAR_NO_DP, CIFAR_EPS8, CIFAR_EPS1,
-    MIG_OVERHEAD, DPSGD_OVERHEAD, MONITORING_OVERHEAD_MS,
-    OUTPUT_PERTURB_MS, RATE_LIMIT_OVERHEAD,
-    BASELINE_THROUGHPUT, SLO_THROUGHPUT,
-    pA_pred, pA_epsilon, pA_N,
-    pB_pred,
-    pC_pred, pC_mig, pC_monitor, pC_output, pC_rate, pC_dpsgd,
-    pD_pred, pD_queries, pD_eps_q, pD_budget, pD_comp,
+    mo, go, np, math,
+    COLORS, apply_plotly_theme, DEFAULT_SENSITIVITY, DEFAULT_DELTA,
+    MNIST_NO_DP, MNIST_EPS1, MNIST_EPS01, CIFAR_NO_DP,
+    CIFAR_EPS8, CIFAR_EPS1, MIG_OVERHEAD, DPSGD_OVERHEAD,
+    MONITORING_OVERHEAD_MS, OUTPUT_PERTURB_MS, RATE_LIMIT_OVERHEAD, BASELINE_THROUGHPUT,
+    SLO_THROUGHPUT, pA_N, pA_epsilon, pA_pred,
+    pB_pred, pC_dpsgd, pC_mig, pC_monitor,
+    pC_output, pC_pred, pC_rate, pD_budget,
+    pD_comp, pD_eps_q, pD_pred, pD_queries,
 ):
 
     # ═════════════════════════════════════════════════════════════════════════

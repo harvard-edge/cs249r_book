@@ -1,0 +1,36 @@
+schema_version: 1
+id: edge-0553
+title: The Automotive Parallelism Dilemma
+topic: 3d-parallelism
+status: published
+provenance: imported
+scenario: You are designing the perception system for a next-generation autonomous vehicle. The core is
+  a large multi-modal Vision Transformer (20B parameters) that fuses data from 8 cameras. This model is
+  too large for a single Jetson AGX Orin, so you must split its execution across two Orin boards connected
+  by a 40 Gbps automotive ethernet link. The end-to-end perception pipeline has a hard real-time deadline
+  of 33ms (30 FPS).
+details:
+  realistic_solution: Pipeline Parallelism is the only viable strategy. The critical insight is that Tensor
+    Parallelism requires AllReduce communication at every transformer layer — with 80 layers and a 5 GB/s
+    automotive ethernet link, the communication overhead alone is ~640 ms, which is 19x over the 33 ms
+    budget. Pipeline Parallelism requires only a single activation transfer between the two halves of
+    the model (~20 MB, taking 4 ms), keeping total latency under 27 ms. The 40 Gbps link is fast enough
+    for one bulk transfer per frame but far too slow for the hundreds of synchronization events TP demands.
+  common_mistake: Applying cloud-HPC intuition directly to an edge problem. Engineers accustomed to datacenters
+    with extremely high-bandwidth, low-latency interconnects like NVLink (~900 GB/s) often underestimate
+    the communication overhead of Tensor Parallelism. On a constrained edge interconnect like automotive
+    ethernet, the frequent, high-volume `AllReduce` operations required by TP become the dominant bottleneck,
+    making it non-viable.
+  napkin_math: '**System:** 20B param ViT (FP16 = 40 GB), 2x Orin (275 TOPS INT8 each, ~17.5 TFLOPS FP16),
+    40 Gbps = 5 GB/s link, 33 ms deadline. | **Tensor Parallelism (TP):** Each transformer layer requires
+    2 AllReduce ops. Activation tensor per layer: ~20 MB (batch=1, seq=1600, hidden=6400, FP16). 80 layers
+    x 2 x 20 MB = 3,200 MB total communication. Transfer time: 3,200 MB / 5 GB/s = **640 ms.** Far exceeds
+    33 ms budget. **TP is infeasible.** | **Pipeline Parallelism (PP):** Split model at layer 40. One
+    activation tensor transfer per micro-batch: 20 MB. Transfer time: 20 MB / 5 GB/s = **4 ms.** Compute
+    per half (40 layers on each Orin): 40/80 x total_FLOPs. Estimated ~200 GFLOPs per half at FP16. Time:
+    200G / 17.5T = **11.4 ms.** **Total: 11.4 + 4 + 11.4 = 26.8 ms. Meets 33 ms deadline.** | **Verdict:**
+    PP requires 1 transfer (20 MB, 4 ms). TP requires 160 transfers (3.2 GB, 640 ms). On a 5 GB/s edge
+    link, TP is 30x over budget. PP is the only viable strategy.'
+last_modified: '2026-04-01'
+tags:
+- scope:Hardware Platform

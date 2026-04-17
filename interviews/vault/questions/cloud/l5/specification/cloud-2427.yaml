@@ -1,0 +1,24 @@
+schema_version: 1
+id: cloud-2427
+title: FP8 Distributed Training Divergence
+topic: quantization-fundamentals
+status: published
+provenance: imported
+scenario: Training a 30B MoE model from scratch on 1024 H100s using FP8. To maximize throughput, you set
+  all forward and backward passes to use E4M3. At step 4,500, the loss suddenly spikes to NaN. Checkpointing
+  shows the gradients in the routing layers underflowed to zero just before divergence.
+details:
+  realistic_solution: 'FP8 comes in two standard formats: E4M3 (4 exponent bits, 3 mantissa bits) and
+    E5M2 (5 exponent bits, 2 mantissa bits). E4M3 has higher precision but a smaller dynamic range (max
+    value ~448). E5M2 has lower precision but a larger dynamic range and can represent much smaller numbers
+    before underflowing (like FP16). In deep neural network training, activations and weights generally
+    require higher precision (E4M3), but gradients, especially during the backward pass of complex layers
+    like MoE routers, have a much wider dynamic range and are prone to underflow. The architectural fix
+    is to use E4M3 for the forward pass (activations/weights) and E5M2 for the backward pass (gradients).'
+  common_mistake: Adding gradient clipping, which only fixes overflow, not the underflow causing the zero-gradients.
+  napkin_math: E4M3 min normal > 2^-6 (approx 0.015). E5M2 min normal > 2^-14 (approx 0.00006). If a gradient
+    value is 0.001, E4M3 quantizes it to 0 (underflow). E5M2 safely represents it. Accumulated 0-gradients
+    in the MoE router cause routing collapse, sending all tokens to one expert, spiking the loss.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

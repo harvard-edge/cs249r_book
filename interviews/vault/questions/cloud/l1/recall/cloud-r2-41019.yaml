@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-r2-41019
+title: Debugging TP Numerical Divergence
+topic: model-tensor-parallelism
+status: published
+provenance: imported
+scenario: After switching from TP=1 to TP=4 on MI300X, your 30B model's training loss diverges after 500
+  steps. Loss curves match perfectly for the first 200 steps, then gradually separate. What are the most
+  likely causes, and how would you systematically debug this?
+details:
+  realistic_solution: 'Root causes (most to least likely): (1) AllReduce non-determinism: ring AllReduce
+    sums elements in different orders than single-GPU reduction. FP32/BF16 addition is not associative
+    — (a+b)+c ≠ a+(b+c) due to rounding. Over hundreds of steps, different reduction trees produce different
+    accumulated errors. Fix: enable deterministic NCCL (NCCL_ALGO=Ring, fixed topology), or use Kahan
+    summation in the optimizer. (2) Dropout seed mismatch: with TP, dropout masks must be identical across
+    TP ranks for replicated regions (LayerNorm input) but independent for partitioned regions. Incorrect
+    seeding causes divergent regularization. Fix: use Megatron''s parallel RNG state management. (3) Gradient
+    scaling interaction: loss scaling for mixed precision interacts differently with TP because gradients
+    are AllReduced at different scales. Fix: ensure loss scaler state is synchronized. Debug approach:
+    (a) Run TP=1 and TP=4 with dropout disabled and deterministic NCCL. (b) Compare activations layer-by-layer
+    at step 1, 100, 200. (c) Identify the first layer where relative error exceeds 1e-5. (d) Check if
+    it correlates with RNG-dependent ops.'
+  common_mistake: Blaming NCCL bugs or hardware errors. The most common cause is non-deterministic floating-point
+    reduction order in AllReduce, which accumulates different rounding errors across TP configurations.
+  napkin_math: BF16 has 7-8 bits mantissa → relative precision ~1/128 ≈ 0.8%. After 500 AllReduces with
+    4-way reduction, accumulated error ≈ sqrt(500) × 0.8% ≈ 17.9% relative — enough to perturb gradient
+    direction in flat loss regions.
+last_modified: '2026-04-02'

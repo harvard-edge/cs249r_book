@@ -1,0 +1,22 @@
+schema_version: 1
+id: cloud-cell-11053
+title: 'Fault Tolerance: Design Checkpointing Architecture for 1024-GPU Training'
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: You are designing checkpointing for a 175B model training on 1,024 H100s (80GB HBM3, 3.35 TB/s).
+  The full checkpoint is 700GB. Your shared Lustre filesystem peaks at 200 GB/s write throughput. Design
+  a checkpoint strategy that minimizes training interruption while maintaining full recovery capability.
+details:
+  realistic_solution: 'Use asynchronous sharded checkpointing: each node writes its own shard in parallel.
+    1024 nodes write 700GB / 1024 = 683MB each. Pipeline: snapshot model state to CPU memory (fast), continue
+    training, async write to Lustre in background.'
+  common_mistake: Blocking all GPUs during checkpoint write — 700GB / 200 GB/s = 3.5 seconds minimum write,
+    but in practice 30-60 seconds with Lustre contention from 1024 nodes writing simultaneously.
+  napkin_math: '700GB checkpoint. Naive: 700GB / 200 GB/s = 3.5 seconds write, but 1024 nodes × metadata
+    ops creates contention → actual 45-90 seconds. Sharded async: each node snapshots 683MB to CPU RAM
+    in 683MB / (NVLink 900 GB/s) ≈ 0.76ms (GPU→CPU PCIe 32 GB/s) = 21ms. Training continues. Each node
+    writes 683MB to Lustre: 683MB / (200GB/1024 nodes = 195MB/s) = 3.5 seconds per node. Total pause:
+    21ms for snapshot. Background write: 3.5 seconds (overlapped with training). Effective overhead: 21ms
+    checkpoint pause every 95 minutes = 0.037% time overhead.'
+last_modified: '2026-04-01'

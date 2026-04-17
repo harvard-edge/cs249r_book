@@ -1,0 +1,41 @@
+schema_version: 1
+id: cloud-2208
+title: The Silent Performance Regression
+topic: pruning-sparsity
+status: published
+provenance: imported
+scenario: Your LLM inference fleet's P50 latency has crept up 15% over 6 weeks, but no single deployment
+  caused a visible regression. Each weekly deploy passed the performance gate (< 5% regression on the
+  canary). Design an observability and benchmarking system that detects, attributes, and prevents this
+  kind of gradual performance degradation. Your system must handle the fact that the regression is composed
+  of multiple small changes, each individually below the detection threshold.
+details:
+  realistic_solution: 'This requires a three-layer observability system: (1) Continuous performance benchmarking:
+    Run a fixed benchmark workload (synthetic, deterministic) on a dedicated canary instance every hour.
+    Store results in a time-series database. Use CUSUM (Cumulative Sum) or Bayesian change-point detection
+    instead of simple threshold comparison — CUSUM accumulates small deviations and triggers when the
+    cumulative drift exceeds a significance bound, catching compound regressions that no single-deploy
+    gate would flag. (2) Differential profiling with attribution: When CUSUM triggers, automatically run
+    a differential profile comparing the current build against the last-known-good build (stored as a
+    reference nsys trace). Diff the kernel-level timings to identify which specific operations regressed.
+    Attribution example: ''FFN GEMM +3ms (new cuBLAS version), LayerNorm +1.5ms (shape change from new
+    tokenizer), Attention +2ms (KV-cache management change).'' Each is below 5% individually but sum to
+    15%. (3) Performance budget system: Assign each team a ''latency budget'' — the attention team owns
+    40ms, the serving team owns 15ms, the data preprocessing team owns 5ms. Track actual vs budget continuously.
+    When a team exceeds budget, they must either optimize or justify. This transforms a global ''latency
+    crept up'' into a local ''team X is 8ms over budget.'' Prevention: add a cumulative regression gate
+    to the release train — not just per-deploy, but a rolling 4-week comparison against the baseline.'
+  common_mistake: 'Adding more aggressive per-deploy gates (e.g., 2% threshold instead of 5%). This increases
+    false positives without solving the fundamental problem: individual changes are genuinely below the
+    noise floor, but they compound.'
+  napkin_math: 'Six deploys, each adding 2.5% latency: $1.025^6 = 1.16$ — a 16% compound regression from
+    six ''passing'' deploys. CUSUM detection: if each deploy adds 5ms to a 200ms P50, cumulative drift
+    after 6 deploys = 30ms. With noise sigma = 10ms, CUSUM threshold h = 4*sigma = 40ms would trigger
+    after 8 deploys. Setting h = 3*sigma = 30ms triggers after 6 deploys — catching it 2 weeks earlier.
+    False positive rate at h = 3*sigma: ~1 per 300 measurements (acceptable with hourly runs).'
+chain:
+  id: cloud-chain-459
+  position: 5
+last_modified: '2026-04-01'
+tags:
+- scope:Performance Engineering

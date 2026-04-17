@@ -1,0 +1,24 @@
+schema_version: 1
+id: cloud-fill-03035
+title: Megatron-LM Column vs Row Parallelism for MLP Layers
+topic: model-tensor-parallelism
+status: published
+provenance: imported
+scenario: 'A team is implementing Megatron-style tensor parallelism for a 13B model on A100 (80GB HBM2e,
+  2TB/s) with TP=4. They''re confused about whether to use column parallelism or row parallelism for the
+  two linear layers in the MLP block (FFN: W1 of shape [H, 4H] and W2 of shape [4H, H]).'
+details:
+  realistic_solution: 'Apply column parallelism to W1 (split output/4H dimension across GPUs: each GPU
+    holds [H, H]) — no communication needed before W1. Apply row parallelism to W2 (split input/4H dimension:
+    each GPU holds [H, H]) — requires an all-reduce after W2 to sum partial results. This pattern requires
+    exactly one all-reduce per MLP block. For attention: column-parallel for QKV projection, row-parallel
+    for output projection.'
+  common_mistake: Applying column parallelism to both W1 and W2. This requires an all-gather before W2
+    to reconstruct the full intermediate activations, adding a second communication operation per MLP
+    block and increasing communication by 2x vs the optimal scheme.
+  napkin_math: '13B model, hidden=5120, FFN=4*5120=20480. TP=4: each GPU holds W1=[5120, 5120], W2=[5120,
+    5120]. Column-parallel W1: input [B, 5120] is broadcast to all 4 GPUs (no comm if input already replicated).
+    Output [B, 5120] per GPU — no all-reduce needed. Row-parallel W2: each GPU partial output [B, 5120]
+    → all-reduce sums to [B, 5120]. All-reduce size: B * 5120 * 2 bytes. At B=1: 10KB, trivial on NVLink.
+    At B=1024: 10MB, 10MB/900GB/s = 11μs — still fast.'
+last_modified: '2026-04-01'

@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -40,7 +40,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_TDP_W, JETSON_TDP_W, LAB_CSS,
         apply_plotly_theme, go, ledger, math, mo, np,
@@ -185,9 +185,7 @@ def _(COLORS, H100_TDP_W, JETSON_TDP_W, apply_plotly_theme, go, math, mo, np):
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_base_a = mo.ui.slider(start=5, stop=50, value=30, step=5,
                                  label="Group A base rate (%)")
     partA_base_b = mo.ui.slider(start=5, stop=50, value=10, step=5,
@@ -205,12 +203,10 @@ def _(mo, partA_pred):
         },
         label="Apply equalized odds to reduce FPR gap from 15% to 5%. Accuracy loss?",
     )
-    return (partB_pred,)
+    return (partA_base_a, partA_base_b, partA_threshold, partB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_target_gap = mo.ui.slider(start=0, stop=20, value=5, step=1,
                                      label="Target FPR gap (pp)")
     partB_method = mo.ui.dropdown(
@@ -228,12 +224,10 @@ def _(mo, partB_pred):
         },
         label="Loan model has 50 features. How much does SHAP add to inference latency?",
     )
-    return (partC_pred,)
+    return (partB_method, partB_target_gap, partC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_features = mo.ui.slider(start=10, stop=200, value=50, step=10,
                                    label="Number of features")
     partC_method = mo.ui.dropdown(
@@ -251,12 +245,11 @@ def _(mo, partC_pred):
         },
         label="Weekly retraining + SHAP for 10% of predictions. Carbon vs baseline?",
     )
-    return (partD_pred,)
+    return (partC_features, partC_method, partD_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_retrain_freq = mo.ui.dropdown(
         options={"Weekly": 52, "Monthly": 12, "Quarterly": 4, "Once": 1},
         value="Weekly", label="Retraining frequency")
@@ -266,6 +259,16 @@ def _(mo, partD_pred):
         options={"Clean (hydro, 20 gCO2/kWh)": 20, "Mixed (400 gCO2/kWh)": 400,
                  "Coal-heavy (800 gCO2/kWh)": 800},
         value="Mixed (400 gCO2/kWh)", label="Grid carbon intensity")
+    return (partD_explain_pct, partD_grid_mix, partD_retrain_freq)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_base_a, partA_base_b, partA_pred,
+    partA_threshold, partB_method, partB_pred, partB_target_gap,
+    partC_features, partC_method, partC_pred, partD_pred,
+    partD_explain_pct, partD_grid_mix, partD_retrain_freq,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — The Fairness Illusion

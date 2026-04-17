@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-0752
+title: The Elastic Training Scaling
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: You're pretraining a 13B model on a cloud cluster. Spot instances give you between 32 and 128
+  GPUs at any time — nodes can be preempted with 30 seconds notice. Your training framework uses synchronous
+  data parallelism. How do you handle GPUs appearing and disappearing mid-training without restarting
+  from scratch?
+details:
+  realistic_solution: 'Use an elastic training framework (e.g., TorchElastic/`torchrun` with `--rdzv_backend=c10d`).
+    Key mechanisms: (1) **Rendezvous protocol** — when a node joins or leaves, surviving workers detect
+    the change, re-form the process group, and redistribute data shards without reloading the model. (2)
+    **Batch size adjustment** — with fewer GPUs, either reduce global batch size (changes optimization
+    dynamics) or increase per-GPU batch size (may OOM). The safe approach: keep per-GPU batch size fixed,
+    let global batch size float, and apply linear learning rate scaling ($\text{lr} \propto \text{global\_batch}$).
+    (3) **In-memory checkpoint** — replicate model state across nodes so a preempted node''s state can
+    be recovered from peers in seconds, not minutes.'
+  common_mistake: '"Just checkpoint frequently and restart with the new GPU count." This works but wastes
+    enormous time: each restart requires loading the checkpoint, rebuilding process groups, and re-warming
+    the data pipeline. With preemptions every ~30 minutes, you''d spend more time restarting than training.'
+  napkin_math: '13B model, FSDP. At 128 GPUs: per-GPU shard = 13B × 16B / 128 = 1.625 GB. At 32 GPUs:
+    per-GPU shard = 6.5 GB — still fits in 80 GB. Global batch at 128 GPUs: 128 × 4 sequences = 512. At
+    32 GPUs: 128 sequences. LR scales: $\text{lr}_{32} = \text{lr}_{128} \times (128/512) = \text{lr}_{128}/4$.
+    Rendezvous time: ~5-10 seconds. Checkpoint reload from peer memory: ~2 seconds for 6.5 GB at NVLink
+    speed. vs. disk reload: 6.5 GB / 2 GB/s (NFS) = 3.25 seconds per GPU, but 32 GPUs hitting NFS simultaneously
+    → minutes.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

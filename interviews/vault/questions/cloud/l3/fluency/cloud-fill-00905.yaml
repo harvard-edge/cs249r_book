@@ -1,0 +1,41 @@
+schema_version: 1
+id: cloud-fill-00905
+title: TPU Kernel Fusion for Memory-Bound Element-wise Operations
+topic: kernel-fusion
+status: published
+provenance: imported
+scenario: You are optimizing a critical path in a large language model inference on a Google TPU v5e,
+  which features 16 GB HBM and 1.6 TB/s memory bandwidth. Your current profile shows that a sequence of
+  two element-wise operations (e.g., a ReLU activation followed by a bias addition) on a large BF16 tensor
+  (say, 4 GB) is memory-bound. Each operation is currently dispatched as a separate kernel. You've identified
+  that kernel launch overhead and redundant global memory accesses are significant bottlenecks. How would
+  you leverage kernel fusion to optimize this specific scenario on the Google TPU v5e? What are the key
+  considerations and expected performance improvements?
+details:
+  realistic_solution: The realistic solution involves fusing the sequence of element-wise operations (ReLU
+    and bias addition) into a single custom kernel. On Google TPUs, this is typically achieved using XLA's
+    fusion capabilities or custom XLA ops/lowering rules (e.g., using Triton for custom kernels compiled
+    to HLO). The fused kernel would read the input tensor once, perform both ReLU and addition operations
+    on the data as it streams through the processing units, and then write the final result back to HBM
+    once. This minimizes global memory traffic by eliminating intermediate writes/reads and reduces kernel
+    launch overhead to a single dispatch. Careful consideration must be given to register pressure and
+    potential increase in compilation time.
+  common_mistake: A common mistake is to ignore kernel fusion for element-wise operations, treating them
+    as independent compute kernels. This leads to multiple trips to HBM for intermediate results and accumulating
+    kernel launch overhead, significantly underutilizing the available memory bandwidth and adding unnecessary
+    latency, especially for small, frequently called operations. Another mistake is to try to fuse operations
+    that are compute-bound rather than memory-bound, which might not yield significant benefits and could
+    increase kernel complexity without proportional performance gains.
+  napkin_math: "Let's assume the tensor is 4 GB (2 * 10^9 BF16 elements). The TPU v5e HBM bandwidth is\
+    \ 1.6 TB/s (1.6 * 10^12 bytes/s). \n\n*   **Unfused Approach:**\n    *   ReLU kernel: Reads 4 GB,\
+    \ writes 4 GB. Total memory traffic = 8 GB.\n    *   Bias Add kernel: Reads 4 GB (ReLU output), reads\
+    \ bias (negligible), writes 4 GB. Total memory traffic = ~8 GB.\n    *   Total memory traffic (main\
+    \ tensor): 8 GB + 8 GB = 16 GB.\n    *   Approximate memory access time: 16 GB / (1.6 TB/s) = (16\
+    \ * 10^9 bytes) / (1.6 * 10^12 bytes/s) = 0.01 seconds = 10 ms.\n    *   Plus two kernel launch overheads.\n\
+    \n*   **Fused Approach:**\n    *   Fused kernel: Reads 4 GB, writes 4 GB. Total memory traffic = 8\
+    \ GB.\n    *   Approximate memory access time: 8 GB / (1.6 TB/s) = (8 * 10^9 bytes) / (1.6 * 10^12\
+    \ bytes/s) = 0.005 seconds = 5 ms.\n    *   Plus one kernel launch overhead.\n\nBy fusing, we achieve\
+    \ an approximate 2x reduction in memory bandwidth usage for the main tensor data, leading to a theoretical\
+    \ 5ms speedup in memory-bound execution time, in addition to eliminating one kernel launch overhead.\
+    \ This is a significant gain for frequently executed operations."
+last_modified: '2026-04-01'

@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2411
+title: Unfused Dequantization Bottleneck
+topic: extreme-quantization
+status: published
+provenance: imported
+scenario: You deploy a 30B parameter LLM on an A100 (80GB, 2 TB/s bandwidth). Using FP16, generation speed
+  is 33 tokens/sec (latency ~30ms/token). You apply W4A16 (INT4 weights, FP16 activations) quantization.
+  You expect a ~4x speedup since generation is memory-bandwidth bound and weights dropped from 60GB to
+  15GB. Instead, generation speed is 40 tokens/sec (latency ~25ms/token) and GPU compute utilization is
+  98%. What is the architectural cause of this missing speedup?
+details:
+  realistic_solution: The symptom reveals a lack of fused dequantization kernels. In a naive W4A16 implementation,
+    the system launches a standalone kernel that reads the 15GB of INT4 weights from HBM, dequantizes
+    them to FP16, and writes 60GB of FP16 back to HBM. Then, the standard cuBLAS GEMM kernel reads the
+    60GB of FP16 from HBM to perform the matrix multiplication. This extra memory roundtrip (Read 15GB
+    + Write 60GB + Read 60GB = 135GB) actually moves MORE data than the original FP16 baseline (Read 60GB),
+    completely destroying the bandwidth savings. The high GPU utilization is from memory stall cycles.
+    The solution is to use fused kernels (like Marlin, AWQ, or GPTQ kernels) that load the INT4 weights
+    directly into SRAM/registers, dequantize them on the fly, and immediately compute the MMA without
+    ever writing the intermediate FP16 values back to global memory.
+  common_mistake: Assuming the INT4 decoding math itself (bit-shifting and masking) takes too many ALUs,
+    completely ignoring the memory subsystem traffic.
+  napkin_math: 'FP16 Baseline traffic: 60GB read. Expected INT4 fused traffic: 15GB read (4x less). Actual
+    Unfused traffic: 15G read + 60G write + 60G read = 135GB. Time = 135GB / 2000 GB/s = 67.5ms theoretically,
+    but caching and pipelining masks some of it, resulting in the observed 25ms.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

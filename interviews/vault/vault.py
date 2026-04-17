@@ -164,7 +164,7 @@ def cmd_stats(args):
         "napkin_math": lambda q: q.get("details", {}).get("napkin_math", "").strip(),
         "common_mistake": lambda q: q.get("details", {}).get("common_mistake", "").strip(),
         "realistic_solution": lambda q: q.get("details", {}).get("realistic_solution", "").strip(),
-        "deep_dive_url": lambda q: q.get("details", {}).get("deep_dive_url", "").strip(),
+        "resources (≥1)": lambda q: q.get("details", {}).get("resources") or None,
         "MCQ options": lambda q: q.get("details", {}).get("options"),
         "bloom_level": lambda q: q.get("bloom_level", "").strip(),
         "canonical_topic": lambda q: q.get("canonical_topic", "").strip(),
@@ -1154,7 +1154,7 @@ Generate exactly ONE interview question as a JSON object. The question must test
 3. common_mistake: What most candidates get wrong (min 20 chars)
 4. realistic_solution: The correct approach with specific numbers (min 20 chars)
 5. napkin_math: Back-of-envelope calculation showing the key insight
-6. deep_dive_url: A real URL to a relevant technical resource (paper, docs, blog)
+6. resources (optional): 0–3 author-style references. Each is {{"name": "<label>", "url": "https://..."}}. Prefer seminal papers (arXiv), framework docs (PyTorch, HuggingFace), or engineering blogs. Do NOT include mlsysbook.ai links — book linking is deferred. Omit or empty-list when no relevant reference exists.
 7. competency_area: One of: compute, memory, latency, precision, power, architecture, optimization, parallelism, networking, deployment, reliability, data, cross-cutting
 
 ## Output Format
@@ -1172,8 +1172,7 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
     "common_mistake": "...",
     "realistic_solution": "...",
     "napkin_math": "...",
-    "deep_dive_title": "...",
-    "deep_dive_url": "..."
+    "resources": []
   }},
   "bloom_level": "{item['bloom']}",
   "canonical_topic": "{item['concept_id']}",

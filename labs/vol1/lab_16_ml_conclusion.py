@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -51,7 +51,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_BW_GBS, H100_RAM_GB, H100_TDP_W, H100_TFLOPS_FP16,
         JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W, JETSON_TFLOPS,
@@ -199,9 +199,7 @@ def _(
     return (partA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_pred):
-    mo.stop(partA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_model = mo.ui.dropdown(options={"7B": 7, "13B": 13, "70B": 70}, value="70B",
                                   label="Model size")
     partA_prec = mo.ui.dropdown(
@@ -219,12 +217,10 @@ def _(mo, partA_pred):
         },
         label="You quantized MobileNetV2 to INT8, deployed on mobile. After 6 months without monitoring?",
     )
-    return (partB_pred,)
+    return (partA_batch, partA_model, partA_prec, partB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partB_pred):
-    mo.stop(partB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_quant = mo.ui.dropdown(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8", "INT4": "int4"},
         value="INT8", label="Quantization level")
@@ -246,14 +242,12 @@ def _(mo, partB_pred):
         value="Memory Wall",
         label="Which invariant do you think you most consistently underestimated?",
     )
-    return (partC_pred,)
+    return (partB_monitoring, partB_months, partB_quant, partC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, partC_pred):
+def _(mo):
 
     # ── Part D widgets ────────────────────────────────────────────────────────
-    mo.stop(partC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
     partD_pred = mo.ui.radio(
         options={
             "A) Preprocessing (35% -- largest non-inference)": "preprocess",
@@ -267,9 +261,7 @@ def _(mo, partC_pred):
     return (partD_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, partD_pred):
-    mo.stop(partD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_preprocess = mo.ui.slider(start=5, stop=50, value=35, step=5,
                                      label="Preprocessing (%)")
     partD_inference = mo.ui.slider(start=5, stop=60, value=40, step=5,
@@ -295,12 +287,11 @@ def _(mo, partD_pred):
         },
         label="Quantize Llama-2 70B FP16 to INT4 (35 GB < 80 GB HBM). New binding constraint?",
     )
-    return (partE_pred,)
+    return (partD_inference, partD_logging, partD_optimize, partD_postprocess, partD_preprocess, partD_speedup, partE_pred)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partE_pred):
-    mo.stop(partE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partE_int4 = mo.ui.checkbox(label="INT4 Quantization", value=False)
     partE_pruning = mo.ui.checkbox(label="Structured Pruning (50%)", value=False)
     partE_distill = mo.ui.checkbox(label="Knowledge Distillation", value=False)
@@ -308,6 +299,18 @@ def _(mo, partE_pred):
     partE_shap = mo.ui.checkbox(label="SHAP Explanations", value=False)
     partE_ctx = mo.ui.slider(start=2048, stop=131072, value=32768, step=2048,
                               label="Context length (tokens)")
+    return (partE_ctx, partE_distill, partE_int4, partE_pruning, partE_retrain, partE_shap)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_batch, partA_model, partA_prec,
+    partA_pred, partB_monitoring, partB_months, partB_pred,
+    partB_quant, partC_pred, partD_inference, partD_logging,
+    partD_optimize, partD_postprocess, partD_pred, partD_preprocess,
+    partD_speedup, partE_pred, partE_ctx, partE_distill,
+    partE_int4, partE_pruning, partE_retrain, partE_shap,
+):
 
     # ═════════════════════════════════════════════════════════════════════════
     # PART A — The Cost of a Token

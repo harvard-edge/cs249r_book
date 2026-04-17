@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-r2-41062
+title: K8s Scheduling Latency for Real-Time Inference
+topic: container-orchestration
+status: published
+provenance: imported
+scenario: Your ML platform auto-deploys new model versions as Kubernetes Deployments. A rolling update
+  replaces old pods with new ones. During the rollout, you observe a 30-second gap where some requests
+  fail (503 errors). Diagnose the root cause and design a zero-downtime deployment strategy for GPU inference
+  pods.
+details:
+  realistic_solution: 'Root cause: Kubernetes marks old pods for termination as soon as new pods are created,
+    but new pods are not ready until model loading completes. Even with maxUnavailable=0, the old pod
+    starts receiving SIGTERM while the new pod is still loading. Fix — multi-layer approach: (1) Readiness
+    probe: configure an HTTP readiness probe that returns 200 only after the model is fully loaded and
+    a warm-up inference has completed. initialDelaySeconds=30, periodSeconds=5. Kubernetes routes traffic
+    only to ready pods. (2) Rolling update config: maxSurge=1, maxUnavailable=0. This creates the new
+    pod first, waits for it to pass readiness, then terminates the old pod. (3) Pre-stop hook: add a preStop
+    lifecycle hook with a 15-second sleep. This keeps the old pod in the Service endpoints for 15 seconds
+    after SIGTERM, allowing in-flight requests to complete (graceful drain). (4) terminationGracePeriodSeconds=60:
+    give the old pod enough time to finish processing long-running inference requests (LLM generation
+    can take 10+ seconds). (5) Model pre-loading: use an init container that downloads the model to a
+    shared emptyDir volume. The main container loads from local disk (fast) instead of pulling from remote
+    storage.'
+  common_mistake: 'Setting maxUnavailable=0 and expecting zero downtime. The gap comes from the new pod''s
+    startup time: pulling the container image, initializing CUDA context, and loading model weights into
+    GPU memory takes 20-30 seconds, during which readiness probes fail.'
+  napkin_math: 'Model load time: 20s (pull weights from S3) → 3s (load from local NVMe). CUDA context
+    init: 2s. Warm-up inference: 1s. Total readiness: 25s → 6s. Gap with proper config: 0s (old pod serves
+    until new is ready).'
+last_modified: '2026-04-02'

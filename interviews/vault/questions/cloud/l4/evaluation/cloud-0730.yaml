@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-0730
+title: The InfiniBand vs RoCE Decision
+topic: compound-ai-systems
+status: published
+provenance: imported
+scenario: 'Your company is building a new 512-GPU training cluster. The vendor offers two options: InfiniBand
+  NDR (400 Gbps per port, credit-based flow control, ~1 μs latency) for $2.8M, or RoCE v2 over standard
+  Ethernet (400 GbE, PFC-based, ~2 μs latency) for $1.2M. Both claim ''lossless RDMA.'' Your workload
+  is fine-tuning 70B models with FSDP across all 512 GPUs. Which do you choose, and when does the cheaper
+  option break down?'
+details:
+  realistic_solution: For 512 GPUs doing FSDP (which uses AllGather + ReduceScatter every forward/backward
+    pass), the critical metric is tail latency, not median latency. InfiniBand's credit-based flow control
+    provides true lossless behavior — the sender never transmits more than the receiver can buffer. RoCE
+    relies on PFC, which works well within a single rack but degrades across multi-hop topologies. At
+    512 GPUs spanning 32+ racks, PFC storms become likely during AllReduce incast. Choose RoCE if your
+    cluster fits in 2-3 racks with a single-tier switch; choose InfiniBand for anything larger or latency-sensitive.
+  common_mistake: '"RoCE v2 is RDMA too, so it''s equivalent to InfiniBand at half the price — always
+    pick RoCE." This ignores that RoCE''s lossless guarantee depends on PFC (Priority Flow Control), which
+    is fragile at scale. PFC pause frames can cascade across switches, causing head-of-line blocking that
+    stalls unrelated flows.'
+  napkin_math: 'FSDP AllGather for 70B model: each GPU holds a 70B/512 ≈ 137M parameter shard ≈ 274 MB
+    (FP16). AllGather collects all shards: 274 MB × 512 = 137 GB total data moved per layer group. At
+    400 Gbps (50 GB/s) per link, ring AllGather takes 137 GB / 50 GB/s ≈ 2.74s at line rate. A 1% PFC-induced
+    pause adds 27 ms. But tail latency matters: if the p99 RoCE latency spikes to 5× (10 μs vs 2 μs per
+    hop) due to PFC storms across 4 switch hops, the AllGather stalls accumulate to ~140 ms per step —
+    a 5% throughput tax that compounds over weeks of training.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

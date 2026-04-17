@@ -1,0 +1,28 @@
+schema_version: 1
+id: cloud-r2-40027
+title: Gradient Compression with Top-K Sparsification
+topic: gradient-synchronization
+status: published
+provenance: imported
+scenario: Your 256-H100 distributed training job sends 4GB of gradients per iteration. Communication takes
+  80ms (AllReduce at 400Gbps), while computation takes 120ms. You want to overlap more communication with
+  computation using Top-K gradient sparsification that transmits only the largest 1% of gradient values.
+  Design the sparsification scheme, including how to handle the 99% of values that are dropped.
+details:
+  realistic_solution: 'Design: (1) Each GPU computes full gradients g_t locally. (2) Add accumulated error
+    from previous iteration: g_t'' = g_t + e_{t-1}. (3) Select Top-K values: keep largest 1% by magnitude
+    = 40MB out of 4GB. (4) Encode as sparse tensor: (index, value) pairs. Each pair = 4 bytes (int32 index)
+    + 2 bytes (FP16 value) = 6 bytes per element. 40MB of values → ~20M elements → 120MB sparse representation.
+    But indices can be compressed with run-length encoding to ~80MB total. (5) Store error: e_t = g_t''
+    - sparse(g_t''), preserving the 99% for next iteration. (6) AllReduce the sparse 80MB instead of dense
+    4GB: time = 2 × 255/256 × 80MB / 50GB/s = 3.2ms — a 25× speedup. With error feedback, convergence
+    matches dense training within 5-10% more iterations. Total training time: computation=120ms + communication=3.2ms
+    ≈ 123ms per iteration (vs 200ms dense with 80ms communication).'
+  common_mistake: Naively dropping 99% of gradients permanently, which causes divergence. The dropped
+    values must be accumulated in a local error buffer and added to the next iteration's gradients — this
+    is error feedback (or error compensation), without which convergence degrades significantly.
+  napkin_math: 'Dense: 4GB AllReduce = 80ms. Top-1%: 80MB sparse AllReduce = 3.2ms. Speedup: 80/3.2 =
+    25× communication reduction. If dense training took 10 days: communication fraction = 80/200 = 40%.
+    Sparse: communication fraction = 3.2/123.2 = 2.6%. Wall-clock: 10 days × (123.2/200) × 1.08 (convergence
+    penalty) = 6.6 days.'
+last_modified: '2026-04-02'

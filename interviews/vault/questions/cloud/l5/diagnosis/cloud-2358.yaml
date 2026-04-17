@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2358
+title: Diagnosing Pageable Memory Bounce Buffers
+topic: vram-budgeting
+status: published
+provenance: imported
+scenario: A high-throughput recommender system operates at 10,000 QPS. The host CPU dynamically generates
+  200MB of dense features per batch. The host-to-device transfer latency randomly spikes from 8ms to 45ms.
+  CPU memory usage is high (85%) but not OOM. GPU compute is intermittently starved.
+details:
+  realistic_solution: The root cause is the use of pageable (unpinned) memory for the dynamically generated
+    features. When `cudaMemcpy` is called on pageable memory, the CUDA driver cannot DMA directly from
+    it. Instead, it synchronously allocates a hidden 'bounce buffer' in pinned memory, copies the data
+    from the pageable buffer to the pinned buffer via the CPU, and then initiates the DMA transfer. Under
+    high CPU memory utilization and fragmentation, allocating this contiguous pinned bounce buffer takes
+    tens of milliseconds, causing the latency spikes. The solution is to pre-allocate a persistent ring
+    buffer of pinned memory (`cudaMallocHost`) on the host, write the dynamic features directly into it,
+    and use `cudaMemcpyAsync` to stream it to the GPU.
+  common_mistake: Using `cudaDeviceSynchronize()` everywhere to debug, which artificially slows down the
+    pipeline, or blaming PCIe switch congestion.
+  napkin_math: 'PCIe Gen4 x16 effective bandwidth ~25 GB/s. 200MB DMA transfer takes 200MB / 25 GB/s =
+    8ms. When bounce buffering occurs: Pinned allocation overhead under fragmentation = ~30ms. Host-to-host
+    copy (200MB at 30 GB/s memory bandwidth) = ~6.6ms. DMA transfer = 8ms. Total = 30 + 6.6 + 8 = 44.6ms
+    (matching the 45ms spike).'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

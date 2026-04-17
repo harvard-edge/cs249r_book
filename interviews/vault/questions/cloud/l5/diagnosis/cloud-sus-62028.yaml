@@ -1,0 +1,32 @@
+schema_version: 1
+id: cloud-sus-62028
+title: Embedding Lookup All-to-All Communication
+topic: recommendation-systems-engineering
+status: published
+provenance: imported
+scenario: Your DLRM training cluster (64 A100s) shows that GPU utilization during embedding forward passes
+  is 8% while MLP backward passes reach 90%. Profiling shows an all-to-all collective taking 85% of the
+  embedding step time. Explain the root cause and propose an architectural change to reduce all-to-all
+  volume.
+details:
+  realistic_solution: 'In DLRM training, embedding tables are sharded across GPUs (model parallelism for
+    embeddings) while input batches are replicated across GPUs (data parallelism for MLPs). Each GPU in
+    the batch needs embedding rows that live on different GPUs — this creates an all-to-all: each of N
+    GPUs sends to each of N GPUs. Volume: batch_size × embedding_dim × num_tables bytes per collective.
+    At 64 GPUs, all-to-all scales as O(N²) in communication pairs. Fix: (1) Embedding table placement
+    optimization: group tables accessed together by the same requests onto the same GPU, reducing inter-GPU
+    communication to only tables that span GPU boundaries. (2) Hybrid sharding: replicate small hot tables
+    on all GPUs (row-wise for large, replicated for small). This converts all-to-all to all-gather for
+    replicated tables (O(N) vs O(N²) scaling). (3) Reduce embedding dimension: use 64-dim instead of 256-dim
+    embeddings where accuracy permits (4× reduction in all-to-all volume).'
+  common_mistake: 'Trying to optimize the NCCL all-to-all implementation without addressing the root cause:
+    the sharding strategy forces every GPU to communicate with every other GPU for every batch.'
+  napkin_math: 'All-to-all volume: 64 GPUs, batch=2048, 100 embedding tables, dim=64, FP32: each GPU sends
+    (2048/64) × 100 × 64 × 4 bytes = 32 × 25600 bytes = 819 KB to each other GPU. Total per GPU: 819 KB
+    × 63 = 51 MB. Bandwidth needed: at 80% overlap with compute: 51 MB / (step_time × 0.2) = 51 MB / 2
+    ms = 25.5 GB/s. A100 NVLink: 600 GB/s — ample. But 64-GPU cluster may span multiple nodes. Cross-node
+    InfiniBand at 200 Gbps (25 GB/s): 51 MB / 25 GB/s = 2 ms for all-to-all — dominates 1 ms compute step.
+    Hybrid sharding: replicate top-20 tables (< 100 MB each) → eliminates 20% of all-to-all volume.'
+last_modified: '2026-04-02'
+tags:
+- scope:Recommendation Systems

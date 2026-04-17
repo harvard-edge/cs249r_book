@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -57,7 +57,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, H100_BW, H100_RAM, H100_RIDGE, H100_TDP, H100_TFLOPS,
         IPHONE_BW, IPHONE_RIDGE, IPHONE_TDP, IPHONE_TFLOPS,
@@ -227,9 +227,7 @@ def _(
     return (pA_pred,)
 
 @app.cell(hide_code=True)
-def _(mo, pA_pred):
-    mo.stop(pA_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pA_dim = mo.ui.slider(start=128, stop=8192, value=512, step=128, label="Matrix dimension N")
     pA_prec = mo.ui.radio(
         options={"FP32": "fp32", "FP16": "fp16", "INT8": "int8"},
@@ -245,12 +243,10 @@ def _(mo, pA_pred):
         },
         label="Fuse LayerNorm + Dropout + ReLU into one kernel, eliminating 2 HBM writes. Speedup?",
     )
-    return (pB_pred,)
+    return (pA_dim, pA_prec, pB_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pB_pred):
-    mo.stop(pB_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pB_mode = mo.ui.radio(
         options={"Eager (separate kernels)": "eager", "Fused (single kernel)": "fused"},
         value="Eager (separate kernels)", label="Execution mode:", inline=True,
@@ -266,12 +262,10 @@ def _(mo, pB_pred):
         },
         label="GEMM at N=1024 is compute-bound on Jetson Orin NX. Is it compute-bound on H100?",
     )
-    return (pC_pred,)
+    return (pB_batch, pB_mode, pC_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pC_pred):
-    mo.stop(pC_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pC_hw = mo.ui.radio(
         options={"Cloud (H100)": "h100", "Edge (Jetson Orin NX)": "jetson", "Mobile (A17 Pro)": "iphone"},
         value="Cloud (H100)", label="Hardware:", inline=True,
@@ -286,12 +280,10 @@ def _(mo, pC_pred):
         },
         label="Memory-bound (AI=10) and compute-bound (AI=500) do the same FLOPs. Which uses more energy?",
     )
-    return (pD_pred,)
+    return (pC_hw, pD_pred)
 
 @app.cell(hide_code=True)
-def _(mo, pD_pred):
-    mo.stop(pD_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pE_pred = mo.ui.radio(
         options={
             "A) ~1.2x (minor)": "1_2",
@@ -303,12 +295,21 @@ def _(mo, pD_pred):
     )
     return (pE_pred,)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, pE_pred):
-    mo.stop(pE_pred.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     pE_tile = mo.ui.slider(start=32, stop=2048, value=256, step=32, label="Tile size (elements)")
     pE_seq = mo.ui.slider(start=512, stop=16384, value=4096, step=512, label="Sequence length")
+    return (pE_seq, pE_tile)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, pA_dim, pA_prec, pA_pred,
+    pB_batch, pB_mode, pB_pred, pC_hw,
+    pC_pred, pD_pred, pE_pred, pE_seq,
+    pE_tile,
+):
 
     # ── Helper: draw roofline ─────────────────────────────────────────────
     def _draw_roofline(fig, peak_tflops, bw_gbs, ridge, color, name):

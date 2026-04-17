@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2320
+title: FP8 Delayed Scaling Out-of-Bounds in Production
+topic: fault-tolerance-checkpointing
+status: published
+provenance: imported
+scenario: Your serving infrastructure processes 5,000 QPS using an FP8 E4M3 LLM. To avoid the computational
+  overhead of calculating the absolute maximum of every activation tensor dynamically, you implement 'delayed
+  scaling', using the max scale from the previous N batches. During a sudden shift in user prompts (e.g.,
+  switching from English to code generation), the model outputs NaNs.
+details:
+  realistic_solution: Delayed scaling relies on the assumption that activation distributions change smoothly
+    between consecutive batches. When the prompt distribution shifts abruptly, the actual maximum activation
+    value in the new batch can be significantly larger than the historical maximum used to calculate the
+    scaling factor. Because E4M3 has a very low maximum representable value, applying a scaling factor
+    optimized for smaller historical activations to the new, larger activations pushes them past the format's
+    limit, causing an overflow to NaN. The architectural fix is to either use a safe margin in the delayed
+    scale, switch back to dynamic per-token scaling for highly variable workloads, or use a format with
+    higher dynamic range like E5M2 for problematic layers.
+  common_mistake: Assuming the new prompt distribution has longer sequence lengths that are causing out-of-memory
+    errors in the KV cache.
+  napkin_math: FP8 E4M3 max representable value is 448. In delayed scaling, you compute scale S from the
+    previous step's max activation. If history max = 10.0, the scale S = 448 / 10.0 = 44.8. If the current
+    batch hits a sudden LLM outlier of 15.0, the quantized value becomes 15.0 * 44.8 = 672. Since 672
+    > 448, this overflows E4M3 precision, producing NaNs. This causes catastrophic failure during text
+    generation.
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

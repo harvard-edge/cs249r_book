@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.19.6"
+__generated_with = "0.23.1"
 app = marimo.App(width="full")
 
 
@@ -64,7 +64,7 @@ async def _():
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
-        await ledger.load_async()
+        _ = await ledger.load_async()
     return (
         COLORS, Engine, H100, ESP32,
         H100_BW_GBS, H100_DISPATCH, H100_RAM_GB, ESP32_RAM_KB,
@@ -241,9 +241,7 @@ def _(
     return (partA_prediction,)
 
 @app.cell(hide_code=True)
-def _(mo, partA_prediction):
-    mo.stop(partA_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partA_kernels = mo.ui.slider(
         start=10, stop=2000, value=1000, step=10, label="Number of kernels",
     )
@@ -262,12 +260,10 @@ def _(mo, partA_prediction):
         label="Fusing 3 element-wise operations into one kernel eliminates intermediate "
               "HBM writes. What speedup do you expect?",
     )
-    return (partB_prediction,)
+    return (partA_compute_us, partA_kernels, partB_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    mo.stop(partB_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partB_num_ops = mo.ui.slider(
         start=2, stop=8, value=3, step=1, label="Operations to fuse",
     )
@@ -286,12 +282,10 @@ def _(mo, partB_prediction):
         label="torch.compile gives 48% speedup on ResNet-50 but takes 30s to compile. "
               "How many inferences before compilation pays off?",
     )
-    return (partC_prediction,)
+    return (partB_num_ops, partB_tensor_mb, partC_prediction)
 
 @app.cell(hide_code=True)
-def _(mo, partC_prediction):
-    mo.stop(partC_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partC_compile_time = mo.ui.slider(
         start=5, stop=300, value=30, step=5, label="Compile time (seconds)",
     )
@@ -310,12 +304,11 @@ def _(mo, partC_prediction):
         label="PyTorch runtime alone requires ~1,800 MB. The ESP32 has 512 KB. "
               "By what factor does the runtime exceed device memory?",
     )
-    return (partD_prediction,)
+    return (partC_compile_time, partC_volume, partD_prediction)
 
+# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
-    mo.stop(partD_prediction.value is None, mo.md("**Make your prediction above to unlock this part.**"))
-
+def _(mo):
     partD_framework = mo.ui.dropdown(
         options={"PyTorch": "PyTorch", "TensorFlow": "TensorFlow",
                  "ONNX Runtime": "ONNX Runtime", "TF Lite": "TF Lite",
@@ -326,6 +319,16 @@ def _(mo, partD_prediction):
         options={"Cloud (H100)": "cloud", "Edge (Jetson 16GB)": "edge", "MCU (ESP32 512KB)": "mcu"},
         value="MCU (ESP32 512KB)", label="Deployment target:", inline=True,
     )
+    return (partD_framework, partD_target)
+
+
+@app.cell(hide_code=True)
+def _(
+    mo, partA_compute_us, partA_kernels, partA_prediction,
+    partB_num_ops, partB_prediction, partB_tensor_mb, partC_compile_time,
+    partC_prediction, partC_volume, partD_prediction, partD_framework,
+    partD_target,
+):
 
     # ─────────────────────────────────────────────────────────────────────
     # PART A BUILDER: The Dispatch Tax

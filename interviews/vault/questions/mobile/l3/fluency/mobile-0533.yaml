@@ -1,0 +1,35 @@
+schema_version: 1
+id: mobile-0533
+title: The Janky Visual Search
+topic: interconnect-topology
+status: published
+provenance: imported
+scenario: You're a mobile ML engineer optimizing a 'Visual Search' feature. The app sends an image to
+  a multi-GPU cloud backend. You observe that while P50 latency is acceptable at 300ms, P99 latency is
+  over 1500ms, causing a janky user experience. The backend team tells you they are using a Mixture-of-Experts
+  (MoE) model sharded across 8 GPUs in a single server. A profiler shows that when the router gate selects
+  certain combinations of experts, the end-to-end inference time spikes dramatically. Given that the mobile
+  network latency is consistently around 50ms and the model's compute-per-expert is stable, what is the
+  most likely cause of this high latency *variance*?
+details:
+  realistic_solution: The most likely cause is a bottleneck in the server's internal interconnect. The
+    server is likely using multiple GPUs connected only by the PCIe bus, without a high-speed NVLink fabric.
+    When the MoE model's router selects experts that reside on GPUs attached to different CPU sockets,
+    their communication must traverse the slow inter-socket link (e.g., UPI/xGMI) in addition to the PCIe
+    bus. This creates significant and variable latency compared to when experts on the same CPU socket
+    are chosen. This is a classic topology-induced bottleneck.
+  common_mistake: Blaming the external network (cellular or InfiniBand) or a software bug, without considering
+    the internal server topology. Many engineers don't realize that even within a single high-end server,
+    not all GPU-to-GPU paths are created equal. A lack of NVLink or a multi-socket CPU architecture can
+    create massive performance cliffs that manifest as high-variance latency.
+  napkin_math: Let's compare the latency of a single GPU-to-GPU data transfer. A transfer over NVLink
+    4.0 has a latency of ~500 ns. In contrast, a PCIe Gen5 transfer has a ~1,000 ns (1 µs) latency. Crucially,
+    if the GPUs are on different CPU sockets, you must add another ~100-200 ns for the inter-socket hop.
+    For an MoE model's all-to-all communication, these small latencies are amplified by the collective
+    algorithm. A 'bad' routing choice forcing cross-socket communication can add milliseconds of latency
+    compared to a 'good' choice on a single socket's PCIe fabric. The difference between a ~500ns NVLink
+    hop and a 1200ns+ cross-socket PCIe hop, repeated many times, easily explains the P50 vs P99 gap observed
+    on the mobile client.
+last_modified: '2026-04-01'
+tags:
+- scope:Device Hardware

@@ -1,0 +1,31 @@
+schema_version: 1
+id: edge-exp2-eval-0035
+title: Dataflow Tradeoffs on Qualcomm AI 100
+topic: systolic-dataflow
+status: published
+provenance: imported
+scenario: You are deploying a large language model inference pipeline on an on-premise server utilizing
+  the Qualcomm Cloud AI 100 accelerator (400 TOPS INT8, 32 GB LPDDR4x, 75W). The model's bottleneck is
+  the attention mechanism's projection matrices. You are given the option to map these operations onto
+  the systolic array using either a Weight-Stationary (WS) or an Output-Stationary (OS) dataflow. Evaluate
+  these two alternatives for this specific hardware and workload, and determine the optimal tiling strategy
+  required to prevent the compute units from stalling.
+details:
+  realistic_solution: For LLM projection layers where batch sizes are small but sequence lengths are long,
+    Output-Stationary (OS) is often preferred to keep the high-precision partial sums in the local SRAM,
+    preventing expensive round-trips to the 32 GB LPDDR4x memory. The tiling strategy must be heavily
+    optimized to maximize arithmetic intensity; the tiles must be sized such that all operands (activations
+    and weights) fit in the on-chip SRAM to continuously feed the compute engines, bridging the gap between
+    the 400 TOPS compute and the LPDDR4x bandwidth.
+  common_mistake: Candidates often reflexively choose Weight-Stationary because it is typical for CNNs
+    on edge NPUs, failing to recognize that LLM attention layers often involve massive intermediate activation
+    matrices. They also frequently ignore the mismatch between the massive 400 TOPS INT8 compute capability
+    and the relatively constrained LPDDR4x memory bandwidth.
+  napkin_math: The AI 100 delivers 400 TOPS (400e12 INT8 ops/sec). Assuming typical LPDDR4x bandwidth
+    is around 136 GB/s, the required arithmetic intensity to prevent stalling is (400e12 ops/sec) / (136e9
+    bytes/sec) ≈ 2941 ops/byte. For a matrix multiplication (M*K x K*N), operations are 2*M*N*K and data
+    is M*K + K*N + M*N bytes. To achieve 2941 ops/byte, the tile sizes (M, N, K) must be large enough
+    (e.g., K > 4400 if M=N=K) so that 2/(1/M + 1/N + 1/K) > 2941. This requires several megabytes of fast
+    on-chip SRAM. Output-Stationary prevents the M*N partial sums (which are often accumulated in higher
+    precision like INT32 or FP16) from draining the 136 GB/s LPDDR4x bandwidth.
+last_modified: '2026-04-01'

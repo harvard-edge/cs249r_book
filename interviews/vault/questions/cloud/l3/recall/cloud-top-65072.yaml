@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-top-65072
+title: Prefill Warmup and JIT Compilation Latency at Service Start
+topic: disaggregated-serving
+status: published
+provenance: imported
+scenario: A newly deployed prefill node takes 45 seconds to serve its first request due to JIT compilation
+  and CUDA graph capture. During this time, the load balancer routes traffic to the node anyway, causing
+  45 seconds of 30x higher latency. Design the deployment readiness lifecycle.
+details:
+  realistic_solution: 'Deployment readiness lifecycle for prefill nodes: (1) Startup phase: load model
+    weights (8B: ~5s, 70B: ~80s); (2) Warmup phase: run dummy forward passes at all expected batch sizes
+    and sequence lengths to trigger CUDA graph capture and cuBLAS kernel selection. Duration: 10-30 seconds
+    for sequence lengths 128, 256, 512, 1024, 2048. (3) Readiness check: node emits ready signal after
+    warmup completion. Kubernetes readinessProbe: use exec probe that checks a local file written by the
+    server after warmup. (4) Load balancer integration: Kubernetes readinessProbe failure excludes pod
+    from Service endpoints. New pod starts traffic only after readiness probe succeeds. (5) Canary deployment:
+    first route 1% traffic to warm pod, verify P99 latency within 10% of baseline, then increase to 100%.
+    Implementation: vLLM''s --enable-prefix-caching and --max-num-seqs should be specified at startup;
+    warmup script runs representative prompts at each sequence length.'
+  common_mistake: Using a simple HTTP health check (server is up and responding) as the readiness signal.
+    The server can respond to health checks immediately after startup while still performing JIT compilation,
+    making health checks insufficient as readiness signals.
+  napkin_math: 'CUDA graph capture for 70B on H100: graph capture per batch size = 5-10 seconds (JIT traces
+    all ops). For batch sizes 1,2,4,8,16,32,64,128: 8 * 7.5s = 60 seconds warmup. Total startup: model
+    load (80s) + warmup (60s) = 140 seconds before ready. At 1 pod scale-up per minute during traffic
+    spike: 140s gap where incoming traffic may hit cold pods. Solution: maintain warm-standby pool with
+    models pre-loaded; scale from standby pool (only need 60s warmup) not from scratch.'
+last_modified: '2026-04-02'
+tags:
+- scope:Foundational

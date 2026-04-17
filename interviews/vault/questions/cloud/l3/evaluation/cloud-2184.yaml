@@ -1,0 +1,37 @@
+schema_version: 1
+id: cloud-2184
+title: The Gradient Bucket Fusion Tradeoff
+topic: collective-communication
+status: published
+provenance: imported
+scenario: PyTorch DDP defaults to a 25 MB gradient bucket size for AllReduce. Your team is training a
+  model with 500 layers, each producing a 50 KB gradient tensor. A colleague suggests increasing the bucket
+  size to 100 MB 'for better bandwidth utilization.' Another suggests decreasing it to 1 MB 'for faster
+  overlap with backward pass.' Who is right, and what is the real tradeoff being managed?
+details:
+  realistic_solution: 'Both are partially right, but the bucket size must balance two competing forces.
+    **Larger buckets (100 MB):** Amortize the per-message startup latency ($\alpha$) across more data,
+    achieving near-peak bandwidth. But communication for that bucket cannot start until ALL gradients
+    in the bucket are computed — delaying the overlap with computation. For 500 layers at 50 KB each,
+    a 100 MB bucket contains 2,000 layers'' worth — the entire model. No overlap is possible; AllReduce
+    starts only after the full backward pass. **Smaller buckets (1 MB):** Each bucket of 20 layers finishes
+    quickly, enabling aggressive overlap with backward compute. But each 1 MB message on InfiniBand pays
+    a 5 μs startup per step — at 32 GPUs with Ring, that''s 630 μs overhead, which is 630× the time to
+    actually transfer 1 MB (1 μs at 50 GB/s). The **25 MB default** is a well-calibrated middle ground:
+    large enough for efficient bandwidth use, small enough that buckets fill during backward pass and
+    communication overlaps with compute.'
+  common_mistake: Optimizing only one side of the tradeoff. Larger buckets improve bandwidth utilization
+    but delay the start of communication. Smaller buckets start communication sooner but suffer from higher
+    per-message latency overhead. Neither extreme is correct without considering the model's backward
+    pass profile.
+  napkin_math: 'Total gradients: 500 layers × 50 KB = 25 MB. Assume 32 GPUs, Ring AllReduce, 50 GB/s InfiniBand.
+    Latency per bucket: 2 × 31 × 5 μs = 310 μs. | 1 MB bucket: 25 buckets. BW per bucket: 2 × (31/32)
+    × 1 MB / 50 GB/s = 39 μs. Per bucket total: 310 + 39 = 349 μs. Serialized: 25 × 349 μs = 8.7 ms. Latency
+    overhead is 89% of total — terrible bandwidth efficiency. | 25 MB bucket (default): 1 bucket. BW:
+    2 × (31/32) × 25 MB / 50 GB/s = 0.97 ms. Total: 310 μs + 0.97 ms = 1.28 ms. But all 500 layers must
+    finish before the single AllReduce starts — limited overlap with backward. | 100 MB bucket: also 1
+    bucket (total grads only 25 MB). Same as 25 MB case. | Sweet spot: ~5 MB buckets = 5 buckets. BW per
+    bucket: 194 μs. Per bucket: 504 μs. Buckets fill during backward pass enabling overlap with compute.'
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Training

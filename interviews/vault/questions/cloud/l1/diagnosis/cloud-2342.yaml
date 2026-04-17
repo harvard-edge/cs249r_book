@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-2342
+title: ZeRO-3 Host Offload PCIe Contention
+topic: memory-hierarchy-design
+status: published
+provenance: imported
+scenario: Training a 200B parameter model on a single node with 8x H100s using DeepSpeed ZeRO-3 with CPU
+  NVMe offload. The NVLink bandwidth is 900 GB/s per GPU. However, system utilization is 12%, NVLink is
+  95% idle, and the training step takes 4500ms. Profiling shows the GPUs are waiting on synchronous memory
+  copies.
+details:
+  realistic_solution: 'The symptom (GPUs idle, NVLink unused, waiting on memory copies) reveals a severe
+    PCIe bottleneck caused by CPU offloading. ZeRO-3 offload stores model parameters in Host CPU RAM (or
+    NVMe). During the forward/backward pass, parameters must be fetched to the GPU immediately before
+    computation. While H100s communicate over ultra-fast NVLink (900 GB/s), fetching from Host RAM traverses
+    the PCIe Gen5 x16 bus, which has a unidirectional theoretical limit of 64 GB/s (often ~50 GB/s effectively).
+    The algorithm is bottlenecked by the host-to-device PCIe bandwidth. Because the prefetching buffer
+    size is likely too small or synchronous, the compute units stall waiting for weights. Co-design solution:
+    Increase the parameter prefetch buffer size to aggressively overlap PCIe transfers with compute, upgrade
+    to an architecture with CXL or Grace-Hopper (NVLink-C2C at 900 GB/s to host memory), or disable CPU
+    offload and distribute the model purely across GPU HBM.'
+  common_mistake: Assuming NVLink is configured incorrectly or that the CPU lacks the compute power to
+    process the optimizer step.
+  napkin_math: '200B model in BF16 = 400 GB. With ZeRO-3, each GPU stores 1/8 of the parameters on CPU
+    RAM = 50 GB. During forward + backward, each GPU must fetch its 50 GB shard from CPU over PCIe and
+    participate in all-gathers. PCIe Gen5 x16 effective bandwidth ≈ 50 GB/s. Fetching 50 GB per pass ×
+    2 passes (fwd + bwd) = 100 GB over PCIe. Transfer time: 100 GB / 50 GB/s = 2.0 seconds. Compute time:
+    6 × 200e9 × 8192 tokens / (8 × 989 TFLOPS) ≈ 1.25 seconds. Total step time ≈ 2.0 + 1.25 + overhead
+    ≈ 4.5 seconds — consistent with the observed 4500 ms. The system is ~60% PCIe-bound. NVLink sits idle
+    because the bottleneck is CPU→GPU, not GPU↔GPU.'
+last_modified: '2026-04-01'
+tags:
+- scope:single-system

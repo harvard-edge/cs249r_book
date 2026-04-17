@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2212
+title: The Rail-Optimized Placement Problem
+topic: scheduling-resource-management
+status: published
+provenance: imported
+scenario: You are scheduling a 32-GPU data-parallel training job on a cluster where each node has 8 GPUs
+  connected by NVLink (900 GB/s intra-node) but nodes connect via InfiniBand (50 GB/s inter-node). The
+  scheduler places GPUs across 6 different nodes (some nodes contribute 4 GPUs, others 8). The training
+  job's AllReduce takes 3x longer than expected. Why did the placement cause this, and what scheduling
+  constraint would fix it?
+details:
+  realistic_solution: 'The scheduler should enforce rail-optimized (topology-aware) placement: allocate
+    complete nodes first, then fill partial nodes only if necessary. For 32 GPUs with 8-GPU nodes, the
+    optimal placement is exactly 4 complete nodes. This ensures the AllReduce tree maps cleanly onto the
+    network hierarchy — intra-node reduction over NVLink first, then inter-node reduction over InfiniBand.
+    With asymmetric placement across 6 nodes, the AllReduce ring has unequal segment bandwidths, and the
+    slowest link (50 GB/s IB) dominates the entire ring.'
+  common_mistake: Blaming the InfiniBand network bandwidth as insufficient. The bandwidth is adequate
+    — the problem is that the *topology-unaware* placement created an asymmetric communication pattern
+    where some GPU pairs communicate at 900 GB/s and others at 50 GB/s.
+  napkin_math: 'Gradient size for a 7B model: 14 GB (FP16). Optimal 4-node ring AllReduce: intra-node
+    reduce over NVLink (14GB / 900 GB/s ≈ 16ms), inter-node AllReduce across 4 nodes (14GB / 50 GB/s ×
+    2(N-1)/N ≈ 420ms). Total ≈ 436ms. Bad 6-node placement: inter-node AllReduce across 6 nodes (14GB
+    / 50 GB/s × 2×5/6 ≈ 467ms), but with asymmetric splits causing stragglers — effective time ≈ 1.3s
+    (3× overhead from load imbalance and IB congestion).'
+last_modified: '2026-04-01'
+tags:
+- scope:Systems & Scale

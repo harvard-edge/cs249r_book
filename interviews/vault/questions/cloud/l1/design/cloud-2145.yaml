@@ -1,0 +1,41 @@
+schema_version: 1
+id: cloud-2145
+title: The Embedding Serving at 10M QPS
+topic: feature-store-management
+status: published
+provenance: imported
+scenario: You need to serve embedding lookups for a search system at 10 million queries per second. Each
+  query requires lookups from 5 embedding tables, each with 1 billion rows and 256-dimensional FP16 embeddings.
+  Total embedding size is 2.56 TB. The P99 latency SLA for the embedding lookup service is 5ms. Design
+  the serving architecture, including storage, caching, and networking.
+details:
+  realistic_solution: '**Architecture: Distributed embedding serving with hot-tier caching.** **(1) Storage
+    tier analysis:** 2.56 TB total. Power-law access: top 0.1% of rows (1M per table = 5M total) serve
+    80% of queries = ~2.56 GB hot tier. Top 5% (50M per table = 250M total) serve 99% of queries = ~128
+    GB warm tier. **(2) Hot tier (L1 — in-process memory):** Top 5M embeddings (2.56 GB) cached in each
+    serving node''s RAM. Latency: ~0.1ms. Handles 80% of lookups. **(3) Warm tier (L2 — distributed cache):**
+    Top 250M embeddings (128 GB) distributed across a memcached/Redis cluster. Latency: ~1ms. Handles
+    19% of lookups. **(4) Cold tier (L3 — SSD-backed store):** Full 2.56 TB on NVMe SSDs across a distributed
+    KV store (RocksDB/Cassandra). Latency: ~3ms. Handles 1% of lookups. **(5) Expected P99:** With 80/19/1
+    hit rates: P99 ≈ max of cold-tier path = 3ms + 1ms network = 4ms < 5ms SLA. **(6) Capacity planning:**
+    At 10M QPS, each serving node handles ~50K QPS (limited by network bandwidth). Need $10\text{M}/50\text{K}
+    = 200$ serving nodes. Each node has 32 GB RAM (hot cache + headroom), 4-core CPU, 10 Gbps NIC. Warm
+    tier: 16-node Redis cluster (8 GB each). Cold tier: 32-node SSD cluster. **(7) Consistency:** Embeddings
+    update weekly via batch retraining. Cache invalidation via versioned keys — deploy new version, warm
+    caches, swap traffic.'
+  common_mistake: Trying to serve 2.56 TB of embeddings from GPU HBM for latency. At 10M QPS * 5 tables
+    * 512 bytes/embedding = 25.6 GB/s aggregate read bandwidth — manageable with a distributed system,
+    but far too much data for any single node's memory. This is a distributed systems problem, not a single-machine
+    GPU problem.
+  napkin_math: 'Total read bandwidth: 10M QPS * 5 lookups * 512 bytes = 25.6 GB/s aggregate. L1 hit rate
+    80%: L1 serves 20.5 GB/s from local RAM (distributed across 200 nodes = ~100 MB/s per node — trivial).
+    L2 hit rate 19%: L2 serves 4.9 GB/s across 16 Redis nodes = ~306 MB/s per node (well within 10 Gbps
+    NIC = 1.25 GB/s). L3 hit rate 1%: L3 serves 256 MB/s across 32 SSD nodes = ~8 MB/s per node (trivial
+    for NVMe). Serving fleet: 200 nodes * $0.50/hr = $100/hr = $876K/yr. The 5ms P99 SLA is achievable
+    because 99% of lookups hit L1/L2 (< 1ms), and only 1% hit SSD-backed L3 (~3-4ms).'
+chain:
+  id: cloud-chain-455
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:System Design

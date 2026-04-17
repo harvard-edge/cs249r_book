@@ -1,0 +1,33 @@
+schema_version: 1
+id: cloud-0094
+title: The P99 Latency Spike
+topic: model-serving-infrastructure
+status: published
+provenance: imported
+scenario: You are the on-call engineer for a new LLM-based chatbot service deployed on H100s. The service
+  uses a simple static batching strategy with a batch size of 32 and a fixed 100ms timeout to collect
+  requests. During a load test, you observe that while average Time to First Token (TTFT) is acceptable
+  at ~120ms, the P99 TTFT spikes to over 500ms, violating your SLO. `nvidia-smi` shows the GPU is consistently
+  busy. Diagnose the most likely cause of this high tail latency.
+details:
+  realistic_solution: The most likely cause is head-of-line blocking exacerbated by the static batching
+    policy. A user request that arrives just after a batch has been dispatched to the GPU must wait for
+    the *entire* 100ms timeout window to elapse, and *then* wait for the next full batch to be processed.
+    Under load, most requests experience some queueing, but the unlucky 'tail' requests that just miss
+    the window experience the maximum possible delay. This creates a bimodal latency distribution, where
+    some users get fast responses and others get very slow ones, dragging up the P99. The solution is
+    to implement continuous batching, which processes requests as they arrive and adds new requests to
+    the running batch dynamically, eliminating the fixed timeout and drastically reducing queue times.
+  common_mistake: Blaming the hardware. Engineers often assume latency spikes are due to the GPU being
+    underpowered, the model being too large, or network issues. They might suggest scaling up to more
+    powerful GPUs (e.g., B200s) without addressing the underlying scheduling problem.
+  napkin_math: In static batching, new requests cannot join an actively processing batch. If a request
+    arrives just after a batch begins generating tokens for 700ms, it must wait that full 700ms, plus
+    the 100ms timeout to form its own batch. Worst-case queue wait = 700ms + 100ms = 800ms. This head-of-line
+    blocking explains the massive P99 TTFT spikes.
+chain:
+  id: cloud-chain-430
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

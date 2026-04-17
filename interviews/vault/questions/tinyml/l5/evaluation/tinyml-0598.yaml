@@ -1,0 +1,30 @@
+schema_version: 1
+id: tinyml-0598
+title: The Bus Arbitration Starvation
+topic: collective-communication
+status: draft
+provenance: imported
+scenario: 'Your industrial IoT sensor runs a vibration anomaly detection model on an STM32H7 (Cortex-M7,
+  480 MHz, 1 MB SRAM, AXI bus matrix). The system simultaneously: (1) streams accelerometer data via SPI+DMA
+  at 25.6 kHz, (2) runs inference on the buffered data, and (3) transmits results over Ethernet+DMA. In
+  isolation, inference takes 2.8 ms. With all three running, inference balloons to 7.0 ms. CPU utilization
+  is only 45%. Explain the 2.5× slowdown.'
+details:
+  realistic_solution: 'AXI bus matrix contention between three bus masters: CPU, SPI DMA, and Ethernet
+    DMA all competing for the same SRAM bank. DMA uses zero CPU cycles but consumes bus bandwidth. When
+    all three target SRAM1, the CPU gets ~40% of bus cycles during DMA bursts, inflating cache miss penalties
+    from 1 cycle (no contention) to 3 cycles. Fix: place tensor_arena in SRAM1 (CPU-dedicated AXI port),
+    camera DMA buffer in SRAM2, Ethernet buffer in SRAM3. The STM32H7''s multi-bank SRAM is designed for
+    exactly this partitioning — different bus masters on different banks eliminate contention entirely,
+    restoring inference to 2.8ms.'
+  common_mistake: '"The CPU is only at 45% utilization, so there''s plenty of headroom." CPU utilization
+    measures instruction execution, not *bus bandwidth*. The CPU can be idle waiting for data while the
+    bus is saturated.'
+  napkin_math: 'SRAM1-only: CPU gets ~1/3 of bus cycles during DMA bursts. Effective CPU bandwidth: 3.84
+    GB/s × 0.4 (accounting for burst granularity) = 1.54 GB/s. Inference needs 1.5 GB/s → barely fits,
+    but cache miss penalty increases from 1 cycle (no contention) to 3 cycles (arbitration). Inference
+    time: 2.8 ms × 2.5 = 7.0 ms. After bank splitting: CPU has dedicated SRAM1 port. Bandwidth: 3.84 GB/s
+    (full). Inference: 2.8 ms. DMA overhead on CPU: 0 cycles (different bus paths).'
+last_modified: '2026-04-01'
+tags:
+- scope:Microcontroller

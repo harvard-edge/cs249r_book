@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-r2-40039
+title: Detecting Silent Gradient Corruption
+topic: gradient-synchronization
+status: published
+provenance: imported
+scenario: Your 512-H100 training run shows gradually increasing loss after 50K iterations, eventually
+  diverging at 80K. All hardware health checks pass. GPU temperatures, memory errors (ECC), and NIC error
+  counters are normal. You suspect silent gradient corruption during AllReduce. How would you detect which
+  GPU or network path is producing corrupted gradients?
+details:
+  realistic_solution: 'Detection strategy: (1) Gradient checksum verification: before AllReduce, each
+    GPU computes a CRC32 of its gradient buffer and broadcasts the checksum. After AllReduce, verify the
+    result''s checksum matches the expected reduction of input checksums. Cost: ~100μs per iteration for
+    2GB buffer. (2) Sentinel value injection: insert known values (0.0, 1.0, -1.0) at fixed positions
+    in the gradient buffer. After AllReduce, verify these sentinels reduced correctly (sum should equal
+    N × value). Any deviation indicates corruption. (3) Binary search isolation: split GPUs into two halves
+    and run AllReduce within each half separately. The half with increasing loss contains the corrupted
+    GPU. Recurse for log₂(512) = 9 rounds to identify the specific GPU. (4) Per-GPU gradient norm monitoring:
+    compute ||g_i|| for each GPU i. A corrupted GPU will have anomalous gradient norms (typically very
+    large due to bit flips in the exponent field of FP16). Alert if any GPU''s norm exceeds 10× the median.
+    The root cause is often a marginal PCIe retimer or a faulty NIC ASIC that passes link-level CRC checks
+    but corrupts payload intermittently.'
+  common_mistake: Only checking hardware error counters. Silent data corruption (SDC) in RDMA transfers
+    can flip bits without triggering ECC errors if the corruption occurs after the memory subsystem (e.g.,
+    in the NIC, PCIe bus, or switch ASIC). These bit flips appear as valid but incorrect gradient values.
+  napkin_math: 'CRC32 of 2GB: 2GB / 32GB/s (CPU throughput) = 62.5ms on CPU, or ~200μs on GPU using parallel
+    CRC. Cost: 200μs per iteration / 100ms iteration = 0.2% overhead — cheap insurance. Binary search:
+    9 rounds × ~5 minutes per round (run 1000 iterations and check loss trend) = 45 minutes to identify
+    the faulty GPU out of 512.'
+last_modified: '2026-04-02'

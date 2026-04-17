@@ -1,0 +1,30 @@
+schema_version: 1
+id: mobile-exp-anal-0011
+title: On-Device PSI Drift Compute Bottleneck
+topic: distribution-drift-detection
+status: published
+provenance: imported
+scenario: A mobile app uses an on-device LLM (Gemini Nano) on the Google Tensor G3 to summarize notifications.
+  To detect concept drift, the ML team implemented a nightly background job that calculates the Population
+  Stability Index (PSI). The job retrieves the last 50,000 raw notification texts, re-loads the Gemini
+  Nano model into the 12 GB LPDDR5X memory, generates 768-dimensional FP16 embeddings for all 50,000 texts,
+  and compares their distribution against a baseline. Despite the Tensor G3's efficient 7.5 TOPS TPU,
+  telemetry shows this nightly job frequently causes thermal throttling and triggers the Android Low Memory
+  Killer (LMK) to terminate other background apps. Analyze why this specific statistical detection workflow
+  degrades system reliability.
+details:
+  realistic_solution: The system failure is caused by re-running model inference in a dense batch rather
+    than the PSI calculation. While the Tensor G3 has 12 GB of RAM, allocating 2-3 GB to load Gemini Nano
+    in a background service violates OS background constraints, triggering the LMK. Furthermore, running
+    continuous inference maxes out the TPU, causing thermal buildup. The robust approach is to cache the
+    768-dimensional embeddings incrementally at inference time during the day, which makes the nightly
+    PSI calculation computationally trivial.
+  common_mistake: Candidates often assume the PSI mathematical formula itself (sum of (Actual - Expected)
+    * ln(Actual/Expected)) is the bottleneck, or they fail to distinguish between the cost of the statistical
+    calculation and the cost of the data preparation (embedding generation).
+  napkin_math: 'Compute constraint: If generating an embedding takes 5 billion operations (5 GOPs), processing
+    50,000 texts requires 250,000 GOPs or 250 TOPs. At the TPU''s max throughput of 7.5 TOPS, this requires
+    250 / 7.5 = 33.3 seconds of sustained 100% TPU utilization, generating significant heat. Memory constraint:
+    Caching the embeddings directly would only take 50,000 * 768 dimensions * 2 bytes (FP16) = 76.8 MB,
+    easily fitting in memory without waking up the massive LLM.'
+last_modified: '2026-04-01'
