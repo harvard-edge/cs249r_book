@@ -52,6 +52,8 @@ async function checkSchemaFingerprint(env: Env, expectedFromDb: string | undefin
       "AND name NOT IN ('questions_fts_data','questions_fts_idx'," +
       "                 'questions_fts_docsize','questions_fts_content'," +
       "                 'questions_fts_config') " +
+      "AND name NOT LIKE '_cf_%' " +
+      "AND name NOT LIKE 'd1_%' " +
       "ORDER BY name"
     ).all<{ sql: string | null }>();
     const ddl = (result.results ?? [])
