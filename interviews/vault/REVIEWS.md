@@ -455,5 +455,3 @@ R7: 0, R8: 0, R9: 1* (regression-detect, not new), R10: 0, R11: 0
 Stability is reached. No further rounds scheduled.
 
 **End of review ledger.**
-
-
