@@ -50,6 +50,33 @@ CREATE TABLE tags (
   FOREIGN KEY (question_id) REFERENCES questions(id)
 );
 
+CREATE TABLE taxonomy (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  area TEXT NOT NULL,
+  prerequisites_json TEXT,
+  tracks_json TEXT,
+  question_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX idx_taxonomy_area ON taxonomy(area);
+
+CREATE TABLE taxonomy_edges (
+  source TEXT NOT NULL,
+  target TEXT NOT NULL,
+  PRIMARY KEY (source, target),
+  FOREIGN KEY (source) REFERENCES taxonomy(id),
+  FOREIGN KEY (target) REFERENCES taxonomy(id)
+);
+
+CREATE TABLE zones (
+  id TEXT PRIMARY KEY,
+  description TEXT,
+  skills_json TEXT,
+  levels_json TEXT
+);
+
 CREATE TABLE release_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
