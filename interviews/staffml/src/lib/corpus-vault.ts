@@ -13,6 +13,15 @@
 import type { Question as VaultQuestion } from "@staffml/vault-types";
 import { makeClientFromEnv, VaultApiClient } from "./vault-api";
 
+// The vault worker enriches each Question with track/level/zone derived from
+// the source filesystem path (classification is path-encoded per vault_cli
+// models.py). These fields are not on the schema itself.
+type EnrichedVaultQuestion = VaultQuestion & {
+  track?: string;
+  level?: string;
+  zone?: string;
+};
+
 // The legacy corpus.ts exports a specific Question shape; this vault-backed
 // module adapts the @staffml/vault-types Question to that shape so callers
 // don't need to change.
@@ -38,7 +47,7 @@ export interface Question {
   };
 }
 
-function adapt(v: VaultQuestion): Question {
+function adapt(v: EnrichedVaultQuestion): Question {
   return {
     id: v.id,
     track: v.track ?? "global",
@@ -79,7 +88,7 @@ export async function getQuestionById(id: string): Promise<Question | null> {
   if (_byId.has(id)) return _byId.get(id)!;
   try {
     const v = await client().getQuestion(id);
-    const q = adapt(v as VaultQuestion);
+    const q = adapt(v as EnrichedVaultQuestion);
     _byId.set(id, q);
     return q;
   } catch {
@@ -91,12 +100,12 @@ export async function listQuestions(params: {
   track?: string; level?: string; zone?: string; limit?: number;
 } = {}): Promise<Question[]> {
   const res = await client().listQuestions(params);
-  return (res.items as VaultQuestion[]).map(adapt);
+  return (res.items as EnrichedVaultQuestion[]).map(adapt);
 }
 
 export async function searchQuestions(q: string, limit = 20): Promise<Question[]> {
   const res = await client().search(q, limit);
-  return (res.results as VaultQuestion[]).map(adapt);
+  return (res.results as EnrichedVaultQuestion[]).map(adapt);
 }
 
 /**

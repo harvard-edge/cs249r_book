@@ -768,8 +768,7 @@ function PracticePage() {
                     {chainInfo && !showAnswer && (
                       <div className="mb-3">
                         <ChainBadge
-                          chainId={chainInfo.id}
-                          chainName={chainInfo.name}
+                          chainId={chainInfo.chainId}
                           position={chainInfo.position + 1}  /* 1-indexed for display */
                           total={chainInfo.total}
                         />
