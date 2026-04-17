@@ -253,26 +253,11 @@ def _(mo):
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-# ─── CELL 4: TABS CELL ────────────────────────────────────────────────────
+# ─── WIDGET CELLS (one per part) ─────────────────────────────────────────
+# Pattern: each cell defines and RETURNS every widget the part owns so
+# marimo's dataflow can route them to the tabs cell. #1332.
 @app.cell(hide_code=True)
-def _(
-    COLORS,
-    H100_TFLOPS, H100_BW, H100_RAM, H100_TDP,
-    A100_TFLOPS, A100_BW, A100_RAM,
-    JETSON_TFLOPS, JETSON_BW, JETSON_RAM, JETSON_TDP,
-    IPHONE_TFLOPS, IPHONE_TDP,
-    ESP32_TFLOPS, ESP32_TDP, ESP32_RAM_KB,
-    RESNET50_FLOPS, RESNET50_SIZE_MB,
-    MOBILENET_FLOPS, DSCNN_FLOPS,
-    SPEED_OF_LIGHT_KM_S, FIBER_FACTOR,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-):
-    # ─────────────────────────────────────────────────────────────────────
-    # SHARED WIDGETS
-    # ─────────────────────────────────────────────────────────────────────
-
-    # Part A
+def _(mo):
     partA_prediction = mo.ui.radio(
         options={
             "A) ~6x (proportional to compute increase)":  "6x",
@@ -280,19 +265,29 @@ def _(
             "C) ~1.5x (modest improvement)":               "1.5x",
             "D) <1.1x (almost no improvement)":            "1.1x",
         },
-        label="Upgrading from A100 ($15K) to H100 ($30K) -- a 6x compute increase. "
+        label=r"Upgrading from A100 (\$15K) to H100 (\$30K) -- a 6x compute increase. "
               "For a workload with AI = 5 FLOPs/Byte, what latency improvement?",
     )
     return (partA_prediction,)
 
+
+# Each widget cell below defines AND returns every widget it owns. A previous
+# version defined partA_ai/partB_distance/partB_sla/... but only returned the
+# next part's prediction; marimo's dataflow then never flowed those widgets
+# into the tabs cell, so sliders and dropdowns never rendered even after the
+# prediction was answered (#1332). Grouping by part keeps the mental model
+# simple: "one cell per part's widgets."
 @app.cell(hide_code=True)
 def _(mo):
     partA_ai = mo.ui.slider(
         start=1, stop=400, value=5, step=1,
         label="Arithmetic Intensity (FLOPs/Byte)",
     )
+    return (partA_ai,)
 
-    # Part B
+
+@app.cell(hide_code=True)
+def _(mo):
     partB_prediction = mo.ui.radio(
         options={
             "A) Yes -- 1 ms compute leaves 9 ms for network":              "yes_easy",
@@ -306,6 +301,7 @@ def _(mo):
     )
     return (partB_prediction,)
 
+
 @app.cell(hide_code=True)
 def _(mo):
     partB_distance = mo.ui.slider(
@@ -317,8 +313,11 @@ def _(mo):
         value="10 ms (AV safety)",
         label="SLA budget:",
     )
+    return partB_distance, partB_sla
 
-    # Part C
+
+@app.cell(hide_code=True)
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) Still 60 FPS -- hardware is designed for this":  "60fps",
@@ -330,6 +329,7 @@ def _(mo):
               "After 90 seconds of continuous use, what frame rate?",
     )
     return (partC_prediction,)
+
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -352,8 +352,11 @@ def _(mo):
         value="ResNet-50 (4.1 GFLOPs)",
         label="Model:",
     )
+    return partC_model, partC_target
 
-    # Part D
+
+@app.cell(hide_code=True)
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) ~2x (cloud is slightly more expensive)":  "2x",
@@ -366,8 +369,12 @@ def _(mo):
     )
     return (partD_prediction,)
 
+
+# Part D slider and dropdown pulled out of the tabs cell (was nested inside
+# before, which left them invisible to the tabs cell's dataflow tracker
+# even though they appeared syntactically near the tabs code). #1332.
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(mo):
     partD_data_size = mo.ui.slider(
         start=1, stop=1024, value=16, step=1,
         label="Data size (KB)",
@@ -377,7 +384,28 @@ def _(mo, partD_prediction):
         value="BLE (1 Mbps)",
         label="Wireless technology:",
     )
+    return partD_data_size, partD_wireless
 
+
+# ─── CELL N: TABS COMPOSITION ────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(
+    COLORS,
+    H100_TFLOPS, H100_BW, H100_RAM, H100_TDP,
+    A100_TFLOPS, A100_BW, A100_RAM,
+    JETSON_TFLOPS, JETSON_BW, JETSON_RAM, JETSON_TDP,
+    IPHONE_TFLOPS, IPHONE_TDP,
+    ESP32_TFLOPS, ESP32_TDP, ESP32_RAM_KB,
+    RESNET50_FLOPS, RESNET50_SIZE_MB,
+    MOBILENET_FLOPS, DSCNN_FLOPS,
+    SPEED_OF_LIGHT_KM_S, FIBER_FACTOR,
+    Engine, Models, Hardware,
+    apply_plotly_theme, go, math, mo, np,
+    partA_prediction, partA_ai,
+    partB_prediction, partB_distance, partB_sla,
+    partC_prediction, partC_target, partC_model,
+    partD_prediction, partD_data_size, partD_wireless,
+):
     # ─────────────────────────────────────────────────────────────────────
     # PART A -- The Memory Wall Revelation
     # ─────────────────────────────────────────────────────────────────────
@@ -443,6 +471,20 @@ def _(mo, partD_prediction):
         _t_mem_a100 = (_data_bytes / (A100_BW * 1e9)) * 1000
         _t_comp_a100 = (_flops / (A100_TFLOPS * 1e12 * _eta)) * 1000
         _t_total_a100 = max(_t_mem_a100, _t_comp_a100) + 0.015
+
+        # Anchor the correct/wrong feedback to the original question (AI=5)
+        # even after the student moves the slider, so "at AI=5" wording stays
+        # truthful regardless of current slider position. #1332.
+        _flops_at_5 = 5 * _data_bytes
+        _t_a100_at_5 = max(
+            _data_bytes / (A100_BW * 1e9),
+            _flops_at_5 / (A100_TFLOPS * 1e12 * _eta),
+        ) * 1000 + 0.015
+        _t_h100_at_5 = max(
+            _data_bytes / (H100_BW * 1e9),
+            _flops_at_5 / (H100_TFLOPS * 1e12 * _eta),
+        ) * 1000 + 0.01
+        _speedup_at_5 = _t_a100_at_5 / _t_h100_at_5 if _t_h100_at_5 > 0 else 1
 
         _t_mem_h100 = (_data_bytes / (H100_BW * 1e9)) * 1000
         _t_comp_h100 = (_flops / (H100_TFLOPS * 1e12 * _eta)) * 1000
@@ -544,11 +586,11 @@ The 6x compute upgrade is almost entirely wasted.
         _pred = partA_prediction.value
         if _pred == "1.1x":
             _rev = ("**Correct.** At AI=5, both GPUs are deeply memory-bound. "
-                    f"The speedup is only {_speedup:.2f}x because bandwidth, not compute, "
+                    f"The speedup is only {_speedup_at_5:.2f}x because bandwidth, not compute, "
                     "is the binding constraint.")
             _rkind = "success"
         else:
-            _rev = (f"**The actual speedup at AI=5 is only ~{_speedup:.2f}x.** "
+            _rev = (f"**The actual speedup at AI=5 is only ~{_speedup_at_5:.2f}x.** "
                     "The workload is memory-bound. Slide AI above the ridge point "
                     "to see where the 6x upgrade actually pays off.")
             _rkind = "warn"

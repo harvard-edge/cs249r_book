@@ -185,14 +185,14 @@ def _(mo):
     return
 
 
+# ─── WIDGET CELLS (one per part) ─────────────────────────────────────────
+# Each cell defines and RETURNS every widget it owns so marimo's dataflow
+# can route them to the tabs cell. A previous version defined partA_stage /
+# partB_cycle_a / partB_cycle_b / partC_sliders / partD_months but only
+# returned the next part's prediction, so sliders and the PM allocation
+# chart never re-rendered when changed. #1332.
 @app.cell(hide_code=True)
-def _(
-    COLORS, H100_TFLOPS, H100_RAM, ESP32_RAM_KB,
-    RESNET50_PARAMS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
-):
-    # ── Part A widgets ───────────────────────────────────────────────────
+def _(mo):
     partA_prediction = mo.ui.radio(
         options={
             "A) During architecture selection (Stage 2, cost 2x)": "stage2",
@@ -205,14 +205,18 @@ def _(
     )
     return (partA_prediction,)
 
+
 @app.cell(hide_code=True)
 def _(mo):
     partA_stage = mo.ui.slider(
         start=1, stop=6, value=5, step=1,
         label="Discovery stage (1=Problem Definition, 6=Monitoring)",
     )
+    return (partA_stage,)
 
-    # ── Part B widgets ───────────────────────────────────────────────────
+
+@app.cell(hide_code=True)
+def _(mo):
     partB_prediction = mo.ui.radio(
         options={
             "A) Team A -- 5% head start is insurmountable": "team_a",
@@ -225,6 +229,7 @@ def _(mo):
     )
     return (partB_prediction,)
 
+
 @app.cell(hide_code=True)
 def _(mo):
     partB_cycle_a = mo.ui.slider(
@@ -235,8 +240,11 @@ def _(mo):
         start=1, stop=168, value=1, step=1,
         label="Team B cycle time (hours)",
     )
+    return partB_cycle_a, partB_cycle_b
 
-    # ── Part C widgets ───────────────────────────────────────────────────
+
+@app.cell(hide_code=True)
+def _(mo):
     partC_prediction = mo.ui.radio(
         options={
             "A) 50-60% (it is the core task)":    "50",
@@ -248,6 +256,7 @@ def _(mo):
               "(architecture, training, hyperparameters)?",
     )
     return (partC_prediction,)
+
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -263,8 +272,11 @@ def _(mo):
         "monitor": mo.ui.slider(start=0, stop=20, value=0, step=1,
                                  label="Monitoring/Maintenance"),
     }
+    return (partC_sliders,)
 
-    # ── Part D widgets ───────────────────────────────────────────────────
+
+@app.cell(hide_code=True)
+def _(mo):
     partD_prediction = mo.ui.radio(
         options={
             "A) 0 -- it was validated during pilot":    "zero",
@@ -277,12 +289,28 @@ def _(mo):
     )
     return (partD_prediction,)
 
+
 @app.cell(hide_code=True)
-def _(mo, partD_prediction):
+def _(mo):
     partD_months = mo.ui.slider(
         start=0, stop=24, value=0, step=1,
         label="Months since production launch",
     )
+    return (partD_months,)
+
+
+# ─── TABS COMPOSITION ────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(
+    COLORS, H100_TFLOPS, H100_RAM, ESP32_RAM_KB,
+    RESNET50_PARAMS, RESNET50_SIZE_MB,
+    Engine, Models, Hardware,
+    apply_plotly_theme, go, math, mo, np,
+    partA_prediction, partA_stage,
+    partB_prediction, partB_cycle_a, partB_cycle_b,
+    partC_prediction, partC_sliders,
+    partD_prediction, partD_months,
+):
 
     # ═════════════════════════════════════════════════════════════════════
     # PART A -- Constraint Propagation
