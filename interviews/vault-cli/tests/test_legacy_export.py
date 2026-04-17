@@ -85,11 +85,47 @@ def test_emitter_deterministic(tmp_path: Path) -> None:
     assert out1.read_bytes() == out2.read_bytes()
 
 
-def test_competency_area_aliases_topic(tmp_path: Path) -> None:
+def test_competency_area_resolves_to_canonical_area(tmp_path: Path) -> None:
+    """competency_area must resolve to the canonical 13-area grouping from
+    topics.json, NOT be a copy of the topic slug."""
+    # Set up the topics.json in the expected relative path.
+    topics_dir = tmp_path / "staffml" / "src" / "data"
+    topics_dir.mkdir(parents=True)
+    topics_data = [{"id": "kv-cache-management", "area": "memory"}]
+    (topics_dir / "topics.json").write_text(json.dumps(topics_data))
+
+    # vault_dir is tmp_path/vault so ../staffml resolves correctly.
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir()
+    policy = vault_dir / "release-policy.yaml"
+    policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
+
+    # Clear the module-level cache so our test topics.json is loaded.
+    import vault_cli.legacy_export as _mod
+    _mod._TOPIC_TO_AREA.clear()
+
+    out = tmp_path / "corpus.json"
+    emit_legacy_corpus(vault_dir, [_make_lq("a")], out)
+    data = json.loads(out.read_text())
+    assert data[0]["topic"] == "kv-cache-management"
+    assert data[0]["competency_area"] == "memory"
+    assert data[0]["scope"] == data[0]["track"]
+
+    # Clean up cache for other tests.
+    _mod._TOPIC_TO_AREA.clear()
+
+
+def test_competency_area_falls_back_to_topic(tmp_path: Path) -> None:
+    """When topics.json is absent, competency_area falls back to topic slug."""
+    import vault_cli.legacy_export as _mod
+    _mod._TOPIC_TO_AREA.clear()
+
     policy = tmp_path / "release-policy.yaml"
     policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
     out = tmp_path / "corpus.json"
     emit_legacy_corpus(tmp_path, [_make_lq("a")], out)
     data = json.loads(out.read_text())
+    # No topics.json → fallback to topic slug.
     assert data[0]["competency_area"] == data[0]["topic"]
-    assert data[0]["scope"] == data[0]["track"]
+
+    _mod._TOPIC_TO_AREA.clear()
