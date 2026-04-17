@@ -38,6 +38,8 @@ from pathlib import Path
 
 
 BOOT_TIMEOUT_MS = 180_000  # 3 min for Pyodide + wheel install + cell exec
+SHELL_TIMEOUT_MS = 30_000  # static shell should paint almost immediately
+POST_IDLE_SETTLE_S = 5.0   # grace for synchronous cell output after network idle
 PORT = 8765
 
 
@@ -75,15 +77,21 @@ def start_server(root: Path, port: int) -> ThreadedServer:
 
 # ── Browser driver ──────────────────────────────────────────────────────────
 
-MARIMO_READY_SELECTORS = [
-    'marimo-island',         # marimo root custom element
-    '[role="tab"]',          # mo.ui.tabs — every lab uses this
-    '.marimo-cell',           # generic cell wrapper fallback
+# Marimo WASM export serializes pre-run cell outputs into the HTML shell, so
+# these selectors attach to the DOM almost immediately — long before Pyodide
+# has actually executed anything. Matching them only proves the page loaded,
+# NOT that Python ran. We use them as the fast-path shell check, then fall
+# through to a network-idle wait that does not return until Pyodide has
+# downloaded its runtime and every wheel the lab needs.
+SHELL_SELECTORS = [
+    'marimo-island',
+    '[role="tab"]',
+    '.marimo-cell',
 ]
 
 
 def verify_lab(page, name: str, url: str) -> list[str]:
-    """Navigate to a lab and wait for a marimo DOM signal. Return error list."""
+    """Navigate to a lab, let Pyodide boot, then report any captured errors."""
     errors: list[str] = []
 
     def record_error(exc):
@@ -99,20 +107,48 @@ def verify_lab(page, name: str, url: str) -> list[str]:
     print(f"  → {name}: navigating to {url}", flush=True)
     page.goto(url, wait_until="domcontentloaded", timeout=30_000)
 
-    start = time.monotonic()
-    selector = ", ".join(MARIMO_READY_SELECTORS)
+    # Phase 1: static shell must paint quickly. If this fails the export is
+    # broken — no point waiting the full Pyodide budget.
+    shell_selector = ", ".join(SHELL_SELECTORS)
     try:
-        page.wait_for_selector(selector, timeout=BOOT_TIMEOUT_MS, state="attached")
-    except Exception as exc:  # noqa: BLE001 — Playwright raises a generic error
-        elapsed = time.monotonic() - start
+        page.wait_for_selector(
+            shell_selector, timeout=SHELL_TIMEOUT_MS, state="attached"
+        )
+    except Exception as exc:  # noqa: BLE001
         errors.append(
-            f"[timeout] no marimo DOM after {elapsed:.0f}s "
-            f"(waited for: {selector}): {exc}"
+            f"[shell-timeout] marimo shell never attached "
+            f"(waited for: {shell_selector}): {exc}"
+        )
+        return errors
+    print(f"  …  {name}: shell rendered, waiting for Pyodide to settle", flush=True)
+
+    # Phase 2: Pyodide downloads runtime + wheels asynchronously. Network idle
+    # only fires once every fetch has resolved, which in practice means the
+    # full micropip.install(...) chain has completed. Without this wait the
+    # #1353-class bug (plotly imported before micropip.install) would go
+    # undetected — marimo's shell renders before Python executes.
+    pyodide_start = time.monotonic()
+    try:
+        page.wait_for_load_state("networkidle", timeout=BOOT_TIMEOUT_MS)
+    except Exception as exc:  # noqa: BLE001
+        elapsed = time.monotonic() - pyodide_start
+        errors.append(
+            f"[pyodide-timeout] network never went idle after {elapsed:.0f}s "
+            f"(Pyodide likely did not boot): {exc}"
         )
         return errors
 
-    elapsed = time.monotonic() - start
-    print(f"  ✅ {name}: marimo DOM rendered in {elapsed:.1f}s", flush=True)
+    # Phase 3: small settle buffer so synchronous post-load cell work (e.g.
+    # plotly figure construction after micropip.install completes) has time
+    # to emit its errors to the console before we tally.
+    page.wait_for_timeout(int(POST_IDLE_SETTLE_S * 1000))
+
+    elapsed = time.monotonic() - pyodide_start
+    print(
+        f"  ✅ {name}: Pyodide settled in {elapsed:.1f}s "
+        f"(captured errors: {len(errors)})",
+        flush=True,
+    )
     return errors
 
 
