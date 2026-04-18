@@ -11,7 +11,7 @@ artifact" contract without requiring Phase-4 cutover: the live site keeps
 reading the bundled JSON; we just prove it's reproducible from YAML.
 
 Maps to legacy fields that the new schema dropped:
-    competency_area  ← topic       (they were ~the same thing)
+    competency_area  ← topic → area (resolved via topics.json)
     bloom_level      ← zone → bloom (rollup mapping, same as export-paper)
     scope            ← track        (1:1)
     chain_positions  ← chain        (reshape {id, position} → {id: position - 1})
@@ -27,6 +27,25 @@ from typing import Any
 from vault_cli.loader import LoadedQuestion
 from vault_cli.policy import filter_questions, load_policy
 
+# ── Topic → competency-area mapping (from topics.json) ─────────
+# topics.json has 87 entries, each with an "area" field that maps to
+# one of 13 canonical competency areas (memory, compute, architecture, …).
+_TOPIC_TO_AREA: dict[str, str] = {}
+
+
+def _load_topic_area_map(vault_dir: Path) -> dict[str, str]:
+    """Load topic→area mapping from the StaffML topics.json file."""
+    if _TOPIC_TO_AREA:
+        return _TOPIC_TO_AREA
+    topics_path = (vault_dir / ".." / "staffml" / "src" / "data" / "topics.json").resolve()
+    if topics_path.exists():
+        data = json.loads(topics_path.read_text(encoding="utf-8"))
+        items = data if isinstance(data, list) else data.get("topics", [])
+        for t in items:
+            _TOPIC_TO_AREA[t["id"]] = t["area"]
+    return _TOPIC_TO_AREA
+
+
 # Zone → Bloom level mapping (mirrors export-paper).
 _ZONE_TO_BLOOM = {
     "recall":        "remember",
@@ -40,7 +59,7 @@ _ZONE_TO_BLOOM = {
 }
 
 
-def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
+def _adapt(lq: LoadedQuestion, area_map: dict[str, str]) -> dict[str, Any]:
     """YAML question → legacy-JSON item in the shape corpus.ts expects."""
     q = lq.question
     c = lq.classification
@@ -49,7 +68,7 @@ def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
         "id": q.id,
         "title": q.title,
         "topic": q.topic,
-        "competency_area": q.topic,                    # legacy alias
+        "competency_area": area_map.get(q.topic, q.topic),
         "scope": c.track.value,                         # legacy alias
         "track": c.track.value,
         "level": c.level.value.upper(),                 # legacy used "L1" uppercase
@@ -111,7 +130,8 @@ def emit_legacy_corpus(
 
     # Sort by id for byte-stable output across runs.
     items_sorted = sorted(items, key=lambda lq: lq.id)
-    legacy_items = [_adapt(lq) for lq in items_sorted]
+    area_map = _load_topic_area_map(vault_dir)
+    legacy_items = [_adapt(lq, area_map) for lq in items_sorted]
 
     # Canonical JSON: sort_keys recursively, LF, UTF-8.
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -50,7 +50,9 @@ from audit.protected_contexts import (
     is_inside_index_entry,
     is_inside_protected_attribute,
     is_python_chunk_option,
+    is_table_caption_line,
     is_table_header_row,
+    is_table_row,
     position_in_spans,
 )
 
@@ -202,11 +204,25 @@ _EXPANSION_FOR = {abbrev: exp for abbrev, exp in _CANONICAL}
 def _skip_line_for_bare(line: str, state) -> bool:
     """Return True for lines where bare uses should NOT be flagged.
 
-    Skips block-level protected contexts, Python chunk options, div
-    fences, headings (abbreviations in headings are allowed to be
-    terse), and table header rows. Does NOT skip lines starting with
-    `\\` — `\\index{foo!bar}` lines contain body prose (same rationale
-    as concept_term_capitalization._skip_concept_term_line).
+    Skips block-level protected contexts and several §10.5 protected
+    editorial contexts where expanding an abbreviation would distort
+    the format rather than clarify it:
+
+    - YAML, code fences, display math, HTML style blocks, HTML comments
+    - Python chunk options, div attribute lines
+    - Headings (H1-H6) — per §10.9 headings use their own case rules
+    - Table rows (both header rows with bold and data rows) — a cell
+      is too constrained for a multi-word expansion
+    - Table captions (`: **Title** ... {#tbl-...}`) — caption headers
+      follow a distinct formatting contract
+    - `.callout-tip` blocks (Learning Objectives) — protected per §9
+      "Protected Content"; the Learning Objectives callout is the one
+      place where bare abbreviations in bullets are expected
+    - `.callout-checkpoint` blocks (self-check questions) — §9 protected
+
+    Does NOT skip lines starting with `\\` — `\\index{foo!bar}` lines
+    contain body prose (same rationale as
+    concept_term_capitalization._skip_concept_term_line).
 
     Intro-finding uses a separate, looser filter so that introductions
     appearing inside headings still count as valid.
@@ -215,13 +231,19 @@ def _skip_line_for_bare(line: str, state) -> bool:
         return True
     if state.in_html_style_block or state.in_html_comment:
         return True
+    if state.in_tip_callout or state.in_checkpoint_callout:
+        return True
+    if state.in_definition_callout:
+        return True
     if is_python_chunk_option(line):
         return True
     if is_div_attribute_line(line):
         return True
     if heading_level(line) is not None:
         return True
-    if is_table_header_row(line):
+    if is_table_row(line):
+        return True
+    if is_table_caption_line(line):
         return True
     return False
 

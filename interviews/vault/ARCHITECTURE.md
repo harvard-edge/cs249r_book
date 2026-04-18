@@ -1,6 +1,6 @@
 # StaffML Vault Architecture — Design Document
 
-> **Status**: **v2.6** — 11 rounds of adversarial review complete; stability declared after R11 with 3 consecutive 0-Critical rounds. ~120 findings closed across R1–R11. Final pre-deploy state.
+> **Status**: **v3.0 — DEPLOYED** — All phases (2–7) implemented and live. Worker API serving 9,113 questions via Cloudflare D1 (ENAM). 86 exemplars seeded. FTS5 search active. 11 review rounds closed across R1–R11.
 > **Scope**: Everything from question authoring to production serving.
 > **Audience**: Future-VJ, future maintainers, future collaborators.
 > **Supersedes**: `SYSTEM.md` (stale — says 5,786 questions, 839 concepts).

@@ -402,7 +402,7 @@ These inversions have direct consequences for system procurement and architectur
 
 You are designing the storage subsystem for a new ML training cluster with 512 GPUs. The primary workload will train large language models on a 10 TB text dataset.
 
-1. Based on the five inversions described above, which storage optimization strategies from the database world would be counterproductive for this workload? Name at least three.
+1. Based on the five inversions described earlier, which storage optimization strategies from the database world would be counterproductive for this workload? Name at least three.
 2. If each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, what is the total data volume read? *How* does this compare to a typical database workload?
 3. The model saves a 500 GB checkpoint every 15 minutes. If checkpoint saves must complete within 30 seconds to minimize training disruption, what minimum write bandwidth is required?
 4. Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" versus "read mode"?
@@ -413,7 +413,7 @@ The storage hierarchy described in the next section is the engineering response 
 
 Understanding *how* data is accessed across storage tiers is essential for choosing the right storage system. @fig-access-patterns-vol2 compares throughput for sequential versus random access, showing how storage performance degrades dramatically when workloads deviate from sequential streaming.
 
-::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Access Pattern Throughput Comparison**. High-performance storage delivers dramatically different throughput depending on access patterns. Sequential reads (blue) saturate bandwidth quickly as request size increases. Random reads (red), typical of databases or poorly shuffled datasets, suffer from seek latency and protocol overhead." fig-alt="Line graph comparing sequential vs random read throughput across I/O request sizes."}
+::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**The Storage Bottleneck Zone**. Required I/O throughput (GB/s) for full GPU utilization vs model size (parameters, 100M to 175B). The red curve shows storage demand growing with model size; horizontal dashed lines mark the ceilings for common storage tiers (NVMe at 7 GB/s, Object at 50 GB/s, Lustre at 100 GB/s). Between the Compute-Bound and Storage-Bottleneck regions lies the transition where storage, not compute, limits training throughput." fig-alt="Log-scale line chart: Model Size 100M to 175B parameters on the x-axis, Data Throughput (GB/s) on the y-axis. Red curve shows required I/O rising to about 500 GB/s at 175B. Dashed lines mark NVMe (7), Object (50), and Lustre (100 GB/s) ceilings."}
 
 ![](images/svg/storage-throughput.svg)
 
@@ -448,7 +448,7 @@ Storage performance decreases and capacity increases as data moves further from 
 
 @fig-storage-pyramid maps these six tiers into a spatial hierarchy, showing how bandwidth decreases and capacity increases at each step away from the accelerator.
 
-::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**. A pyramid visualization extending the classic memory hierarchy from GPU HBM down to Object Storage. The bandwidth gap between levels drives the need for sophisticated caching and prefetching." fig-alt="Five-tier pyramid: GPU HBM, Host DRAM, Local NVMe, Parallel File System, Object Storage from top to base."}
+::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**. Six tiers grouped into Hot / Warm / Cold bands: GPU HBM (3.35 TB/s, 80 GB, ~\\$15/GB), CPU DRAM (300 GB/s, 512 GB--2 TB, ~\\$4/GB), NVMe SSD (7 GB/s, 8 TB, ~\\$0.10/GB), SATA SSD (0.5 GB/s, 32 TB, ~\\$0.06/GB), Object Storage / Lustre (50 GB/s aggregated, PB, \\$0.023/GB), and Tape Archive (0.3 GB/s, EB, \\$0.001/GB). Each step down trades bandwidth for capacity and cost." fig-alt="Six storage tiers from GPU HBM (fastest) down to Tape Archive (slowest). Columns show bandwidth, capacity, and cost per GB. A left-hand ribbon groups them into Hot, Warm, and Cold bands."}
 
 ![](images/svg/storage-hierarchy.svg)
 
@@ -1512,7 +1512,7 @@ Hardware degradation introduces the need for a **storage refresh cycle**. NVMe d
 
 ### Tiering strategies {#sec-storage-tiering}
 
-The cost structure described above motivates a **tiering strategy** that places data at the appropriate level of the hierarchy based on access frequency and latency requirements.
+The cost structure described earlier motivates a **tiering strategy** that places data at the appropriate level of the hierarchy based on access frequency and latency requirements.
 
 The fastest and most expensive layer is the **hot tier** (local NVMe + host DRAM), which holds data being actively consumed by the current training job. Datasets are staged from shared storage to local NVMe at job start. This tier is provisioned per-node and is not shared across the cluster, so data that multiple jobs or teams need simultaneously cannot live here alone.
 
@@ -1769,7 +1769,7 @@ The economics of the hierarchy are equally consequential. The orders-of-magnitud
 
 Engineers who internalize the storage hierarchy gain a systematic diagnostic framework for training performance. When a cluster reports low accelerator utilization, the instinct is often to suspect the compute configuration or the model itself. In practice, the root cause is frequently buried in the data path: a data loader reading individual files instead of shards, a prefetch buffer sized for average latency rather than tail latency, a checkpoint strategy that blocks training while writing to a slow parallel file system, or a NUMA-unaware memory allocation that halves effective DRAM bandwidth. Diagnosing these failures requires understanding which tier is the bottleneck and why, a question that the pipeline equation and the storage hierarchy framework make answerable.
 
-This diagnostic perspective connects directly to the choice of distributed training strategy, which dictates the demand patterns placed on the storage system. Data parallelism replicates the model on every node, creating uniform read patterns but massive checkpoint redundancy as every node saves the same parameters. Pipeline parallelism creates strict sequential dependencies between stages, where a data loading stall in an early stage cascades down the pipeline, starving all downstream stages. Expert parallelism, as seen in Mixture of Experts (MoE) models, creates highly non-uniform access patterns where different accelerator groups require different subsets of the data at any given time. Each strategy imposes a unique signature on the storage system, and co-designing the interaction between parallelism strategy and storage hierarchy is a cornerstone of efficient ML systems design explored in @sec-distributed-training-systems.
+This diagnostic perspective connects directly to the choice of distributed training strategy, which dictates the demand patterns placed on the storage system. Data parallelism replicates the model on every node, creating uniform read patterns but massive checkpoint redundancy as every node saves the same parameters. Pipeline parallelism creates strict sequential dependencies between stages, where a data loading stall in an early stage cascades down the pipeline, starving all downstream stages. Expert parallelism, as seen in mixture-of-experts (MoE) models, creates highly non-uniform access patterns where different accelerator groups require different subsets of the data at any given time. Each strategy imposes a unique signature on the storage system, and co-designing the interaction between parallelism strategy and storage hierarchy is a cornerstone of efficient ML systems design explored in @sec-distributed-training-systems.
 
 ::: {.callout-chapter-connection title="From Storage to Splitting"}
 

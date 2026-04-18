@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-0201
+title: The Tokenizer Mismatch
+topic: mlops-lifecycle
+status: published
+provenance: human
+scenario: Your team fine-tuned a 7B model and deployed it to production. The weights are identical, but
+  the serving cluster is suddenly OOMing under load, and the KV-cache is filling up 30% faster than expected
+  for the exact same text inputs. Why does a tokenizer version mismatch cause a massive GPU memory leak,
+  and how does it destroy your serving economics?
+details:
+  realistic_solution: The serving pipeline is using an older or different tokenizer than training. If
+    the training pipeline used `tokenizer_v2` (which maps "machine learning" → tokens [4521, 3892], 2
+    tokens) but the serving pipeline loads `tokenizer_v1` (which maps "machine learning" → [4521, 12,
+    3892, 44], 4 tokens), the exact same input text produces a longer sequence of token IDs. Because KV-cache
+    memory scales linearly with sequence length, a less efficient tokenizer artificially inflates the
+    memory footprint of every request. The model isn't just producing worse answers; it's physically consuming
+    more VRAM per word of text, causing the batch scheduler to OOM or reject requests much earlier than
+    expected.
+  common_mistake: '"The serving framework must be allocating memory differently" or "There''s a memory
+    leak in the Python code." Both ignore the relationship between text, tokens, and hardware memory.'
+  napkin_math: 'Typical tokenizer vocabulary: 32,000 tokens. If `v1` is a naive BPE and `v2` is highly
+    optimized for your domain, `v1` might average 1.5 tokens per word while `v2` averages 1.1 tokens per
+    word. For a 1,000-word prompt: `v2` = 1,100 tokens. `v1` = 1,500 tokens. That''s a 36% increase in
+    sequence length. For a 7B model (KV-cache = ~1MB per token), the prompt takes 1.1GB with the correct
+    tokenizer, but 1.5GB with the mismatched one. Across a batch of 64 requests, you''re wasting 25GB
+    of HBM just storing the extra intermediate states of inefficiently tokenized text. This drops your
+    maximum concurrent requests by 30%, forcing you to scale out the GPU cluster to handle the same QPS.'
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

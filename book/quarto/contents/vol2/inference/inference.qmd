@@ -137,9 +137,9 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 
 The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb`GB of HBM3[^fn-hbm3-bandwidth] memory. GPT-4 class models with hundreds of billions of parameters require 200–400 GB just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM[^fn-dlrm-scale] model stores embedding tables that require multiple terabytes of memory.
 
-[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tbs` TB/s on the H100 versus `{python} InferenceSetup.a100_mem_bw_tbs` TB/s for HBM2e on the A100. Because LLM decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
+[^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tbs` TB/s on the H100 versus `{python} InferenceSetup.a100_mem_bw_tbs` TB/s for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation the single most consequential variable in inference cost-per-token. \index{HBM3!bandwidth}
 
-[^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**: Meta's 2019 reference architecture separates dense features — GPU-bound multilayer perceptrons (MLPs) — from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology. Embedding tables can exceed 100 TB, making DLRM memory-capacity-bound rather than compute-bound and forcing distribution strategies fundamentally different from LLM model parallelism. \index{DLRM!scale}
+[^fn-dlrm-scale]: **DLRM (Deep Learning Recommendation Model)**: Meta's 2019 reference architecture separates dense features—GPU-bound multilayer perceptrons (MLPs)—from sparse features (CPU-bound embedding lookups), creating a hybrid serving topology. Embedding tables can exceed 100 TB, making DLRM memory-capacity-bound rather than compute-bound and forcing distribution strategies fundamentally different from LLM model parallelism. \index{DLRM!scale}
 
 Beyond memory constraints, throughput limitations emerge when request volume exceeds single-machine capacity even with optimal batching. Consider a recommendation system serving 100,000 queries per second with a 10 ms latency budget. If single-machine throughput peaks at 10,000 QPS, no amount of optimization on that machine can satisfy demand. Horizontal scaling across multiple replicas becomes mandatory.
 
@@ -618,7 +618,7 @@ At the broadest scope, the platform level coordinates across multiple services a
 
 The four levels form a *serving hierarchy* (@fig-serving-hierarchy), each building on the one below.
 
-::: {#fig-serving-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Serving Hierarchy.** Optimization occurs at four distinct levels. The Request Level focuses on minimizing per-request latency. The Replica Level maximizes single-instance throughput. The Service Level manages distribution across multiple replicas. The Platform Level handles efficient resource sharing across multiple services and tenants." fig-alt="Four-level hierarchy diagram: request level, replica level, service level, and platform level with optimization targets."}
+::: {#fig-serving-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Serving Hierarchy.** A three-tier serving stack with cumulative latency budget from top to bottom. Tier 1 (CDN / Edge Cache) handles geographic distribution and cached static responses (SLA <10 ms). Tier 2 (Gateway / Router) handles request routing, rate limiting, and authentication (SLA <50 ms). Tier 3 (Model Serving Cluster) runs GPU workers with autoscaling and continuous batching (SLA <2 s)." fig-alt="Three stacked tiers: Tier 1 CDN / Edge Cache with Edge PoPs (SLA <10 ms); Tier 2 Gateway / Router with Rate Limiter, Auth, and Router (SLA <50 ms); Tier 3 Model Serving Cluster with GPU workers and autoscaler (SLA <2 s)."
 ![](images/svg/serving-hierarchy.svg)
 :::
 
@@ -745,11 +745,11 @@ The taxonomy that follows matches batching strategies to model characteristics, 
 
 Batching efficiency depends on how computation scales with batch size relative to how memory and communication scale. Different model architectures exhibit different scaling relationships, requiring different batching strategies, as @fig-batching-strategies summarizes.
 
-::: {#fig-batching-strategies fig-env="figure" fig-pos="htb" fig-cap="**Batching Strategies Compared.** **Static batching** (A) waits for all slots to fill, creating latency bubbles. **Continuous batching** (B) allows requests to join and leave at each iteration, maximizing GPU utilization for LLMs. **Feature-parallel batching** (C) shards requests by feature type (e.g., User IDs vs. Item IDs), optimizing for distributed embedding lookup." fig-alt="Three-panel diagram comparing static, continuous, and feature-parallel batching strategies with GPU utilization."}
+::: {#fig-batching-strategies fig-env="figure" fig-pos="htb" fig-cap="**Batching Strategies Compared.** Three timelines show how batching policies trade wait time for GPU utilization. (a) **No batching**: requests processed sequentially, GPU idle between them (around 40 percent utilization). (b) **Static batching**: requests wait until a full batch is assembled before dispatch, with padding for short requests (around 70 percent utilization). (c) **Dynamic batching**: assembles a batch within a short time window with adaptive size, reducing wait and lifting utilization (around 85 percent)." fig-alt="Three stacked timelines labeled (a) No Batching, (b) Static Batching, (c) Dynamic Batching. Each shows four requests R1-R4 and the corresponding GPU utilization bar (approximately 40, 70, and 85 percent respectively)."}
 ![](images/svg/batching-strategies.svg)
 :::
 
-For **vision models** — convolutional neural networks (CNNs) and vision transformers (ViTs) processing fixed-size images — computation scales linearly with batch size while memory scales sub-linearly due to weight sharing. Larger batches improve GPU utilization with minimal overhead, making static or dynamic batching with large batch sizes optimal.
+For **vision models**—convolutional neural networks (CNNs) and vision transformers (ViTs) processing fixed-size images—computation scales linearly with batch size while memory scales sub-linearly due to weight sharing. Larger batches improve GPU utilization with minimal overhead, making static or dynamic batching with large batch sizes optimal.
 
 For **LLMs in the decode phase**, computation per token is small relative to memory bandwidth requirements for loading model weights. The bottleneck is memory bandwidth, not compute. Larger batches amortize weight loading across more tokens, dramatically improving throughput but with diminishing returns as batch size grows.
 
@@ -1140,7 +1140,7 @@ Analysis
 
 2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct` percent utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms), as @fig-queuing-hockey-stick illustrates.
 
-::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**. Relationship between system utilization and queuing delay. As utilization approaches 100%, the queuing delay increases exponentially according to Kingman's formula. Production systems typically target 70--80% utilization to maintain a 'safe' region where traffic spikes do not cause unbounded latency growth." fig-alt="Plot of Latency vs Utilization. The curve is relatively flat until 70 percent utilization, then rises sharply (hockey stick shape) toward infinity at 100 percent."}
+::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**. Relationship between system utilization $\\rho$ and queue length (M/M/1: $L = \\rho/(1-\\rho)$). Three zones are shaded: a Safe Zone ($\\rho < 0.7$), a Caution band (0.7--0.85), and a Danger Zone ($\\rho > 0.85$) where queue depth grows unboundedly. Production systems typically target $\\rho \\leq 0.7$ to maintain latency headroom." fig-alt="Plot of Queue Length (requests) vs. Utilization rho from 0 to 1. The curve is flat until rho around 0.7, bends upward through a caution band (0.7 to 0.85), then rises sharply in a Danger Zone toward saturation at rho=1."}
 ![](images/svg/queuing-hockey-stick.svg){width=100 percent}
 :::
 
@@ -1218,7 +1218,7 @@ $$B = \max\{B : T_{P99}(B) \leq \text{SLO}\}$$
 
 The relationship between batch size, throughput, and latency defines an **operating region** within which production systems must function. @fig-batch-tradeoff-curves illustrates this region:
 
-::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-off Curves**. The operating region (shaded) is bounded by the stability constraint (minimum throughput) and latency SLO (maximum latency). Larger batch sizes increase throughput but also increase latency. The optimal operating point maximizes throughput while meeting the SLO." fig-alt="Graph showing throughput on y-axis and latency on x-axis. A curved line represents different batch sizes from B=1 to B=64. The operating region is shaded, bounded by a vertical line for SLO and horizontal line for minimum throughput."}
+::: {#fig-batch-tradeoff-curves fig-env="figure" fig-pos="htb" fig-cap="**Batch Size Trade-off Curves**. As batch size grows on the x-axis, throughput (left y-axis, blue) grows sublinearly while latency P50 (right y-axis, red) grows near-linearly. An optimal point is marked at BS=16; a shaded OOM / memory-capacity region flags batch sizes that exceed device memory. Benchmark: Llama-2 70B in FP16 tensor-parallel across four A100 80 GB GPUs." fig-alt="Chart with Batch Size on the x-axis (1 to 128). Left y-axis Throughput in tokens/s (blue, sublinear); right y-axis Latency P50 in ms (red, near-linear). Green dashed Optimal BS=16 marker; shaded OOM region on the right."}
 
 ![](images/svg/batch-size-tradeoffs.svg)
 
@@ -1594,7 +1594,7 @@ Average latency comparison
 
 The result, depicted in @fig-continuous-batching, is a **`{python} BatchingWorkedExample.latency_red_str` percent reduction in average latency**, exactly matching the waste ratio.
 
-::: {#fig-continuous-batching fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. Continuous Batching.** Top: Traditional batching wastes 37.5% of GPU cycles as completed requests (R1, R3, R4) wait idle for the longest request (R2). Bottom: Continuous batching immediately frees slots upon completion, allowing new requests (R5, R6, R7) to join. This eliminates waste and increases effective throughput." fig-alt="Two timeline diagrams: traditional batching with idle slots versus continuous batching with immediate slot reuse."}
+::: {#fig-continuous-batching fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. Continuous Batching.** Top: Traditional batching wastes 37.5 percent of GPU cycles as completed requests (R1, R3, R4) wait idle for the longest request (R2). Bottom: Continuous batching immediately frees slots upon completion, allowing new requests (R5, R6, R7) to join. This eliminates waste and increases effective throughput." fig-alt="Two timeline diagrams: traditional batching with idle slots versus continuous batching with immediate slot reuse."}
 ![](images/svg/continuous-batching.svg)
 :::
 
@@ -1750,7 +1750,7 @@ Recommendation systems present a third constraint regime that resembles neither.
 
 ### Feature-parallel batching for recommendation systems {#sec-inference-scale-featureparallel-batching-recommendation-systems-2a3f}
 
-::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-Parallel Batching Pipeline**. Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Flow diagram showing 3 requests entering a batching layer. Batch is split into User, Item, and Context parallel paths. Each path hits a set of sharded embedding servers. Outputs converge into a dense MLP ranking head."}
+::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-Parallel Batching Pipeline**. Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Flow diagram showing a request entering a feature extraction layer. The request is split into User, Item, and Context parallel paths, each hitting sharded embedding servers. Outputs converge into a dense MLP ranking head."}
 ![](images/svg/feature-parallel-pipeline.svg){width=100 percent}
 :::
 
@@ -1828,7 +1828,7 @@ Some applications cannot tolerate batching delay of any kind. Real-time speech r
 Streaming inference processes inputs incrementally without waiting for batch formation:
 
 - **Speech**: Process audio frames (10--20 ms chunks) as they arrive from the microphone
-- **Video**: Process frames at capture rate (30-60 FPS) without buffering
+- **Video**: Process frames at capture rate (30–60 FPS) without buffering
 - **Robotics**: Process sensor readings at control loop frequency (100--1000 Hz)
 
 For streaming applications, the relevant metric is not throughput but **time to process each input**:
@@ -1965,7 +1965,7 @@ sequenceDiagram
     Scheduler->>User: Stream Result
 ```
 
-::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time." fig-alt="Flowchart with 5 stages: Client, Load Balancer, Request Queue, Dynamic Batcher, Model Execution. Arrows show request flow with dashed return path. Red annotations below highlight latency sources at each stage."}
+::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**. A detailed view of the request lifecycle: client requests arrive at a load balancer, then undergo preprocessing (tokenization) on the CPU. The data moves to the GPU for the compute-bound prefill stage and the memory-bound decode stage, which uses the KV cache. Finally, the response is postprocessed on the CPU (detokenization) and sent back. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time." fig-alt="Flowchart showing a request moving from CPU (Preprocessing) to GPU (Prefill Stage, Decode Stage) and back to CPU (Postprocessing). Red annotations below highlight latency sources such as routing, TTFT, and per-token decode time."}
 
 ![](images/svg/serving-pipeline.svg)
 
@@ -2200,7 +2200,7 @@ PagedAttention [@kwon2023vllm], introduced in vLLM, applies virtual memory conce
 
 @fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
-::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**PagedAttention Memory Mapping**. Decoupling the logical view of a sequence's KV cache (contiguous pages) from its physical storage (non-contiguous 16-token blocks). A block table maps logical pages to physical blocks, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="Three-part diagram: left shows 4 contiguous logical pages (P0-P3), center shows block table mapping logical to physical addresses, right shows 12 scattered physical blocks in HBM with 4 highlighted as mapped."}
+::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**KV Cache Fragmentation and the PagedAttention Solution**. Top left: internal fragmentation wastes memory by pre-allocating for the maximum sequence length. Top right: external fragmentation leaves unusable memory gaps. Bottom: PagedAttention solves this by mapping contiguous logical pages of a sequence to non-contiguous physical memory blocks via a block table, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="A three-part diagram on memory fragmentation. Top panels show internal and external fragmentation. The bottom panel shows the PagedAttention solution using a block table to map logical pages to scattered physical blocks, eliminating waste."}
 ![](images/svg/kv-cache-fragmentation.svg){width=100 percent}
 :::
 
@@ -3536,7 +3536,7 @@ Meta's recommendation infrastructure demonstrates embedding sharding at extreme 
 
 - Embedding tables: 100+ TB total
 - Unique entities: 10+ trillion
-- Embedding dimension: 128-256
+- Embedding dimension: 128–256
 - Shards: 1,000+ servers
 
 **Sharding strategy**:
@@ -4799,7 +4799,7 @@ def handle_spot_termination():
 
 A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class, as shown in @fig-spot-aware-routing. SLO-critical requests always route to on-demand capacity, while best-effort requests absorb the cost savings and interruption risk of spot instances.
 
-::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-Aware Traffic Distribution**. The load balancer routes 70% of traffic to on-demand replicas (guaranteed availability) and 30% to spot replicas (cost savings, preemption risk). SLO-critical requests always use on-demand; best-effort requests tolerate occasional retries on eviction. The mixed fleet achieves ~50% cost reduction vs. 100% on-demand." fig-alt="Load Balancer box with two fan-out arrows: a solid green arrow labeled 70 percent to On-Demand Replicas box containing three active GPU workers, and a dashed orange arrow labeled 30 percent to Spot Replicas box containing two spot workers and one preempted worker."}
+::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-Aware Traffic Distribution**. The load balancer routes 70 percent of traffic to on-demand replicas (guaranteed availability) and 30 percent to spot replicas (cost savings, preemption risk). SLO-critical requests always use on-demand; best-effort requests tolerate occasional retries on eviction. The mixed fleet achieves ~50 percent cost reduction vs. 100 percent on-demand." fig-alt="Load Balancer box with two fan-out arrows: a solid green arrow labeled 70 percent to On-Demand Replicas box containing three active GPU workers, and a dashed orange arrow labeled 30 percent to Spot Replicas box containing two spot workers and one preempted worker."}
 
 ![](images/svg/spot-aware-routing.svg)
 
@@ -4822,7 +4822,7 @@ Single-region deployment creates three fundamental limitations. The most immedia
 | **Tokyo**         |             150 ms |                   10 ms |
 | **Sydney**        |             200 ms |                   10 ms |
 
-For interactive applications (chatbots, autocomplete), these delays compound across multiple model calls per request. Beyond latency, single-region deployment creates a single point of failure: cloud region outages, while rare, affect all users simultaneously. Regulatory constraints add a third dimension, as data residency requirements — the General Data Protection Regulation (GDPR) and data sovereignty laws — may require processing user data within specific geographic boundaries.
+For interactive applications (chatbots, autocomplete), these delays compound across multiple model calls per request. Beyond latency, single-region deployment creates a single point of failure: cloud region outages, while rare, affect all users simultaneously. Regulatory constraints add a third dimension, as data residency requirements—the General Data Protection Regulation (GDPR) and data sovereignty laws—may require processing user data within specific geographic boundaries.
 
 #### Multi-region architecture patterns {#sec-inference-scale-multiregion-architecture-patterns-5c67}
 
@@ -5556,7 +5556,7 @@ A DevOps team applies their standard web-server load balancing rules to a new fl
 
 Fallacy: Inference at scale is synonymous with LLM serving.
 
-The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80-90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1-5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
+The misconception, reinforced by current discourse, leads to over-focus on LLM-specific techniques while ignoring the broader inference landscape. By request volume, recommendation systems constitute 80–90 percent of production inference at major technology companies, with vision and other models comprising most of the remainder. LLMs currently represent 1-5 percent of requests, though this is growing. A practitioner who only understands continuous batching and KV cache management will be unprepared for the feature-parallel batching and embedding sharding that dominate production inference. Technique selection must match the actual workload.
 
 Pitfall: Using training infrastructure for production serving.
 

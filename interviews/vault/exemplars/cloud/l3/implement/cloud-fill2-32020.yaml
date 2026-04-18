@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-fill2-32020
+title: mmap for Zero-Copy Model Loading
+topic: memory-mapped-inference
+status: published
+provenance: human
+scenario: 'You serve a 7B model (14 GB in FP16) on an H100 with 80 GB HBM. The model is stored on a local
+  NVMe SSD (7 GB/s sequential read). Compare two loading strategies: (1) traditional load with malloc
+  + read(), and (2) mmap the model file. What are the cold-start times, memory implications, and when
+  does each approach win?'
+details:
+  realistic_solution: 'Strategy 1 (malloc + read): Allocates 14 GB in RAM, then sequentially reads the
+    file. Time = 14 GB / 7 GB/s = 2.0 seconds. Memory: 14 GB resident immediately. Then cudaMemcpy to
+    GPU: 14 GB / 32 GB/s (PCIe 5.0) = 0.44s. Total cold start: ~2.4s. Strategy 2 (mmap): Maps the file
+    into virtual address space instantly (~0ms). Pages are loaded on demand via page faults. If you then
+    copy to GPU, each page fault triggers a 4KB read — thousands of faults. Cold start can be slower (3-5s)
+    due to fault overhead. However, mmap wins for: (1) warm restarts — pages stay in kernel page cache,
+    no re-read needed, (2) multi-process serving — N processes share the same physical pages via copy-on-write,
+    using 14 GB total instead of N × 14 GB, (3) partial model loading — only accessed layers are paged
+    in. For inference serving with multiple replicas, mmap saves (N-1) × 14 GB of host RAM.'
+  common_mistake: Thinking mmap is always faster. For cold start with no page cache, mmap incurs page
+    faults on every access, which can be slower than a bulk sequential read due to random 4KB page fault
+    overhead.
+  napkin_math: 'Sequential read: 14 GB / 7 GB/s = 2.0s + 0.44s PCIe = 2.4s cold start. mmap cold: ~3-5s
+    (page fault overhead). mmap warm: <0.1s (page cache hit). Multi-process savings: 4 replicas × 14 GB
+    = 56 GB with malloc vs 14 GB shared with mmap.'
+last_modified: '2026-04-01'
+tags:
+- scope:Inference

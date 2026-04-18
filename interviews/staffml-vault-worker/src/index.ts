@@ -52,6 +52,8 @@ async function checkSchemaFingerprint(env: Env, expectedFromDb: string | undefin
       "AND name NOT IN ('questions_fts_data','questions_fts_idx'," +
       "                 'questions_fts_docsize','questions_fts_content'," +
       "                 'questions_fts_config') " +
+      "AND name NOT LIKE '_cf_%' " +
+      "AND name NOT LIKE 'd1_%' " +
       "ORDER BY name"
     ).all<{ sql: string | null }>();
     const ddl = (result.results ?? [])
@@ -431,6 +433,84 @@ async function handleSearch(env: Env, req: Request, url: URL): Promise<Response>
   );
 }
 
+async function handleChain(env: Env, req: Request, chainId: string): Promise<Response> {
+  const origin = req.headers.get("Origin");
+  const chain = await env.DB
+    .prepare("SELECT id, name, topic FROM chains WHERE id = ?")
+    .bind(chainId)
+    .first<{ id: string; name: string | null; topic: string | null }>();
+  if (!chain) {
+    return json({ error: "not-found", chain_id: chainId }, { status: 404, headers: corsHeaders(env, origin) });
+  }
+  const questions = await env.DB
+    .prepare(
+      `SELECT cq.position, q.id, q.title, q.topic, q.track, q.level, q.zone
+       FROM chain_questions cq
+       JOIN questions q ON q.id = cq.question_id
+       WHERE cq.chain_id = ?
+       ORDER BY cq.position`,
+    )
+    .bind(chainId)
+    .all();
+  const manifest = await getManifest(env);
+  return json(
+    { chain, questions: questions.results ?? [] },
+    {
+      releaseId: manifest.release_id,
+      cacheControl: cacheControl(3600),
+      headers: corsHeaders(env, origin),
+    },
+  );
+}
+
+async function handleTaxonomy(env: Env, req: Request): Promise<Response> {
+  const origin = req.headers.get("Origin");
+  const topics = await env.DB
+    .prepare("SELECT id, name, description, area, prerequisites_json, tracks_json, question_count FROM taxonomy ORDER BY area, id")
+    .all<{
+      id: string; name: string; description: string | null;
+      area: string; prerequisites_json: string | null;
+      tracks_json: string | null; question_count: number;
+    }>();
+  const zones = await env.DB
+    .prepare("SELECT id, description, skills_json, levels_json FROM zones ORDER BY id")
+    .all<{ id: string; description: string | null; skills_json: string | null; levels_json: string | null }>();
+
+  // Group topics by area for the response.
+  const areas: Record<string, unknown[]> = {};
+  for (const t of topics.results ?? []) {
+    if (!areas[t.area]) areas[t.area] = [];
+    areas[t.area].push({
+      id: t.id,
+      name: t.name,
+      description: t.description,
+      prerequisites: t.prerequisites_json ? JSON.parse(t.prerequisites_json) : [],
+      tracks: t.tracks_json ? JSON.parse(t.tracks_json) : [],
+      question_count: t.question_count,
+    });
+  }
+
+  const manifest = await getManifest(env);
+  return json(
+    {
+      areas,
+      zones: (zones.results ?? []).map(z => ({
+        id: z.id,
+        description: z.description,
+        skills: z.skills_json ? JSON.parse(z.skills_json) : [],
+        levels: z.levels_json ? JSON.parse(z.levels_json) : [],
+      })),
+      topic_count: (topics.results ?? []).length,
+      area_count: Object.keys(areas).length,
+    },
+    {
+      releaseId: manifest.release_id,
+      cacheControl: cacheControl(Number.parseInt(env.CACHE_TTL_TAXONOMY, 10)),
+      headers: corsHeaders(env, origin),
+    },
+  );
+}
+
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
@@ -492,6 +572,20 @@ export default {
           req, env, ctx,
           Number.parseInt(env.CACHE_TTL_SEARCH, 10),
           () => handleSearch(env, req, url),
+        );
+      }
+      if (url.pathname.startsWith("/chains/")) {
+        const chainId = url.pathname.slice("/chains/".length);
+        return await cachedOrCompute(
+          req, env, ctx, 3600,
+          () => handleChain(env, req, chainId),
+        );
+      }
+      if (url.pathname === "/taxonomy") {
+        return await cachedOrCompute(
+          req, env, ctx,
+          Number.parseInt(env.CACHE_TTL_TAXONOMY, 10),
+          () => handleTaxonomy(env, req),
         );
       }
       if (url.pathname === "/stats") {

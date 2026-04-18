@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-sus-62002
+title: TTFT vs TPOT SLO Tension
+topic: disaggregated-serving
+status: published
+provenance: human
+scenario: 'Your disaggregated serving cluster has separate TTFT and TPOT SLOs: TTFT < 500 ms, TPOT < 50
+  ms per token. During a load spike the prefill queue grows. An engineer proposes migrating two decode
+  GPUs to the prefill pool to reduce TTFT. Analyze the tradeoff — what does this fix, what does it break,
+  and what metric do you use to decide the right pool ratio?'
+details:
+  realistic_solution: 'Moving GPUs from decode to prefill reduces prefill queue depth and TTFT, but each
+    decode GPU now serves more concurrent in-flight sequences. TPOT degrades because decode is already
+    memory-bandwidth-bound: adding sequences increases HBM reads per step proportionally. The right signal
+    is the ratio of prefill throughput (tokens/s processed) to decode throughput (tokens/s generated).
+    If prefill throughput >> decode throughput, the bottleneck is decode and migrating to prefill worsens
+    TPOT. Track P99 of both SLOs independently and model the system as two coupled M/D/c queues — find
+    the pool split where both P99s are met with maximum total throughput.'
+  common_mistake: Treating TTFT and TPOT as independent — migrating capacity to prefill directly lengthens
+    decode queues, increasing TPOT for all in-flight requests, not just new ones. The queuing is coupled.
+  napkin_math: 'If prefill pool processes 200k tokens/s and decode pool generates 80k tokens/s, decode
+    is the bottleneck. Moving 1 GPU from decode (saves ~10k tokens/s decode capacity) to prefill (gains
+    ~25k tokens/s prefill capacity) widens the bottleneck. Correct direction: move prefill GPUs to decode
+    until the ratio equalizes at target utilization ρ < 0.8. On MI300X (5.3 TB/s, 192 GB): decode throughput
+    = 5.3e12/140e9 = 37.8 tok/s — 1.58× H100; larger KV pool means more concurrent sequences before decode
+    saturates, shifting the breakeven pool ratio in favor of fewer decode GPUs.'
+last_modified: '2026-04-02'
+tags:
+- scope:Disaggregated Serving

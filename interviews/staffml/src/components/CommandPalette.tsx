@@ -33,6 +33,7 @@ import {
 import clsx from "clsx";
 import { searchTopics } from "@/lib/taxonomy";
 import { searchQuestions } from "@/lib/corpus";
+import { useVault, vaultSearch } from "@/lib/corpus-provider";
 
 type Result =
   | { kind: "page"; title: string; subtitle: string; href: string; icon: React.ComponentType<{ className?: string }> }
@@ -108,11 +109,14 @@ export default function CommandPalette() {
     return () => clearTimeout(t);
   }, [query, open]);
 
+  const { apiBase } = useVault();
+  const [vaultResults, setVaultResults] = useState<Result[]>([]);
+
   // ─── Compute results ─────────────────────────────────
   // Pages filter on the live `query` (cheap, in-memory list filter).
   // Topics + questions filter on the debounced `searchQuery` because they
   // walk the full corpus.
-  const results = useMemo<Result[]>(() => {
+  const localResults = useMemo<Result[]>(() => {
     const out: Result[] = [];
 
     const pages = PAGES.filter(p => pageMatches(p, query));
@@ -150,6 +154,38 @@ export default function CommandPalette() {
 
     return out;
   }, [query, searchQuery]);
+
+  // ─── Vault FTS5 search (async enhancement) ──────────
+  // When the API is available, fire an FTS5 search in parallel.
+  // Results replace the local question results for better ranking.
+  useEffect(() => {
+    if (!apiBase || searchQuery.trim().length < 2) {
+      setVaultResults([]);
+      return;
+    }
+    let cancelled = false;
+    vaultSearch(apiBase, searchQuery, 12).then((hits) => {
+      if (cancelled || !hits) return;
+      const mapped: Result[] = hits.map((h: any) => ({
+        kind: "question" as const,
+        title: h.title,
+        subtitle: `${h.level} · ${h.track} · ${h.topic}`,
+        questionId: h.id,
+      }));
+      setVaultResults(mapped);
+    });
+    return () => { cancelled = true; };
+  }, [apiBase, searchQuery]);
+
+  // Merge: pages + topics from local, questions from vault (if available) or local
+  const results = useMemo<Result[]>(() => {
+    const pages = localResults.filter(r => r.kind === "page");
+    const topics = localResults.filter(r => r.kind === "topic");
+    const questions = vaultResults.length > 0
+      ? vaultResults
+      : localResults.filter(r => r.kind === "question");
+    return [...pages, ...topics, ...questions];
+  }, [localResults, vaultResults]);
 
   // Reset active index when results change
   useEffect(() => {
