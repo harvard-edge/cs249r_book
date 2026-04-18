@@ -240,15 +240,79 @@ async function initializeDatabase() {
 // Guard to prevent multiple main() executions
 let mainExecuted = false;
 
-async function main() {
-  if (mainExecuted) {
+function showSocratiqLoader() {
+  const loader = document.createElement("div");
+  loader.id = "socratiq-init-loader";
+  loader.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 999999;
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+  `;
+
+  const spinner = document.createElement("div");
+  spinner.style.cssText = `
+    width: 50px;
+    height: 50px;
+    border: 5px solid #f3f3f3;
+    border-top: 5px solid #A51C30;
+    border-radius: 50%;
+    animation: socratiq-spin 1s linear infinite;
+    margin-bottom: 20px;
+  `;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes socratiq-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
+
+  const text = document.createElement("div");
+  text.textContent = "Initializing SocratiQ...";
+  text.style.cssText = `
+    font-size: 18px;
+    font-weight: 600;
+    color: #1f2328;
+  `;
+
+  loader.appendChild(spinner);
+  loader.appendChild(text);
+  document.body.appendChild(loader);
+}
+
+function hideSocratiqLoader() {
+  const loader = document.querySelector("#socratiq-init-loader");
+  if (loader) {
+    loader.remove();
+  }
+}
+
+async function main(isReEntry = false) {
+  if (mainExecuted && !isReEntry) {
     return;
   }
   mainExecuted = true;
   
   try {
+    if (isReEntry) {
+      showSocratiqLoader();
+    }
+
     // Initialize database as the first operation
-    await initializeDatabase();
+    if (!isReEntry) {
+      await initializeDatabase();
+    }
     
     // Verify database initialization
     const db = await getDBInstance();
@@ -294,7 +358,9 @@ async function main() {
     const tocDbTest = await testTOCDatabaseConnection();
 
     // Always initialize the toggle button listener if present
-    initializeSocratiqToggle();
+    if (!isReEntry) {
+      initializeSocratiqToggle();
+    }
 
     if (!checkWidgetAccess()) {
       // Clean up URL if we are disabling/not loading the widget
@@ -305,6 +371,7 @@ async function main() {
         const cleanUrl = window.location.pathname;
         window.history.replaceState({}, '', cleanUrl);
       }
+      if (isReEntry) hideSocratiqLoader();
       return;
     }
     currentUrl = window.location.href;
@@ -360,13 +427,18 @@ async function main() {
     // Check if the document is already loaded
     if (document.readyState === "loading") {
       // Loading hasn't finished yet
-      document.addEventListener("DOMContentLoaded", inject);
+      document.addEventListener("DOMContentLoaded", async () => {
+        await inject();
+        if (isReEntry) hideSocratiqLoader();
+      });
     } else {
       // `DOMContentLoaded` has already fired
-      inject();
+      await inject();
+      if (isReEntry) hideSocratiqLoader();
     }
   } catch (error) {
     console.error("Failed to initialize application:", error);
+    if (isReEntry) hideSocratiqLoader();
   }
 }
 
@@ -411,7 +483,7 @@ function initializeSocratiqToggle() {
           }
 
           if (!document.querySelector("#widget-chat-container")) {
-            main();
+            main(true);
           }
         } else {
           // Remove cookie and widget
@@ -2536,38 +2608,112 @@ export function setListeners() {
 
   // More Options dropdown functionality
   const moreOptionsButton = shadowRoot.querySelector('#more-options-button');
-  const moreOptionsDropdown = shadowRoot.querySelector('#more-options-dropdown');
+  const dropdownTemplate  = shadowRoot.querySelector('#more-options-dropdown');
 
-  // Toggle dropdown visibility
+  // Move dropdown to document.body so position:fixed is true-viewport-relative
+  // (Shadow DOM stacking contexts break fixed positioning)
+  let moreOptionsDropdown = null;
+  if (dropdownTemplate) {
+    // Inject dropdown styles into document head once
+    if (!document.getElementById('socratiq-dropdown-style')) {
+      const ds = document.createElement('style');
+      ds.id = 'socratiq-dropdown-style';
+      ds.textContent = `
+        #socratiq-more-dropdown {
+          position: fixed;
+          background: #ffffff;
+          border: 1px solid #e5e7eb;
+          border-radius: 10px;
+          box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+          min-width: 190px;
+          z-index: 2147483640;
+          overflow: hidden;
+          padding: 4px;
+          font-family: system-ui, sans-serif;
+        }
+        #socratiq-more-dropdown.hidden { display: none !important; }
+        #socratiq-more-dropdown .dropdown-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          width: 100%;
+          padding: 9px 12px;
+          border-radius: 7px;
+          font-size: 0.82rem;
+          color: #374151;
+          background: none;
+          border: none;
+          cursor: pointer;
+          text-align: left;
+          transition: background 0.12s;
+          box-sizing: border-box;
+        }
+        #socratiq-more-dropdown .dropdown-item:hover {
+          background: rgba(99,102,241,0.09);
+          color: #6366f1;
+        }
+        #socratiq-more-dropdown .dropdown-item.active {
+          background: rgba(99,102,241,0.13);
+          color: #6366f1;
+          font-weight: 600;
+        }
+        @keyframes sqDropRise {
+          from { opacity:0; transform:translateY(6px); }
+          to   { opacity:1; transform:translateY(0); }
+        }
+        #socratiq-more-dropdown:not(.hidden) { animation: sqDropRise 0.14s ease-out; }
+      `;
+      document.head.appendChild(ds);
+    }
+
+    // Clone inner content into a fresh div on document.body
+    moreOptionsDropdown = document.createElement('div');
+    moreOptionsDropdown.id = 'socratiq-more-dropdown';
+    moreOptionsDropdown.classList.add('hidden');
+    moreOptionsDropdown.innerHTML = dropdownTemplate.querySelector('.dropdown-content').innerHTML;
+    document.body.appendChild(moreOptionsDropdown);
+    dropdownTemplate.remove(); // remove original from shadow DOM
+  }
+
+  const _hideDropdown = () => moreOptionsDropdown?.classList.add('hidden');
+  const _showDropdown = () => {
+    if (!moreOptionsDropdown) return;
+    const rect = moreOptionsButton.getBoundingClientRect();
+    moreOptionsDropdown.style.left = `${Math.max(4, rect.right - 190)}px`;
+    moreOptionsDropdown.style.top  = `${rect.top - 8}px`;
+    moreOptionsDropdown.style.transform = 'translateY(-100%)';
+    moreOptionsDropdown.classList.remove('hidden');
+  };
+
   if (moreOptionsButton) {
     moreOptionsButton.addEventListener('click', (e) => {
       e.stopPropagation();
-      moreOptionsDropdown.classList.toggle('hidden');
+      moreOptionsDropdown?.classList.contains('hidden') ? _showDropdown() : _hideDropdown();
     });
   }
 
-  // Close dropdown when clicking outside
+  // Close when clicking anywhere outside
   document.addEventListener('click', (e) => {
-    if (moreOptionsDropdown && !moreOptionsDropdown.contains(e.target) && !moreOptionsButton.contains(e.target)) {
-      moreOptionsDropdown.classList.add('hidden');
+    if (moreOptionsDropdown && !moreOptionsDropdown.contains(e.target) && !moreOptionsButton?.contains(e.target)) {
+      _hideDropdown();
     }
   });
 
   // Meditation Timer
-  const meditationBtn = shadowRoot.querySelector('#meditation-btn');
+  const meditationBtn = moreOptionsDropdown?.querySelector('#meditation-btn');
   if (meditationBtn) {
     meditationBtn.addEventListener('click', async () => {
-      moreOptionsDropdown.classList.add('hidden');
+      _hideDropdown();
       const { openMeditationTimer } = await import('./components/meditation/meditationTimer.js');
       openMeditationTimer(shadowRoot);
     });
   }
 
   // Draw-to-Select
-  const drawSelectBtn = shadowRoot.querySelector('#draw-select-btn');
+  const drawSelectBtn = moreOptionsDropdown?.querySelector('#draw-select-btn');
   if (drawSelectBtn) {
     drawSelectBtn.addEventListener('click', async () => {
-      moreOptionsDropdown.classList.add('hidden');
+      _hideDropdown();
 
       const { startDrawSelect, stopDrawSelect, isDrawSelectActive } = await import('./components/draw-select/drawSelect.js');
 

@@ -77,6 +77,8 @@ export default defineConfig({
           try {
             if (!req.url) return next();
             const urlPath = req.url.split('?')[0].split('#')[0];
+            // Suppress favicon 404
+            if (urlPath === '/favicon.ico') { res.writeHead(204); res.end(); return; }
             if (!urlPath.startsWith('/test_website/')) return next();
             
             // Let the injector handle index files so it can append the dev module

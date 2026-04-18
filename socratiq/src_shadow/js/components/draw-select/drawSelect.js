@@ -208,8 +208,10 @@ function _extractTextInPath(polygon) {
         const p = node.parentElement;
         if (!p) return NodeFilter.FILTER_REJECT;
         const tag = p.tagName?.toLowerCase();
-        // Skip scripts, styles, hidden elements
+        // Skip scripts, styles, hidden elements and widget internals
         if (['script', 'style', 'noscript', 'svg'].includes(tag)) return NodeFilter.FILTER_REJECT;
+        // Skip anything inside the socratiq widget shadow host
+        if (p.closest?.('socratiq-widget, #socratiq-more-dropdown, #socratiq-meditation-nudge')) return NodeFilter.FILTER_REJECT;
         const cs = getComputedStyle(p);
         if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
@@ -238,5 +240,17 @@ function _extractTextInPath(polygon) {
     }
   }
 
-  return captured.join(' ');
+  const raw = captured.join(' ');
+  return _cleanCapturedText(raw);
+}
+
+function _cleanCapturedText(text) {
+  return text
+    // Strip {{ref:target:display:url}} citation markers — internal AI syntax
+    .replace(/\{\{ref:[^}]*\}\}/g, '')
+    // Strip bare URLs that leaked in
+    .replace(/https?:\/\/\S+/g, '')
+    // Collapse multiple spaces/newlines left by removals
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }

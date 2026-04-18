@@ -768,15 +768,13 @@ export const styles = `
   }
   /* ── More-options dropdown ─────────────────────────────────────────────── */
   .more-options-dropdown {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    right: 0;
+    position: fixed;
     background: var(--socratiq-bg, #ffffff);
     border: 1px solid var(--socratiq-border, #e5e7eb);
     border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    min-width: 180px;
-    z-index: 9999;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    min-width: 190px;
+    z-index: 2147483640;
     overflow: hidden;
     animation: dropdownRiseIn 0.15s ease-out;
   }
