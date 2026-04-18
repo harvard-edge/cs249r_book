@@ -1,0 +1,39 @@
+schema_version: 1
+id: cloud-0232
+title: The Inference Cost Attribution Puzzle
+topic: tco-cost-modeling
+status: published
+provenance: human
+scenario: 'Your platform serves 5 different LLMs on a shared pool of 64 A100 GPUs using vLLM with continuous
+  batching. The finance team wants to charge each product team for their inference costs. Your colleague
+  proposes: ''Divide total GPU cost by total requests, charge per request.'' The search team (short prompts,
+  50-token outputs) and the content team (long prompts, 2,000-token outputs) both object. Design a fair
+  cost attribution model.'
+details:
+  realistic_solution: 'Fair cost attribution must reflect actual GPU resource consumption, which has two
+    distinct phases: (1) **Prefill cost** — proportional to input tokens (compute-bound, scales as O(n²)
+    for attention), and (2) **Decode cost** — proportional to output tokens (memory-bandwidth-bound, scales
+    linearly but occupies KV-cache memory for the entire generation duration). The correct model charges:
+    `cost = α × input_tokens + β × output_tokens + γ × generation_time_ms`. The α term captures prefill
+    compute, β captures decode compute, and γ captures KV-cache memory occupancy (a long-running generation
+    blocks memory that could serve other requests). Calibrate α, β, γ by profiling each model: measure
+    GPU-seconds consumed per input token (prefill) and per output token (decode) at representative batch
+    sizes. For continuous batching, the γ term is critical — a request generating 2,000 tokens at 40ms/token
+    occupies KV-cache for 80 seconds, blocking ~2 GB of GPU memory that could serve 20 short requests.'
+  common_mistake: '"Charge per request" or "Charge per token." Per-request ignores the 40× difference
+    in compute between a 50-token and 2,000-token generation. Per-token ignores that prefill and decode
+    have different costs.'
+  napkin_math: '64 A100s at $2/hr = $128/hr total. Search team: 10,000 req/hr × 500 input + 50 output
+    tokens. Content team: 1,000 req/hr × 2,000 input + 2,000 output tokens. Per-request billing: search
+    pays 10/11 × $128 = $116/hr, content pays $12/hr. Per-token billing: search = 5.5M tokens, content
+    = 4M tokens → search pays $74, content pays $54. **Per-GPU-second billing (actual resource use):**
+    search prefill ≈ 0.5s/req × 10k = 5,000 GPU-sec; search decode ≈ 2s/req × 10k = 20,000 GPU-sec; content
+    prefill ≈ 4s/req × 1k = 4,000 GPU-sec; content decode ≈ 80s/req × 1k = 80,000 GPU-sec. Total = 109,000
+    GPU-sec. Content share = 84,000/109,000 = **77%** → fair charge ≈ $98/hr. Search share = 25,000/109,000
+    = 23% → $30/hr. The naive per-request model undercharges content by ~8× ($12 vs $98).'
+chain:
+  id: cloud-chain-431
+  position: 4
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack

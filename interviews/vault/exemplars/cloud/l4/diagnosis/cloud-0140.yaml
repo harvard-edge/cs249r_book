@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-0140
+title: The Feature Store Consistency Trap
+topic: storage-format-selection
+status: published
+provenance: human
+scenario: Your team builds a feature store to eliminate training-serving skew. The store materializes
+  2,000 features into an online Redis cluster and an offline Parquet lake. After launch, you discover
+  that 15% of features have different values between the online and offline paths for the same entity
+  at the same timestamp. Your feature store was supposed to solve this exact problem. What went wrong?
+details:
+  realistic_solution: 'The online path computes features at *request time* using the latest state (point-in-time
+    lookup), while the offline path computes features in a batch job that runs hours later using event-time
+    windows. The divergence comes from late-arriving data. A user''s "last-7-day purchase count" computed
+    online at 2:00 PM sees transactions up to 1:59 PM. The offline batch job running at midnight replays
+    the same window but now includes transactions that arrived late (payment processor delays, retry queues).
+    The fix is a **dual-write architecture**: compute features once in a streaming engine (Flink/Spark
+    Streaming), write simultaneously to both online (Redis) and offline (Parquet) stores from the same
+    computation. This guarantees bitwise consistency. Additionally, implement a **feature validation pipeline**
+    that samples 1% of online-served features, replays them offline, and alerts on divergence >0.1%.'
+  common_mistake: '"There''s a bug in the ETL pipeline" or "Redis and Parquet use different serialization."
+    Both assume a simple data bug — the real issue is architectural: time semantics.'
+  napkin_math: '2,000 features × 10M entities = 20B feature values. Redis cluster for online serving:
+    20B × 8 bytes avg = 160 GB → 3 nodes of r6g.4xlarge (128 GB each) at $1.60/hr = $3,456/month. Parquet
+    offline: 160 GB compressed (~40 GB) on S3 = $0.92/month. The cost asymmetry is 3,750:1, which is why
+    teams are tempted to compute them differently — and that''s where skew creeps in. Streaming dual-write
+    adds ~$800/month in Flink compute but eliminates the 15% skew that was causing a 3% model accuracy
+    drop worth $200k/month in revenue.'
+chain:
+  id: cloud-chain-297
+  position: 2
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack
