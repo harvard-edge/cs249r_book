@@ -230,8 +230,8 @@ this.createModal().then(async () => {
 
             <div 
                 id="sr-modal-content_inner"
-                class="relative top-20 mx-auto p-5 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg} max-h-[80vh] "
-               style="height: 700px; background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important;"
+                class="relative top-10 mx-auto mb-6 p-5 w-[90%] max-w-4xl shadow-lg rounded-md ${themeClasses.modalBg}"
+               style="max-height: calc(100vh - 80px); background-color: ${isDark ? '#0d1117' : '#ffffff'} !important; color: ${isDark ? '#e6edf3' : '#1f2328'} !important; display: flex; flex-direction: column;"
                 >
                     <!-- Close button -->
       <button id="closeModal_sr" class="absolute top-4 right-4 flex items-center z-10" style="color: #9ca3af !important;">             
@@ -239,9 +239,9 @@ this.createModal().then(async () => {
         ESC
     </kbd>
 </button>
-                    <div class="grid grid-cols-4 mt-8 gap-4">
+                    <div class="grid grid-cols-4 mt-8 gap-4" style="flex: 1; min-height: 0; overflow: hidden;">
                         <!-- Sidebar -->
-                        <div id="sr-sidebar" class="col-span-1 border-r overflow-y-auto ${themeClasses.border} pr-4" style="max-height: 600px; overflow-y: auto;">
+                        <div id="sr-sidebar" class="col-span-1 border-r overflow-y-auto ${themeClasses.border} pr-4" style="max-height: 100%; overflow-y: auto;">
                         <!-- Search input -->
                         <div class="relative mb-4">
                             <input type="text" 
@@ -292,10 +292,10 @@ this.createModal().then(async () => {
 
                     
                         <!-- Updated Main Content Area -->
-                        <div 
+                        <div
                         id="sr-modal-content-container"
                         class="col-span-3 pl-4 overflow-y-auto"
-                        style="height: 600px">
+                        style="max-height: 100%;">
                         <!-- Progress Bar -->
                         <div class="mb-4">
                             <div class="flex justify-between items-center mb-2">

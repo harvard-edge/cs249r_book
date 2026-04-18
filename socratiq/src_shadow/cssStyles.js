@@ -766,6 +766,55 @@ export const styles = `
     background-color: #cbd5e0;
     border-radius: 3px;
   }
+  /* ── More-options dropdown ─────────────────────────────────────────────── */
+  .more-options-dropdown {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    background: var(--socratiq-bg, #ffffff);
+    border: 1px solid var(--socratiq-border, #e5e7eb);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    min-width: 180px;
+    z-index: 9999;
+    overflow: hidden;
+    animation: dropdownRiseIn 0.15s ease-out;
+  }
+  .more-options-dropdown.hidden { display: none !important; }
+  @keyframes dropdownRiseIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .dropdown-content { padding: 4px; }
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 7px;
+    font-size: 0.82rem;
+    color: var(--socratiq-text, #374151);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.12s;
+  }
+  .dropdown-item:hover { background: rgba(99,102,241,0.08); color: #6366f1; }
+  .dropdown-item.active {
+    background: rgba(99,102,241,0.12);
+    color: #6366f1;
+    font-weight: 600;
+  }
+
+  /* Draw-to-select active indicator on the ⋯ button */
+  #more-options-button.draw-active {
+    color: #6366f1;
+    background: rgba(99,102,241,0.12);
+    border-radius: 6px;
+  }
+
   .difficulty-dropdown {
     position: relative;
     margin-bottom: 0.5rem;

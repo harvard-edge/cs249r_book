@@ -90,6 +90,68 @@ Add to the bottom of any HTML page:
 
 Then navigate to the page with `?socratiq=true` to activate the widget (sets a persistent cookie). Subsequent visits load the widget automatically.
 
+## ⚙️ Configuration
+
+All configuration is centralised in two files — **you should never need to touch anything else** to deploy the widget on a new site.
+
+### `src_shadow/configs/env_configs.js` — Backend & Runtime
+
+This is the **primary config file**. Change these before deploying:
+
+```js
+// Switch between local wrangler dev workers and production Cloudflare Workers
+export const USE_LOCAL_WORKERS = false;   // true → localhost:8787/8788
+
+// The topic the widget scopes its answers to (used in the system prompt)
+export const MAIN_TOPIC = 'MLSysBook.AI: Principles and Practices of Machine Learning Systems Engineering';
+
+// AI provider model selection — change any model here, takes effect everywhere
+export const PROVIDER_MODELS = {
+  GROQ:        { model: 'llama-3.1-8b-instant',  stream: true  },
+  GEMINI:      { model: 'gemini-2.5-flash',       stream: true  },
+  // ... see file for full list
+};
+
+// Max characters of page text sent per LLM call
+export const SIZE_LIMIT_LLM_CALL = 6000;
+```
+
+| Variable | What it controls |
+|---|---|
+| `USE_LOCAL_WORKERS` | `true` → hit `localhost:8787/8788` (wrangler dev); `false` → production workers |
+| `MAIN_TOPIC` | Injected into every system prompt to keep answers on-topic |
+| `PROVIDER_MODELS` | Model name + streaming flag per provider, tried in order on fallback |
+| `SIZE_LIMIT_LLM_CALL` | Text truncation limit before sending to AI (tokens ~= chars/4) |
+| `WORKER_URL_AI` / `WORKER_URL_AI_STREAM` | Resolved automatically from `USE_LOCAL_WORKERS` — don't set manually |
+
+### `src_shadow/configs/client.config.js` — Prompts & UX
+
+Contains all LLM **prompt templates** and UI copy. Edit these to customise what the AI says:
+
+| Export | What it controls |
+|---|---|
+| `quiz_prompt` | Section quiz prompt template (3 questions) |
+| `QUIZ_SUMMATIVE_PROMPT` | Cumulative quiz prompt template (10 questions) |
+| `SYSTEM_PROMPT_ORIG` | Base system prompt (uses `MAIN_TOPIC` from env_configs) |
+| `DIFFICULTY_LEVELS` | Array of 4 difficulty prompts (Beginner → Bloom's Taxonomy) |
+| `PROGRESS_REPORT_PROMPT` | Progress report analysis prompt |
+| `TEXT_EXTRACTION_CONFIG` | `MAX_TOKENS`, DOM selectors for content vs nav extraction |
+| `getConfigs(type)` | Factory — returns a config object for `'quiz'`, `'explain'`, `'query'`, `'summative'`, `'progress_report'` |
+
+### Local worker development
+
+```bash
+# 1. Start the Cloudflare Worker locally (in cloudflare/proxy-worker/)
+wrangler dev
+
+# 2. Set USE_LOCAL_WORKERS = true in env_configs.js
+
+# 3. Start the widget dev server
+npm run dev
+```
+
+Revert `USE_LOCAL_WORKERS = false` before building for production.
+
 ## 🎨 Theme Detection
 
 The widget auto-detects light/dark mode using the following priority order:

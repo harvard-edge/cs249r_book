@@ -1,61 +1,14 @@
 import { alert } from "../utils/utils.js";
 import { TokenCounter } from "../utils/tokenCounter.js";
 import { CustomAPIAdapter } from "./custom-api-adapter.js";
+import { USE_LOCAL_WORKERS, WORKER_URL_AI, WORKER_URL_AI_STREAM, PROVIDER_MODELS } from "../../../configs/env_configs.js";
 
-// ===== CONFIGURATION =====
-// Set to true to use localhost workers, false to use production workers
-const USE_LOCAL_WORKERS = false;
-// =========================
+// Provider configs are now centrally managed in src_shadow/configs/env_configs.js
+const providerConfigs = PROVIDER_MODELS;
 
-// Configuration for different providers - ordered by speed
-const providerConfigs = {
-  GROQ: {
-    model: "llama-3.1-8b-instant",
-    stream: true,
-  },
-  GEMINI: {
-    model: "gemini-2.5-flash",
-    stream: true,
-  },
-  CEREBRAS: {
-    model: "gpt-oss-120b",
-    stream: true,
-  },
-  SAMBANOVA: {
-    model: "gpt-oss-120b",
-    stream: true,
-  },
-  MISTRAL: {
-    model: "mistral-tiny",
-    stream: true,
-  },
-  OPENAI: {
-    model: "deepseek/deepseek-chat-v3.1:free",
-    stream: true,
-  },
-  HUGGINGFACE: {
-    model: "meta-llama/Llama-3.1-8B-Instruct:featherless-ai",
-    stream: false,
-  },
-  AWAN: {
-    model: "Meta-Llama-3.1-70B-Instruct",
-    stream: true,
-  },
-};
-
-// Determine API URL based on configuration
+// Determine API URL based on configuration — controlled via env_configs.js
 function getApiUrl(isStreaming = false) {
-  if (USE_LOCAL_WORKERS) {
-    // Local development - use your Cloudflare Worker
-    return isStreaming 
-      ? "http://localhost:8788/ai/stream"
-      : "http://localhost:8787/ai";
-  } else {
-    // Production - deployed workers
-    return isStreaming
-      ? "https://proxy-worker-streaming.mlsysbook.workers.dev/ai/stream"
-      : "https://proxy-worker.mlsysbook.workers.dev/ai";
-  }
+  return isStreaming ? WORKER_URL_AI_STREAM : WORKER_URL_AI;
 }
 
 // Serialize response content for consistent output

@@ -254,7 +254,18 @@ export const htmlContent = `
               <!-- Dropdown Menu -->
               <div id="more-options-dropdown" class="more-options-dropdown hidden">
                 <div class="dropdown-content">
-                  <!-- Collaborative features removed -->
+                  <button id="draw-select-btn" class="dropdown-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:1rem;height:1rem;flex-shrink:0;">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
+                    </svg>
+                    <span>Draw to Select</span>
+                  </button>
+                  <button id="meditation-btn" class="dropdown-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:1rem;height:1rem;flex-shrink:0;">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+                    </svg>
+                    <span>Meditation Timer</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -743,6 +754,122 @@ export const htmlContent = `
 
   <div id="modal_feedback">
 
+  </div>
+
+  <!-- Quiz Options Modal -->
+  <div id="quizModal" style="
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: rgba(0,0,0,0.45);
+    backdrop-filter: blur(2px);
+    align-items: center;
+    justify-content: center;
+  ">
+    <div style="
+      background: var(--socratiq-bg, #ffffff);
+      color: var(--socratiq-text, #1f2328);
+      border-radius: 16px;
+      padding: 28px 24px 24px;
+      width: min(420px, 92vw);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+      position: relative;
+      animation: quizModalIn 0.18s ease;
+    ">
+      <style>
+        @keyframes quizModalIn {
+          from { opacity: 0; transform: scale(0.95) translateY(8px); }
+          to   { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        #quizModal .quiz-option-card {
+          display: flex;
+          align-items: flex-start;
+          gap: 14px;
+          padding: 16px;
+          border-radius: 12px;
+          border: 1.5px solid var(--socratiq-border, #e5e7eb);
+          cursor: pointer;
+          transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+          background: var(--socratiq-bg, #ffffff);
+          text-align: left;
+          width: 100%;
+          margin-bottom: 12px;
+        }
+        #quizModal .quiz-option-card:hover {
+          border-color: #6366f1;
+          box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+          background: rgba(99,102,241,0.04);
+        }
+        #quizModal .quiz-option-icon {
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        #quizModal .quiz-option-title {
+          font-size: 0.95rem;
+          font-weight: 600;
+          margin-bottom: 3px;
+          color: var(--socratiq-text, #1f2328);
+        }
+        #quizModal .quiz-option-desc {
+          font-size: 0.8rem;
+          color: var(--socratiq-text-muted, #6b7280);
+          line-height: 1.4;
+        }
+        #quizModal .quiz-modal-close {
+          position: absolute;
+          top: 14px;
+          right: 16px;
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: var(--socratiq-text-muted, #9ca3af);
+          padding: 4px;
+          border-radius: 6px;
+          line-height: 1;
+          font-size: 1.1rem;
+        }
+        #quizModal .quiz-modal-close:hover { color: var(--socratiq-text, #1f2328); }
+      </style>
+
+      <button class="quiz-modal-close" id="close-quiz-modal" aria-label="Close">✕</button>
+
+      <div style="margin-bottom: 20px;">
+        <div style="font-size: 1.05rem; font-weight: 700; margin-bottom: 4px; color: var(--socratiq-text, #1f2328);">Choose Quiz Type</div>
+        <div style="font-size: 0.8rem; color: var(--socratiq-text-muted, #6b7280);">Select how you'd like to be tested</div>
+      </div>
+
+      <!-- Section Quiz -->
+      <button class="quiz-option-card" id="section-quiz-btn">
+        <div class="quiz-option-icon" style="background: rgba(99,102,241,0.1);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="#6366f1">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25Z" />
+          </svg>
+        </div>
+        <div>
+          <div class="quiz-option-title">Section Quiz</div>
+          <div class="quiz-option-desc">Test your understanding of the current section with focused questions</div>
+        </div>
+      </button>
+
+      <!-- Cumulative Quiz -->
+      <button class="quiz-option-card" id="cumulative-quiz-btn" style="margin-bottom: 0;">
+        <div class="quiz-option-icon" style="background: rgba(16,185,129,0.1);">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="#10b981">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5m.75-9 3-3 2.148 2.148A12.061 12.061 0 0 1 16.5 7.605" />
+          </svg>
+        </div>
+        <div>
+          <div class="quiz-option-title">Cumulative Quiz</div>
+          <div class="quiz-option-desc">Review material from multiple chapters to reinforce long-term learning</div>
+        </div>
+      </button>
+    </div>
   </div>
 
   <div id="helpModal" class="hidden">

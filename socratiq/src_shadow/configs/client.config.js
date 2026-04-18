@@ -1,3 +1,5 @@
+import { MAIN_TOPIC } from './env_configs.js';
+
 export const QUERYAGENTPROCESS = ["Vectorizing query", "Cosine searching vector database", "Retrieving relevant sentences", "Calling LLM model", "Returning results"]
 export const EXPLAINAGENTPROCESS = ["Retrieving relevant context from website", "Calling LLM model", "Returning results"]
 export const GENERALAGENTPROCESS = ["Retrieving relevant sentences", "Checking conversation history", "Calling LLM model", "Returning results"]
@@ -12,7 +14,6 @@ export const OFFLINE_PROCESS = [
   "Preparing offline response"
 ];
 
-const MAIN_TOPIC = 'MLSysBook.AI: Principles and Practices of Machine Learning Systems Engineering'
 export let SYSTEM_PROMPT_ORIG = `Please try to provide useful, helpful and actionable answers. Stick to topics related to ${MAIN_TOPIC}.`
 
 export const DIFFICULTY_LEVELS = [

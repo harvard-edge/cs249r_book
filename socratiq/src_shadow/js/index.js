@@ -2361,7 +2361,7 @@ export function setListeners() {
 
   if (quizButton && quizModal) {
     quizButton.addEventListener('click', () => {
-      quizModal.style.display = 'block';
+      quizModal.style.display = 'flex';
     });
   } else if (quizButton) {
     // No modal in template - fire quiz directly from page content
@@ -2552,6 +2552,58 @@ export function setListeners() {
       moreOptionsDropdown.classList.add('hidden');
     }
   });
+
+  // Meditation Timer
+  const meditationBtn = shadowRoot.querySelector('#meditation-btn');
+  if (meditationBtn) {
+    meditationBtn.addEventListener('click', async () => {
+      moreOptionsDropdown.classList.add('hidden');
+      const { openMeditationTimer } = await import('./components/meditation/meditationTimer.js');
+      openMeditationTimer(shadowRoot);
+    });
+  }
+
+  // Draw-to-Select
+  const drawSelectBtn = shadowRoot.querySelector('#draw-select-btn');
+  if (drawSelectBtn) {
+    drawSelectBtn.addEventListener('click', async () => {
+      moreOptionsDropdown.classList.add('hidden');
+
+      const { startDrawSelect, stopDrawSelect, isDrawSelectActive } = await import('./components/draw-select/drawSelect.js');
+
+      if (isDrawSelectActive()) {
+        stopDrawSelect();
+        drawSelectBtn.classList.remove('active');
+        moreOptionsButton.classList.remove('draw-active');
+        return;
+      }
+
+      drawSelectBtn.classList.add('active');
+      moreOptionsButton.classList.add('draw-active');
+
+      startDrawSelect((capturedText) => {
+        drawSelectBtn.classList.remove('active');
+        moreOptionsButton.classList.remove('draw-active');
+
+        if (!capturedText) return;
+
+        // Open the chat panel
+        import('./components/menu/open_close_menu.js').then(({ menu_slide_on }) => {
+          menu_slide_on(shadowRoot, true);
+        });
+
+        // Send captured text as a query
+        window.dispatchEvent(new CustomEvent('aiActionCompleted', {
+          detail: {
+            type: 'query',
+            text: capturedText,
+            title: 'Draw to Select',
+            sectionId: 'draw-select',
+          }
+        }));
+      });
+    });
+  }
 }
 
 let prevId = chatId;
