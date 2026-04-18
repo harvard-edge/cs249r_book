@@ -336,7 +336,7 @@ Next: Complete Module 04 to continue Foundation Tier
 
 ### Reset Module (Advanced)
 
-<div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
+<div class="modules-reset-box" style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
 ```bash
 tito module reset 01
