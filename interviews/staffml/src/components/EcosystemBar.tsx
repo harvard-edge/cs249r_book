@@ -194,7 +194,7 @@ export default function EcosystemBar() {
   const [hoveredLink, setHoveredLink] = useState<string | null>(null);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
 
   // Theme-aware colors (matches shared/_navbar.scss light/dark)
@@ -339,6 +339,14 @@ export default function EcosystemBar() {
             >
               <i className="bi bi-envelope" /> <span className="hidden xl:inline">Subscribe</span>
             </a>
+            {/* Dark mode toggle — matches Quarto navbar position */}
+            <button
+              onClick={toggleTheme}
+              style={{ ...S.navLink, padding: '8px 10px', cursor: 'pointer' }}
+              aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            >
+              <i className={`bi ${isDark ? 'bi-sun' : 'bi-moon-stars-fill'}`} style={{ fontSize: 14 }} />
+            </button>
             {RIGHT_MENUS.map(renderDropdown)}
           </div>
         </div>

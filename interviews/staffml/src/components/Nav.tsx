@@ -143,32 +143,7 @@ export default function Nav() {
 
         <div className="flex items-center gap-3">
           <StreakBadge />
-          <button
-            onClick={toggleTheme}
-            className="p-2 text-textTertiary hover:text-textSecondary transition-colors"
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-          </button>
-          <a
-            href={buildSiteIssueUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden md:flex text-textTertiary hover:text-textSecondary items-center gap-1.5 text-xs transition-colors"
-            title="Report an issue"
-          >
-            <Bug className="w-3.5 h-3.5" />
-            Report Issue
-          </a>
-          <a
-            href="https://github.com/harvard-edge/cs249r_book"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden lg:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border rounded-lg text-textSecondary hover:text-textPrimary hover:bg-surface transition-colors"
-          >
-            <Star className="w-3.5 h-3.5" />
-            Star on GitHub
-          </a>
+          {/* Dark mode toggle and Star moved to EcosystemBar for consistency */}
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
