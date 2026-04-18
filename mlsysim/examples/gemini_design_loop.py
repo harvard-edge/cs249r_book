@@ -32,8 +32,7 @@ class MockGeminiAgent:
 
     def prompt(self, text: str, tools=None) -> str:
         """Simulates calling a frontier Gemini model."""
-        print(f"
-[{self.role.upper()} AGENT] Thinking...")
+        print(f"\n[{self.role.upper()} AGENT] Thinking...")
         time.sleep(1)
         
         if "Initial Request" in text:
@@ -80,16 +79,14 @@ def run_agentic_loop():
     
     # The Goal SLA
     goal = "Design a cluster to serve Llama3_70B. Keep it under 10 nodes if possible. Minimize carbon."
-    print(f"
-[USER] Goal: {goal}")
-    
+    print(f"\n[USER] Goal: {goal}")
+
     iteration = 1
     max_iterations = 3
     current_prompt = f"Initial Request: {goal}. Output ONLY the YAML."
-    
+
     while iteration <= max_iterations:
-        print(f"
---- Iteration {iteration} ---")
+        print(f"\n--- Iteration {iteration} ---")
         
         # 1. Agent generates YAML
         yaml_str = architect.prompt(current_prompt).strip()
@@ -124,8 +121,7 @@ def run_agentic_loop():
                 print(f"   Throughput: {result_dict.get('p_throughput', 'N/A')}")
                 print(f"   TCO ($):    ${result_dict.get('m_tco_usd', 0):,.2f}")
                 print(f"   Carbon:     {result_dict.get('m_carbon_footprint', 0):.2f} tonnes")
-                print("
-[SUCCESS] Agent reached optimal configuration.")
+                print("\n[SUCCESS] Agent reached optimal configuration.")
                 break
                 
         except Exception as e:

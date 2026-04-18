@@ -153,7 +153,7 @@ tutorials/
 ├── 08_nine_million_dollar.qmd   ← Cluster 5: Ops
 ├── 09_sensitivity.qmd           ← Cluster 6: Analysis
 ├── 10_gpu_vs_wafer.qmd          ← Cluster 6: Analysis
-├── 11_full_stack_audit.qmd      ← Cluster 7: Capstone
+├── 12_full_stack_audit.qmd      ← Cluster 7: Capstone
 └── extending.qmd                ← Developer appendix (unnumbered)
 ```
 

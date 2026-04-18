@@ -70,5 +70,10 @@ def test_serving_disaggregated_speculative():
         draft_acceptance_rate=0.7
     )
     
-    # ITL should be faster despite running decode on slower A100, due to speculative decoding
+    # ITL should be faster despite running decode on slower A100, due to
+    # speculative decoding amortizing the per-token cost across draft tokens.
     assert res_opt.itl.magnitude > 0
+    assert res_opt.itl < res_base.itl, (
+        f"Speculative decoding should reduce ITL (got base={res_base.itl}, "
+        f"opt={res_opt.itl})"
+    )
