@@ -6,7 +6,7 @@ export interface Question {
   scope?: string;
   level: string;
   title: string;
-  topic: string;            // one of 79 curated topic IDs
+  topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones
   competency_area: string;  // one of 13 canonical areas
   bloom_level?: string;     // remember | understand | apply | analyze | evaluate | create
@@ -38,11 +38,7 @@ export function getQuestions(): Question[] {
 /**
  * Marketing-friendly question count string. Rounds the live corpus length
  * down to the nearest thousand and appends a `+` so the headline never goes
- * stale until the next 1,000-question milestone is crossed. Used in page
- * metadata, OG descriptions, and hero copy as a single source of truth so
- * we never have to chase hardcoded counts in five different files again.
- *
- * Example: corpus length 8,053 → "8,000+"
+ * stale until the next 1,000-question milestone is crossed.
  */
 export const QUESTION_COUNT_DISPLAY = `${(Math.floor(questions.length / 1000) * 1000).toLocaleString("en-US")}+`;
 

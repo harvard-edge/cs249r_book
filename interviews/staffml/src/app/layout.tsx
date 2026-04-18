@@ -75,7 +75,7 @@ export default function RootLayout({
           httpEquiv="Content-Security-Policy"
           content={`default-src 'self'; script-src 'self' 'unsafe-inline'${
             process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""
-          }; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://mlsysbook.ai https://harvard-edge.github.io; img-src 'self' data: https://mlsysbook.ai https://harvard-edge.github.io; base-uri 'self'; form-action 'self';`}
+          }; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; connect-src 'self' https://api.github.com https://mlsysbook.ai https://harvard-edge.github.io https://staffml-vault.mlsysbook-ai-account.workers.dev https://staffml-vault.mlsysbook.ai; img-src 'self' data: https://mlsysbook.ai https://harvard-edge.github.io; base-uri 'self'; form-action 'self';`}
         />
         {/*
           Theme bootstrap — render-blocking external script (no async/defer)
