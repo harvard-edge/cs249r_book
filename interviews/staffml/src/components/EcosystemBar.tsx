@@ -32,6 +32,20 @@ interface MenuGroup {
 }
 
 const LEFT_MENUS: MenuGroup[] = [
+  // Site-specific dropdown first (matches ecosystem convention)
+  {
+    id: "staffml", label: "StaffML", items: [
+      { icon: "bi-mortarboard", label: "StaffML Home", href: "/" },
+      { icon: "bi-collection", label: "Question Vault", href: "/" },
+      { divider: true },
+      { icon: "bi-lightning", label: "Practice", href: "/practice" },
+      { icon: "bi-crosshair", label: "Mock Interview", href: "/gauntlet" },
+      { icon: "bi-bar-chart", label: "Progress", href: "/progress" },
+      { divider: true },
+      { icon: "bi-map", label: "Study Plans", href: "/plans" },
+      { icon: "bi-diagram-3", label: "Framework", href: "/framework" },
+    ]
+  },
   {
     id: "read", label: "Read", items: [
       { icon: "bi-journal", label: "Volume I: Foundations", href: `${BASE}/vol1/` },
