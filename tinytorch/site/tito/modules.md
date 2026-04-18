@@ -138,7 +138,7 @@ tito module status
 
 ### Environment Health
 
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+<div class="modules-health-box" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
 
 **Check Setup (Run This First)**
 ```bash
