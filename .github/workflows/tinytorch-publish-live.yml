@@ -13,7 +13,7 @@ name: '🔥 TinyTorch · 🚀 Publish (Live)'
 #   3. UPDATE_VERSION   — Bump version in 6 files on dev (skip if site_only)
 #   4. SYNC_DEV_MAIN    — Merge dev into main
 #   5. BUILD_PDFS       — Generate guide + paper PDFs (skip if site_only)
-#   6. BUILD_DEPLOY     — Jupyter Book render, deploy to gh-pages/tinytorch/
+#   6. BUILD_DEPLOY     — Quarto render, deploy to gh-pages/tinytorch/
 #   7. CREATE_RELEASE   — Tag + draft GitHub Release (skip if site_only)
 #
 # Modes:
@@ -192,34 +192,6 @@ jobs:
           echo "✅ pyproject.toml version updated"
           cat tinytorch/pyproject.toml | grep "^version"
 
-      - name: 📝 Update version in website badge
-        run: |
-          echo "📝 Updating version in tinytorch/site/_static/version-badge.js..."
-
-          VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
-          VERSION_NUM=${VERSION_NUM#tinytorch-v}
-
-          # Update version in version-badge.js
-          sed -i "s/const version = versionMeta ? versionMeta.content : '[0-9.]*'/const version = versionMeta ? versionMeta.content : '$VERSION_NUM'/" tinytorch/site/_static/version-badge.js
-
-          echo "✅ version-badge.js updated"
-          cat tinytorch/site/_static/version-badge.js | grep "const version"
-
-      - name: 📝 Update version in navbar badge
-        run: |
-          echo "📝 Updating version in tinytorch/site/_static/wip-banner.js..."
-
-          VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
-          VERSION_NUM=${VERSION_NUM#tinytorch-v}
-          RELEASE_DATE=$(date +'%b %-d, %Y')
-
-          # Update the top-of-file constants (easy to find, easy to sed)
-          sed -i "s/const TINYTORCH_VERSION = '.*'/const TINYTORCH_VERSION = '$VERSION_NUM'/" tinytorch/site/_static/wip-banner.js
-          sed -i "s/const TINYTORCH_RELEASE_DATE = '.*'/const TINYTORCH_RELEASE_DATE = '$RELEASE_DATE'/" tinytorch/site/_static/wip-banner.js
-
-          echo "✅ wip-banner.js updated"
-          head -10 tinytorch/site/_static/wip-banner.js
-
       - name: 📝 Update version in installer
         run: |
           echo "📝 Updating version in tinytorch/site/extra/install.sh..."
@@ -233,32 +205,25 @@ jobs:
           echo "✅ install.sh updated"
           cat tinytorch/site/extra/install.sh | grep "TINYTORCH_VERSION"
 
-      - name: 📢 Update announcement bar
+      - name: 📢 Update Quarto announcement bar
         run: |
-          echo "📢 Updating announcement in tinytorch/site/_static/announcement.json..."
+          echo "📢 Updating announcement in tinytorch/site-quarto/config/announcement.yml..."
 
           VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
           VERSION_NUM=${VERSION_NUM#tinytorch-v}
 
-          # Update announcement.json with new version
-          # Link directly to the TinyTorch release tag
-          cat > tinytorch/site/_static/announcement.json << EOF
-          {
-            "enabled": true,
-            "dismissId": "v$VERSION_NUM",
-            "items": [
-              {
-                "icon": "🎉",
-                "text": "v$VERSION_NUM released — ${{ github.event.inputs.description }}",
-                "link": "https://github.com/harvard-edge/cs249r_book/releases/tag/tinytorch-v$VERSION_NUM",
-                "linkText": "See →"
-              }
-            ]
-          }
+          cat > tinytorch/site-quarto/config/announcement.yml << EOF
+          # TinyTorch announcement bar configuration
+          # Managed via Quarto's built-in announcement feature
+          website:
+            announcement:
+              content: "🎉 v${VERSION_NUM} released — ${{ github.event.inputs.description }} · <a href='https://github.com/harvard-edge/cs249r_book/releases/tag/tinytorch-v${VERSION_NUM}'>See release →</a>"
+              type: info
+              dismissable: true
           EOF
 
-          echo "✅ announcement.json updated"
-          cat tinytorch/site/_static/announcement.json
+          echo "✅ announcement.yml updated"
+          cat tinytorch/site-quarto/config/announcement.yml
 
       - name: 📝 Update README badge
         run: |
@@ -278,7 +243,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add tinytorch/pyproject.toml tinytorch/site/_static/version-badge.js tinytorch/site/_static/wip-banner.js tinytorch/site/extra/install.sh tinytorch/site/_static/announcement.json tinytorch/README.md
+          git add tinytorch/pyproject.toml tinytorch/site/extra/install.sh tinytorch/site-quarto/config/announcement.yml tinytorch/README.md
           git commit -m "chore(tinytorch): bump version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
           git push origin dev
 
@@ -342,31 +307,31 @@ jobs:
         with:
           ref: main  # Use freshly synced main
 
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
       - name: 🐍 Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'tinytorch/site/requirements.txt'
 
-      - name: 📦 Install dependencies
-        working-directory: tinytorch
+      - name: 📦 Copy community app into Quarto site
         run: |
-          pip install --upgrade pip
-          pip install -r site/requirements.txt
+          echo "📦 Copying community HTML app into Quarto site..."
+          if [ -d tinytorch/site/extra/community ]; then
+            cp -r tinytorch/site/extra/community ${{ vars.TINYTORCH_SITE }}/community
+            echo "✅ Community app copied"
+          else
+            echo "⚠️ Community app not found in site/extra/community"
+          fi
 
-      - name: 👥 Generate team page from contributors
-        working-directory: tinytorch/site
+      - name: 🔨 Build Quarto Site
+        working-directory: ${{ vars.TINYTORCH_SITE }}
         run: |
-          echo "👥 Generating team page from .all-contributorsrc..."
-          python3 scripts/generate_team.py
-          echo "✅ Team page generated"
-
-      - name: 🔨 Build Jupyter Book
-        working-directory: tinytorch/site
-        run: |
-          jupyter-book build . --all
-          touch _build/html/.nojekyll
+          echo "🔨 Building TinyTorch Quarto site..."
+          quarto render
+          touch _build/.nojekyll
+          echo "✅ Build complete"
 
       - name: 📥 Download PDF Guide
         uses: actions/download-artifact@v7
@@ -385,17 +350,17 @@ jobs:
       - name: 📁 Inject PDFs into site
         run: |
           echo "📁 Injecting PDFs into built site..."
-          mkdir -p tinytorch/site/_build/html/_static/downloads
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads
 
           if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
-            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Guide.pdf
+            cp ./pdf-artifacts/guide/tinytorch-course.pdf ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/TinyTorch-Guide.pdf
             echo "✅ Injected TinyTorch-Guide.pdf"
           else
             echo "⚠️ Guide PDF not found"
           fi
 
           if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
-            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Paper.pdf
+            cp ./pdf-artifacts/paper/paper.pdf ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/TinyTorch-Paper.pdf
             echo "✅ Injected TinyTorch-Paper.pdf"
           else
             echo "⚠️ Paper PDF not found"
@@ -403,31 +368,32 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la tinytorch/site/_build/html/_static/downloads/ || echo "No downloads folder"
+          ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/ || echo "No downloads folder"
 
       - name: 📊 Download slide decks from release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "📊 Downloading slide decks from GitHub release..."
-          mkdir -p tinytorch/site/_build/html/_static/slides
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/assets/slides
 
           # Download all PDFs from the slides release
           gh release download tinytorch-slides-v0.1.0 \
             --repo harvard-edge/cs249r_book \
             --pattern "*.pdf" \
-            --dir tinytorch/site/_build/html/_static/slides
+            --dir ${{ vars.TINYTORCH_SITE }}/_build/assets/slides || echo "⚠️ No slides release found"
 
           echo ""
           echo "📦 Slides folder contents:"
-          ls -la tinytorch/site/_build/html/_static/slides/ || echo "No slides folder"
-          echo "✅ Downloaded $(ls tinytorch/site/_build/html/_static/slides/*.pdf 2>/dev/null | wc -l) slide decks"
+          ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/ || echo "No slides folder"
+          echo "✅ Downloaded $(ls ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/*.pdf 2>/dev/null | wc -l) slide decks"
 
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./tinytorch/site/_build/html
+          publish_dir: ./${{ vars.TINYTORCH_SITE }}/_build
           destination_dir: tinytorch
           publish_branch: gh-pages
           keep_files: true

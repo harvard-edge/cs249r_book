@@ -1916,17 +1916,11 @@ class GELUBackward(Function):
 
         if isinstance(tensor, Tensor) and tensor.requires_grad:
             x = tensor.data
-            # GELU derivative approximation
-            # Using the tanh approximation: gelu(x) ≈ 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
-            sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
-            x_cubed = x ** 3
-            tanh_arg = sqrt_2_over_pi * (x + 0.044715 * x_cubed)
-            tanh_out = np.tanh(tanh_arg)
-            sech_squared = 1 - tanh_out ** 2
-
-            # Derivative: 0.5 * (1 + tanh(...)) + 0.5 * x * sech²(...) * d(tanh_arg)/dx
-            d_tanh_arg = sqrt_2_over_pi * (1 + 0.134145 * x ** 2)
-            gelu_grad = 0.5 * (1 + tanh_out) + 0.5 * x * sech_squared * d_tanh_arg
+            # GELU derivative using the sigmoid approximation (matches forward):
+            # forward: gelu(x) = x * sigmoid(1.702 * x)
+            # d/dx [x * sig(1.702x)] = sig(1.702x) + x * 1.702 * sig(1.702x) * (1 - sig(1.702x))
+            sig = 1.0 / (1.0 + np.exp(-1.702 * x))
+            gelu_grad = sig + x * 1.702 * sig * (1.0 - sig)
 
             return (grad_output * gelu_grad,)
         return (None,)

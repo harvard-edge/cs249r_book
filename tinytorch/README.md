@@ -153,7 +153,7 @@ Build your framework through four progressive parts:
     <tr>
       <td align="center"><b>IV. Optimization</b></td>
       <td align="center">14-20</td>
-      <td>Profiling, quantization, compression, acceleration, benchmarking, capstone</td>
+      <td>Profiling, quantization, compression, acceleration, memoization, benchmarking, capstone</td>
     </tr>
   </tbody>
 </table>
@@ -315,7 +315,7 @@ TinyTorch/
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point
-│   ├── commands/               # 23 command modules
+│   ├── commands/               # 26 command modules
 │   └── core/                   # Core utilities
 │
 ├── tinytorch/                  # 📦 Generated package (import from here)
