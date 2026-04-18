@@ -129,7 +129,10 @@ def find_current_text(fig_id: str, qmd_file: str) -> dict:
     if not qmd_path.exists():
         return {"fig_cap": "", "fig_alt": ""}
 
-    text = qmd_path.read_text(encoding="utf-8")
+    try:
+        text = qmd_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return {"fig_cap": "", "fig_alt": ""}
 
     # Find the figure div block containing this fig-id
     # The div may span multiple lines, so collect the full attribute block
