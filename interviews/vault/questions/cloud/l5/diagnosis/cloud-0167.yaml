@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-0167
+title: The Speculative Decoding Memory Bomb
+topic: speculative-decoding
+status: published
+provenance: imported
+scenario: To improve Time Per Output Token (TPOT), your team implements speculative decoding for a 70B
+  model on H100s. You use a small draft model to generate 4 candidate tokens, and the 70B orchestrator
+  model verifies them in a single, parallel forward pass. In staging, TPOT improves by 2.5x. You deploy
+  to production. Shortly after, the service suffers a cascading failure from OOM errors, even though the
+  number of concurrent users did not increase. Your observability tools show that peak GPU memory usage
+  *per request* has inexplicably quadrupled. Critique this implementation. Why did an optimization designed
+  to reduce latency cause a catastrophic memory failure?
+details:
+  realistic_solution: The catastrophic failure stems from a misunderstanding of the memory access pattern
+    during the verification step. The 4x increase in memory per request is not a coincidence; it's a direct
+    result of the speculation length (k=4). To verify 4 candidate tokens in parallel, the attention mechanism's
+    internal data structures grow proportionally. The query tensor becomes `[batch, k, dim]` instead of
+    `[batch, 1, dim]`, and the intermediate attention score matrices become `k` times larger. These temporary
+    activation tensors, which must exist in HBM during the forward pass, are the source of the memory
+    explosion. The system was provisioned for the memory profile of standard decoding, where activations
+    grow linearly with sequence length. It was not provisioned for the multiplicative peak memory required
+    by the parallel verification step of speculative decoding, causing any GPU serving a moderate number
+    of users to instantly OOM.
+  common_mistake: The draft model itself uses too much memory. A 7B model uses ~14GB, which is significant,
+    but it's a fixed cost and doesn't explain the per-request memory explosion. Another mistake is to
+    blame weight loading overhead, which affects latency, not memory capacity.
+  napkin_math: Let's analyze the peak activation memory during one forward pass.
+chain:
+  id: cloud-chain-386
+  position: 3
+last_modified: '2026-04-01'
+tags:
+- scope:Serving Stack
