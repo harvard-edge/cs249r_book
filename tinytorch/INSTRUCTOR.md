@@ -417,30 +417,30 @@ def forward(self, q, k, v):
 - **Key Concept**: Small details matter at scale
 - **Demo**: Gradient vanishing/exploding
 
-### **Module 04-05: Layers & Networks**
-- **Focus**: Composition, parameter management
+### **Module 03-05: Layers, Losses & Data**
+- **Focus**: Composition, parameter management, data pipelines
 - **Key Concept**: Building blocks combine into complex systems
-- **Project**: Build a small CNN
+- **Project**: Build layers, define loss functions, load datasets
 
-### **Module 06-07: Spatial & Attention**
-- **Focus**: Algorithmic complexity, memory patterns
-- **Key Concept**: O(N²) operations become bottlenecks
-- **Demo**: Profile attention memory usage
+### **Module 06-08: Autograd, Optimizers & Training**
+- **Focus**: Automatic differentiation, gradient descent, end-to-end training
+- **Key Concept**: The training loop is where all components come together
+- **Project**: Train a real model on MNIST
 
-### **Module 08-11: Training Pipeline**
-- **Focus**: End-to-end system integration
-- **Key Concept**: Many components must work together
-- **Project**: Train a real model
+### **Module 09-13: CNNs & Transformers**
+- **Focus**: Spatial operations, tokenization, attention, full architectures
+- **Key Concept**: O(N²) attention operations become bottlenecks at scale
+- **Demo**: Profile attention memory usage, build a working GPT
 
-### **Module 12-15: Production**
-- **Focus**: Deployment, optimization, monitoring
-- **Key Concept**: Academic vs production requirements
-- **Demo**: Model compression, deployment
+### **Module 14-19: Optimization & Systems**
+- **Focus**: Profiling, quantization, compression, acceleration, memoization, benchmarking
+- **Key Concept**: Academic vs production requirements; measure before optimizing
+- **Demo**: Model compression, KV caching, performance profiling
 
-### **Module 16: TinyGPT**
-- **Focus**: Framework generalization
-- **Key Concept**: 70% component reuse from vision to language
-- **Capstone**: Build a working language model
+### **Module 20: Capstone**
+- **Focus**: Benchmark submission and competition
+- **Key Concept**: Professional benchmarking with standardized reporting
+- **Capstone**: Demonstrate framework capabilities with reproducible results
 
 ## 🎯 Learning Objectives
 
