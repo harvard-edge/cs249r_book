@@ -306,7 +306,7 @@ tito module test 01
 
 ### View Progress
 
-<div style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+<div class="modules-progress-box" style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
 
 ```bash
 tito module status
