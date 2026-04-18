@@ -288,7 +288,7 @@ print(x.grad) # Uses YOUR autograd!
 
 ### Test a Module (Without Exporting)
 
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+<div class="modules-test-box" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
 
 ```bash
 tito module test 01
