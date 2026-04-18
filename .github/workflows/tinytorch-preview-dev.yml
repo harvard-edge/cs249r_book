@@ -1,15 +1,15 @@
 name: '🔥 TinyTorch · 👁️ Preview (Dev)'
 
 # =============================================================================
-# TinyTorch — Dev Preview Deploy
+# TinyTorch — Dev Preview Deploy (Quarto)
 # =============================================================================
 #
-# Builds the TinyTorch Jupyter Book site with PDFs and slide decks, then
+# Builds the TinyTorch Quarto site with PDFs and slide decks, then
 # deploys to the dev preview site via SSH. Gated on Validate (Dev) passing.
 #
 # Flow:
 #   1. BUILD_PDFS   — Compile guide + paper PDFs (reusable workflow)
-#   2. BUILD_SITE   — Jupyter Book render + inject PDFs + download slides
+#   2. BUILD_SITE   — Quarto render + inject PDFs + download slides
 #   3. DEPLOY       — Push to dev preview repo via SSH
 #
 # Triggers:
@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-pdfs]
     if: |
-      always() && 
+      always() &&
       ((github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
@@ -65,32 +65,15 @@ jobs:
       - name: 📥 Checkout
         uses: actions/checkout@v6
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'tinytorch/site/requirements.txt'
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: 📦 Install dependencies
-        working-directory: tinytorch
+      - name: 🔨 Build Quarto Site
+        working-directory: tinytorch/site-quarto
         run: |
-          pip install --upgrade pip
-          pip install -r site/requirements.txt
-
-      - name: 👥 Generate team page from contributors
-        working-directory: tinytorch/site
-        run: |
-          echo "👥 Generating team page from .all-contributorsrc..."
-          python3 scripts/generate_team.py
-          echo "✅ Team page generated"
-
-      - name: 🔨 Build Jupyter Book
-        working-directory: tinytorch/site
-        run: |
-          echo "🔨 Building TinyTorch Jupyter Book..."
-          jupyter-book build . --all
-          touch _build/html/.nojekyll
+          echo "🔨 Building TinyTorch Quarto site..."
+          quarto render
+          touch _build/.nojekyll
           echo "✅ Build complete"
 
       - name: 📥 Download PDF Guide
@@ -110,17 +93,17 @@ jobs:
       - name: 📁 Inject PDFs into site
         run: |
           echo "📁 Injecting PDFs into built site..."
-          mkdir -p tinytorch/site/_build/html/_static/downloads
+          mkdir -p tinytorch/site-quarto/_build/assets/downloads
 
           if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
-            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Guide.pdf
+            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site-quarto/_build/assets/downloads/TinyTorch-Guide.pdf
             echo "✅ Injected TinyTorch-Guide.pdf"
           else
             echo "⚠️ Guide PDF not found"
           fi
 
           if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
-            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Paper.pdf
+            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site-quarto/_build/assets/downloads/TinyTorch-Paper.pdf
             echo "✅ Injected TinyTorch-Paper.pdf"
           else
             echo "⚠️ Paper PDF not found"
@@ -128,28 +111,28 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la tinytorch/site/_build/html/_static/downloads/ || echo "No downloads folder"
+          ls -la tinytorch/site-quarto/_build/assets/downloads/ || echo "No downloads folder"
 
       - name: 📊 Download slide decks from release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "📊 Downloading slide decks from GitHub release..."
-          mkdir -p tinytorch/site/_build/html/_static/slides
+          mkdir -p tinytorch/site-quarto/_build/assets/slides
 
           # Download all PDFs from the slides release
           gh release download tinytorch-slides-v0.1.0 \
             --repo harvard-edge/cs249r_book \
             --pattern "*.pdf" \
-            --dir tinytorch/site/_build/html/_static/slides
+            --dir tinytorch/site-quarto/_build/assets/slides || echo "⚠️ No slides release found"
 
           echo ""
           echo "📦 Slides folder contents:"
-          ls -la tinytorch/site/_build/html/_static/slides/ || echo "No slides folder"
-          echo "✅ Downloaded $(ls tinytorch/site/_build/html/_static/slides/*.pdf 2>/dev/null | wc -l) slide decks"
+          ls -la tinytorch/site-quarto/_build/assets/slides/ || echo "No slides folder"
+          echo "✅ Downloaded $(ls tinytorch/site-quarto/_build/assets/slides/*.pdf 2>/dev/null | wc -l) slide decks"
 
       - name: 🔗 Rewrite URLs for dev site
-        run: bash .github/scripts/rewrite-dev-urls.sh tinytorch tinytorch/site/_build/html
+        run: bash .github/scripts/rewrite-dev-urls.sh tinytorch tinytorch/site-quarto/_build
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -177,7 +160,7 @@ jobs:
           mkdir -p ${{ vars.DEV_TINYTORCH_PATH }}
 
           echo "🚚 Copying TinyTorch site content..."
-          cp -r "${{ github.workspace }}/tinytorch/site/_build/html/." ${{ vars.DEV_TINYTORCH_PATH }}/
+          cp -r "${{ github.workspace }}/tinytorch/site-quarto/_build/." ${{ vars.DEV_TINYTORCH_PATH }}/
 
           echo "🔍 Validating deployment content..."
           if [ ! -f "${{ vars.DEV_TINYTORCH_PATH }}/index.html" ]; then
@@ -190,7 +173,7 @@ jobs:
 
           echo "📦 Committing and pushing changes..."
           git add .
-          git commit -m "🔥 Deploy TinyTorch dev to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git commit -m "🔥 Deploy TinyTorch dev (Quarto) to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
           # Retry push with rebase to handle concurrent deploys
           for i in 1 2 3; do
