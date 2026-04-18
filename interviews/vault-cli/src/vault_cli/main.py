@@ -27,13 +27,13 @@ from vault_cli.commands import (
     diff_cmd as diff_cmd_mod,
 )
 from vault_cli.commands import (
-    generate as generate_cmd_mod,
-)
-from vault_cli.commands import (
     doctor as doctor_cmd_mod,
 )
 from vault_cli.commands import (
     dup as dup_cmd_mod,
+)
+from vault_cli.commands import (
+    generate as generate_cmd_mod,
 )
 from vault_cli.commands import (
     promote as promote_cmd_mod,
