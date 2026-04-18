@@ -18,7 +18,7 @@ name: '🔥 TinyTorch · 👁️ Preview (Dev)'
 #
 # Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_TINYTORCH_PATH}/
 # Secrets:    SSH_DEPLOY_KEY
-# Vars:       DEV_REPO, DEV_REPO_URL, DEV_TINYTORCH_PATH
+# Vars:       TINYTORCH_SITE, BOOK_TOOLS, DEV_REPO, DEV_REPO_URL, DEV_TINYTORCH_PATH
 #
 # Related:
 #   - tinytorch-validate-dev.yml — Gates this workflow (must pass first)
@@ -69,12 +69,10 @@ jobs:
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: 🔨 Build Quarto Site
-        working-directory: tinytorch/site-quarto
+        working-directory: ${{ vars.TINYTORCH_SITE }}
         run: |
-          echo "🔨 Building TinyTorch Quarto site..."
           quarto render
           touch _build/.nojekyll
-          echo "✅ Build complete"
 
       - name: 📥 Download PDF Guide
         uses: actions/download-artifact@v7
@@ -93,17 +91,17 @@ jobs:
       - name: 📁 Inject PDFs into site
         run: |
           echo "📁 Injecting PDFs into built site..."
-          mkdir -p tinytorch/site-quarto/_build/assets/downloads
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads
 
           if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
-            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site-quarto/_build/assets/downloads/TinyTorch-Guide.pdf
+            cp ./pdf-artifacts/guide/tinytorch-course.pdf ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/TinyTorch-Guide.pdf
             echo "✅ Injected TinyTorch-Guide.pdf"
           else
             echo "⚠️ Guide PDF not found"
           fi
 
           if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
-            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site-quarto/_build/assets/downloads/TinyTorch-Paper.pdf
+            cp ./pdf-artifacts/paper/paper.pdf ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/TinyTorch-Paper.pdf
             echo "✅ Injected TinyTorch-Paper.pdf"
           else
             echo "⚠️ Paper PDF not found"
@@ -111,28 +109,39 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la tinytorch/site-quarto/_build/assets/downloads/ || echo "No downloads folder"
+          ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/ || echo "No downloads folder"
 
       - name: 📊 Download slide decks from release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "📊 Downloading slide decks from GitHub release..."
-          mkdir -p tinytorch/site-quarto/_build/assets/slides
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/assets/slides
 
           # Download all PDFs from the slides release
           gh release download tinytorch-slides-v0.1.0 \
             --repo harvard-edge/cs249r_book \
             --pattern "*.pdf" \
-            --dir tinytorch/site-quarto/_build/assets/slides || echo "⚠️ No slides release found"
+            --dir ${{ vars.TINYTORCH_SITE }}/_build/assets/slides || echo "⚠️ No slides release found"
 
           echo ""
           echo "📦 Slides folder contents:"
-          ls -la tinytorch/site-quarto/_build/assets/slides/ || echo "No slides folder"
-          echo "✅ Downloaded $(ls tinytorch/site-quarto/_build/assets/slides/*.pdf 2>/dev/null | wc -l) slide decks"
+          ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/ || echo "No slides folder"
+          echo "✅ Downloaded $(ls ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/*.pdf 2>/dev/null | wc -l) slide decks"
 
       - name: 🔗 Rewrite URLs for dev site
-        run: bash .github/scripts/rewrite-dev-urls.sh tinytorch tinytorch/site-quarto/_build
+        run: bash .github/scripts/rewrite-dev-urls.sh tinytorch ${{ vars.TINYTORCH_SITE }}/_build
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          COMMIT_SHORT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+
+          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            ${{ vars.TINYTORCH_SITE }}/_build \
+            --verbose \
+            --commit-hash "${{ github.sha }}" \
+            --commit-short "$COMMIT_SHORT"
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -142,11 +151,9 @@ jobs:
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
 
-          # Add github.com to known hosts
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-          echo "🔧 Configuring git..."
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
@@ -160,7 +167,7 @@ jobs:
           mkdir -p ${{ vars.DEV_TINYTORCH_PATH }}
 
           echo "🚚 Copying TinyTorch site content..."
-          cp -r "${{ github.workspace }}/tinytorch/site-quarto/_build/." ${{ vars.DEV_TINYTORCH_PATH }}/
+          cp -r "${{ github.workspace }}/${{ vars.TINYTORCH_SITE }}/_build/." ${{ vars.DEV_TINYTORCH_PATH }}/
 
           echo "🔍 Validating deployment content..."
           if [ ! -f "${{ vars.DEV_TINYTORCH_PATH }}/index.html" ]; then
@@ -171,11 +178,9 @@ jobs:
           echo "📦 Contents of ${{ vars.DEV_TINYTORCH_PATH }}/:"
           ls -la ${{ vars.DEV_TINYTORCH_PATH }}/ | head -10
 
-          echo "📦 Committing and pushing changes..."
           git add .
           git commit -m "🔥 Deploy TinyTorch dev (Quarto) to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
-          # Retry push with rebase to handle concurrent deploys
           for i in 1 2 3; do
             if git push origin main 2>/dev/null; then
               echo "✅ Push succeeded on attempt $i"
