@@ -479,7 +479,7 @@ tito system health
 
 ### Import Errors
 
-<div style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
+<div class="modules-trouble-box" style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
 
 **Problem**: `from tinytorch import X` fails
 
