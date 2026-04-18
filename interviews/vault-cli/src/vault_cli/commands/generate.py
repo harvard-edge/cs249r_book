@@ -14,7 +14,6 @@ import hashlib
 import json
 import os
 import stat
-from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -232,7 +231,7 @@ def _call_llm(
             "[red]error[/red]: anthropic package not installed. "
             "Run: pip install anthropic"
         )
-        raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
+        raise typer.Exit(code=ExitCode.VALIDATION_FAILURE) from None
 
     client = anthropic.Anthropic(api_key=api_key)
     response = client.messages.create(
@@ -473,6 +472,6 @@ def register(app: typer.Typer) -> None:
         for p in written:
             console.print(f"  {p}")
         console.print(
-            f"\nNext: review each draft, then run "
-            f"[bold]vault promote <id> --reviewed-by <email>[/bold]"
+            "\nNext: review each draft, then run "
+            "[bold]vault promote <id> --reviewed-by <email>[/bold]"
         )
