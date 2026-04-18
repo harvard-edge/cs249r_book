@@ -6,12 +6,9 @@ Generates Quarto-compatible Markdown tables for the textbook's backmatter.
 Extracts live data from the mlsysim Hardware and Model registries.
 """
 
-import sys
-import os
-from .core.constants import ureg, Q_
-from .hardware.registry import Hardware
-from .models.registry import Models
-from .infra.registry import Infra
+from mlsysim.core.constants import Q_
+from mlsysim.hardware.registry import Hardware
+from mlsysim.models.registry import Models
 
 def fmt_q(q: Q_, precision: int = 1) -> str:
     """Format a quantity for the table."""

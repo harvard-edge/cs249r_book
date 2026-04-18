@@ -89,9 +89,6 @@ mlsysim schema      Export the JSON Schema for the mlsys.yaml configuration file
 ## Known limitations & gotchas
 
 - **First-order analytical model.** Predictions are typically within 15–30% of measured throughput on well-optimized workloads. Use MLSys·im to *compare* options and identify *bottlenecks*; validate with empirical benchmarks before committing to a production SLA. See `accuracy.qmd` for full validation against MLPerf v4.0.
-- **Editable installs (`pip install -e .`) are not supported.** The Hatch build backend uses a `sources` rewrite that the `editables` backend cannot handle. Use a regular `pip install ".[dev]"` from the source tree, or rebuild the wheel after each change.
-- **`examples/06_multi_objective_pareto.py`** still references a `result.pareto_front` attribute that was renamed in the API; the script will need an update before it runs end-to-end. Filed as a follow-up.
-- **`examples/gemini_design_loop.py`** has a syntax error (multi-line f-string) on Python < 3.12 and will fail to import. Filed as a follow-up; the file is excluded from the wheel.
 - **Slide PDFs.** Many tutorials cross-link to lecture slides at `github.com/harvard-edge/cs249r_book/releases/download/slides-latest/*.pdf`. The `slides-latest` release tag is not yet published; these links will resolve once the slides ship.
 - **Hosted notebook launchers.** Google Colab and Binder buttons are planned but not wired up for 0.1.0. Tutorials run locally on any Python 3.10+ environment.
 

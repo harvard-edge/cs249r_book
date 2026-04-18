@@ -11,15 +11,16 @@ Usage:
 """
 
 import sys
-import math
 from pathlib import Path
 
-# Add repo root to path so mlsysim is importable
-repo_root = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(repo_root))
+# Add the mlsysim project root (`paper/scripts/../../..` → `mlsysim/`) so the
+# nested package layout is importable when the script is run directly without
+# first installing the package.
+project_root = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-import mlsysim
-from mlsysim.core.constants import Q_, ureg
+import mlsysim  # noqa: E402
+from mlsysim.core.constants import Q_  # noqa: E402
 
 # ── Reported ground truth values ────────────────────────────────────
 REPORTED = {
