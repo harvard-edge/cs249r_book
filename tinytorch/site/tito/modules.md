@@ -73,7 +73,7 @@ Follow this workflow to build ML systems from scratch.
 
 Here's what a complete session looks like:
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="modules-session-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **1. Start Session**
 ```bash
