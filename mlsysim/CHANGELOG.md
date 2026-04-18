@@ -49,7 +49,7 @@
 - `mlsysim audit` — system audit
 
 ### Testing
-- 334 tests, 100% pass rate
+- 367 tests, 100% pass rate
 - Direct formula unit tests with known-answer validation
 - Solver suite covering all major models
 - Physics bounds validation across all hardware
