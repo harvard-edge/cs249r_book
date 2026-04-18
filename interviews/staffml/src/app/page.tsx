@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useEffect, useMemo } from "react";
-import { Search, X, Target, Crosshair, Flame, Calendar } from "lucide-react";
+import { Search, X, Target, Crosshair, Flame, Calendar, ChevronUp, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -49,6 +49,7 @@ function HomePage() {
   const [selectedTrack, setSelectedTrackState] = useState<string | null>(
     initialTrack && validTracks.includes(initialTrack) ? initialTrack : null
   );
+  const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const setSelectedTrack = (track: string | null) => {
     setSelectedTrackState(track);
     const params = new URLSearchParams(searchParams.toString());
@@ -235,6 +236,16 @@ function HomePage() {
       {/* ─── Header ─── */}
       <div className="px-6 pt-4 pb-4 border-b border-border">
         <div className="max-w-5xl mx-auto">
+          <AnimatePresence initial={false}>
+          {!headerCollapsed && (
+          <motion.div
+            key="header-content"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="overflow-hidden"
+          >
           {isReturning ? (
             /* Returning user — single compact row */
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -355,6 +366,10 @@ function HomePage() {
             .
           </p>
 
+          </motion.div>
+          )}
+          </AnimatePresence>
+
           {/* Filters row — track + areas + search on one compact strip */}
           <div className="flex flex-col gap-2">
             {/* Track pills */}
@@ -436,6 +451,19 @@ function HomePage() {
               )}
             </div>
           </div>
+
+          {/* Collapse/expand toggle */}
+          <button
+            onClick={() => setHeaderCollapsed(!headerCollapsed)}
+            className="w-full flex items-center justify-center pt-1.5 -mb-1 text-textMuted hover:text-textSecondary transition-colors"
+            aria-label={headerCollapsed ? "Expand header" : "Collapse header"}
+          >
+            {headerCollapsed ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronUp className="w-4 h-4" />
+            )}
+          </button>
         </div>
       </div>
 
