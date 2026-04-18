@@ -198,7 +198,7 @@ if manifest:
 
     ok(f"Vault v{manifest.get('version', '?')} — hash {manifest.get('contentHash', '?')}")
 else:
-    warn("No vault-manifest.json found — run generate-manifest.py")
+    warn("No vault-manifest.json found — run vault build --legacy-json")
 
 # ── 7. Distribution sanity ───────────────────────────────────
 

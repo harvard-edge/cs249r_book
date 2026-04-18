@@ -244,6 +244,21 @@ def register(app: typer.Typer) -> None:
             release_hash_val = conn.execute(
                 "SELECT value FROM release_metadata WHERE key='release_hash'"
             ).fetchone()["value"]
+            # Area count from taxonomy table (13 canonical areas)
+            areas_count_row = conn.execute(
+                "SELECT COUNT(DISTINCT area) AS n FROM taxonomy"
+            ).fetchone()
+            areas_count = areas_count_row["n"] if areas_count_row else topics_count
+            # Edges count from taxonomy_edges table
+            edges_count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM taxonomy_edges"
+            ).fetchone()
+            edges_count = edges_count_row["n"] if edges_count_row else 0
+            # Zone count from zones table (11 ikigai zones)
+            zones_table_count_row = conn.execute(
+                "SELECT COUNT(*) AS n FROM zones"
+            ).fetchone()
+            zones_table_count = zones_table_count_row["n"] if zones_table_count_row else len(by_zone)
         finally:
             conn.close()
 
@@ -285,6 +300,9 @@ def register(app: typer.Typer) -> None:
             "release_hash": release_hash_val,
             "total_questions": total,
             "topics": topics_count,
+            "areas": areas_count,
+            "edges": edges_count,
+            "zones_count": zones_table_count,
             "chains": {
                 "total": chains_total,
                 "full": chains_full,
@@ -312,7 +330,6 @@ def register(app: typer.Typer) -> None:
         def pct(n: int, d: int) -> str:
             return f"{100.0 * n / d:.1f}" if d else "0"
 
-        zones_count = len(by_zone)
         levels_count = len(by_level)
         tracks_count = len(by_track)
 
@@ -335,9 +352,9 @@ def register(app: typer.Typer) -> None:
             f"\\newcommand{{\\numtracks}}{{{tracks_count}}}",
             f"\\newcommand{{\\numlevels}}{{{levels_count}}}",
             f"\\newcommand{{\\numtopics}}{{{topics_count}}}",
-            f"\\newcommand{{\\numareas}}{{{topics_count}}}",
-            f"\\newcommand{{\\numzones}}{{{zones_count}}}",
-            "\\newcommand{\\numedges}{123}",
+            f"\\newcommand{{\\numareas}}{{{areas_count}}}",
+            f"\\newcommand{{\\numzones}}{{{zones_table_count}}}",
+            f"\\newcommand{{\\numedges}}{{{edges_count}}}",
             f"\\newcommand{{\\numchains}}{{{fmt(chains_total)}}}",
             f"\\newcommand{{\\numfullchains}}{{{fmt(chains_full)}}}",
             "\\newcommand{\\numinvariants}{26}",
@@ -355,7 +372,7 @@ def register(app: typer.Typer) -> None:
             "",
             f"\\newcommand{{\\numapplicablepairs}}{{{applicable_pairs}}}",
             f"\\newcommand{{\\numexcludedpairs}}{{{excluded_pairs}}}",
-            f"\\newcommand{{\\numapplicablecells}}{{{fmt(applicable_pairs * zones_count)}}}",
+            f"\\newcommand{{\\numapplicablecells}}{{{fmt(applicable_pairs * zones_table_count)}}}",
             "",
             "% Chain depth distribution",
         ])
