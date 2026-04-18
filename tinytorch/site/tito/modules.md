@@ -219,7 +219,7 @@ Jupyter Lab opens with the generated notebook for Module 05
 
 ### Resume Work (Continue Later)
 
-<div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1.5rem 0;">
+<div class="modules-resume-box" style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1.5rem 0;">
 
 ```bash
 tito module resume 01
