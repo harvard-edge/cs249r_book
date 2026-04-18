@@ -109,7 +109,7 @@ Consider the running example that threads through this volume: a 175-billion-par
 
 In the **Fleet Stack** (@sec-vol2-introduction), network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation. @fig-network-five-level-model organizes the fabric design space into five co-dependent levels, from physical signaling to cluster-scale orchestration.
 
-::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The Five-Level Network Model for ML Training**. Five layered levels span from physical signaling to cluster-scale collectives. Level 1 **Physical** (PAM4/NRZ signaling, SerDes, DAC, AOC, pluggable optics). Level 2 **Link** (Ethernet, InfiniBand Link, PFC, DCQCN, HPCC). Level 3 **Network** (IP routing, fat-tree, rail-optimized, Dragonfly, adaptive routing). Level 4 **Transport** (RDMA, GPUDirect, RoCEv2, zero-copy DMA). Level 5 **Application / Collective** (NCCL, Gloo, MPI, Ring-AllReduce, AllToAll)." fig-alt="Five-level stack from bottom to top: Physical, Link, Network, Transport, Application / Collective. Each level lists representative protocols; abstraction increases upward."}
+::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The Five-Level Network Model for ML Training**. Five layered levels span from physical signaling to cluster-scale collectives. Level 1 **Physical** (PAM4/NRZ signaling, SerDes, DAC, AOC, pluggable optics). Level 2 **Link** (Ethernet, InfiniBand Link, PFC, DCQCN, HPCC). Level 3 **Network** (IP routing, fat-tree, rail-optimized, Dragonfly, adaptive routing). Level 4 **Transport** (RDMA, GPUDirect, α-β model, RoCEv2, zero-copy DMA). Level 5 **Application / Collective** (NCCL, Gloo, MPI, Ring-AllReduce, AllToAll, AllGather)." fig-alt="Five-level stack from bottom to top: Physical, Link, Network, Transport, Application / Collective. Each level lists representative protocols; abstraction increases upward."}
 ![](images/svg/five-level-model.svg){width=100 percent}
 :::
 
@@ -269,7 +269,7 @@ plt.close()
 
 To see *why* this ratio matters so viscerally, consider *what* happens during a single training step. @fig-bandwidth-cliff-gantt contrasts the timeline for an 8-GPU job communicating within a node versus a 64-GPU job communicating across nodes.
 
-::: {#fig-bandwidth-cliff-gantt fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Cliff in a Training Step**. Two timelines for the same model: an 8-GPU intra-node job (top) using NVLink at 900 GB/s, and a 64-GPU inter-node job (bottom) using InfiniBand at 50 GB/s. The AllReduce phase (red) grows from a thin sliver to a dominant fraction of the step. Without communication--computation overlap, GPUs sit idle during the entire AllReduce, and the utilization gap between the two scenarios exceeds 10 percentage points." fig-alt="Two horizontal Gantt bars. Top bar shows forward pass, backward pass, and thin AllReduce sliver at 99 percent utilization. Bottom bar shows same compute phases but a wide AllReduce block dropping utilization to 87 percent."}
+::: {#fig-bandwidth-cliff-gantt fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Cliff in a Training Step**. Two timelines for the same model: an 8-GPU intra-node job (top) using NVLink at 900 GB/s, and a 64-GPU inter-node job (bottom) using InfiniBand at 50 GB/s. The AllReduce phase (red) grows from a thin sliver to a dominant fraction of the step. Without communication--computation overlap, GPUs sit idle during the entire AllReduce, and the utilization gap between the two scenarios exceeds 10 percentage points." fig-alt="Two horizontal Gantt bars. Top bar shows forward pass, backward pass, and thin AllReduce sliver at 99.5 percent utilization. Bottom bar shows same compute phases but a wide AllReduce block dropping utilization to 87.8 percent."}
 
 ```{.tikz}
 \usetikzlibrary{positioning, decorations.pathreplacing}
@@ -335,7 +335,7 @@ To see *why* this ratio matters so viscerally, consider *what* happens during a 
 
 :::
 
-The 12 percentage-point utilization gap in @fig-bandwidth-cliff-gantt represents millions of dollars in wasted compute over a months-long training run. Network fabric design is therefore the central engineering challenge of distributed training, not an afterthought.
+The 12.5 percentage-point utilization gap in @fig-bandwidth-cliff-gantt represents millions of dollars in wasted compute over a months-long training run. Network fabric design is therefore the central engineering challenge of distributed training, not an afterthought.
 
 ## *How* ML Networking Inverts Datacenter Assumptions {#sec-network-workload-inversion}
 
@@ -472,7 +472,7 @@ Two transport protocols dominate modern GPU clusters:
 
 [^fn-infiniband-origin]: **InfiniBand**: Formed in 1999 from the merger of two competing server I/O standards (Future I/O and NGIO), InfiniBand was originally designed to replace PCI as a general-purpose system interconnect. Its pivot to HPC networking preserved the credit-based, hardware-managed flow control that server I/O demanded---and this heritage is precisely why InfiniBand provides native losslessness without the PFC fragility that plagues Ethernet-based RDMA fabrics. \index{InfiniBand!origin}
 
-@fig-ib-roce-stack compares the two stacks, showing how both expose the same **Verbs API** to applications despite their different transport foundations.
+@fig-ib-roce-stack compares the two stacks, showing how RDMA-based protocols expose a user-space **Verbs API** that bypasses the kernel's traditional TCP/IP stack.
 
 ::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**Traditional TCP/IP vs. RDMA / RoCE v2 Stacks**. Side-by-side comparison. Traditional TCP/IP (left) traverses application, OS kernel (context switch), Socket API, TCP/UDP, IP/Ethernet, and NIC, with latency of 10--20 us and 2--3x CPU copies. RDMA/RoCE v2 (right) exposes a user-space Verbs API that bypasses the kernel, offloading transport to the RDMA NIC (GPUDirect reads GPU HBM directly), with latency of 1--3 us and zero-copy CPU overhead." fig-alt="Two protocol stacks. Left Traditional TCP/IP: Application, OS Kernel, Socket, TCP/UDP, IP, NIC (10-20 us, 2-3x copies). Right RDMA/RoCE v2: user-space Verbs API bypasses kernel to RDMA NIC with GPUDirect (1-3 us, zero copy)."}
 
@@ -864,7 +864,7 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 
 :::
 
-::: {#fig-fat-tree-detail fig-env="figure" fig-pos="htb" fig-cap="**Non-blocking Fat-Tree Topology**. A three-tier Clos network built from radix-k switches. By ensuring that the number of uplinks at each level matches the number of downlinks, the topology provides full bisection bandwidth between any two pods. The multiple parallel paths between leaf and spine enable hardware-based adaptive routing to spray packets and avoid congestion." fig-alt="Hierarchical switch diagram with three tiers: Leaf, Spine, and Core. Multiple parallel paths connect switches across tiers, illustrating full bisection bandwidth."}
+::: {#fig-fat-tree-detail fig-env="figure" fig-pos="htb" fig-cap="**Non-blocking Fat-Tree Topology**. A three-tier Clos network built from radix-k switches. By ensuring that the number of uplinks at each level matches the number of downlinks, the topology provides full bisection bandwidth between any two pods. The multiple parallel paths between leaf and spine enable hardware-based adaptive routing to spray packets and avoid congestion." fig-alt="Hierarchical switch diagram with three tiers: Core, Leaf, and GPU Racks. Multiple parallel paths connect switches across tiers, illustrating full bisection bandwidth."}
 ![](images/svg/fat-tree-detail.svg){width=100 percent}
 :::
 
@@ -985,7 +985,7 @@ However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod
 
 As @fig-rail-optimized-cabling shows, in modern ML nodes GPUs are partitioned into "Rails" corresponding to their PCIe slot position.
 
-::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**. In modern ML nodes (e.g., DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that **Tensor Parallelism**—which synchronizes between corresponding GPUs—never competes for bisection bandwidth with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, etc."}
+::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**. In modern ML nodes (e.g., DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that **data-parallel** AllReduce traffic—which synchronizes between corresponding GPUs—never competes for bisection bandwidth with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, etc."}
 
 ![](images/svg/rail-optimized.svg)
 
@@ -1212,7 +1212,7 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 
 :::
 
-The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. As @fig-congestion-cascade illustrates, this cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet.
+The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. This cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet. The root cause is **incast**, a many-to-one traffic pattern inherent to distributed synchronization, as illustrated in @fig-congestion-cascade; this deterministic overload is what triggers the PFC backpressure cascades.
 
 ::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**The Incast Problem in Distributed Training**. During AllReduce synchronization, every GPU node sends line-rate traffic to a common aggregation switch port, producing a many-to-one traffic burst. The figure shows 256 GPU nodes each at 50 GB/s converging on a switch port with 400 Gb/s (50 GB/s) capacity and a 32 MB buffer: 12.8 TB/s of offered load against 50 GB/s of capacity overflows the buffer by 256x. This deterministic overload is the root cause of the PFC backpressure cascades described below." fig-alt="Eight labeled GPU nodes (with 248 more implied) each at 50 GB/s converge on a central Switch Port with 400 Gb/s capacity and a 32 MB buffer that overflows. Callout notes 256x overload: 256 times 50 GB/s = 12.8 TB/s vs 50 GB/s port capacity."}
 ![](images/svg/incast-flow.svg){width=100 percent}
