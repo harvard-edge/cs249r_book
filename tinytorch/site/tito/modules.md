@@ -184,7 +184,7 @@ Convenience command to launch Jupyter Lab from the correct directory.
 
 ### List Available Modules
 
-<div style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
+<div class="modules-lifecycle-box" style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
 
 ```bash
 tito module list
