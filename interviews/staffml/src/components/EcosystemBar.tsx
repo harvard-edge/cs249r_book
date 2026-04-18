@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { ECOSYSTEM_BASE as BASE } from "../lib/env";
+import { useTheme } from "@/components/ThemeProvider";
 
 const ASSET_PREFIX = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -193,6 +194,19 @@ export default function EcosystemBar() {
   const [hoveredLink, setHoveredLink] = useState<string | null>(null);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+
+  // Theme-aware colors (matches shared/_navbar.scss light/dark)
+  const bgColor = isDark ? '#212529' : '#fff';
+  const borderColor = isDark ? '#454d55' : '#dee2e6';
+  const brandColor = isDark ? '#e6e6e6' : '#333';
+  const navColor = isDark ? '#adb5bd' : '#6c757d';
+  const dropdownBg = isDark ? '#2d2d2d' : '#fff';
+  const dropdownBorder = isDark ? '#454d55' : 'rgba(0,0,0,0.15)';
+  const dropdownItemColor = isDark ? '#e6e6e6' : '#212529';
+  const dropdownHoverBg = isDark ? '#3a3a3a' : '#f8f9fa';
+  const dividerColor = isDark ? '#454d55' : '#dee2e6';
 
   // Load Bootstrap Icons font
   useEffect(() => {
@@ -217,14 +231,14 @@ export default function EcosystemBar() {
 
   const linkStyle = (id: string) => ({
     ...S.navLink,
-    color: openMenu === id || hoveredLink === id ? ACCENT : NAV_COLOR,
+    color: openMenu === id || hoveredLink === id ? ACCENT : navColor,
   });
 
   const itemStyle = (key: string, active?: boolean) => ({
     ...S.dropdownItem,
-    color: active ? ACCENT : hoveredItem === key ? ACCENT : '#212529',
+    color: active ? ACCENT : hoveredItem === key ? ACCENT : dropdownItemColor,
     fontWeight: active ? 500 : 400,
-    backgroundColor: hoveredItem === key ? '#f8f9fa' : 'transparent',
+    backgroundColor: hoveredItem === key ? dropdownHoverBg : 'transparent',
   });
 
   const renderDropdown = (menu: MenuGroup) => (
@@ -244,10 +258,10 @@ export default function EcosystemBar() {
         }} />
       </button>
       {openMenu === menu.id && (
-        <div style={{ ...S.dropdown, ...(menu.alignEnd ? S.dropdownEnd : {}) }}>
+        <div style={{ ...S.dropdown, ...(menu.alignEnd ? S.dropdownEnd : {}), backgroundColor: dropdownBg, border: `1px solid ${dropdownBorder}` }}>
           {menu.items.map((item, i) =>
             item.divider ? (
-              <div key={i} style={S.divider} />
+              <div key={i} style={{ ...S.divider, borderTopColor: dividerColor }} />
             ) : (
               <a
                 key={i}
@@ -271,11 +285,12 @@ export default function EcosystemBar() {
   return (
     <div ref={barRef} style={{
       position: 'sticky' as const, top: 0, zIndex: 60,
-      backgroundColor: '#fff', borderBottom: '1px solid #dee2e6',
+      backgroundColor: bgColor, borderBottom: `1px solid ${borderColor}`,
+      transition: 'background-color 0.2s, border-color 0.2s',
     }}>
       <div style={{ ...S.nav, position: 'relative' as const, borderBottom: 'none' }}>
         {/* Brand */}
-        <a href={BASE} style={S.brand}>
+        <a href={BASE} style={{ ...S.brand, color: brandColor }}>
           <img
             src={`${ASSET_PREFIX}/logo-seas-shield.png`}
             alt=""
@@ -346,7 +361,7 @@ export default function EcosystemBar() {
 
       {/* Mobile expanded */}
       {mobileOpen && (
-        <div className="lg:hidden" style={{ borderTop: '1px solid #dee2e6', backgroundColor: '#fff', padding: '12px 16px' }}>
+        <div className="lg:hidden" style={{ borderTop: `1px solid ${borderColor}`, backgroundColor: bgColor, padding: '12px 16px' }}>
           {LEFT_MENUS.map((menu) => (
             <div key={menu.id} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: '#adb5bd', textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>
