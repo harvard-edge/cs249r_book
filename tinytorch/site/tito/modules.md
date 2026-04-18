@@ -196,7 +196,7 @@ tito module list
 
 ### Start a Module (First Time)
 
-<div style="background: #fffbeb; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+<div class="modules-start-box" style="background: #fffbeb; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
 
 ```bash
 tito module start 01
