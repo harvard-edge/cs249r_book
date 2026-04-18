@@ -100,10 +100,10 @@ const RIGHT_MENUS: MenuGroup[] = [
 // ─── Styles matching Bootstrap 5 navbar computed values ────
 
 // Colors extracted from Quarto's compiled Bootstrap CSS
-const ACCENT = '#a51c30';       // --bs-navbar-active-color
+const ACCENT = '#a51c30';       // --bs-navbar-active-color (crimson)
 const ACCENT_HOVER = 'rgba(165, 28, 48, 0.8)'; // --bs-navbar-hover-color
-const NAV_COLOR = '#545556';    // --bs-navbar-color: rgb(84.32, 84.66, 85)
-const BRAND_COLOR = '#545556';  // --bs-navbar-brand-color
+const NAV_COLOR = '#6c757d';    // Matches shared/_navbar.scss nav-link color
+const BRAND_COLOR = '#333';     // Matches shared/_navbar.scss .navbar-brand color
 
 const S = {
   nav: {
@@ -121,9 +121,9 @@ const S = {
     alignItems: 'center',
     gap: 8,
     textDecoration: 'none',
-    color: ACCENT,  // Brand text is accent color in Quarto theme
+    color: BRAND_COLOR,  // Neutral gray, matches shared/_navbar.scss
     fontSize: 20,  // --bs-navbar-brand-font-size: 1.25rem
-    fontWeight: 400,  // Bootstrap default
+    fontWeight: 500,  // Matches shared/_navbar.scss .navbar-brand
     whiteSpace: 'nowrap' as const,
     marginRight: 16,  // --bs-navbar-brand-margin-end: 1rem
   },
