@@ -359,7 +359,7 @@ tito module reset 01
 
 When you run `tito module complete XX`, here's what happens:
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="modules-export-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **Step 1: Validation**
 ```
