@@ -217,6 +217,7 @@ Tensor Class Structure:
 │ Utility Methods:                │
 │ • __repr__(), __str__()         │
 │ • numpy(), memory_footprint()   │
+│ • ndim, numel(), contiguous()   │
 └─────────────────────────────────┘
 ```
 
@@ -262,6 +263,7 @@ class Tensor:
     This class provides the core data structure for all ML operations:
     - data: The actual numerical values (NumPy array)
     - shape: Dimensions of the tensor
+    - ndim: Number of dimensions (0=scalar, 1=vector, 2=matrix, ...)
     - size: Total number of elements
     - dtype: Data type (float32)
 
@@ -317,6 +319,19 @@ class Tensor:
             int: Memory usage in bytes (e.g., 1000x1000 float32 = 4MB)
         """
         return self.data.nbytes
+
+    @property
+    def ndim(self):
+        """Number of tensor dimensions (0=scalar, 1=vector, 2=matrix, ...)."""
+        return len(self.shape)
+
+    def numel(self):
+        """Return total number of elements (PyTorch-compatible)."""
+        return self.size
+
+    def contiguous(self):
+        """Return a contiguous copy of the tensor data (PyTorch-compatible)."""
+        return Tensor(self.data.copy())
 
     def __add__(self, other):
         """Add two tensors element-wise with broadcasting support.
@@ -799,6 +814,21 @@ def test_unit_tensor_creation():
     tensor_3d = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
     assert tensor_3d.shape == (2, 2, 2)
     assert tensor_3d.size == 8
+
+    # Test PyTorch-compatible utility methods
+    assert scalar.ndim == 0, "Scalar should be 0-dimensional"
+    assert vector.ndim == 1, "Vector should be 1-dimensional"
+    assert matrix.ndim == 2, "Matrix should be 2-dimensional"
+    assert tensor_3d.ndim == 3, "3D tensor should be 3-dimensional"
+
+    assert scalar.numel() == 1, "Scalar has 1 element"
+    assert vector.numel() == 3, "Vector has 3 elements"
+    assert matrix.numel() == 4, "2x2 matrix has 4 elements"
+
+    # Test contiguous returns a copy with same data
+    contig = matrix.contiguous()
+    assert np.array_equal(contig.data, matrix.data)
+    assert contig.data is not matrix.data, "contiguous() should return a copy"
 
     print("✅ Tensor creation works correctly!")
 
