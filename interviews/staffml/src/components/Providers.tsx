@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { ToastProvider } from "@/components/Toast";
 import ThemeProvider from "@/components/ThemeProvider";
+import { CorpusProvider } from "@/lib/corpus-provider";
 import { flushAnalytics, track } from "@/lib/analytics";
 
 export default function Providers({ children }: { children: React.ReactNode }) {
@@ -26,9 +27,11 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeProvider>
-      <ToastProvider>
-        {children}
-      </ToastProvider>
+      <CorpusProvider>
+        <ToastProvider>
+          {children}
+        </ToastProvider>
+      </CorpusProvider>
     </ThemeProvider>
   );
 }
