@@ -1,0 +1,34 @@
+schema_version: 1
+id: cloud-2009
+title: Diagnosing Non-Contiguous Tensor Memory Bottlenecks
+topic: tensor-arena-planning
+status: published
+provenance: human
+scenario: You are profiling a PyTorch transformer training loop on a single NVIDIA H100 GPU. After introducing
+  a novel multi-head attention mechanism that heavily relies on tensor reshaping, slicing, and `.transpose()`,
+  the GPU SM (compute) utilization drops from 75% to 20%, while memory bandwidth utilization spikes to
+  95%. Profiling shows that time spent in `aten::clone` and uncoalesced element-wise kernels has increased
+  by 10x, severely bottlenecking the iteration. What is the root cause of this degradation at the tensor
+  abstraction level, and how do you resolve it?
+details:
+  realistic_solution: The `transpose()` and slicing operations only alter the tensor's metadata (shape
+    and strides), creating a non-contiguous memory view. Subsequent operations (like cuBLAS GEMMs or layer
+    norms) require contiguous memory, forcing PyTorch to implicitly trigger synchronous `aten::clone`
+    operations. The fix is to explicitly call `.contiguous()` immediately after the reshape to amortize
+    the cost, or utilize `einops` / custom Triton kernels to fuse the operations and avoid materializing
+    the intermediate non-contiguous tensor.
+  common_mistake: Candidates often assume the new attention math is computationally heavier or blame Python
+    interpreter overhead, completely missing how logical tensor metadata (strides) impacts physical memory
+    layouts.
+  napkin_math: For a tensor of shape [B=32, H=16, S=4096, D=128] in FP16, the physical size is 512 MB.
+    An implicit clone forces a 512 MB read + 512 MB write = 1 GB of memory traffic. On an H100 (3 TB/s
+    HBM3), each implicit clone adds ~0.33 ms of pure memory overhead. With 10 non-contiguous operations
+    per layer across 32 layers, this adds ~106 ms of pure memory transfer delay per forward pass, completely
+    starving the compute units.
+chain:
+  id: cloud-chain-414
+  position: 2
+created_at: '2026-03-24T01:42:40.082359'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

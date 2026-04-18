@@ -1,0 +1,35 @@
+schema_version: 1
+id: cloud-1212
+title: Root-Causing Memory Power in LLM Inference
+topic: energy-per-operation
+status: published
+provenance: human
+scenario: Your team is profiling an auto-regressive decoding microservice serving a 20-billion parameter
+  LLM (FP16, 40GB memory footprint) on a single A100 GPU (2 TB/s HBM2e bandwidth). At a batch size of
+  1, generating 50 tokens per second, the chip's arithmetic logic units (ALUs) consume merely ~0.2W, but
+  overall chip power draw unexpectedly hits 180W. Diagnose why the chip's power consumption is massively
+  disproportionate to the actual FLOPs performed.
+details:
+  realistic_solution: Diagnose the issue as extreme energy-per-byte disparity. At batch size 1, every
+    parameter must be loaded from HBM to SRAM for a single multiply-accumulate. Off-chip HBM access costs
+    ~80 pJ/byte, whereas an FP16 MAC operation costs ~0.1 pJ. On an A100 with 2 TB/s bandwidth, a 40 GB
+    model at batch=1 can generate at most ~50 tokens/sec (2 TB/s / 40 GB). At this rate, memory reads
+    alone consume ~160W while compute (at 0.1 pJ/MAC) uses only ~0.1W. To resolve the power bottleneck,
+    increase the batch size (to amortize weight reads over multiple tokens) or quantize weights to INT4/FP8
+    to significantly reduce the raw bytes fetched.
+  common_mistake: Candidates often misdiagnose this as an inefficient matrix multiplication kernel, static
+    leakage, or cooling overhead, failing to realize that data movement (fetching weights from HBM) inherently
+    costs orders of magnitude more energy than ALUs.
+  napkin_math: 'HBM Read Volume: 40 GB/token * 50 tokens/sec = 2 TB/sec (saturating A100 HBM bandwidth).
+    HBM Energy Cost: ~80 picoJoules (pJ) per byte. Power from memory reads = 2e12 bytes/sec * 80e-12 J/byte
+    = 160 Watts. Compute per token: 2 * 20e9 FLOPs = 40 GFLOPs (20 GMACs). At 50 tokens/sec = 2 TFLOP/s
+    = 1e12 MACs/s. Compute Power: 1e12 MACs/s * 0.1e-12 J/MAC = 0.1 Watts. Total: ~160W memory + ~0.1W
+    compute + ~20W static/overhead = ~180W. Memory movement consumes **~1600x** more power than compute.
+    This is why batch size 1 decode is fundamentally memory-energy-bound.'
+chain:
+  id: cloud-chain-128
+  position: 2
+created_at: '2026-03-23T22:12:15.757312'
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations
