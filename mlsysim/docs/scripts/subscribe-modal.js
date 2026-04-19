@@ -1,6 +1,24 @@
 /**
  * Subscribe Modal Component
- * Elegant popup subscription form for ML Systems Textbook
+ * Elegant popup subscription form for ML Systems Textbook.
+ *
+ * CANONICAL SOURCE. After editing this file, run:
+ *
+ *   bash shared/scripts/sync-mirrors.sh
+ *
+ * to propagate changes to the per-subsite mirrors. The sync script is
+ * authoritative; the mirror list lives there. CI runs `--check` to catch
+ * drift in pull requests.
+ *
+ * Why mirrors instead of symlinks? Quarto's resource-copy step preserves
+ * symlinks rather than dereferencing them, which breaks both local builds
+ * (`AlreadyExists` on the second pass) and gh-pages deploys (the symlink
+ * target falls outside the build output).
+ *
+ * Intentional non-mirrors (different content per subsite, keep in sync
+ * manually if behaviour needs to align):
+ *   tinytorch/site-quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
+ *   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
  */
 
 (function() {
