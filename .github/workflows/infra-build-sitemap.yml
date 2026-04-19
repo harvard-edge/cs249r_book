@@ -1,0 +1,155 @@
+name: 'infra: build sitemap-index'
+
+# Reusable workflow: aggregate every discovered <subsite>/sitemap.xml under
+# the gh-pages branch into a single root-level sitemap-index, then push.
+#
+# Use as the FINAL step in any *-publish-live workflow (or run on a schedule
+# / manually) so the canonical https://mlsysbook.ai/sitemap.xml stays in
+# sync with whatever subsites are currently deployed.
+#
+# Why a separate workflow rather than inlining into book-publish-live:
+#   - Every subsite publish (vol1, vol2, tinytorch, labs, kits, slides,
+#     mlsysim, instructors, staffml, site-landing) needs to refresh the
+#     index. Centralizing here keeps that one job in one place.
+#   - The index is cheap to rebuild (no rendering); making it its own
+#     workflow lets any publish trigger it via `workflow_call` without
+#     duplicating sed/git plumbing.
+#
+# Inputs:
+#   base_url           Public site URL (default: https://mlsysbook.ai)
+#   include_subsites   Optional comma-separated allowlist (top-level dirs).
+#                      Empty = "everything found".
+#   dry_run            When true, runs in --check mode (no push).
+
+on:
+  workflow_call:
+    inputs:
+      base_url:
+        description: 'Public base URL'
+        required: false
+        type: string
+        default: 'https://mlsysbook.ai'
+      include_subsites:
+        description: 'Comma-separated allowlist (e.g., "book,tinytorch,labs"); blank = all discovered'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Validate only; do not commit/push'
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Public base URL'
+        required: false
+        type: string
+        default: 'https://mlsysbook.ai'
+      include_subsites:
+        description: 'Comma-separated allowlist (e.g., "book,tinytorch,labs"); blank = all discovered'
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 'Validate only; do not commit/push'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Share the gh-pages-deploy concurrency group with the publish workflows so
+# we never race their pushes.
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-sitemap:
+    name: 'Aggregate subsite sitemaps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout dev (for the build script)
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+          path: dev-src
+          sparse-checkout: |
+            shared/scripts/build-sitemap.py
+          sparse-checkout-cone-mode: false
+
+      - name: 📥 Checkout gh-pages
+        uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: gh-pages
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🔍 Discover subsite sitemaps
+        run: |
+          INCLUDE='${{ inputs.include_subsites }}'
+          INCLUDE_FLAGS=""
+          if [ -n "$INCLUDE" ]; then
+            IFS=',' read -ra SITES <<< "$INCLUDE"
+            for s in "${SITES[@]}"; do
+              s_trimmed="$(echo "$s" | xargs)"
+              [ -n "$s_trimmed" ] && INCLUDE_FLAGS="$INCLUDE_FLAGS --include-subsite $s_trimmed"
+            done
+          fi
+          echo "INCLUDE_FLAGS=$INCLUDE_FLAGS" >> "$GITHUB_ENV"
+
+          python3 dev-src/shared/scripts/build-sitemap.py \
+            --root gh-pages \
+            --base-url '${{ inputs.base_url }}' \
+            $INCLUDE_FLAGS \
+            --check
+
+      - name: 📝 Build sitemap-index
+        if: inputs.dry_run != true
+        run: |
+          python3 dev-src/shared/scripts/build-sitemap.py \
+            --root gh-pages \
+            --base-url '${{ inputs.base_url }}' \
+            $INCLUDE_FLAGS
+
+      - name: 💾 Commit and push (if changed)
+        if: inputs.dry_run != true
+        working-directory: gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add sitemap.xml robots.txt
+
+          if git diff --cached --quiet; then
+            echo "✅ sitemap-index already up to date — nothing to push."
+            exit 0
+          fi
+
+          git commit -m "chore(seo): refresh sitemap-index + robots.txt"
+          git push origin gh-pages
+          echo "✅ Pushed updated sitemap-index."
+
+      - name: 📋 Summary
+        if: always()
+        run: |
+          echo "## Sitemap aggregation summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Base URL:** ${{ inputs.base_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Include filter:** \`${{ inputs.include_subsites || '(all discovered)' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Dry run:** ${{ inputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f gh-pages/sitemap.xml ]; then
+            echo "**Indexed sitemaps:**" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            grep -oE '<loc>[^<]+</loc>' gh-pages/sitemap.xml | sed 's|<loc>|- |;s|</loc>||' >> "$GITHUB_STEP_SUMMARY"
+          fi
