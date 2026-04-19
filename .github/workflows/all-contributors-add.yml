@@ -30,7 +30,13 @@ on:
     types: [created, edited]
 
 # =============================================================================
-# CONFIGURATION - Edit these values to customize the workflow
+# CONFIGURATION
+# =============================================================================
+# Workflow knobs only. The list of projects, their directories, aliases, and
+# section metadata lives in `.github/workflows/contributors/projects.json` —
+# edit that file (and only that file) to add or rename a project. PROJECTS,
+# PROJECT_ALIASES, and PROJECT_DIRS are loaded from there at the top of the
+# job and exported to $GITHUB_ENV for every subsequent step.
 # =============================================================================
 env:
   # LLM Configuration
@@ -39,26 +45,9 @@ env:
   # Git Configuration
   TARGET_BRANCH: 'dev'
 
-  # Valid contribution types (comma-separated)
+  # Valid contribution types (comma-separated). These are the keys the LLM is
+  # allowed to emit and that the deterministic regex fallback scans for.
   CONTRIBUTION_TYPES: 'bug,code,doc,design,ideas,review,test,tool'
-
-  # Valid project keys (comma-separated). These are the canonical names used
-  # in commit messages, bot replies, and generator section markers.
-  # NOTE: "staffml" is the brand; the source lives under interviews/ on disk
-  # (see PROJECT_DIRS below).
-  PROJECTS: 'book,tinytorch,kits,labs,mlsysim,staffml,slides,instructors'
-
-  # Project aliases (format: alias1:project1,alias2:project2). Use lowercase.
-  # Aliases are matched as substrings, so prefer non-ambiguous tokens only —
-  # e.g. avoid generic words like "deck" or "teaching" that appear in normal
-  # prose. Canonical project names are already substring-matched.
-  # `interviews:staffml` keeps backward compatibility with old comments that
-  # used the directory name.
-  PROJECT_ALIASES: 'tito:tinytorch,interviews:staffml,slide:slides,instructor:instructors'
-
-  # Project key → on-disk directory. Only specify entries where the project
-  # key differs from the directory name. Format: project1:dir1,project2:dir2
-  PROJECT_DIRS: 'staffml:interviews'
 
 jobs:
   add-contributor:
@@ -73,6 +62,31 @@ jobs:
       pull-requests: write
 
     steps:
+      # =====================================================================
+      # STEP 0: Load the projects config (projects.json → $GITHUB_ENV)
+      # =====================================================================
+      # Sparse-checkout just the helper + config so we can populate PROJECTS,
+      # PROJECT_ALIASES, and PROJECT_DIRS for every later step. The full
+      # checkout in STEP 4 happens after parse passes (avoids paying for it
+      # on malformed comments).
+      - name: Checkout projects config (sparse)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          sparse-checkout: |
+            .github/workflows/contributors/projects.json
+            .github/workflows/contributors/projects.py
+          sparse-checkout-cone-mode: false
+
+      - name: Export project env from projects.json
+        shell: bash
+        run: |
+          {
+            echo "PROJECTS=$(python3 .github/workflows/contributors/projects.py keys)"
+            echo "PROJECT_ALIASES=$(python3 .github/workflows/contributors/projects.py aliases)"
+            echo "PROJECT_DIRS=$(python3 .github/workflows/contributors/projects.py dirs-overrides)"
+          } >> "$GITHUB_ENV"
+
       # =====================================================================
       # STEP 1: Extract trigger line + detect project from PR files
       # =====================================================================
@@ -401,7 +415,10 @@ jobs:
       # =====================================================================
       # STEP 4: Checkout, update config, generate READMEs, commit
       # =====================================================================
-      - name: Checkout repository
+      # Full checkout. Supersedes the sparse checkout from STEP 0 — at this
+      # point we've passed parse and need every project's .all-contributorsrc,
+      # READMEs, and the generator scripts to update them.
+      - name: Checkout repository (full)
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         uses: actions/checkout@v6
         with:

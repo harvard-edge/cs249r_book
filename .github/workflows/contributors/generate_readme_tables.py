@@ -9,25 +9,20 @@ Usage:
     python generate_readme_tables.py [--project PROJECT] [--update]
 """
 
+import argparse
 import json
 import re
-import argparse
+import sys
 from pathlib import Path
 
 # Project key → on-disk directory. Project key is the canonical name used in
 # commit messages and bot replies; directory is where the .all-contributorsrc
-# file lives. Keep this in sync with PROJECTS / PROJECT_DIRS in
-# .github/workflows/all-contributors-add.yml.
-PROJECTS = {
-    "book": "book/",
-    "instructors": "instructors/",
-    "kits": "kits/",
-    "labs": "labs/",
-    "mlsysim": "mlsysim/",
-    "slides": "slides/",
-    "staffml": "interviews/",
-    "tinytorch": "tinytorch/",
-}
+# file lives. Loaded from projects.json (the single source of truth — edit
+# that file, not this dict, to add or rename a project).
+sys.path.insert(0, str(Path(__file__).parent))
+from projects import dirs as _project_dirs  # noqa: E402
+
+PROJECTS = {key: f"{d}/" for key, d in _project_dirs().items()}
 
 # Emoji mapping for contribution types (only types actually in use)
 # Synced with generate_main_readme.py

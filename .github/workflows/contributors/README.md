@@ -5,35 +5,46 @@ This folder contains scripts for managing contributor recognition across the rep
 ## Overview
 
 The contributor system tracks contributions across each top-level Quarto site
-or sub-project:
+or sub-project. Every consumer — the two workflows, both generators, the bot
+reply text — reads from a single config file:
 
-| Project key (canonical) | On-disk directory | Aliases recognized in comments |
-|---|---|---|
-| `book` | `book/` | — |
-| `tinytorch` | `tinytorch/` | `tito` |
-| `kits` | `kits/` | — |
-| `labs` | `labs/` | — |
-| `mlsysim` | `mlsysim/` | — |
-| `staffml` | `interviews/` | `interviews` |
-| `slides` | `slides/` | `slide` |
-| `instructors` | `instructors/` | `instructor` |
+> **`projects.json`** is the **single source of truth**. Add, rename, reorder
+> a project there and nowhere else.
 
-The **project key** is the canonical name used in commit messages, bot
-replies, and section markers. The **on-disk directory** is where the
-`.all-contributorsrc` lives — they only differ for `staffml` (which lives
-under `interviews/` for legacy reasons).
+`projects.py` loads `projects.json` and exposes:
 
-The single source of truth is the env block at the top of
-`all-contributors-add.yml`:
+- a small Python API (`projects()`, `keys()`, `dirs()`, `alias_pairs()`) used
+  by the generator scripts via `from projects import …`
+- a CLI used by the workflows that need shell-friendly strings:
+  ```bash
+  python3 projects.py keys             # → book,tinytorch,…,instructors
+  python3 projects.py aliases          # → tito:tinytorch,interviews:staffml,…
+  python3 projects.py dirs-overrides   # → staffml:interviews
+  python3 projects.py update-files     # → newline-separated file list
+  ```
 
-- `PROJECTS` — comma-separated list of canonical project keys
-- `PROJECT_ALIASES` — `alias:project_key` pairs (substring-matched in comments)
-- `PROJECT_DIRS` — `project_key:directory` pairs (only when they differ)
+### Each project entry has
 
-Keep the following in sync with that env block:
-- Trigger `paths` and the file/commit lists in `update-contributors.yml`
-- `PROJECTS` dict in `generate_readme_tables.py`
-- `PROJECT_SECTIONS` list in `generate_main_readme.py`
+- **`key`** — canonical name used in commit messages, bot replies, and
+  section markers (e.g. `staffml`).
+- **`dir`** — on-disk directory holding `.all-contributorsrc` and
+  `README.md` (e.g. `interviews`). May differ from the key.
+- **`aliases`** — alternate strings recognised in the trigger comment
+  (substring-matched, so prefer non-ambiguous tokens).
+- **`section`** — `{emoji, title, marker}` rendered into the root README.
+
+### Where `projects.json` is consumed
+
+| Consumer | How it reads |
+|---|---|
+| `generate_main_readme.py` | imports `projects.projects()` for section list |
+| `generate_readme_tables.py` | imports `projects.dirs()` for the path map |
+| `all-contributors-add.yml` | sparse-checkouts the file, runs `projects.py keys/aliases/dirs-overrides`, exports to `$GITHUB_ENV` |
+| `update-contributors.yml` | runs `projects.py update-files` to derive the change-detection and `git add` lists |
+
+The push trigger in `update-contributors.yml` uses the glob
+`*/.all-contributorsrc`, so adding a new project's config doesn't even need
+a workflow edit to start triggering.
 
 ## Scripts
 
@@ -61,10 +72,11 @@ python generate_main_readme.py [--dry-run]
 ```
 
 **What it does:**
-- Reads all four project `.all-contributorsrc` files
-- Generates HTML tables with contributor avatars and badges
-- Updates the Contributors section in `README.md`
-- Creates sections: Book, TinyTorch, Kits, Labs
+- Reads each project's `.all-contributorsrc` (project list comes from
+  `projects.json`).
+- Generates HTML tables with contributor avatars and badges.
+- Updates the Contributors section in the root `README.md`, in the order
+  declared in `projects.json`.
 
 ### `generate_readme_tables.py`
 
@@ -75,7 +87,9 @@ python generate_readme_tables.py [--project PROJECT] [--update]
 ```
 
 **Options:**
-- `--project`: Process only one project (book, tinytorch, kits, labs)
+- `--project`: Process only one project. Valid values come from
+  `projects.json` (currently: `book`, `tinytorch`, `mlsysim`, `staffml`,
+  `kits`, `labs`, `slides`, `instructors`).
 - `--update`: Actually update the README files (without this, just prints)
 
 **What it does:**
@@ -186,10 +200,12 @@ Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`,
 ├── update-contributors.yml      # Push-triggered workflow
 └── contributors/
     ├── README.md                 # This file
+    ├── projects.json             # ⭐ Single source of truth
+    ├── projects.py               # Loader + CLI for projects.json
     ├── requirements.txt          # Python dependencies
     ├── update_contributors.py    # GitHub API updater
-    ├── generate_main_readme.py   # Main README generator
-    ├── generate_readme_tables.py # Per-project README generator
+    ├── generate_main_readme.py   # Main README generator (reads projects.json)
+    ├── generate_readme_tables.py # Per-project README generator (reads projects.json)
     └── scan_contributors.py      # Git history scanner
 
 Project configs (path = on-disk directory, project key in parens):
