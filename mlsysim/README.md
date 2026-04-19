@@ -220,7 +220,9 @@ The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware pe
 
 Thanks to these wonderful people for helping improve MLSys·im!
 
-<!-- ALL-CONTRIBUTORS-LIST:START -->
+**Legend:** 🪲 Bug Hunter · ⚡ Code Warrior · 📚 Documentation Hero · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
 <table>
@@ -236,3 +238,8 @@ Thanks to these wonderful people for helping improve MLSys·im!
 <!-- prettier-ignore-end -->
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
+
+**Recognize a contributor:** Comment on any issue or PR:
+```
+@all-contributors please add @username for code, doc, ideas, or bug
+```

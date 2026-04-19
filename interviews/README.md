@@ -310,6 +310,10 @@ python3 scripts/generate-manifest.py
 
 ## Contributors
 
+Thanks to these wonderful people who have helped build StaffML!
+
+**Legend:** 🪲 Bug Hunter · ⚡ Code Warrior · 📚 Documentation Hero · 🎨 Design Artist · 🧠 Idea Generator · 🔎 Code Reviewer · 🧪 Test Engineer · 🛠️ Tool Builder
+
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
@@ -325,6 +329,11 @@ python3 scripts/generate-manifest.py
 <!-- prettier-ignore-end -->
 
 <!-- ALL-CONTRIBUTORS-LIST:END -->
+
+**Recognize a contributor:** Comment on any issue or PR:
+```
+@all-contributors please add @username for code, doc, ideas, or design
+```
 
 ---
 
