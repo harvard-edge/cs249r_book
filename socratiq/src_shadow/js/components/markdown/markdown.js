@@ -349,7 +349,6 @@ function normalizeMarkdownText(text) {
   
   // Find questions and %%% marker
   let questionLines = [];
-  let percentLineIndex = -1;
   
   // Helper function to identify a question line
   const isQuestion = (line) => {
@@ -367,7 +366,6 @@ function normalizeMarkdownText(text) {
     
     // Check for %%% marker
     if (line.includes('%%%')) {
-      percentLineIndex = i;
       continue;
     }
     
@@ -689,7 +687,6 @@ function submitEditedText(text, e) {
 
   let diagramId = '';
   if (containsWordReference(text)) {
-    diagramId = generateUniqueId();
     console.log("CONTAINS DIAGRAM!!");
     diagramId = generateUniqueId();
     generateDiagramId("aiActionCompleted", text, "mermaid_diagram", diagramId)

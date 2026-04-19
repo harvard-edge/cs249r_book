@@ -52,7 +52,6 @@ export function highlight(shadowRoot) {
 
       let diagramId = '';
       if (containsWordReference(text_combo)) {
-        diagramId = generateUniqueId();
         console.log("CONTAINS DIAGRAM!!");
         diagramId = generateUniqueId();
         generateDiagramId("aiActionCompleted", text_combo, "mermaid_diagram", diagramId)

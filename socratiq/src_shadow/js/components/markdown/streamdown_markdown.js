@@ -6,6 +6,7 @@ import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import markdownit from 'markdown-it';
 import markdownItContainer from 'markdown-it-container';
+import DOMPurify from 'dompurify';
 import { htmlLoader } from './loader';
 import { findClosestAIMessage } from '../../libs/utils/utils.js';
 import { containsWordReference } from '../../libs/diagram/mermaid';
@@ -90,6 +91,16 @@ function parseMarkdownWithStreaming(text, parseIncomplete = true) {
   return md.render(text);
 }
 
+// Escape HTML special characters to prevent XSS when inserting into innerHTML
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Code highlighting using plain pre/code with language class (compatible with any CSS theme)
 function highlightCode(code, language) {
   const escaped = code
@@ -109,9 +120,11 @@ async function renderMermaid(chart, containerId) {
   try {
     const id = `mermaid-${containerId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const { svg } = await mermaid.render(id, chart);
-    return svg;
+    return DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, html: true } });
   } catch (error) {
     console.error('Mermaid rendering error:', error);
+    const safeErrorMessage = escapeHtml(error && error.message ? error.message : 'Unknown error');
+    const safeChart = escapeHtml(chart);
     return `<div class="mermaid-error" style="
       background-color: #f8d7da;
       border: 1px solid #f5c6cb;
@@ -120,10 +133,10 @@ async function renderMermaid(chart, containerId) {
       border-radius: 4px;
       margin: 1rem 0;
     ">
-      <strong>Mermaid Error:</strong> ${error.message}
+      <strong>Mermaid Error:</strong> ${safeErrorMessage}
       <details style="margin-top: 0.5rem;">
         <summary style="cursor: pointer; color: #721c24;">Show Code</summary>
-        <pre style="margin-top: 0.5rem; background: #f5c6cb; padding: 0.5rem; border-radius: 3px; font-size: 0.875rem;">${chart}</pre>
+        <pre style="margin-top: 0.5rem; background: #f5c6cb; padding: 0.5rem; border-radius: 3px; font-size: 0.875rem;">${safeChart}</pre>
       </details>
     </div>`;
   }
@@ -502,9 +515,18 @@ function handleCustomReferenceClick(targetId, event) {
     
     if (sourceUrl && normalizedSourceUrl !== normalizedCurrentUrl) {
       console.log(`🔍 Cross-page reference detected: ${normalizedSourceUrl} !== ${normalizedCurrentUrl}`);
-      console.log(`🔍 Navigating to ${sourceUrl} with scroll-to=${targetId}`);
-      // Navigate to the source page with scroll parameter
-      window.location.href = `${sourceUrl}?scroll-to=${targetId}`;
+      try {
+        const safeUrl = new URL(sourceUrl, window.location.origin);
+        if ((safeUrl.protocol === 'http:' || safeUrl.protocol === 'https:') && safeUrl.origin === window.location.origin) {
+          safeUrl.searchParams.set('scroll-to', targetId);
+          console.log(`🔍 Navigating to ${safeUrl.toString()} with scroll-to=${targetId}`);
+          window.location.href = safeUrl.toString();
+        } else {
+          console.warn(`⚠️ Blocked unsafe cross-page navigation URL: ${sourceUrl}`);
+        }
+      } catch (e) {
+        console.warn(`⚠️ Invalid cross-page navigation URL: ${sourceUrl}`, e);
+      }
       return;
     } else if (!sourceUrl) {
       console.log(`❌ ERROR: No data-source-url found! Reference data may have been lost during save/load.`);
@@ -649,7 +671,6 @@ function showCustomReferenceTooltip(targetId, event, displayText) {
       for (const element of allElements) {
         const elementId = element.getAttribute('data-fuzzy-id');
         if (elementId && elementId.includes(targetId)) {
-          targetElement = element;
           targetContent = element.textContent || '';
           break;
         }
@@ -692,34 +713,41 @@ function showCustomReferenceTooltip(targetId, event, displayText) {
   
   // isCrossPage is already determined above
   
-  // Update tooltip content
-  const tooltipHTML = `
-    <div style="font-weight: 600; color: #374151; margin-bottom: 0.5rem;">
-      ${displayText}
-    </div>
-    ${truncatedContent ? `
-    <div style="color: #4b5563; margin-bottom: 0.75rem; font-style: italic; border-left: 3px solid #e5e7eb; padding-left: 0.5rem;">
-      "${truncatedContent}"
-    </div>
-    ` : ''}
-    <a href="#" 
-       onclick="event.preventDefault(); handleCustomReferenceClick('${targetId}'); return false;"
-       style="
-         color: #3b82f6;
-         text-decoration: none;
-         font-size: 0.75rem;
-         font-weight: 500;
-         display: inline-flex;
-         align-items: center;
-         gap: 0.25rem;
-       "
-       onmouseover="this.style.textDecoration='underline'"
-       onmouseout="this.style.textDecoration='none'">
-      ${isCrossPage ? 'Go to page →' : 'Go to target →'}
-    </a>
-  `;
-  
-  tooltip.innerHTML = tooltipHTML;
+  // Update tooltip content safely using DOM construction
+  tooltip.textContent = '';
+  const titleDiv = document.createElement('div');
+  titleDiv.style.fontWeight = '600';
+  titleDiv.style.color = '#374151';
+  titleDiv.style.marginBottom = '0.5rem';
+  titleDiv.textContent = displayText;
+  tooltip.appendChild(titleDiv);
+  if (truncatedContent) {
+    const quoteDiv = document.createElement('div');
+    quoteDiv.style.color = '#4b5563';
+    quoteDiv.style.marginBottom = '0.75rem';
+    quoteDiv.style.fontStyle = 'italic';
+    quoteDiv.style.borderLeft = '3px solid #e5e7eb';
+    quoteDiv.style.paddingLeft = '0.5rem';
+    quoteDiv.textContent = `"${truncatedContent}"`;
+    tooltip.appendChild(quoteDiv);
+  }
+  const link = document.createElement('a');
+  link.href = '#';
+  link.style.color = '#3b82f6';
+  link.style.textDecoration = 'none';
+  link.style.fontSize = '0.75rem';
+  link.style.fontWeight = '500';
+  link.style.display = 'inline-flex';
+  link.style.alignItems = 'center';
+  link.style.gap = '0.25rem';
+  link.textContent = isCrossPage ? 'Go to page →' : 'Go to target →';
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    handleCustomReferenceClick(targetId);
+  });
+  link.addEventListener('mouseover', () => { link.style.textDecoration = 'underline'; });
+  link.addEventListener('mouseout', () => { link.style.textDecoration = 'none'; });
+  tooltip.appendChild(link);
   
   // Add hover events to the tooltip
   tooltip.onmouseenter = () => {
@@ -803,7 +831,6 @@ function normalizeMarkdownText(text) {
   
   // Find questions and %%% marker
   let questionLines = [];
-  let percentLineIndex = -1;
   
   const isQuestion = (line) => {
     const cleanLine = line.replace(/^\d+\.\s*/, '')
@@ -818,7 +845,6 @@ function normalizeMarkdownText(text) {
     const line = lines[i].trim();
     
     if (line.includes('%%%')) {
-      percentLineIndex = i;
       continue;
     }
     
@@ -876,10 +902,11 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
 
   // Process custom containers first
   const customContainerHtml = md.render(processedText);
+  const sanitizedCustomContainerHtml = DOMPurify.sanitize(customContainerHtml);
   
   // Create a temporary container to process the HTML
   const tempDiv = document.createElement('div');
-  tempDiv.innerHTML = customContainerHtml;
+  tempDiv.innerHTML = sanitizedCustomContainerHtml;
 
   // Process code blocks with STREAMDOWN's highlighting
   const codeBlocks = tempDiv.querySelectorAll('pre code');
@@ -898,22 +925,30 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
       `;
       
       try {
-        const svg = await renderMermaid(code, Date.now());
+        const svg = await renderMermaid(code, Date.now()); // DOMPurify.sanitize applied inside renderMermaid
+        const safeSvg = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true, html: true } });
         mermaidContainer.innerHTML = `
           <div class="mermaid-diagram">
-            ${svg}
+            ${safeSvg}
           </div>
         `;
       } catch (error) {
-        mermaidContainer.innerHTML = `
-          <div class="mermaid-error">
-            <strong>Mermaid Error:</strong> ${error.message}
-            <details>
-              <summary>Show Code</summary>
-              <pre>${code}</pre>
-            </details>
-          </div>
-        `;
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'mermaid-error';
+        const strong = document.createElement('strong');
+        strong.textContent = 'Mermaid Error:';
+        errorDiv.appendChild(strong);
+        errorDiv.appendChild(document.createTextNode(` ${error && error.message ? error.message : 'Unknown error'}`));
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = 'Show Code';
+        const pre = document.createElement('pre');
+        pre.textContent = code;
+        details.appendChild(summary);
+        details.appendChild(pre);
+        errorDiv.appendChild(details);
+        mermaidContainer.innerHTML = '';
+        mermaidContainer.appendChild(errorDiv);
       }
       
       codeBlock.parentElement.parentElement.replaceWith(mermaidContainer);
@@ -964,7 +999,7 @@ async function processMarkdownWithStreamdown(text, parseIncomplete = true) {
     const processedText = renderMath(textNode.textContent);
     if (processedText !== textNode.textContent) {
       const mathDiv = document.createElement('span');
-      mathDiv.innerHTML = processedText;
+      mathDiv.innerHTML = DOMPurify.sanitize(processedText);
       textNode.parentNode.replaceChild(mathDiv, textNode);
     }
   }
@@ -1202,7 +1237,7 @@ export async function updateMarkdownPreview(text, clone, isResearch = 0, markdow
     </div>
   `;
 
-  preview.innerHTML = finalHtml;
+  preview.innerHTML = DOMPurify.sanitize(finalHtml, { FORCE_BODY: true, ADD_TAGS: ['style'] });
 
   // Initialize editable inputs (preserved functionality)
   initializeSpoilerEditing(preview);
@@ -1306,7 +1341,7 @@ function addQuestionsToPreview(preview, questions, contentToRender) {
       relatedDiv.appendChild(hr);
     }
     const button = document.createElement('button');
-    button.innerHTML = `+ ${removeLeadingNumberAndAsterisks(question)}`;
+    button.textContent = `+ ${removeLeadingNumberAndAsterisks(question)}`;
     button.style.backgroundColor = 'transparent';
     button.style.border = 'none';
     button.classList.add('followup-button');

@@ -1,4 +1,17 @@
-import Chart from 'chart.js/auto';
+import {
+    Chart,
+    LineController,
+    BarController,
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    BarElement,
+    Legend,
+    Tooltip
+} from 'chart.js';
+
+Chart.register(LineController, BarController, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Legend, Tooltip);
 
 export class FlashcardStats {
     constructor(shadowRoot) {

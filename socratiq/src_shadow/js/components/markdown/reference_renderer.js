@@ -242,18 +242,25 @@ function handleReferenceClick(refId, event) {
     
     if (sourceUrl && normalizedSourceUrl !== normalizedCurrentUrl) {
       console.log(`🔍 Cross-page reference detected: ${normalizedSourceUrl} !== ${normalizedCurrentUrl}`);
-      
-      if (paragraphId) {
-        console.log(`🔍 Navigating to ${sourceUrl} with scroll-to=${paragraphId}`);
-        // Navigate to the source page with scroll parameter
-        window.location.href = `${sourceUrl}?scroll-to=${paragraphId}`;
-        return;
-      } else {
-        console.log(`🔍 No paragraph ID available for cross-page navigation`);
-        // Navigate without scroll parameter
-        window.location.href = sourceUrl;
-        return;
+      try {
+        const safeUrl = new URL(sourceUrl, window.location.origin);
+        const isHttpProtocol = safeUrl.protocol === 'http:' || safeUrl.protocol === 'https:';
+        const isSameOrigin = safeUrl.origin === window.location.origin;
+        if (!isHttpProtocol || !isSameOrigin) {
+          console.warn(`⚠️ Blocked unsafe cross-page navigation URL: ${sourceUrl}`);
+          return;
+        }
+        if (paragraphId) {
+          console.log(`🔍 Navigating to ${safeUrl.toString()} with scroll-to=${paragraphId}`);
+          safeUrl.searchParams.set('scroll-to', paragraphId);
+        } else {
+          console.log(`🔍 No paragraph ID available for cross-page navigation`);
+        }
+        window.location.href = safeUrl.toString();
+      } catch (e) {
+        console.warn(`⚠️ Invalid cross-page navigation URL: ${sourceUrl}`, e);
       }
+      return;
     }
     
     // Same-page reference - use existing logic
