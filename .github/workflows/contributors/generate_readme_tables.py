@@ -16,10 +16,12 @@ from pathlib import Path
 
 PROJECTS = {
     "book": "book/",
+    "instructors": "instructors/",
     "interviews": "interviews/",
     "kits": "kits/",
     "labs": "labs/",
     "mlsysim": "mlsysim/",
+    "slides": "slides/",
     "tinytorch": "tinytorch/",
 }
 

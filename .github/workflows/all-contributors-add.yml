@@ -42,11 +42,15 @@ env:
   # Valid contribution types (comma-separated)
   CONTRIBUTION_TYPES: 'bug,code,doc,design,ideas,review,test,tool'
 
-  # Valid projects (comma-separated)
-  PROJECTS: 'book,tinytorch,kits,labs,mlsysim,interviews'
+  # Valid projects (comma-separated). One entry per top-level Quarto/site folder
+  # that has its own .all-contributorsrc and contributor section.
+  PROJECTS: 'book,tinytorch,kits,labs,mlsysim,interviews,slides,instructors'
 
-  # Project aliases (format: alias1:project1,alias2:project2)
-  PROJECT_ALIASES: 'tito:tinytorch,staffml:interviews'
+  # Project aliases (format: alias1:project1,alias2:project2). Use lowercase.
+  # Aliases are matched as substrings, so prefer non-ambiguous tokens only —
+  # e.g. avoid generic words like "deck" or "teaching" that appear in normal
+  # prose. Canonical project names are already substring-matched.
+  PROJECT_ALIASES: 'tito:tinytorch,staffml:interviews,slide:slides,instructor:instructors'
 
 jobs:
   add-contributor:
@@ -213,7 +217,7 @@ jobs:
             COMMENT: ${{ steps.extract.outputs.trigger_line }}
 
             CONTRIBUTION TYPES (pick one or more):
-            - bug: Found or reported a bug, identified issues
+            - bug: Found or reported a bug, identified issues, root-caused a failure
             - code: Wrote code, implemented features, fixed bugs
             - doc: Wrote documentation, improved docs, fixed typos
             - design: UI/UX design, visual design, architecture design
@@ -229,6 +233,11 @@ jobs:
 
             RULES:
             - types: Array of one or more contribution types from the list above.
+            - If the comment lists multiple types (separated by comma, slash, "and",
+              "&", "+", or whitespace), return ALL of them — do not collapse to one.
+            - Ignore emoji, punctuation, casing, and Markdown formatting when
+              identifying types. Treat "🪲 Bug,Code", "Bug & Code", "bug/code",
+              and "bug, code" as identical inputs that yield ["bug", "code"].
             - Do NOT include username or project fields. Those are detected separately.
 
             EXAMPLES:
@@ -243,6 +252,12 @@ jobs:
 
             Input: "@all-contributors @reviewer99 gave feedback on the PR"
             Output: {"types": ["review"]}
+
+            Input: "@all-contributors please add @user42 for 🪲 Bug,Code in Labs"
+            Output: {"types": ["bug", "code"]}
+
+            Input: "@all-contributors @maintainer for Doc & Review in tinytorch"
+            Output: {"types": ["doc", "review"]}
 
             Return ONLY the JSON object, no explanation or other text.
 
@@ -303,6 +318,28 @@ jobs:
               }
             } catch (e) {
               console.log('Failed to parse LLM JSON:', e.message);
+            }
+
+            // --- Deterministic fallback / safety net ---
+            // Scan the trigger line directly for whole-word type keywords. This
+            // protects against the LLM dropping a type when the comment is
+            // emoji-prefixed or has tight punctuation (e.g. "🪲 Bug,Code").
+            // We union with the LLM result so we never *lose* a type, but we
+            // still rely on the LLM for ambiguous natural-language phrasing.
+            const stripped = triggerLine
+              .toLowerCase()
+              .replace(/[^a-z0-9\s,/&+]/g, ' ');
+            const tokenRe = /\b(bug|code|doc|design|ideas|review|test|tool)\b/g;
+            const regexTypes = new Set();
+            let m;
+            while ((m = tokenRe.exec(stripped)) !== null) {
+              if (validTypes.includes(m[1])) regexTypes.add(m[1]);
+            }
+            if (regexTypes.size > 0) {
+              const merged = new Set([...types, ...regexTypes]);
+              const before = JSON.stringify(types);
+              types = [...merged];
+              console.log(`Type union — LLM=${before} regex=${JSON.stringify([...regexTypes])} -> ${JSON.stringify(types)}`);
             }
 
             // --- Validate types ---

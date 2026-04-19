@@ -4,13 +4,24 @@ This folder contains scripts for managing contributor recognition across the rep
 
 ## Overview
 
-The contributor system tracks contributions to four projects:
-- **book/** - ML Systems textbook
-- **tinytorch/** - Educational ML framework
-- **kits/** - Hardware kits
-- **labs/** - Lab exercises
+The contributor system tracks contributions across each top-level Quarto site
+or sub-project:
 
-Each project has its own `.all-contributorsrc` file, and the main `README.md` displays all contributors in organized sections.
+- **book/** — ML Systems textbook
+- **tinytorch/** — Educational ML framework (alias: `tito`)
+- **kits/** — Hardware kits
+- **labs/** — Lab exercises
+- **mlsysim/** — ML systems simulator
+- **interviews/** — StaffML interview hub (alias: `staffml`)
+- **slides/** — Beamer lecture decks (alias: `slide`)
+- **instructors/** — Instructor / adopter site (alias: `instructor`)
+
+Each project has its own `.all-contributorsrc` file, and the main `README.md`
+displays all contributors in organized sections. The canonical project list
+lives in `PROJECTS` inside `all-contributors-add.yml` — keep the trigger paths
+in `update-contributors.yml`, the `PROJECTS` dict in
+`generate_readme_tables.py`, and the `PROJECT_SECTIONS` list in
+`generate_main_readme.py` in sync with that env var.
 
 ## Scripts
 
@@ -101,10 +112,15 @@ Automatically adds contributors when you comment on any issue or PR:
 6. Replies to confirm the addition
 
 **Project Detection:**
-- Add `tinytorch` label OR mention "tinytorch" in issue title → tinytorch project
-- Add `kits` label OR mention "kits" in issue title → kits project
-- Add `labs` label OR mention "labs" in issue title → labs project
-- Otherwise → book project (default)
+1. Project name (or alias) explicitly mentioned in the trigger comment, e.g.
+   `@all-contributors please add @user for code in TinyTorch, Slides`. Multiple
+   projects in one comment are supported.
+2. PR file paths — if the PR only touches files under one top-level project
+   directory (`tinytorch/...`, `labs/...`, etc.), that project is used.
+3. Issue labels or title (matched against project names and aliases).
+
+If detection fails or is ambiguous, the workflow replies asking the user to
+specify the project explicitly.
 
 ### 2. `update-contributors.yml` - Push-Triggered
 
@@ -165,9 +181,13 @@ Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`,
     └── scan_contributors.py      # Git history scanner
 
 Project configs:
-├── .all-contributorsrc           # Root config (legacy)
-├── book/.all-contributorsrc      # Book contributors
-├── tinytorch/.all-contributorsrc # TinyTorch contributors
-├── kits/.all-contributorsrc      # Kits contributors
-└── labs/.all-contributorsrc      # Labs contributors
+├── .all-contributorsrc              # Root config (legacy / aggregate)
+├── book/.all-contributorsrc         # Book contributors
+├── tinytorch/.all-contributorsrc    # TinyTorch contributors
+├── kits/.all-contributorsrc         # Kits contributors
+├── labs/.all-contributorsrc         # Labs contributors
+├── mlsysim/.all-contributorsrc      # MLSys·im contributors
+├── interviews/.all-contributorsrc   # StaffML interview hub contributors
+├── slides/.all-contributorsrc       # Slide deck contributors
+└── instructors/.all-contributorsrc  # Instructor site contributors
 ```

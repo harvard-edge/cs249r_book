@@ -679,6 +679,44 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- LABS-CONTRIBUTORS-END -->
+
+---
+
+### 🎞️ Slides Contributors
+
+<!-- SLIDES-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- SLIDES-CONTRIBUTORS-END -->
+
+---
+
+### 🗺️ Instructor Site Contributors
+
+<!-- INSTRUCTORS-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- INSTRUCTORS-CONTRIBUTORS-END -->
 ---
 
 <div align="center">

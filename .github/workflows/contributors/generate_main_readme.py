@@ -2,9 +2,11 @@
 """
 Generate the main README.md contributor section from all project configs.
 
-This script reads the .all-contributorsrc files from each project
-(book, tinytorch, kits, labs) and generates a sectioned contributor
-table for the main README.md.
+This script reads each project's .all-contributorsrc file and generates a
+sectioned contributor table for the main README.md.
+
+To add or remove a project section, edit the PROJECT_SECTIONS list below —
+that is the single source of truth used to produce the rendered output.
 
 Usage:
     python generate_main_readme.py [--dry-run]
@@ -117,115 +119,60 @@ def generate_legend() -> str:
     return " · ".join(items)
 
 
+# Ordered list of project sections rendered in the main README.
+# Each entry: (config_dir, emoji, title, marker_id)
+#   - config_dir : top-level repo folder containing .all-contributorsrc
+#   - emoji      : section emoji
+#   - title      : section heading text (after the emoji)
+#   - marker_id  : prefix used in the HTML <!-- ${ID}-CONTRIBUTORS-START --> markers
+PROJECT_SECTIONS = [
+    ("book",        "📖",  "Textbook Contributors",       "BOOK"),
+    ("tinytorch",   "🔥",  "TinyTorch Contributors",      "TINYTORCH"),
+    ("mlsysim",     "🚀",  "MLSys·im Contributors",       "MLSYSIM"),
+    ("interviews",  "💼",  "Interview Hub Contributors",  "INTERVIEWS"),
+    ("kits",        "🛠️", "Hardware Kits Contributors",  "KITS"),
+    ("labs",        "🧪",  "Labs Contributors",           "LABS"),
+    ("slides",      "🎞️", "Slides Contributors",         "SLIDES"),
+    ("instructors", "🗺️", "Instructor Site Contributors", "INSTRUCTORS"),
+]
+
+
+def _render_section(emoji: str, title: str, marker_id: str, table_html: str) -> str:
+    return (
+        f"### {emoji} {title}\n"
+        "\n"
+        f"<!-- {marker_id}-CONTRIBUTORS-START -->\n"
+        "<!-- prettier-ignore-start -->\n"
+        "<!-- markdownlint-disable -->\n"
+        f"{table_html}\n"
+        "\n"
+        "<!-- markdownlint-restore -->\n"
+        "<!-- prettier-ignore-end -->\n"
+        f"<!-- {marker_id}-CONTRIBUTORS-END -->"
+    )
+
+
 def generate_sectioned_contributors(repo_root: Path) -> str:
     """Generate the full sectioned contributor section showing ALL contributors."""
-    # Load all configs
-    book_config = load_config(repo_root / "book" / ".all-contributorsrc")
-    tinytorch_config = load_config(repo_root / "tinytorch" / ".all-contributorsrc")
-    mlsysim_config = load_config(repo_root / "mlsysim" / ".all-contributorsrc")
-    kits_config = load_config(repo_root / "kits" / ".all-contributorsrc")
-    labs_config = load_config(repo_root / "labs" / ".all-contributorsrc")
-    interviews_config = load_config(repo_root / "interviews" / ".all-contributorsrc")
+    rendered_sections = []
+    for config_dir, emoji, title, marker_id in PROJECT_SECTIONS:
+        config = load_config(repo_root / config_dir / ".all-contributorsrc")
+        contributors = config.get("contributors", [])
+        table_html = generate_contributor_table(contributors)
+        rendered_sections.append(_render_section(emoji, title, marker_id, table_html))
 
-    book_contributors = book_config.get("contributors", [])
-    tinytorch_contributors = tinytorch_config.get("contributors", [])
-    mlsysim_contributors = mlsysim_config.get("contributors", [])
-    kits_contributors = kits_config.get("contributors", [])
-    labs_contributors = labs_config.get("contributors", [])
-    interviews_contributors = interviews_config.get("contributors", [])
-
-    # Generate tables
-    book_table = generate_contributor_table(book_contributors)
-    tinytorch_table = generate_contributor_table(tinytorch_contributors)
-    mlsysim_table = generate_contributor_table(mlsysim_contributors)
-    kits_table = generate_contributor_table(kits_contributors)
-    labs_table = generate_contributor_table(labs_contributors)
-    interviews_table = generate_contributor_table(interviews_contributors)
-
-    # Generate legend
     legend = generate_legend()
+    body = "\n\n---\n\n".join(rendered_sections)
 
-    return f'''## Contributors
-
-Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
-
-**Legend:** {legend}
-
-### 📖 Textbook Contributors
-
-<!-- BOOK-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{book_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- BOOK-CONTRIBUTORS-END -->
-
----
-
-### 🔥 TinyTorch Contributors
-
-<!-- TINYTORCH-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{tinytorch_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- TINYTORCH-CONTRIBUTORS-END -->
-
----
-
-### 🚀 MLSys·im Contributors
-
-<!-- MLSYSIM-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{mlsysim_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- MLSYSIM-CONTRIBUTORS-END -->
-
----
-
-### 💼 Interview Hub Contributors
-
-<!-- INTERVIEWS-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{interviews_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- INTERVIEWS-CONTRIBUTORS-END -->
-
----
-
-### 🛠️ Hardware Kits Contributors
-
-<!-- KITS-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{kits_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- KITS-CONTRIBUTORS-END -->
-
----
-
-### 🧪 Labs Contributors
-
-<!-- LABS-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{labs_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- LABS-CONTRIBUTORS-END -->'''
+    return (
+        "## Contributors\n"
+        "\n"
+        "Thanks goes to these wonderful people who have contributed to making this resource better for everyone!\n"
+        "\n"
+        f"**Legend:** {legend}\n"
+        "\n"
+        f"{body}"
+    )
 
 
 def update_readme(repo_root: Path, dry_run: bool = False) -> bool:
