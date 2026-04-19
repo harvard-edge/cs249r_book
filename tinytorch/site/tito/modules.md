@@ -73,7 +73,7 @@ Follow this workflow to build ML systems from scratch.
 
 Here's what a complete session looks like:
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="modules-session-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **1. Start Session**
 ```bash
@@ -138,7 +138,7 @@ tito module status
 
 ### Environment Health
 
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+<div class="modules-health-box" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
 
 **Check Setup (Run This First)**
 ```bash
@@ -184,7 +184,7 @@ Convenience command to launch Jupyter Lab from the correct directory.
 
 ### List Available Modules
 
-<div style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
+<div class="modules-lifecycle-box" style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
 
 ```bash
 tito module list
@@ -196,7 +196,7 @@ tito module list
 
 ### Start a Module (First Time)
 
-<div style="background: #fffbeb; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+<div class="modules-start-box" style="background: #fffbeb; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
 
 ```bash
 tito module start 01
@@ -219,7 +219,7 @@ Jupyter Lab opens with the generated notebook for Module 05
 
 ### Resume Work (Continue Later)
 
-<div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1.5rem 0;">
+<div class="modules-resume-box" style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1.5rem 0;">
 
 ```bash
 tito module resume 01
@@ -237,7 +237,7 @@ tito module resume 01
 
 ### View a Module (Read-Only)
 
-<div style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
+<div class="modules-view-box" style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
 
 ```bash
 tito module view 01
@@ -251,7 +251,7 @@ tito module view 01
 
 ### Complete & Export (Essential)
 
-<div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
+<div class="modules-complete-box" style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
 
 ```bash
 tito module complete 01
@@ -288,7 +288,7 @@ print(x.grad) # Uses YOUR autograd!
 
 ### Test a Module (Without Exporting)
 
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+<div class="modules-test-box" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
 
 ```bash
 tito module test 01
@@ -306,7 +306,7 @@ tito module test 01
 
 ### View Progress
 
-<div style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+<div class="modules-progress-box" style="background: #fef3c7; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
 
 ```bash
 tito module status
@@ -336,7 +336,7 @@ Next: Complete Module 04 to continue Foundation Tier
 
 ### Reset Module (Advanced)
 
-<div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
+<div class="modules-reset-box" style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
 ```bash
 tito module reset 01
@@ -359,7 +359,7 @@ tito module reset 01
 
 When you run `tito module complete XX`, here's what happens:
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="modules-export-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **Step 1: Validation**
 ```
@@ -439,7 +439,7 @@ tinytorch/
 
 ### Environment Not Ready
 
-<div style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
+<div class="modules-trouble-box" style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
 
 **Problem**: `tito system health` shows errors
 
@@ -460,7 +460,7 @@ tito system health
 
 ### Export Fails
 
-<div style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
+<div class="modules-trouble-box" style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
 
 **Problem**: `tito module complete XX` fails
 
@@ -479,7 +479,7 @@ tito system health
 
 ### Import Errors
 
-<div style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
+<div class="modules-trouble-box" style="background: #fff5f5; padding: 1.5rem; border: 1px solid #fed7d7; border-radius: 0.5rem; margin: 1rem 0;">
 
 **Problem**: `from tinytorch import X` fails
 
