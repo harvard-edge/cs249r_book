@@ -1,6 +1,10 @@
 function Note (note)
-  -- Only process for latex, pdf, or epub formats
-  if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") or quarto.doc.is_format("epub") then
+  -- Only convert footnotes to sidenotes for PDF/LaTeX output.
+  -- ePub is HTML-based: pandoc.RawInline('latex', ...) nodes are ignored by
+  -- the EPUB renderer, so the surrounding \sidenote{} delimiters are stripped
+  -- while the note body is emitted inline — causing the sidenote text to
+  -- appear embedded in the running prose (see issue #1333).
+  if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
     -- For PDF/LaTeX, convert footnote to sidenote for margin placement
     -- Requires sidenotes package (loaded in header-includes.tex)
     -- Fallback to \footnote is defined in header-includes.tex if package fails
@@ -22,6 +26,6 @@ function Note (note)
     table.insert(sidenote_content, pandoc.RawInline('latex', '}'))
     return sidenote_content
   end
-  -- For other formats, return the content unchanged
+  -- For ePub and all other formats, let Pandoc render footnotes normally.
   return nil
 end
