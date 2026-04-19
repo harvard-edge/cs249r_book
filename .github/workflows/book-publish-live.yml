@@ -677,15 +677,18 @@ jobs:
 
       - name: 📝 Update per-volume version in index.qmd
         run: |
-          # The volume version display lives in:
-          #   contents/vol1/index.qmd   doi: "vX.Y.Z"
-          #   contents/vol2/index.qmd   doi: "vA.B.C"
-          # rendered into the "Version" field of each volume's title block.
-          # version-link.js picks up the v\d+\.\d+\.\d+ string and hyperlinks
-          # it to the releases page.
+          # The volume version display lives in TWO places per volume:
+          #   index-vol{N}.qmd                 (project-root, renders /book/vol{N}/index.html)
+          #   contents/vol{N}/index.qmd        (deep, renders /book/vol{N}/contents/vol{N}/index.html)
+          # Both have a `doi: "vX.Y.Z"` line that surfaces in the title block,
+          # and version-link.js picks up the v\d+\.\d+\.\d+ string to hyperlink
+          # it to the releases page. The deep file remains the canonical
+          # sidebar "Volume home"; the root file is what the public URL hits.
           #
-          # We update the bare "vX.Y.Z" form (no prefix) because that's what
-          # readers see; the per-volume tag itself uses the vol{N}-v prefix.
+          # We MUST update both — otherwise the publicly-rendered welcome page
+          # at /book/vol{N}/ would display a stale version after the publish.
+          # The bare "vX.Y.Z" form (no `vol{N}-` prefix) is what readers see;
+          # the per-volume git tag itself uses the vol{N}-v prefix.
 
           NEW_VOL1="${{ needs.validate-inputs.outputs.new_vol1_version }}"
           NEW_VOL2="${{ needs.validate-inputs.outputs.new_vol2_version }}"
@@ -695,22 +698,35 @@ jobs:
 
           UPDATED_FILES=()
 
+          # bump_volume_doi <bare-version> <file...>
+          # Tolerates a missing file (warn only) so a future config change
+          # that removes one of the surfaces doesn't fail the publish.
+          bump_volume_doi() {
+            local bare="$1"; shift
+            for f in "$@"; do
+              if [ ! -f "$f" ]; then
+                echo "⚠️ skipping (not found): $f"
+                continue
+              fi
+              echo "📝 setting doi → $bare in $f"
+              sed -i "s|doi: \".*\"|doi: \"$bare\"|g" "$f"
+              grep "doi:" "$f" || echo "⚠️ no doi: line found in $f"
+              UPDATED_FILES+=("$f")
+            done
+          }
+
           if [ -n "$NEW_VOL1" ]; then
             BARE="${NEW_VOL1#vol1-}"   # strip "vol1-" → "vX.Y.Z"
-            FILE="${{ vars.BOOK_QUARTO }}/contents/vol1/index.qmd"
-            echo "📝 vol1: setting doi → $BARE in $FILE"
-            sed -i "s|doi: \".*\"|doi: \"$BARE\"|g" "$FILE"
-            grep "doi:" "$FILE" || echo "⚠️ no doi: line found in $FILE"
-            UPDATED_FILES+=("$FILE")
+            bump_volume_doi "$BARE" \
+              "${{ vars.BOOK_QUARTO }}/index-vol1.qmd" \
+              "${{ vars.BOOK_QUARTO }}/contents/vol1/index.qmd"
           fi
 
           if [ -n "$NEW_VOL2" ]; then
             BARE="${NEW_VOL2#vol2-}"
-            FILE="${{ vars.BOOK_QUARTO }}/contents/vol2/index.qmd"
-            echo "📝 vol2: setting doi → $BARE in $FILE"
-            sed -i "s|doi: \".*\"|doi: \"$BARE\"|g" "$FILE"
-            grep "doi:" "$FILE" || echo "⚠️ no doi: line found in $FILE"
-            UPDATED_FILES+=("$FILE")
+            bump_volume_doi "$BARE" \
+              "${{ vars.BOOK_QUARTO }}/index-vol2.qmd" \
+              "${{ vars.BOOK_QUARTO }}/contents/vol2/index.qmd"
           fi
 
           if [ "${#UPDATED_FILES[@]}" -eq 0 ]; then
