@@ -68,11 +68,11 @@ from typing import Dict, List, Optional, Any
 GEMINI_MODEL          = "gemini-3.1-pro-preview"
 GEMINI_TIMEOUT_SEC    = 420      # rewrite prompts carry full SVG source
 RETRY_BACKOFFS_SEC    = (2, 8, 24)
-WALL_TIME_BUDGET_SEC  = 12 * 60 * 60
+WALL_TIME_BUDGET_SEC  = 24 * 60 * 60   # 24h safety cap for overnight full sweep
 RENDER_WIDTH_PX       = 600
 REVIEW_BATCH_SIZE     = 8
 VERIFY_BATCH_SIZE     = 8        # 16 images per call
-MAX_CYCLES            = 4
+MAX_CYCLES            = 2        # full-sweep default; smoke showed cycles 1-2 capture bulk of improvements
 
 TERMINAL_STATUSES = {"clean", "fixed", "needs-human", "render-failed", "skipped-draft"}
 
