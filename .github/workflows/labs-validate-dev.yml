@@ -275,12 +275,27 @@ jobs:
           python3 labs/tests/browser_smoke.py --labs-dir /tmp/wasm-smoke
 
   # ===========================================================================
+  # Stage 4: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This pass adds external reachability as a
+  # warning. Flip fail_on_broken=true once the baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './labs/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
   # Summary
   # ===========================================================================
   summary:
     name: '📊 Summary'
     runs-on: ubuntu-latest
-    needs: [validate-notebooks, build-site, wasm-smoke-test]
+    needs: [validate-notebooks, build-site, wasm-smoke-test, check-links]
     if: always()
 
     steps:
@@ -293,6 +308,7 @@ jobs:
           echo "| 🧪 Notebook Validation | ${{ needs.validate-notebooks.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔨 Site Build | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🌐 WASM Export | ${{ needs.wasm-smoke-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
 
       - name: ❌ Check for failures
         run: |
@@ -302,4 +318,7 @@ jobs:
             echo "❌ Validation failed"
             exit 1
           fi
-          echo "✅ All checks passed"
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"

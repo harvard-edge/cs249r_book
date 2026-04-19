@@ -1,0 +1,148 @@
+name: '🌐 Site · ✅ Validate (Dev)'
+
+# =============================================================================
+# Unified Site — Content & Build Validation
+# =============================================================================
+#
+# Validates the unified mlsysbook.ai landing site (landing + about + community
+# + newsletter) before the preview/publish workflows ever touch it.
+#
+# Flow:
+#   1. BUILD_SITE   — Quarto render of the unified site
+#   2. CHECK_LINKS  — Lychee external-link reachability (Tier 2, non-blocking)
+#   3. SUMMARY      — Aggregate results
+#
+# Why this exists:
+#   site-preview-dev.yml jumps straight to building & SSH-deploying. With no
+#   validation gate the dev preview can land broken. This workflow is the
+#   missing CI counterpart added as part of the staged-rollout safety net.
+#
+# Triggers:
+#   - push: dev branch, site/** or shared/** paths
+#   - pull_request: site/** or shared/** changes
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+#
+# Related:
+#   - site-preview-dev.yml  — Dev preview deploy (gates on this passing)
+#   - site-publish-live.yml — Production deploy
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'shared/**'
+      - '.github/workflows/site-validate-dev.yml'
+      - '.github/workflows/site-preview-dev.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'site/**'
+      - 'shared/**'
+      - '.github/workflows/site-validate-dev.yml'
+      - '.github/workflows/site-preview-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Quarto site build
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build Unified Site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📬 Install newsletter sync deps (no API call)
+        run: |
+          pip install -r site/newsletter/requirements.txt
+          # We deliberately do NOT pull from Buttondown here — that requires
+          # a secret and is the deploy workflow's responsibility. We only need
+          # the deps so Quarto can render the newsletter index.
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Unified Site (HTML)
+        working-directory: site
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          MISSING=0
+          for page in index.html about/index.html community/index.html newsletter/index.html; do
+            if [ ! -f "site/_build/$page" ]; then
+              echo "❌ MISSING: $page"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "❌ $MISSING critical pages missing from build."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh site/_build | cut -f1)"
+          echo "📄 Pages: $(find site/_build -name '*.html' | wc -l)"
+
+  # ===========================================================================
+  # Stage 2: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This Lychee pass adds external
+  # reachability as a warning. Flip fail_on_broken=true once baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './site/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [build-site, check-links]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🌐 Unified Site Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Site Build (HTML) | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.build-site.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"
