@@ -46,7 +46,7 @@ on:
         type: boolean
         default: false
       release_type:
-        description: 'Release type (ignored if site_only) [patch]'
+        description: 'Release type (ignored if site_only OR if explicit_version is set) [patch]'
         required: true
         type: choice
         options:
@@ -54,6 +54,10 @@ on:
           - 'minor'
           - 'major'
         default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z to release (skips patch/minor/major math). Leave blank to auto-bump.'
+        required: false
+        default: ''
       confirm:
         description: 'Type "PUBLISH" to confirm (safety check) [required]'
         required: true
@@ -109,16 +113,32 @@ jobs:
             exit 0
           fi
 
-          echo "🔄 Getting latest TinyTorch version..."
-
-          # Get latest tinytorch-v* tag, default to v0.0.0 if none exist
+          # Always look up the previous tag (used as previous_version output)
           LATEST_VERSION=$(git tag -l "tinytorch-v*" | sort -V | tail -n1)
-          if [ -z "$LATEST_VERSION" ]; then
-            LATEST_VERSION="tinytorch-v0.0.0"
-            echo "📊 No TinyTorch tags found, using default: $LATEST_VERSION"
-          else
-            echo "📊 Latest TinyTorch tag: $LATEST_VERSION"
+          LATEST_VERSION=${LATEST_VERSION:-"tinytorch-v0.0.0"}
+          echo "📊 Latest TinyTorch tag: $LATEST_VERSION"
+
+          # Explicit-version override: bypass major/minor/patch math.
+          # Used for non-incremental jumps (e.g. 0.1.x → 0.10.0 alongside Vol II launch).
+          EXPLICIT="${{ github.event.inputs.explicit_version }}"
+          if [ -n "$EXPLICIT" ]; then
+            if ! echo "$EXPLICIT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "❌ explicit_version '$EXPLICIT' is not a valid X.Y.Z semver triple."
+              exit 1
+            fi
+            NEW_VERSION="tinytorch-v$EXPLICIT"
+            # Guard against re-tagging an existing release
+            if git rev-parse -q --verify "refs/tags/$NEW_VERSION" >/dev/null; then
+              echo "❌ Tag $NEW_VERSION already exists. Refusing to re-release."
+              exit 1
+            fi
+            echo "🎯 Explicit version override: $NEW_VERSION (bypassing ${{ github.event.inputs.release_type }} bump)"
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          echo "🔄 Auto-calculating next ${{ github.event.inputs.release_type }} version..."
 
           # Remove 'tinytorch-v' prefix for calculation
           VERSION_NUM=${LATEST_VERSION#tinytorch-v}
@@ -192,6 +212,19 @@ jobs:
           echo "✅ pyproject.toml version updated"
           cat tinytorch/pyproject.toml | grep "^version"
 
+      - name: 📝 Update version in settings.ini (nbdev / tito metadata)
+        run: |
+          echo "📝 Updating version in tinytorch/settings.ini..."
+
+          VERSION_NUM="${{ needs.validate-inputs.outputs.new_version }}"
+          VERSION_NUM=${VERSION_NUM#tinytorch-v}
+
+          # nbdev settings.ini uses unquoted "version = X.Y.Z" (no quotes)
+          sed -i "s/^version = .*/version = $VERSION_NUM/" tinytorch/settings.ini
+
+          echo "✅ settings.ini version updated"
+          grep "^version" tinytorch/settings.ini
+
       - name: 📝 Update version in installer
         run: |
           echo "📝 Updating version in tinytorch/site/extra/install.sh..."
@@ -243,7 +276,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add tinytorch/pyproject.toml tinytorch/site/extra/install.sh tinytorch/site-quarto/config/announcement.yml tinytorch/README.md
+          git add \
+            tinytorch/pyproject.toml \
+            tinytorch/settings.ini \
+            tinytorch/site/extra/install.sh \
+            tinytorch/site-quarto/config/announcement.yml \
+            tinytorch/README.md
           git commit -m "chore(tinytorch): bump version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
           git push origin dev
 
