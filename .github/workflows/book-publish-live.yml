@@ -161,7 +161,7 @@ on:
         required: false
         default: '60'
       previous_version:
-        description: 'Previous version to increment from (format: book-vX.Y.Z) [auto-detect from latest git tag]'
+        description: 'Previous version override (vol1-vX.Y.Z or vol2-vX.Y.Z). Only used when deploy_target is vol1 OR vol2 (single-volume). Ignored if deploy_target=all. Leave blank to auto-detect from latest matching tag.'
         required: false
         default: ''
       testing_mode:
@@ -327,9 +327,21 @@ jobs:
     timeout-minutes: 10
     if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     outputs:
+      # Backwards-compatible "summary" version string used by the 50+ status /
+      # release-notes / commit-message references downstream. With per-volume
+      # versioning it becomes either "vol1-vX.Y.Z", "vol2-vX.Y.Z", or
+      # "vol1-vX.Y.Z+vol2-vA.B.C" depending on deploy_target. Steps that need
+      # the per-volume value should use new_vol1_version / new_vol2_version
+      # instead.
       new_version: ${{ steps.version.outputs.new_version }}
       previous_version: ${{ steps.version.outputs.previous_version }}
       release_type: ${{ steps.version.outputs.release_type }}
+      # Per-volume outputs — empty string when that volume is not in the
+      # current deploy_target.
+      new_vol1_version: ${{ steps.version.outputs.new_vol1_version }}
+      new_vol2_version: ${{ steps.version.outputs.new_vol2_version }}
+      previous_vol1_version: ${{ steps.version.outputs.previous_vol1_version }}
+      previous_vol2_version: ${{ steps.version.outputs.previous_vol2_version }}
 
     steps:
       - name: 🔒 Check Branch Restriction
@@ -381,66 +393,135 @@ jobs:
 
           echo "✅ Ready to publish"
 
-      - name: 🏷️ Calculate Next Version
+      - name: 🏷️ Calculate Next Version (per-volume)
         id: version
         run: |
-          echo "🔄 Getting latest release version..."
+          # ----------------------------------------------------------------
+          # Per-volume version computation.
+          #
+          # Each volume tracks its own tag space:
+          #   vol1: tag prefix  vol1-v*    (continues from legacy book-v* if
+          #                                no vol1-v* tag exists yet)
+          #   vol2: tag prefix  vol2-v*    (defaults to v0.0.0 → first release
+          #                                bumps to v0.1.0)
+          #
+          # `deploy_target` decides which volume(s) get bumped on this run.
+          # The release_type (patch/minor/major) is applied to each volume
+          # that is in scope. The `new_version` output is a summary string
+          # used by downstream status/commit-message steps.
+          #
+          # `previous_version` workflow input (legacy override) is interpreted
+          # as the previous version for whichever single volume is targeted.
+          # If deploy_target=all, the input is ignored and both versions are
+          # auto-detected.
+          # ----------------------------------------------------------------
 
-          # Use provided previous version or auto-detect
-          if [ -n "${{ github.event.inputs.previous_version }}" ]; then
-            LATEST_VERSION="${{ github.event.inputs.previous_version }}"
-            echo "📌 Using provided previous version: $LATEST_VERSION"
-          else
-            # Get latest git tag version, default to book-v0.0.0 if no tags exist
-            LATEST_VERSION=$(git tag -l "book-v*" | sort -V | tail -n1)
-            if [ -z "$LATEST_VERSION" ]; then
-              LATEST_VERSION="book-v0.0.0"
-              echo "📊 No git tags found, using default: $LATEST_VERSION"
+          DEPLOY_TARGET="${{ github.event.inputs.deploy_target }}"
+          RELEASE_TYPE="${{ github.event.inputs.release_type }}"
+          OVERRIDE="${{ github.event.inputs.previous_version }}"
+
+          echo "📦 Deploy target: $DEPLOY_TARGET"
+          echo "📈 Release type:  $RELEASE_TYPE"
+
+          # NOTE on bash style: each `local` declaration is on its own line.
+          # Bundling them ("local a=$1 b=$2 c=${b#x}") breaks the parameter
+          # expansion in `c` because `b` isn't visible at expansion time.
+          bump() {
+            # bump <PREFIX> <PREVIOUS_FULL_TAG> → echoes new full tag
+            local prefix="$1"
+            local prev="$2"
+            local num="${prev#${prefix}-v}"
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$num"
+            major=${major:-0}
+            minor=${minor:-0}
+            patch=${patch:-0}
+            case "$RELEASE_TYPE" in
+              major) major=$((major+1)); minor=0; patch=0 ;;
+              minor) minor=$((minor+1)); patch=0 ;;
+              patch) patch=$((patch+1)) ;;
+            esac
+            echo "${prefix}-v${major}.${minor}.${patch}"
+          }
+
+          latest_for() {
+            # latest_for <PREFIX> [FALLBACK_TAG] → echoes latest tag with that
+            # prefix, or FALLBACK_TAG if none exists.
+            local prefix="$1"
+            local fallback="$2"
+            local latest
+            [ -z "$fallback" ] && fallback="${prefix}-v0.0.0"
+            latest=$(git tag -l "${prefix}-v*" | sort -V | tail -n1)
+            echo "${latest:-$fallback}"
+          }
+
+          # ------------------------------- vol1 ----------------------------
+          NEW_VOL1=""
+          PREV_VOL1=""
+          if [[ "$DEPLOY_TARGET" == "vol1" || "$DEPLOY_TARGET" == "all" ]]; then
+            if [ "$DEPLOY_TARGET" == "vol1" ] && [ -n "$OVERRIDE" ]; then
+              PREV_VOL1="$OVERRIDE"
+              echo "📌 vol1: using provided previous_version: $PREV_VOL1"
             else
-              echo "📊 Auto-detected latest git tag: $LATEST_VERSION"
+              # Seed vol1 from legacy book-v* if no vol1-v* tag exists yet,
+              # so the v0.5.1 → v0.6.0 line is preserved across the rename.
+              LEGACY=$(git tag -l "book-v*" | sort -V | tail -n1)
+              LEGACY=${LEGACY:-book-v0.0.0}
+              SEED_VOL1="vol1-v${LEGACY#book-v}"
+              PREV_VOL1=$(latest_for "vol1" "$SEED_VOL1")
+              echo "📊 vol1: latest = $PREV_VOL1"
             fi
+            NEW_VOL1=$(bump "vol1" "$PREV_VOL1")
+            echo "🎯 vol1: new    = $NEW_VOL1"
           fi
 
-          # Remove 'book-v' prefix for calculation
-          VERSION_NUM=${LATEST_VERSION#book-v}
+          # ------------------------------- vol2 ----------------------------
+          NEW_VOL2=""
+          PREV_VOL2=""
+          if [[ "$DEPLOY_TARGET" == "vol2" || "$DEPLOY_TARGET" == "all" ]]; then
+            if [ "$DEPLOY_TARGET" == "vol2" ] && [ -n "$OVERRIDE" ]; then
+              PREV_VOL2="$OVERRIDE"
+              echo "📌 vol2: using provided previous_version: $PREV_VOL2"
+            else
+              # Seed vol2 from v0.0.0 so the FIRST publish lands at v0.1.0
+              # (when release_type=minor, which it should be for a 1st
+              # release). vol2 has no legacy tag history to inherit from.
+              PREV_VOL2=$(latest_for "vol2" "vol2-v0.0.0")
+              echo "📊 vol2: latest = $PREV_VOL2"
+            fi
+            NEW_VOL2=$(bump "vol2" "$PREV_VOL2")
+            echo "🎯 vol2: new    = $NEW_VOL2"
+          fi
 
-          # Split version into components
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUM"
+          # --------------------------- summary string -----------------------
+          # Backwards-compatible `new_version` for the many downstream
+          # references that just want to print "what we're shipping".
+          if [ -n "$NEW_VOL1" ] && [ -n "$NEW_VOL2" ]; then
+            NEW_SUMMARY="${NEW_VOL1}+${NEW_VOL2}"
+            PREV_SUMMARY="${PREV_VOL1}+${PREV_VOL2}"
+          elif [ -n "$NEW_VOL1" ]; then
+            NEW_SUMMARY="$NEW_VOL1"
+            PREV_SUMMARY="$PREV_VOL1"
+          elif [ -n "$NEW_VOL2" ]; then
+            NEW_SUMMARY="$NEW_VOL2"
+            PREV_SUMMARY="$PREV_VOL2"
+          else
+            echo "❌ deploy_target=$DEPLOY_TARGET produced no per-volume bumps"
+            exit 1
+          fi
 
-          # Handle empty or invalid versions
-          MAJOR=${MAJOR:-0}
-          MINOR=${MINOR:-0}
-          PATCH=${PATCH:-0}
+          echo ""
+          echo "🏁 Summary: $NEW_SUMMARY (prev: $PREV_SUMMARY)"
 
-          echo "📊 Previous version components: $MAJOR.$MINOR.$PATCH"
-
-          # Calculate new version based on release type
-          case "${{ github.event.inputs.release_type }}" in
-            "major")
-              NEW_MAJOR=$((MAJOR + 1))
-              NEW_MINOR=0
-              NEW_PATCH=0
-              ;;
-            "minor")
-              NEW_MAJOR=$MAJOR
-              NEW_MINOR=$((MINOR + 1))
-              NEW_PATCH=0
-              ;;
-            "patch")
-              NEW_MAJOR=$MAJOR
-              NEW_MINOR=$MINOR
-              NEW_PATCH=$((PATCH + 1))
-              ;;
-          esac
-
-          NEW_VERSION="book-v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
-          echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
-          echo "📋 Description: ${{ github.event.inputs.description }}"
-
-          # Export for other steps
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
-          echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          {
+            echo "new_version=$NEW_SUMMARY"
+            echo "previous_version=$PREV_SUMMARY"
+            echo "release_type=$RELEASE_TYPE"
+            echo "new_vol1_version=$NEW_VOL1"
+            echo "new_vol2_version=$NEW_VOL2"
+            echo "previous_vol1_version=$PREV_VOL1"
+            echo "previous_vol2_version=$PREV_VOL2"
+          } >> "$GITHUB_OUTPUT"
 
   pre-flight-checks:
     name: '🛫 Pre-Flight Validation'
@@ -594,36 +675,61 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📝 Update Version in index.qmd
+      - name: 📝 Update per-volume version in index.qmd
         run: |
-          echo "📝 Updating version number in ${{ vars.BOOK_QUARTO }}/index.qmd..."
-          echo "🎯 This automatically updates the version displayed on the website"
-          echo "🔗 The version links to GitHub releases via assets/scripts/version-link.js"
-          echo ""
+          # The volume version display lives in:
+          #   contents/vol1/index.qmd   doi: "vX.Y.Z"
+          #   contents/vol2/index.qmd   doi: "vA.B.C"
+          # rendered into the "Version" field of each volume's title block.
+          # version-link.js picks up the v\d+\.\d+\.\d+ string and hyperlinks
+          # it to the releases page.
+          #
+          # We update the bare "vX.Y.Z" form (no prefix) because that's what
+          # readers see; the per-volume tag itself uses the vol{N}-v prefix.
 
-          # Switch to dev branch first to update the file
+          NEW_VOL1="${{ needs.validate-inputs.outputs.new_vol1_version }}"
+          NEW_VOL2="${{ needs.validate-inputs.outputs.new_vol2_version }}"
+
           git checkout dev
           git pull origin dev
 
-          # Find and update the doi line with the new version
-          # The doi field is repurposed to show version (with custom label "Version")
-          # JavaScript makes it link to releases page instead of DOI registry
-          sed -i "s|doi: \".*\"|doi: \"${{ needs.validate-inputs.outputs.new_version }}\"|g" ${{ vars.BOOK_QUARTO }}/index.qmd
+          UPDATED_FILES=()
 
-          echo "✅ Version updated to ${{ needs.validate-inputs.outputs.new_version }}"
-          echo "📄 Updated line:"
-          cat ${{ vars.BOOK_QUARTO }}/index.qmd | grep "doi:" || echo "Could not verify doi field"
+          if [ -n "$NEW_VOL1" ]; then
+            BARE="${NEW_VOL1#vol1-}"   # strip "vol1-" → "vX.Y.Z"
+            FILE="${{ vars.BOOK_QUARTO }}/contents/vol1/index.qmd"
+            echo "📝 vol1: setting doi → $BARE in $FILE"
+            sed -i "s|doi: \".*\"|doi: \"$BARE\"|g" "$FILE"
+            grep "doi:" "$FILE" || echo "⚠️ no doi: line found in $FILE"
+            UPDATED_FILES+=("$FILE")
+          fi
 
-          # Commit the version update
+          if [ -n "$NEW_VOL2" ]; then
+            BARE="${NEW_VOL2#vol2-}"
+            FILE="${{ vars.BOOK_QUARTO }}/contents/vol2/index.qmd"
+            echo "📝 vol2: setting doi → $BARE in $FILE"
+            sed -i "s|doi: \".*\"|doi: \"$BARE\"|g" "$FILE"
+            grep "doi:" "$FILE" || echo "⚠️ no doi: line found in $FILE"
+            UPDATED_FILES+=("$FILE")
+          fi
+
+          if [ "${#UPDATED_FILES[@]}" -eq 0 ]; then
+            echo "ℹ️ No per-volume index.qmd to update for this deploy_target."
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add ${{ vars.BOOK_QUARTO }}/index.qmd
-          git commit -m "chore: update version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
-          git push origin dev
+          git add "${UPDATED_FILES[@]}"
+          if git diff --cached --quiet; then
+            echo "✅ Volume index.qmd files already at target version — nothing to commit."
+            exit 0
+          fi
 
-          echo "✅ Version committed to dev branch"
-          echo "🔄 Next step: merge-to-main will include this version update"
+          git commit -m "chore: bump volume version(s) to ${{ needs.validate-inputs.outputs.new_version }}"
+          git push origin dev
+          echo "✅ Version commit pushed to dev. merge-to-main will pick it up."
 
   merge-to-main:
     name: '🔄 Merge to Main'
@@ -823,38 +929,48 @@ jobs:
 
           echo "✅ Synced with latest main branch"
 
-      - name: 🏷️ Create Release Tag
+      - name: 🏷️ Create per-volume release tag(s)
         run: |
-          echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
-          echo "✅ Build AND deployment completed successfully - safe to create release tag"
+          # Tag each volume independently. We REFUSE to retag (no force-
+          # delete on remote) because that would silently overwrite a
+          # previously-shipped release; if a tag already exists for the
+          # version we're trying to ship, that's a maintainer error and
+          # the publish should fail loudly.
 
-          # Check if tag already exists locally
-          if git tag -l "${{ needs.validate-inputs.outputs.new_version }}" | grep -q "${{ needs.validate-inputs.outputs.new_version }}"; then
-            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists locally"
-            echo "🔄 Removing existing tag to recreate it..."
-            git tag -d ${{ needs.validate-inputs.outputs.new_version }}
-          fi
+          NEW_VOL1="${{ needs.validate-inputs.outputs.new_vol1_version }}"
+          NEW_VOL2="${{ needs.validate-inputs.outputs.new_vol2_version }}"
+          DESCRIPTION="${{ github.event.inputs.description }}"
 
-          # Check if tag exists on remote
-          if git ls-remote --tags origin | grep -q "refs/tags/${{ needs.validate-inputs.outputs.new_version }}$"; then
-            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists on remote"
-            echo "🔄 Removing remote tag to recreate it..."
-            git push origin --delete ${{ needs.validate-inputs.outputs.new_version }}
-          fi
+          create_tag() {
+            local tag="$1"
+            local label="$2"
+            [ -z "$tag" ] && return 0
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+               || git ls-remote --tags origin | grep -q "refs/tags/${tag}$"; then
+              echo "❌ Tag $tag already exists. Refusing to overwrite a"
+              echo "   previously-shipped release. If this is intentional,"
+              echo "   delete the tag manually first."
+              exit 1
+            fi
+            echo "🏷️ Creating $label tag: $tag"
+            git tag -a "$tag" -m "Release $tag: $DESCRIPTION"
+            git push origin "$tag"
+            echo "✅ Pushed $tag"
+          }
 
-          # Create the tag on the latest main commit
-          git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
-          echo "✅ Tag created successfully!"
+          create_tag "$NEW_VOL1" "Volume I"
+          create_tag "$NEW_VOL2" "Volume II"
 
-      - name: 🚀 Push tag for release tracking
+      - name: 📋 Tag summary
         run: |
-          echo "🚀 Pushing release tag for version tracking..."
-          git push origin ${{ needs.validate-inputs.outputs.new_version }}
-
-          echo "✅ Release tag pushed successfully!"
-          echo "🏷️ Tag: ${{ needs.validate-inputs.outputs.new_version }}"
-          echo "📋 Description: ${{ github.event.inputs.description }}"
-          echo "📊 This tag marks a successful build and tested release"
+          echo "## 🏷️ Release tags created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.validate-inputs.outputs.new_vol1_version }}" ] && \
+            echo "- **Volume I:**  \`${{ needs.validate-inputs.outputs.new_vol1_version }}\`" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.validate-inputs.outputs.new_vol2_version }}" ] && \
+            echo "- **Volume II:** \`${{ needs.validate-inputs.outputs.new_vol2_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Description: ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
 
   download-and-deploy-artifacts:
     name: '📦 Download Artifacts & Deploy to GitHub Pages'
