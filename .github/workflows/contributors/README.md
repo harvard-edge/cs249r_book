@@ -7,21 +7,33 @@ This folder contains scripts for managing contributor recognition across the rep
 The contributor system tracks contributions across each top-level Quarto site
 or sub-project:
 
-- **book/** — ML Systems textbook
-- **tinytorch/** — Educational ML framework (alias: `tito`)
-- **kits/** — Hardware kits
-- **labs/** — Lab exercises
-- **mlsysim/** — ML systems simulator
-- **interviews/** — StaffML interview hub (alias: `staffml`)
-- **slides/** — Beamer lecture decks (alias: `slide`)
-- **instructors/** — Instructor / adopter site (alias: `instructor`)
+| Project key (canonical) | On-disk directory | Aliases recognized in comments |
+|---|---|---|
+| `book` | `book/` | — |
+| `tinytorch` | `tinytorch/` | `tito` |
+| `kits` | `kits/` | — |
+| `labs` | `labs/` | — |
+| `mlsysim` | `mlsysim/` | — |
+| `staffml` | `interviews/` | `interviews` |
+| `slides` | `slides/` | `slide` |
+| `instructors` | `instructors/` | `instructor` |
 
-Each project has its own `.all-contributorsrc` file, and the main `README.md`
-displays all contributors in organized sections. The canonical project list
-lives in `PROJECTS` inside `all-contributors-add.yml` — keep the trigger paths
-in `update-contributors.yml`, the `PROJECTS` dict in
-`generate_readme_tables.py`, and the `PROJECT_SECTIONS` list in
-`generate_main_readme.py` in sync with that env var.
+The **project key** is the canonical name used in commit messages, bot
+replies, and section markers. The **on-disk directory** is where the
+`.all-contributorsrc` lives — they only differ for `staffml` (which lives
+under `interviews/` for legacy reasons).
+
+The single source of truth is the env block at the top of
+`all-contributors-add.yml`:
+
+- `PROJECTS` — comma-separated list of canonical project keys
+- `PROJECT_ALIASES` — `alias:project_key` pairs (substring-matched in comments)
+- `PROJECT_DIRS` — `project_key:directory` pairs (only when they differ)
+
+Keep the following in sync with that env block:
+- Trigger `paths` and the file/commit lists in `update-contributors.yml`
+- `PROJECTS` dict in `generate_readme_tables.py`
+- `PROJECT_SECTIONS` list in `generate_main_readme.py`
 
 ## Scripts
 
@@ -180,14 +192,14 @@ Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`,
     ├── generate_readme_tables.py # Per-project README generator
     └── scan_contributors.py      # Git history scanner
 
-Project configs:
+Project configs (path = on-disk directory, project key in parens):
 ├── .all-contributorsrc              # Root config (legacy / aggregate)
-├── book/.all-contributorsrc         # Book contributors
-├── tinytorch/.all-contributorsrc    # TinyTorch contributors
-├── kits/.all-contributorsrc         # Kits contributors
-├── labs/.all-contributorsrc         # Labs contributors
-├── mlsysim/.all-contributorsrc      # MLSys·im contributors
-├── interviews/.all-contributorsrc   # StaffML interview hub contributors
-├── slides/.all-contributorsrc       # Slide deck contributors
-└── instructors/.all-contributorsrc  # Instructor site contributors
+├── book/.all-contributorsrc         # book
+├── tinytorch/.all-contributorsrc    # tinytorch
+├── kits/.all-contributorsrc         # kits
+├── labs/.all-contributorsrc         # labs
+├── mlsysim/.all-contributorsrc      # mlsysim
+├── interviews/.all-contributorsrc   # staffml  (directory ≠ project key)
+├── slides/.all-contributorsrc       # slides
+└── instructors/.all-contributorsrc  # instructors
 ```

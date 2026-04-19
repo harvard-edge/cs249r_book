@@ -122,17 +122,19 @@ def generate_legend() -> str:
 # Ordered list of project sections rendered in the main README.
 # Each entry: (config_dir, emoji, title, marker_id)
 #   - config_dir : top-level repo folder containing .all-contributorsrc
+#                  (this is the on-disk directory, not necessarily the project
+#                   key — e.g. "interviews" on disk renders as "StaffML")
 #   - emoji      : section emoji
 #   - title      : section heading text (after the emoji)
 #   - marker_id  : prefix used in the HTML <!-- ${ID}-CONTRIBUTORS-START --> markers
 PROJECT_SECTIONS = [
-    ("book",        "📖",  "Textbook Contributors",       "BOOK"),
-    ("tinytorch",   "🔥",  "TinyTorch Contributors",      "TINYTORCH"),
-    ("mlsysim",     "🚀",  "MLSys·im Contributors",       "MLSYSIM"),
-    ("interviews",  "💼",  "Interview Hub Contributors",  "INTERVIEWS"),
-    ("kits",        "🛠️", "Hardware Kits Contributors",  "KITS"),
-    ("labs",        "🧪",  "Labs Contributors",           "LABS"),
-    ("slides",      "🎞️", "Slides Contributors",         "SLIDES"),
+    ("book",        "📖",  "Textbook Contributors",        "BOOK"),
+    ("tinytorch",   "🔥",  "TinyTorch Contributors",       "TINYTORCH"),
+    ("mlsysim",     "🚀",  "MLSys·im Contributors",        "MLSYSIM"),
+    ("interviews",  "🤖",  "StaffML Contributors",         "STAFFML"),
+    ("kits",        "🛠️", "Hardware Kits Contributors",   "KITS"),
+    ("labs",        "🧪",  "Labs Contributors",            "LABS"),
+    ("slides",      "🎞️", "Slides Contributors",          "SLIDES"),
     ("instructors", "🗺️", "Instructor Site Contributors", "INSTRUCTORS"),
 ]
 

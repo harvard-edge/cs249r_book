@@ -618,9 +618,9 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 ---
 
-### 💼 Interview Hub Contributors
+### 🤖 StaffML Contributors
 
-<!-- INTERVIEWS-CONTRIBUTORS-START -->
+<!-- STAFFML-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
 <table>
@@ -633,7 +633,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
-<!-- INTERVIEWS-CONTRIBUTORS-END -->
+<!-- STAFFML-CONTRIBUTORS-END -->
 
 ---
 

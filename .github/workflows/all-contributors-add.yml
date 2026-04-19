@@ -42,15 +42,23 @@ env:
   # Valid contribution types (comma-separated)
   CONTRIBUTION_TYPES: 'bug,code,doc,design,ideas,review,test,tool'
 
-  # Valid projects (comma-separated). One entry per top-level Quarto/site folder
-  # that has its own .all-contributorsrc and contributor section.
-  PROJECTS: 'book,tinytorch,kits,labs,mlsysim,interviews,slides,instructors'
+  # Valid project keys (comma-separated). These are the canonical names used
+  # in commit messages, bot replies, and generator section markers.
+  # NOTE: "staffml" is the brand; the source lives under interviews/ on disk
+  # (see PROJECT_DIRS below).
+  PROJECTS: 'book,tinytorch,kits,labs,mlsysim,staffml,slides,instructors'
 
   # Project aliases (format: alias1:project1,alias2:project2). Use lowercase.
   # Aliases are matched as substrings, so prefer non-ambiguous tokens only —
   # e.g. avoid generic words like "deck" or "teaching" that appear in normal
   # prose. Canonical project names are already substring-matched.
-  PROJECT_ALIASES: 'tito:tinytorch,staffml:interviews,slide:slides,instructor:instructors'
+  # `interviews:staffml` keeps backward compatibility with old comments that
+  # used the directory name.
+  PROJECT_ALIASES: 'tito:tinytorch,interviews:staffml,slide:slides,instructor:instructors'
+
+  # Project key → on-disk directory. Only specify entries where the project
+  # key differs from the directory name. Format: project1:dir1,project2:dir2
+  PROJECT_DIRS: 'staffml:interviews'
 
 jobs:
   add-contributor:
@@ -74,6 +82,7 @@ jobs:
         env:
           PROJECTS: ${{ env.PROJECTS }}
           PROJECT_ALIASES: ${{ env.PROJECT_ALIASES }}
+          PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
         with:
           script: |
             const body = context.payload.comment.body;
@@ -98,6 +107,21 @@ jobs:
                 const [alias, proj] = pair.split(':');
                 if (alias && proj) projectAliases[alias.trim()] = proj.trim();
               });
+            }
+
+            // project key → on-disk directory (defaults to project name)
+            const projectDirs = {};
+            for (const p of validProjects) projectDirs[p] = p;
+            if (process.env.PROJECT_DIRS) {
+              process.env.PROJECT_DIRS.split(',').forEach(pair => {
+                const [proj, dir] = pair.split(':');
+                if (proj && dir) projectDirs[proj.trim()] = dir.trim();
+              });
+            }
+            // reverse lookup for PR-file detection: directory → project key
+            const dirToProject = {};
+            for (const [proj, dir] of Object.entries(projectDirs)) {
+              dirToProject[dir] = proj;
             }
 
             // --- Helper: detect ALL project names in text (for multi-project support) ---
@@ -146,8 +170,10 @@ jobs:
                 const projectCounts = {};
                 for (const file of files) {
                   const topDir = file.filename.split('/')[0];
-                  if (validProjects.includes(topDir)) {
-                    projectCounts[topDir] = (projectCounts[topDir] || 0) + 1;
+                  // Map directory → canonical project key (e.g. interviews → staffml)
+                  const proj = dirToProject[topDir];
+                  if (proj) {
+                    projectCounts[proj] = (projectCounts[proj] || 0) + 1;
                   }
                 }
 
@@ -417,6 +443,7 @@ jobs:
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         env:
           PROJECTS: ${{ env.PROJECTS }}
+          PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
         run: |
           python3 << 'EOF'
           import json
@@ -430,7 +457,18 @@ jobs:
           profile = "${{ steps.userinfo.outputs.profile }}"
 
           valid_projects = os.environ.get('PROJECTS', 'book').split(',')
-          config_paths = {p: f'{p}/.all-contributorsrc' for p in valid_projects}
+
+          # project key → on-disk directory (defaults to project name).
+          # Override entries come from PROJECT_DIRS env (e.g. "staffml:interviews").
+          project_dirs = {p: p for p in valid_projects}
+          for pair in os.environ.get('PROJECT_DIRS', '').split(','):
+              pair = pair.strip()
+              if ':' in pair:
+                  proj, _, d = pair.partition(':')
+                  if proj and d:
+                      project_dirs[proj.strip()] = d.strip()
+
+          config_paths = {p: f'{project_dirs[p]}/.all-contributorsrc' for p in valid_projects}
           updated_paths = []
 
           for project in projects:
@@ -498,15 +536,30 @@ jobs:
 
       - name: Commit and push changes
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
+        env:
+          PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
         run: |
           PROJECTS_JSON='${{ steps.parse.outputs.projects }}'
           USERNAME="${{ steps.parse.outputs.username }}"
           TYPES=$(echo '${{ steps.parse.outputs.types }}' | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
           PROJECTS_LIST=$(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
 
-          # Stage contributor files for each project
-          for project in $(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
-            git add "${project}/.all-contributorsrc" "${project}/README.md" 2>/dev/null || true
+          # Stage contributor files for each project, resolving project key →
+          # on-disk directory via PROJECT_DIRS overrides (e.g. staffml → interviews).
+          DIRS=$(echo "$PROJECTS_JSON" | PROJECT_DIRS="$PROJECT_DIRS" python3 -c '
+          import json, os, sys
+          projects = json.load(sys.stdin)
+          overrides = {}
+          for pair in os.environ.get("PROJECT_DIRS", "").split(","):
+              pair = pair.strip()
+              if ":" in pair:
+                  proj, _, d = pair.partition(":")
+                  if proj and d:
+                      overrides[proj.strip()] = d.strip()
+          print(" ".join(overrides.get(p, p) for p in projects))
+          ')
+          for dir in $DIRS; do
+            git add "${dir}/.all-contributorsrc" "${dir}/README.md" 2>/dev/null || true
           done
           git add README.md 2>/dev/null || true
 
@@ -525,6 +578,8 @@ jobs:
       - name: React to comment
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         uses: actions/github-script@v8
+        env:
+          PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
         with:
           script: |
             await github.rest.reactions.createForIssueComment({
@@ -540,6 +595,17 @@ jobs:
             const types = JSON.parse('${{ steps.parse.outputs.types }}');
             const triggerLine = `${{ steps.extract.outputs.trigger_line }}`;
 
+            // project key → on-disk directory (used in the file paths shown in the
+            // success comment so they actually exist on disk, e.g. staffml → interviews).
+            const projectDirs = {};
+            if (process.env.PROJECT_DIRS) {
+              process.env.PROJECT_DIRS.split(',').forEach(pair => {
+                const [proj, dir] = pair.split(':');
+                if (proj && dir) projectDirs[proj.trim()] = dir.trim();
+              });
+            }
+            const dirFor = (p) => projectDirs[p] || p;
+
             const sourceLabels = {
               comment: 'explicitly mentioned in comment',
               pr_files: 'detected from PR changed files',
@@ -548,7 +614,7 @@ jobs:
             const sourceNote = sourceLabels[projectSource] || projectSource;
 
             const projectList = projects.length === 1 ? projects[0] : projects.join(', ');
-            const filesList = projects.map(p => `- \`${p}/.all-contributorsrc\`, \`${p}/README.md\``).join('\n');
+            const filesList = projects.map(p => `- \`${dirFor(p)}/.all-contributorsrc\`, \`${dirFor(p)}/README.md\``).join('\n');
 
             const body = [
               "I've added @" + username + " as a contributor" + (projects.length > 1 ? " to **" + projectList + "**" : " to **" + projects[0] + "**") + "! :tada:",

@@ -14,14 +14,18 @@ import re
 import argparse
 from pathlib import Path
 
+# Project key → on-disk directory. Project key is the canonical name used in
+# commit messages and bot replies; directory is where the .all-contributorsrc
+# file lives. Keep this in sync with PROJECTS / PROJECT_DIRS in
+# .github/workflows/all-contributors-add.yml.
 PROJECTS = {
     "book": "book/",
     "instructors": "instructors/",
-    "interviews": "interviews/",
     "kits": "kits/",
     "labs": "labs/",
     "mlsysim": "mlsysim/",
     "slides": "slides/",
+    "staffml": "interviews/",
     "tinytorch": "tinytorch/",
 }
 
