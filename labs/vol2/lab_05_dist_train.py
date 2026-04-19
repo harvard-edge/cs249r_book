@@ -73,23 +73,25 @@ async def _():
     from mlsysim.labs.components import DecisionLog
     import mlsysim
     from mlsysim import Hardware
-    from mlsysim.core.defaults import (
-        GPU_MTTF_HOURS, INFINIBAND_NDR_BW_GBS, IB_NDR_LATENCY_US,
-        SCALING_EFF_256GPU, OVERHEAD_PIPELINE_BUBBLE,
+    from mlsysim.core.defaults import INFINIBAND_NDR_BW_GBS
+    from mlsysim.core.constants import (
+        A100_FLOPS_FP16_TENSOR, T4_FLOPS_FP16_TENSOR,
     )
 
     # ── Hardware registry ─────────────────────────────────────────────────
     H100 = Hardware.Cloud.H100
     A100 = Hardware.Cloud.A100
-    EDGE = Hardware.Edge.JetsonOrinNX
 
     # ── Hardware constants (from registry) ──────────────────────────────
     H100_TFLOPS_FP16  = H100.compute.peak_flops.m_as("TFLOPs/s")
     H100_BW_GBS       = H100.memory.bandwidth.m_as("GB/s")
     H100_RAM_GB       = H100.memory.capacity.m_as("GB")
     A100_RAM_GB       = A100.memory.capacity.m_as("GB")
+    A100_TFLOPS_FP16  = A100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
+    T4_TFLOPS_FP16    = T4_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
     # Interconnect specs (from defaults — not in per-device registry)
     NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (DGX H100)
+    IB_NDR_BW_GBS     = INFINIBAND_NDR_BW_GBS  # 50 GB/s, alias for consistent naming
     IB_HDR_BW_GBS     = 25.0      # GB/s InfiniBand HDR per port
     ETH_100G_BW_GBS   = 12.5      # GB/s 100GbE
     GPUS_PER_NODE     = 8
@@ -99,8 +101,9 @@ async def _():
         _ = await ledger.load_async()
     return (
         COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np,
-        make_subplots, mlsysim, DecisionLog, Hardware, H100, A100, EDGE,
+        make_subplots, mlsysim, DecisionLog, Hardware, H100, A100,
         H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, A100_RAM_GB,
+        A100_TFLOPS_FP16, T4_TFLOPS_FP16,
         NVLINK4_BW_GBS, IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS,
         GPUS_PER_NODE,
     )
@@ -323,7 +326,9 @@ def _(mo, partB_prediction):
 
 # ─── CELL 6b: PART D WIDGETS ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, partC_reflection):
+def _(mo, partC_reflection,
+      H100_TFLOPS_FP16, A100_TFLOPS_FP16, T4_TFLOPS_FP16,
+      IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS):
     partD_prediction = mo.ui.radio(
         options={
             "A) A100 80GB -- same HBM so same result": "A",
@@ -335,11 +340,11 @@ def _(mo, partC_reflection):
     )
     d1_hw_tier = mo.ui.dropdown(
         options={
-            "H100 + IB NDR (50 GB/s, 989 TFLOPS)": ("H100", 989.0, 50.0),
-            "A100 + IB HDR (25 GB/s, 312 TFLOPS)": ("A100", 312.0, 25.0),
-            "T4 + 100GbE (12.5 GB/s, 65 TFLOPS)": ("T4", 65.0, 12.5),
+            f"H100 + IB NDR ({IB_NDR_BW_GBS} GB/s, {H100_TFLOPS_FP16:.0f} TFLOPS)": ("H100", H100_TFLOPS_FP16, IB_NDR_BW_GBS),
+            f"A100 + IB HDR ({IB_HDR_BW_GBS} GB/s, {A100_TFLOPS_FP16:.0f} TFLOPS)": ("A100", A100_TFLOPS_FP16, IB_HDR_BW_GBS),
+            f"T4 + 100GbE ({ETH_100G_BW_GBS} GB/s, {T4_TFLOPS_FP16:.0f} TFLOPS)": ("T4", T4_TFLOPS_FP16, ETH_100G_BW_GBS),
         },
-        value="H100 + IB NDR (50 GB/s, 989 TFLOPS)",
+        value=f"H100 + IB NDR ({IB_NDR_BW_GBS} GB/s, {H100_TFLOPS_FP16:.0f} TFLOPS)",
         label="Hardware tier",
     )
     d1_model_size = mo.ui.dropdown(
@@ -381,6 +386,8 @@ def _(DecisionLog, mo, partD_reflection):
 def _(
     COLORS, apply_plotly_theme, go, math,
     mo, np, H100_TFLOPS_FP16, H100_RAM_GB,
+    A100_TFLOPS_FP16, T4_TFLOPS_FP16,
+    IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS,
     NVLINK4_BW_GBS, GPUS_PER_NODE, synth_decision_input, synth_decision_ui,
     a1_gpu_slider, a1_interconnect, a1_model_select, a2_microbatches,
     a2_pp, a2_tp, a2_zero_stage, d1_gpu_count,
@@ -1128,9 +1135,9 @@ def _(
 
         # Compare all three tiers
         _tiers = [
-            ("H100 + IB NDR", 989.0, 50.0),
-            ("A100 + IB HDR", 312.0, 25.0),
-            ("T4 + 100GbE", 65.0, 12.5),
+            ("H100 + IB NDR", H100_TFLOPS_FP16, IB_NDR_BW_GBS),
+            ("A100 + IB HDR", A100_TFLOPS_FP16, IB_HDR_BW_GBS),
+            ("T4 + 100GbE", T4_TFLOPS_FP16, ETH_100G_BW_GBS),
         ]
         _tier_effs = []
         for _tname, _tflops, _tbw in _tiers:

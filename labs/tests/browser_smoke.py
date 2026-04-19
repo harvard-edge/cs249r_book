@@ -115,7 +115,7 @@ def _extract_python_exception(text: str) -> str | None:
     return f"{exc_type}: {msg}"
 
 
-def verify_lab(page, name: str, url: str) -> list[str]:
+def verify_lab(page, name: str, url: str, labs_dir: Path) -> list[str]:
     """Navigate to a lab, let Pyodide boot, then report any captured errors."""
     errors: list[str] = []
 
@@ -174,6 +174,33 @@ def verify_lab(page, name: str, url: str) -> list[str]:
     # to emit its errors to the console before we tally.
     page.wait_for_timeout(int(POST_IDLE_SETTLE_S * 1000))
 
+    # Phase 4: for labs that declare mo.ui.tabs(...), verify that at least one
+    # [role="tab"] element is visible in the DOM. Network-idle passes even when
+    # Python execution stalls mid-cell (as in #1388), because Pyodide downloaded
+    # all wheels — it just never finished running the cells. A rendered tab is
+    # proof that the tabs cell actually executed to completion.
+    tab_elements = page.query_selector_all('[role="tab"]')
+    if tab_elements:
+        # tabs were found — check they are actually visible, not just attached
+        visible_tabs = [t for t in tab_elements if t.is_visible()]
+        if not visible_tabs:
+            errors.append(
+                f"[tabs-hidden] {len(tab_elements)} [role='tab'] elements "
+                f"attached but none visible — tabs cell likely stalled"
+            )
+    else:
+        # No tabs in DOM at all — only flag if the lab source declares mo.ui.tabs
+        # (avoids false positives on simpler labs that have no tabs).
+        lab_source_dir = labs_dir / name
+        source_files = list(lab_source_dir.glob("*.py"))
+        if source_files:
+            lab_src = source_files[0].read_text(encoding="utf-8", errors="ignore")
+            if "mo.ui.tabs" in lab_src:
+                errors.append(
+                    "[tabs-missing] lab declares mo.ui.tabs but no [role='tab'] "
+                    "elements rendered — Python execution likely hung before tabs cell"
+                )
+
     elapsed = time.monotonic() - pyodide_start
     print(
         f"  ✅ {name}: Pyodide settled in {elapsed:.1f}s "
@@ -221,7 +248,7 @@ def main() -> int:
             for name in lab_names:
                 page = context.new_page()
                 url = f"http://127.0.0.1:{args.port}/{name}/index.html"
-                errors = verify_lab(page, name, url)
+                errors = verify_lab(page, name, url, labs_dir)
                 if errors:
                     all_errors[name] = errors
                 page.close()
