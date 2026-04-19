@@ -114,10 +114,10 @@ function _buildHTML() {
         ">↺</button>
         <button id="med-pulse-toggle" title="Toggle breathing pulse" style="
           background:var(--socratiq-input-bg,#f3f4f6);color:var(--socratiq-text-muted,#6b7280);border:1px solid var(--socratiq-border,#e5e7eb);cursor:pointer;
-          border-radius:50%;width:38px;height:38px;font-size:0.9rem;
-          display:flex;align-items:center;justify-content:center;
+          border-radius:20px;padding:0 12px;height:38px;font-size:0.72rem;
+          display:flex;align-items:center;gap:5px;white-space:nowrap;
           transition:all 0.2s;
-        ">〇</button>
+        "><span id="med-pulse-icon" style="font-size:0.8rem;">〇</span><span id="med-pulse-label">Pulse: on</span></button>
       </div>
 
       <!-- Sound picker -->
@@ -343,39 +343,45 @@ function _wire(shadowRoot, modal) {
     _playSound(selectedSound);
   }
 
-  playBtn.addEventListener('click', _start);
-  resetBtn.addEventListener('click', _reset);
-
   // ── Pulse toggle ──
   const pulseToggle = modal.querySelector('#med-pulse-toggle');
+  const pulseIcon   = modal.querySelector('#med-pulse-icon');
+  const pulseLabel  = modal.querySelector('#med-pulse-label');
   let pulseEnabled = true;
-  pulseToggle.addEventListener('click', () => {
-    pulseEnabled = !pulseEnabled;
+
+  function _applyPulseState() {
     if (pulseEnabled) {
-      pulseToggle.title = 'Turn off breathing pulse';
       pulseToggle.style.color = '#6366f1';
       pulseToggle.style.borderColor = '#6366f1';
+      pulseToggle.style.background = 'rgba(99,102,241,0.08)';
+      pulseIcon.textContent = '◉';
+      pulseLabel.textContent = 'Pulse: on';
       if (running) { card.classList.add('breathing'); arc.classList.add('breathing'); }
     } else {
-      pulseToggle.title = 'Turn on breathing pulse';
       pulseToggle.style.color = '';
       pulseToggle.style.borderColor = '';
-      card.classList.remove('breathing');
-      arc.classList.remove('breathing');
-    }
-  });
-
-  // Patch _start/_pause to respect pulseEnabled
-  const _origStart = _start;
-  function _startPatched() {
-    _origStart();
-    if (!pulseEnabled) {
+      pulseToggle.style.background = '';
+      pulseIcon.textContent = '〇';
+      pulseLabel.textContent = 'Pulse: off';
       card.classList.remove('breathing');
       arc.classList.remove('breathing');
     }
   }
-  playBtn.removeEventListener('click', _start);
-  playBtn.addEventListener('click', _startPatched);
+
+  pulseToggle.addEventListener('click', () => {
+    pulseEnabled = !pulseEnabled;
+    _applyPulseState();
+  });
+
+  // Wire play through a single handler that respects pulseEnabled
+  playBtn.addEventListener('click', () => {
+    _start();
+    if (!pulseEnabled) {
+      card.classList.remove('breathing');
+      arc.classList.remove('breathing');
+    }
+  });
+  resetBtn.addEventListener('click', _reset);
 
   // ── Interval reminder wiring ──
 
