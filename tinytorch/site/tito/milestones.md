@@ -55,7 +55,7 @@ tito milestone run 03
 
 ### Discover Milestones
 
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
+<div class="milestones-discover-box" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
 
 **List All Milestones**
 ```bash
