@@ -75,6 +75,23 @@ FENCE_OPEN_RE = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>
 # a paragraph isn't treated as a link.
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 
+# Strip HTML comments (single- or multi-line). Authors stash TikZ source,
+# review notes, and other non-rendered fragments in `<!-- ... -->` blocks;
+# the LINK_RE regex would otherwise match TikZ syntax like
+# `\node[mycycle](B1){GPU 1};` as a Markdown link `[mycycle](B1)`.
+# Replace each non-newline char with a space to preserve line numbers and
+# column offsets, so any *real* failures we report stay accurate.
+HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# Quarto / Pandoc cross-reference targets. These resolve at render time
+# against the project-wide cross-ref index, not against the filesystem,
+# so the link checker cannot validate them offline. The book toolchain
+# (`book-check-references`) owns this validation.
+# Examples we must skip: `[See sec](@sec-foo)`, `[Fig](@fig-bar)`,
+#                        `[Tbl](@tbl-baz)`, `[Eq](@eq-qux)`, `[Lst](@lst-x)`.
+QUARTO_XREF_PREFIXES = ("@sec-", "@fig-", "@tbl-", "@eq-", "@lst-", "@thm-",
+                        "@cor-", "@def-", "@exr-", "@exm-", "@prp-")
+
 # Match explicit Quarto / Pandoc anchor syntax inside headings:
 #   ## My Header {#sec-foo}
 ANCHOR_ATTR_RE = re.compile(r"\{#(?P<id>[^\s}]+)[^}]*\}")
@@ -133,6 +150,30 @@ def slugify(heading: str) -> str:
     return cleaned
 
 
+def github_slugify(heading: str) -> str:
+    """Approximate GitHub's heading-anchor slug (used in `.md` READMEs).
+
+    GitHub's algorithm differs from Pandoc in two important ways:
+      - It does NOT strip leading non-letter chars, so emoji-prefixed
+        headings like `## 🎯 20 Progressive Modules` produce anchors
+        that start with a hyphen (`-20-progressive-modules`) because
+        the emoji collapses to nothing while the trailing space
+        becomes a leading hyphen.
+      - It removes punctuation but preserves underscores and hyphens.
+
+    Generating both slugs and registering both as valid anchors keeps the
+    checker honest for repos that mix Quarto-rendered (.qmd) and
+    GitHub-rendered (.md) content. When the two algorithms agree the
+    extra entry is harmless.
+    """
+    cleaned = HEADING_CLEAN_RE.sub("", heading)
+    cleaned = cleaned.lower()
+    # Drop everything that isn't a word char, whitespace, or hyphen.
+    cleaned = re.sub(r"[^\w\s\-]", "", cleaned)
+    cleaned = re.sub(r"\s+", "-", cleaned)
+    return cleaned
+
+
 def collect_anchors(text: str) -> set[str]:
     """Return the set of anchor ids defined in the given Markdown source.
 
@@ -155,12 +196,46 @@ def collect_anchors(text: str) -> set[str]:
         slug = slugify(heading)
         if slug:
             anchors.add(slug)
+        gh_slug = github_slugify(heading)
+        if gh_slug:
+            anchors.add(gh_slug)
 
     return anchors
 
 
 def is_external(target: str) -> bool:
-    return target.startswith(EXTERNAL_SCHEMES)
+    # Match schemes case-insensitively. Authors occasionally type `HTTP://` or
+    # `HTTPS://` (especially after auto-capitalize on mobile or in copied
+    # academic citations); these are still external URLs and out of scope for
+    # this offline checker. A strict prefix match would otherwise treat them
+    # as relative paths and report bogus failures.
+    head = target[:8].lower()
+    return any(head.startswith(s) for s in EXTERNAL_SCHEMES)
+
+
+def is_quarto_xref(target: str) -> bool:
+    """True for Quarto cross-ref targets like `@sec-foo`, `@fig-bar`.
+
+    These resolve through the project's cross-ref index at render time, not
+    through the filesystem. Validation belongs to the book toolchain's
+    `book-check-references` hook, not here.
+    """
+    return target.startswith(QUARTO_XREF_PREFIXES)
+
+
+def strip_html_comments(text: str) -> str:
+    """Erase HTML comment bodies while preserving line/column offsets.
+
+    Each non-newline character inside a `<!-- ... -->` block becomes a
+    space; newlines stay intact. This keeps any subsequent line-number /
+    column reporting accurate, while preventing the link regex from
+    matching link-shaped tokens that are author-visible only (TikZ
+    source, review notes, etc.).
+    """
+    def _blank(match: re.Match) -> str:
+        return re.sub(r"[^\n]", " ", match.group(0))
+
+    return HTML_COMMENT_RE.sub(_blank, text)
 
 
 def split_target(target: str) -> tuple[str, str]:
@@ -233,10 +308,16 @@ def check_file(path: Path, cache: dict[Path, str]) -> list[Problem]:
     own_anchors = collect_anchors(text)
     problems: list[Problem] = []
 
+    # Erase HTML comment bodies BEFORE scanning. We compute anchors against
+    # the unmodified text (you can legitimately put a {#id} inside a comment
+    # that documents something), but we never want to *follow* link-shaped
+    # tokens out of a comment block.
+    scan_text = strip_html_comments(text)
+
     in_fence = False
     fence_marker: str | None = None  # The exact `` `... `` or `~~~...` that opened the block.
 
-    for line_no, line in enumerate(text.splitlines(), start=1):
+    for line_no, line in enumerate(scan_text.splitlines(), start=1):
         # Track fenced code blocks (``` or ~~~). Inside a fence, skip all link
         # parsing — TikZ, raw LaTeX, and code samples otherwise produce piles of
         # false positives that look like Markdown links.
@@ -258,7 +339,7 @@ def check_file(path: Path, cache: dict[Path, str]) -> list[Problem]:
 
         for m in LINK_RE.finditer(scan_line):
             target = m.group("target")
-            if not target or is_external(target):
+            if not target or is_external(target) or is_quarto_xref(target):
                 continue
             path_part, anchor = split_target(target)
 
@@ -272,7 +353,7 @@ def check_file(path: Path, cache: dict[Path, str]) -> list[Problem]:
 
             cands = candidate_paths(path, path_part)
             if not cands:
-                continue  # Site-absolute or unparseable; skip.
+                continue  # Site-absolute or unparsable; skip.
 
             resolved = next((c for c in cands if c.exists()), None)
             if resolved is None:
