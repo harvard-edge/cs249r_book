@@ -24,7 +24,7 @@ Each milestone script imports **YOUR code** from the TinyTorch package you built
 
 ## Quick Start
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="milestones-quickstart-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **Typical workflow:**
 
@@ -55,7 +55,7 @@ tito milestone run 03
 
 ### Discover Milestones
 
-<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
+<div class="milestones-discover-box" style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1rem 0;">
 
 **List All Milestones**
 ```bash
@@ -76,7 +76,7 @@ tito milestone list --simple
 
 ### Learn About Milestones
 
-<div style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff9800; margin: 1rem 0;">
+<div class="milestones-learn-box" style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff9800; margin: 1rem 0;">
 
 **Get Detailed Information**
 ```bash
@@ -93,7 +93,7 @@ Shows:
 
 ### Run Milestones
 
-<div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1rem 0;">
+<div class="milestones-run-box" style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1rem 0;">
 
 **Run a Milestone**
 ```bash
@@ -117,7 +117,7 @@ tito milestone run 03 --skip-checks
 
 ### Track Progress
 
-<div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1rem 0;">
+<div class="milestones-track-box" style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1rem 0;">
 
 **View Milestone Progress**
 ```bash
@@ -325,7 +325,7 @@ Unlock by completing module: 09
 
 TinyTorch tracks progress in three ways (all are related but distinct):
 
-<div style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1rem 0;">
+<div class="milestones-tracking-box" style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1rem 0;">
 
 **1. Module Completion** (`tito module status`)
 - Which modules (01-20) you've implemented
