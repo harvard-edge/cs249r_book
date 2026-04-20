@@ -137,7 +137,7 @@ A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios
 
 ***Machine Learning Training Systems***\index{Training Systems!definition} are software-hardware systems that execute the iterative optimization loop—forward pass, loss computation, backward pass, and parameter update—to minimize a loss function over a training dataset.
 
-1.  **Significance (Quantitative):** Training memory cost is 4$\times$ the inference memory cost per parameter when using the Adaptive Moment Estimation (Adam) optimizer: a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (gradients) + 28 GB (Adam first and second moments in FP32) = 56 GB minimum, before accounting for activation storage. This 4$\times$ multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
+1.  **Significance (Quantitative):** Training memory cost is 6$\times$ the inference memory cost per parameter when using the Adaptive Moment Estimation (Adam) optimizer: a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (FP16 gradients) + 56 GB (Adam first and second moments in FP32) = 84 GB minimum, before accounting for activation storage. This multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
 2.  **Distinction (Durable):** Unlike inference systems, which execute a single forward pass and discard intermediate activations, training systems must retain all intermediate activations from the forward pass for use during the backward pass, creating a memory footprint that grows linearly with model depth and batch size.
 3.  **Common Pitfall:** A frequent misconception is that training failures are compute problems. The most common training failure is out-of-memory (OOM) error, which is a memory management problem: the activation tensors from all $L$ layers accumulate during the forward pass and must coexist in GPU memory simultaneously, causing OOM before the first gradient is computed.
 
@@ -4861,7 +4861,7 @@ class GPT2WalkthroughCalc:
     checkpoint_factor_str = f"{checkpoint_factor}"
 ```
 
-::: {.callout-example title="GPT-2 Optimization on V100"}
+::: {.callout-example title="GPT-2 Optimization on A100"}
 
 **Initial Configuration** (Naive Implementation):
 
@@ -4872,7 +4872,7 @@ class GPT2WalkthroughCalc:
 
 #### Steps 1--3: Solve the memory problem {.unnumbered}
 
-The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. Baseline FP32 requires `{python} GPT2WalkthroughCalc.total_fp32_str` GB, an immediate OOM on a 32 GB V100 (**Machine** constraint in D·A·M terms). Applying mixed precision (AMP) reduces this to `{python} GPT2WalkthroughCalc.total_amp_str` GB (`{python} GPT2WalkthroughCalc.amp_reduction_str` percent reduction), but still exceeds 32 GB. Adding gradient checkpointing (every four layers) reduces activations by 4$\times$, bringing the total to `{python} GPT2WalkthroughCalc.total_ckpt_str` GB. It fits, at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` percent more compute for activation recomputation.
+The memory analysis from @sec-model-training-mixedprecision-training-9218 applies directly. Baseline FP32 requires `{python} GPT2WalkthroughCalc.total_fp32_str` GB, an immediate OOM on a 40 GB A100 (**Machine** constraint in D·A·M terms). Applying mixed precision (AMP) reduces this to `{python} GPT2WalkthroughCalc.total_amp_str` GB (`{python} GPT2WalkthroughCalc.amp_reduction_str` percent reduction), but still exceeds 40 GB. Adding gradient checkpointing (every four layers) reduces activations by 4$\times$, bringing the total to `{python} GPT2WalkthroughCalc.total_ckpt_str` GB. It fits, at the cost of `{python} GPT2WalkthroughCalc.recompute_overhead_str` percent more compute for activation recomputation.
 
 With memory solved, the next step is determining whether throughput is acceptable.
 
@@ -5068,7 +5068,7 @@ Yet some models simply will not fit, and some training runs would take years eve
 ## Scaling Training Systems {#sec-model-training-scaling-training-systems-adfd}
 
 \index{Training!scaling strategies}\index{Scaling!single-device limitations}\index{Conservation of Complexity!distributed training}
-The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated reducing memory from 89 GB to 32 GB, bringing a 1.5B parameter model within reach of a single V100. However, some models simply will not fit, no matter how aggressively these techniques are applied. A 70B parameter model requires 140 GB for weights alone in FP16, nearly double the capacity of the largest single GPU available today. Even when a model does fit, training on a single device may take years rather than weeks.
+The optimization toolkit developed in the previous section (mixed precision, Flash Attention, gradient checkpointing, and data prefetching) can transform an infeasible training configuration into a practical one on a single machine. The GPT-2 walkthrough demonstrated reducing memory from 89 GB to 32 GB, bringing a 1.5B parameter model within reach of a single A100 (40 GB). However, some models simply will not fit, no matter how aggressively these techniques are applied. A 70B parameter model requires 140 GB for weights alone in FP16, nearly double the capacity of the largest single GPU available today. Even when a model does fit, training on a single device may take years rather than weeks.
 
 When single-machine optimization has been exhausted, the only remaining option is to spread computation across multiple devices. Multi-device training provides three capabilities unavailable to a single GPU: aggregate memory capacity, aggregate compute throughput, and aggregate storage bandwidth. The following discussion covers when and how to scale beyond single-device training, from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary. The key parallelism strategies and their trade-offs are introduced here; the implementation details of multi-node distributed training (collective communication primitives, fault tolerance, and elastic scheduling) are beyond our current scope.
 

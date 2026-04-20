@@ -733,7 +733,7 @@ class AllReduceBottleneck:
     num_gpus = 1024
     peak_tflops = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
     gpu_util = 0.50
-    flops_per_sample_base = 2e18 # Rough estimate for 1B model iteration
+    flops_per_sample_base = 5e13 # Realistic per-GPU compute for ~100ms iteration
 
     alpha_s = 1.5e-6 # NDR InfiniBand hop latency
     beta_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB / second)
@@ -742,7 +742,7 @@ class AllReduceBottleneck:
     params_large = 70e9
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Compute time
+    # Step 1: Compute time per GPU
     t_comp_s = flops_per_sample_base / (peak_tflops * 1e12 * gpu_util)
 
     # AllReduce time: 2(p-1)alpha + 2(p-1)/p * m/beta
@@ -934,17 +934,19 @@ class BisectionScaling:
     # ┌── 2. EXECUTE ───────────────────────────────────────
     bw_1_1 = n_gpus * beta_gbs
     bw_4_1 = bw_1_1 / 4
-    time_1_1 = gradient_gb / bw_1_1
-    time_4_1 = gradient_gb / bw_4_1
+    total_data_gb = n_gpus * gradient_gb
+    time_1_1 = total_data_gb / bw_1_1
+    time_4_1 = total_data_gb / bw_4_1
     slowdown = time_4_1 / time_1_1
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(slowdown == 4.0, "Slowdown must match oversubscription ratio")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bbs_n_gpus_str = f"{n_gpus}"
     bbs_gradient_gb_str = f"{gradient_gb}"
+    bbs_total_data_gb_str = f"{total_data_gb:,}"
     bbs_slowdown_str = f"{int(slowdown)}"
-    bbs_time_1_1_ms_str = f"{time_1_1 * 1000:.1f}"
-    bbs_time_4_1_ms_str = f"{time_4_1 * 1000:.1f}"
+    bbs_time_1_1_ms_str = f"{time_1_1 * 1000:,.0f}"
+    bbs_time_4_1_ms_str = f"{time_4_1 * 1000:,.0f}"
 
 ```
 
@@ -956,9 +958,9 @@ class BisectionScaling:
 Bisection bandwidth ($BW_{bisect}$) is the minimum pipe diameter between halves of your cluster.
 
 1. **Non-blocking (1:1)**: $BW_{bisect} =$ `{python} BisectionScaling.bbs_n_gpus_str` $\times 50 \text{ GB/s} = 51,200 \text{ GB/s}$.
-   - Time: $100 \text{ GB} / 51,200 \approx$ **`{python} BisectionScaling.bbs_time_1_1_ms_str` ms**.
+   - Time: `{python} BisectionScaling.bbs_total_data_gb_str` $\text{ GB} / 51,200 \approx$ **`{python} BisectionScaling.bbs_time_1_1_ms_str` ms**.
 2. **Oversubscribed (4:1)**: $BW_{bisect} = 51,200 / 4 = 12,800 \text{ GB/s}$.
-   - Time: $100 \text{ GB} / 12,800 \approx$ **`{python} BisectionScaling.bbs_time_4_1_ms_str` ms**.
+   - Time: `{python} BisectionScaling.bbs_total_data_gb_str` $\text{ GB} / 12,800 \approx$ **`{python} BisectionScaling.bbs_time_4_1_ms_str` ms**.
 
 **The Systems Insight**: Saving money on core switches creates a **`{python} BisectionScaling.bbs_slowdown_str`$\times$ bottleneck** for global synchronization. For a \$300M supercomputer where training is 30 percent communication, this "saving" wastes approximately **\$75 Million** in idle compute time. For training, network oversubscription is a false economy.
 
@@ -1135,8 +1137,10 @@ class BisectionBottleneck:
     total_bisec_bw_b = total_bisec_bw_a / oversub_ratio_b
 
     # Step 2: Time = Data / Bandwidth
-    time_a_s = gradient_size_gb / total_bisec_bw_a
-    time_b_s = gradient_size_gb / total_bisec_bw_b
+    # In AllReduce, the total data crossing the bisection is num_nodes * gradient_size_gb
+    total_data_crossing_bisection = num_nodes * gradient_size_gb
+    time_a_s = total_data_crossing_bisection / total_bisec_bw_a
+    time_b_s = total_data_crossing_bisection / total_bisec_bw_b
 
     # Step 3: Economic impact
     # Step 4: Relative throughput = 1 / ((1 - comm_frac) + (comm_frac * oversub_ratio))
