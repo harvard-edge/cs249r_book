@@ -536,6 +536,115 @@ jobs:
             echo "previous_vol2_version=$PREV_VOL2"
           } >> "$GITHUB_OUTPUT"
 
+      - name: 🛡️ No-downgrade guard (per-volume)
+        env:
+          # Step `run:` blocks don't inherit shell variables across steps;
+          # surface the per-volume outputs as env so the guard can read them.
+          NEW_VOL1: ${{ steps.version.outputs.new_vol1_version }}
+          NEW_VOL2: ${{ steps.version.outputs.new_vol2_version }}
+        run: |
+          # ----------------------------------------------------------------
+          # No-downgrade guard.
+          #
+          # The version-bump step computes NEW_VOL{1,2} from the latest
+          # vol{1,2}-v* tag (with a legacy/zero-seed fallback for first
+          # releases). When the per-volume index.qmd doi has been edited
+          # ahead of the tags — for example vol2 is currently displaying
+          # `doi: "v0.5.1"` inherited from the legacy single-volume era —
+          # the auto-computed value can be LOWER than what the source
+          # already shows, and the downstream sed step would silently
+          # rewrite the doi to the lower version.
+          #
+          # Concrete failure modes this guard prevents:
+          #   - vol2: index-vol2.qmd doi="v0.5.1", no vol2-v* tag exists,
+          #           release_type=patch → workflow computes vol2-v0.0.1
+          #           → sed rewrites doi to "v0.0.1" → the public welcome
+          #           page silently regresses from v0.5.1 to v0.0.1.
+          #   - any volume where someone manually edited doi past the
+          #           latest tag and then ran patch/minor against the
+          #           older tag.
+          #
+          # The guard refuses to proceed if the bare planned version is
+          # not >= the bare doi already in EITHER per-volume index.qmd.
+          # Equality is allowed (no-op write); strictly less is blocked.
+          #
+          # Fix when this trips:
+          #   - If the doi in index-vol{N}.qmd is correct, request the
+          #     matching version: re-run with previous_version pointing
+          #     at the right tag (or seed a tag at the displayed version
+          #     and re-run).
+          #   - If the doi is stale, edit it down to match the latest
+          #     tag and re-run.
+          # ----------------------------------------------------------------
+
+          # sort -V puts the higher semver last
+          semver_lt() {
+            # returns 0 (true) if $1 < $2 strictly
+            local a="$1" b="$2"
+            [ "$a" = "$b" ] && return 1
+            local highest
+            highest=$(printf '%s\n%s\n' "$a" "$b" | sort -V | tail -n1)
+            [ "$highest" = "$b" ]
+          }
+
+          read_doi() {
+            local f="$1"
+            [ -f "$f" ] || { echo ""; return; }
+            grep -E '^[[:space:]]*doi:[[:space:]]*"' "$f" \
+              | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' \
+              | sed -E 's/^v//'
+          }
+
+          check_volume() {
+            # check_volume <vol-tag>  e.g. vol1-v0.6.0
+            local new_tag="$1" prefix bare doi_bare doi_raw f
+            [ -z "$new_tag" ] && return 0   # not in scope this run
+            prefix="${new_tag%%-*}"        # vol1 or vol2
+            bare="${new_tag#${prefix}-v}"  # X.Y.Z
+            f="${{ vars.BOOK_QUARTO }}/index-${prefix}.qmd"
+
+            if [ ! -f "$f" ]; then
+              echo "⚠️ $f missing — skipping guard for $prefix (PR-6 not deployed?)."
+              return 0
+            fi
+
+            doi_bare=$(read_doi "$f")
+            doi_raw="v${doi_bare}"
+            echo "📂 $prefix source-of-truth (${f##*/}): $doi_raw"
+            echo "🎯 $prefix planned new version:        v$bare"
+
+            if [ -z "$doi_bare" ]; then
+              echo "❌ Could not read doi from $f — refusing to proceed."
+              return 1
+            fi
+
+            if semver_lt "$bare" "$doi_bare"; then
+              echo ""
+              echo "❌ DOWNGRADE BLOCKED for $prefix"
+              echo "   ${f##*/} doi is v$doi_bare but this run would write v$bare."
+              echo ""
+              echo "   This usually means index-${prefix}.qmd was edited past"
+              echo "   the latest ${prefix}-v* tag, or no ${prefix}-v* tag"
+              echo "   exists yet and the auto-seeded baseline is lower than"
+              echo "   what readers currently see."
+              echo ""
+              echo "   To proceed, either:"
+              echo "     1. Run with previous_version=${prefix}-v$doi_bare so the"
+              echo "        next bump starts from the displayed version, or"
+              echo "     2. Edit index-${prefix}.qmd doi down to match the"
+              echo "        latest ${prefix}-v* tag and re-run."
+              return 1
+            fi
+
+            echo "✅ $prefix planned v$bare ≥ source v$doi_bare — allowed."
+            return 0
+          }
+
+          rc=0
+          check_volume "$NEW_VOL1" || rc=1
+          check_volume "$NEW_VOL2" || rc=1
+          exit "$rc"
+
   pre-flight-checks:
     name: '🛫 Pre-Flight Validation'
     runs-on: ubuntu-latest
