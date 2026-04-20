@@ -133,10 +133,10 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 テキストブック](https://mlsysbook.ai) | MLシステムの概念を理解 | [book/](book/README.md) |
+| **READ** | [📖 テキストブック](https://mlsysbook.ai) | MLシステムの概念を理解 | [book/](../book/README.md) |
 | **EXPLORE** | 🔮 Software Co‑Labs | レイテンシ・メモリ・エネルギー・コストの実験 | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | フレームワーク実装を体験 | [tinytorch/](tinytorch/README.md) |
-| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | メモリ・電力・時間・安全性の制約下でハードウェアをエンジニアリング | [kits/](kits/README.md) |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | フレームワーク実装を体験 | [tinytorch/](../tinytorch/README.md) |
+| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | メモリ・電力・時間・安全性の制約下でハードウェアをエンジニアリング | [kits/](../kits/README.md) |
 | **PROVE** | 🏆 AI Olympics | すべてのトラックで競争・ベンチマーク | *Coming 2026* |
 
 **各パスが教えること:**
@@ -255,9 +255,9 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | I want to… | Go here |
 |--------------|---------|
-| 誤字修正・章改善 | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
-| TinyTorch モジュール追加・バグ修正 | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
-| ハードウェア実験改善 | [kits/README.md](kits/README.md) |
+| 誤字修正・章改善 | [book/docs/CONTRIBUTING.md](../book/docs/CONTRIBUTING.md) |
+| TinyTorch モジュール追加・バグ修正 | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
+| ハードウェア実験改善 | [kits/README.md](../kits/README.md) |
 | Issue 報告 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
 | 質問 | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
 
@@ -284,8 +284,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | Component | License | What It Means |
 |-----------|---------|---------------|
-| **Book content** | [CC BY‑NC‑ND 4.0](LICENSE.md) | 出典表示・非営利・改変禁止の条件で自由配布 |
-| **TinyTorch code** | [Apache 2.0](tinytorch/LICENSE) | 自由使用・修正・配布・特許保護含む |
+| **Book content** | [CC BY‑NC‑ND 4.0](../LICENSE.md) | 出典表示・非営利・改変禁止の条件で自由配布 |
+| **TinyTorch code** | [Apache 2.0](../tinytorch/LICENSE) | 自由使用・修正・配布・特許保護含む |
 
 テキストブックの内容（章・図・解説）は教育資料であり、出典表示と非営利利用を前提に自由に共有できます。ソフトウェアフレームワークは誰でも使用・修正・統合できるよう設計されたツールです。
 
