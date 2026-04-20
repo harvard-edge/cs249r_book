@@ -9,27 +9,43 @@ It is not for CSS/SCSS, TeX templates, or other rendering assets.
 
 ## Active config: how `_quarto.yml` is selected
 
-Quarto looks for `_quarto.yml` and `index.qmd` at the project root
-(`book/quarto/`). Both files there are **symlinks** that the CLI rewrites every
-time you build, preview, or switch volume/format:
+Quarto looks for `_quarto.yml` at the project root (`book/quarto/`). That file
+is a **symlink** the `binder` CLI rewrites every time you build, preview, or
+switch volume/format:
 
     book/quarto/_quarto.yml   ->  config/_quarto-{html,pdf,epub}-{vol1,vol2}.yml
-    book/quarto/index.qmd     ->  contents/{vol1,vol2}/index.qmd
 
-The actual files live in `config/`; the symlink at the project root is just a
+The actual file lives in `config/`; the symlink at the project root is just a
 pointer to the currently-active configuration.
 
-**Do not edit `book/quarto/_quarto.yml` or `book/quarto/index.qmd` directly.**
-Edit the canonical file under `config/` (or `contents/<vol>/index.qmd`) instead.
-The symlink target may be overwritten on the next build.
+**Do not edit `book/quarto/_quarto.yml` directly.** Edit the canonical file
+under `config/` instead. The symlink target may be overwritten on the next
+build.
 
 The symlink is managed by [`book/cli/core/config.py`](../../../cli/core/config.py)
-(`ConfigManager.setup_symlink` / `_setup_index_symlink`). To switch manually,
-use the `binder` CLI commands or relink by hand:
+(`ConfigManager.setup_symlink`). To switch manually, use the `binder` CLI
+commands or relink by hand:
 
     cd book/quarto
     ln -sf config/_quarto-html-vol2.yml _quarto.yml
-    ln -sf contents/vol2/index.qmd index.qmd
+
+### Per-volume landing pages
+
+There are **two** landing page files, one per volume, both at the project root:
+
+    book/quarto/index-vol1.qmd   (rendered by every vol1 build)
+    book/quarto/index-vol2.qmd   (rendered by every vol2 build)
+
+Each sets `output-file: index.html` in its frontmatter and is referenced
+explicitly by the matching `config/_quarto-<format>-<vol>.yml` render list.
+This ensures `vol1`'s deployed `index.html` contains vol1 content and `vol2`'s
+contains vol2 content.
+
+**Never commit a `book/quarto/index.qmd`** (symlink *or* regular file). A root
+`index.qmd` is auto-discovered by Quarto's website type and silently clobbers
+the per-volume `index-volX.qmd` during render — the vol1 build ends up
+deploying vol2 content. The path is listed in `.gitignore` to prevent the
+`binder` CLI's local symlink from being checked in accidentally.
 
 ## Layout
 
