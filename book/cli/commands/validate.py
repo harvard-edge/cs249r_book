@@ -202,17 +202,15 @@ class ValidateCommand:
             # Fast source-level invariants. No EPUB build required. Suitable
             # for pre-commit — runs in <1s across all SVGs + .bib files.
             ("hygiene", "_run_epub_hygiene"),
+            # Reader-compatibility smoke checks against the built EPUB.
+            # No Java required; catches patterns epubcheck does not, e.g.
+            # CSS custom properties (ClearView / Tolino compat) and
+            # external resource references.
+            ("smoke", "_run_epub_smoke"),
             # Full W3C epubcheck validation of built EPUB artifacts under
             # _build/epub-vol*/. Requires epubcheck + JRE. Slow (~30s per
             # volume) — appropriate for CI, not pre-commit.
             ("epubcheck", "_run_epubcheck"),
-            # Note: the legacy `structure` scope (validate_epub.py) has
-            # been retired from the default run. epubcheck supersedes its
-            # coverage and this module's `hygiene` check catches the
-            # source-level cases it was written for. The script itself
-            # remains at book/tools/scripts/utilities/validate_epub.py
-            # and can still be invoked directly if someone needs a
-            # no-Java smoke check.
         ],
         "sources": [
             ("citations", "_run_sources"),
@@ -3352,6 +3350,63 @@ class ValidateCommand:
             description="EPUB source hygiene (SVG + BibTeX invariants)",
             files_checked=files_checked,
             issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_epub_smoke(self, root: Path) -> ValidationRunResult:
+        """Reader-compatibility smoke checks against the built EPUB(s).
+
+        Epubcheck validates EPUB 3 spec conformance. This scope catches
+        patterns that pass epubcheck but break specific readers:
+
+          * CSS custom properties (`--var`, `var(--x)`) that older
+            ClearView / Tolino firmware cannot resolve.
+          * External resource references (`src="https://..."`,
+            `<link href="https://...">`) that EPUB readers do not fetch.
+
+        Runs against every EPUB discovered under `_build/epub-vol*/`.
+        Does not require Java — safe to run on any dev machine.
+        """
+        from cli.commands._epub_checks import (
+            _discover_built_epubs,
+            run_smoke_checks_on,
+        )
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        epubs = _discover_built_epubs(repo_root)
+
+        if not epubs:
+            return ValidationRunResult(
+                name="epub-smoke",
+                description="EPUB reader-compatibility smoke (no built EPUBs found)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        all_issues: List[ValidationIssue] = []
+        for epub in epubs:
+            for e in run_smoke_checks_on(epub, repo_root=repo_root):
+                all_issues.append(ValidationIssue(
+                    file=e.file,
+                    line=e.line,
+                    code=e.code,
+                    message=e.message,
+                    # Smoke issues are advisory (warnings), not blockers,
+                    # because they flag reader-subset behavior rather than
+                    # spec violations. Promote to error by fixing at source.
+                    severity=e.severity,
+                ))
+
+        return ValidationRunResult(
+            name="epub-smoke",
+            description=(
+                f"EPUB reader-compatibility smoke "
+                f"({len(epubs)} EPUB(s) scanned)"
+            ),
+            files_checked=len(epubs),
+            issues=all_issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 

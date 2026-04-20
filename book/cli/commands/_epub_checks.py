@@ -46,6 +46,8 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -446,6 +448,162 @@ def _parse_epubcheck_json(
             ))
 
     return issues, counts
+
+
+# ---------------------------------------------------------------------------
+# Smoke check: reader-compatibility invariants epubcheck does not cover.
+#
+# Epubcheck enforces EPUB 3 spec conformance, but some readers enforce a
+# stricter subset. The patterns checked here produced real user-reported
+# breakage before the `fix/epub-issues` work:
+#
+#   CSS custom properties (`--var` declarations, `var(--x)` usage)
+#       Valid per CSS 4 spec but not implemented in older / embedded EPUB
+#       renderers (ClearView, Tolino firmware pre-2023, some Kobo builds).
+#       Root cause of issue #1052 before the CSS was rewritten without
+#       custom properties.
+#
+#   External resource references (src=, href= pointing off-device)
+#       EPUB readers typically do not fetch external resources — an
+#       `<img src="https://...">` shows a broken-image icon on every
+#       reader that enforces offline rendering. Zero false positives
+#       in well-authored EPUBs; this is always a bug.
+#
+# The smoke check runs in <1s against a built EPUB and does not require
+# Java, so it is useful when epubcheck is not installed locally and as
+# a belt-and-suspenders confirmation alongside epubcheck.
+# ---------------------------------------------------------------------------
+
+# CSS custom property declarations like `--accent-color: #333;`
+_CSS_CUSTOM_PROP_DECL_RE = re.compile(r'^\s*(--[\w-]+)\s*:', flags=re.MULTILINE)
+
+# CSS custom property consumption like `color: var(--accent-color);`
+_CSS_CUSTOM_PROP_USE_RE = re.compile(r'\bvar\(\s*(--[\w-]+)')
+
+# External resource references in XHTML. We match href= and src= values
+# that begin with a scheme (http, https, ftp, data: except for known safe
+# data URIs) or with `//`. In-EPUB paths start with a letter or `../`.
+_EXTERNAL_RESOURCE_RE = re.compile(
+    r'\b(?:href|src)="((?:https?|ftp)://[^"]*|//[^"]*)"',
+)
+
+
+def run_smoke_checks_on(
+    epub_path: Path,
+    *,
+    repo_root: Path,
+) -> list[EpubIssue]:
+    """Run reader-compatibility smoke checks against a built EPUB.
+
+    Unlike `run_epubcheck_on`, this does not require Java — it unzips the
+    EPUB into a temp directory, walks the CSS and XHTML, and returns
+    issues for patterns epubcheck does not catch:
+
+      * CSS custom property declarations and usage
+      * External resource references in XHTML href / src
+
+    Returns an empty list on a clean EPUB.
+    """
+    issues: list[EpubIssue] = []
+    if not epub_path.exists():
+        return [EpubIssue(
+            file=str(epub_path), line=0, col=0,
+            code="smoke-missing-epub",
+            severity="error",
+            message=f"EPUB file not found: {epub_path}",
+        )]
+
+    epub_rel = (
+        str(epub_path.relative_to(repo_root))
+        if epub_path.is_relative_to(repo_root)
+        else str(epub_path)
+    )
+    tmp = Path(tempfile.mkdtemp(prefix="epub-smoke-"))
+    try:
+        try:
+            with zipfile.ZipFile(epub_path, "r") as zf:
+                zf.extractall(tmp)
+        except zipfile.BadZipFile:
+            return [EpubIssue(
+                file=epub_rel, line=0, col=0,
+                code="smoke-bad-zip",
+                severity="error",
+                message="EPUB is not a valid zip archive",
+            )]
+
+        # --- CSS custom properties -------------------------------------
+        for css in tmp.rglob("*.css"):
+            text = _read(css)
+            if text is None:
+                continue
+            rel_in_epub = css.relative_to(tmp).as_posix()
+            displayed = f"{epub_rel}!{rel_in_epub}"
+
+            for m in _CSS_CUSTOM_PROP_DECL_RE.finditer(text):
+                issues.append(EpubIssue(
+                    file=displayed,
+                    line=_line_of(text, m.start()),
+                    col=0,
+                    code="smoke-css-custom-property-decl",
+                    # Treated as error because it produced real user-
+                    # reported EPUB-load failure on ClearView (issue #1052).
+                    severity="error",
+                    message=(
+                        f"CSS custom property declaration '{m.group(1)}'; "
+                        "older EPUB readers (ClearView, Tolino pre-2023) "
+                        "do not support these. Inline the value."
+                    ),
+                ))
+            for m in _CSS_CUSTOM_PROP_USE_RE.finditer(text):
+                issues.append(EpubIssue(
+                    file=displayed,
+                    line=_line_of(text, m.start()),
+                    col=0,
+                    code="smoke-css-custom-property-use",
+                    severity="error",
+                    message=(
+                        f"var({m.group(1)}) reference; older EPUB readers "
+                        "do not resolve CSS custom properties. Inline "
+                        "the literal value."
+                    ),
+                ))
+
+        # --- External resource references -----------------------------
+        for xhtml in tmp.rglob("*.xhtml"):
+            text = _read(xhtml)
+            if text is None:
+                continue
+            rel_in_epub = xhtml.relative_to(tmp).as_posix()
+            displayed = f"{epub_rel}!{rel_in_epub}"
+
+            for m in _EXTERNAL_RESOURCE_RE.finditer(text):
+                url = m.group(1)
+                # Allowlist: external hyperlinks (<a href="https://...">)
+                # are fine; only flag when the match's *attribute* is src=
+                # or the href= is on a <link> element (external stylesheet).
+                # We approximate this by looking at the 60 chars before
+                # the match for 'src=' or '<link'.
+                context_before = text[max(0, m.start() - 60):m.start()]
+                is_src_attr = "src=\"" in m.group(0)
+                is_link_href = "<link" in context_before.lower()
+                if not (is_src_attr or is_link_href):
+                    continue
+                issues.append(EpubIssue(
+                    file=displayed,
+                    line=_line_of(text, m.start()),
+                    col=0,
+                    code="smoke-external-resource",
+                    severity="error",
+                    message=(
+                        f"External resource reference: {url} — EPUB readers "
+                        "do not fetch remote resources. Inline the asset "
+                        "or remove the reference."
+                    ),
+                ))
+
+        return issues
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def emit_github_annotations(issues: Iterable[EpubIssue]) -> None:

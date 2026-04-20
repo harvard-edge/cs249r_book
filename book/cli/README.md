@@ -99,6 +99,7 @@ All validation is in `validate.py`. Each check belongs to a **group** and has a 
 | **spelling** | `prose` | Spell check prose content |
 | | `tikz` | Spell check TikZ labels |
 | **epub** | `hygiene` | Fast SVG/BibTeX source invariants (pre-commit, <1s) |
+| | `smoke` | Reader-compat smoke checks on built EPUBs — no Java required |
 | | `epubcheck` | W3C epubcheck on built EPUBs under `_build/epub-vol*/` (CI, ~7s per volume) |
 | **sources** | `citations` | Source citation verification |
 | **references** | `hallucinator` | Bibliography entry verification (Crossref/DOI) |
@@ -175,7 +176,21 @@ If one of these triggers during commit, the fix is almost always at source:
 - **Duplicate SVG markers** — open the SVG in a text editor and delete the duplicate `<marker>` element. The compact one-line form and the multi-line expanded form are two common duplicates; keep one.
 - **BibTeX URL escapes** — edit the `.bib` entry: replace `\_` with `_`, `\%` with `%`, `<`/`>` with `%3C`/`%3E`. These escapes are LaTeX-only; BibTeX `url = { ... }` fields do not require them.
 
-### Layer 2 — epubcheck (built-EPUB, post-build)
+### Layer 2 — smoke (built-EPUB, no Java)
+
+Runs in <1s against every EPUB under `_build/epub-vol*/`. Catches reader-compatibility issues that epubcheck does not, because it enforces EPUB 3 spec conformance while readers enforce a stricter subset:
+
+| Code | What it catches | Symptom |
+|---|---|---|
+| `smoke-css-custom-property-decl` | `--var-name: value;` declarations in packaged CSS. | ClearView / Tolino (pre-2023 firmware) silently fail to load the EPUB. |
+| `smoke-css-custom-property-use` | `var(--x)` references. | Same readers render the default fallback, producing visual regressions. |
+| `smoke-external-resource` | `src="https://..."` / `<link href="https://...">` in any XHTML. | EPUB readers do not fetch remote assets; image shows as broken-icon on every reader. |
+
+**Fix at source** in every case — there is no legitimate reason a packaged EPUB should reference external assets, and CSS custom properties should be inlined (or post-processed away) for the packaged stylesheet.
+
+Useful when Java is not installed locally and `epubcheck` is unavailable; the other two layers still provide real coverage.
+
+### Layer 3 — epubcheck (built-EPUB, full spec)
 
 Runs the W3C `epubcheck` validator against every EPUB discovered under `book/quarto/_build/epub-vol*/`. Emits `ValidationIssue` records with file, line, column, RSC/OPF code, severity, and human-readable message. When running under GitHub Actions, also emits `::error file=...,line=...::` annotations so findings show up inline on PR diffs.
 
@@ -188,7 +203,7 @@ Thresholds (from the command line, environment variables, or the CI workflow):
 
 ### Defense in depth
 
-The two layers exist because neither alone is sufficient:
+The three layers exist because none alone is sufficient:
 
 - **Hygiene alone** is a whitelist of known patterns. It cannot catch a category of error epubcheck invents in a future version, nor renderer-emitted markup (bare `<br>`, `--` in TikZ comments) that only appears after Quarto + post-process have run.
 - **Epubcheck alone** takes ~7 seconds per volume and requires a full EPUB build. Developers under time pressure will find ways around it.
