@@ -291,7 +291,7 @@ Understanding this mapping is essential: the *what* of parallelism directly dete
 | **Parallelism Strategy**     | **The Gradient's Goal**               | **Primary Primitive**      | **Primary Constraint**            |
 |:-----------------------------|:--------------------------------------|:---------------------------|:----------------------------------|
 | **Data Parallelism**         | Meet everyone, compute global average | AllReduce                  | Bandwidth (Large payloads)        |
-| **FSDP/ZeRO**              | Find shards, reconstruct the whole    | AllGather + ReduceScatter  | Bandwidth (High frequency)        |
+| **FSDP/ZeRO**                | Find shards, reconstruct the whole    | AllGather + ReduceScatter  | Bandwidth (High frequency)        |
 | **Tensor Parallelism**       | Quick handshake within the node       | AllReduce                  | Latency (Speed is life)           |
 | **Pipeline Parallelism**     | Handoff to the next neighbor          | Point-to-Point (Send/Recv) | Latency (Sequential dependencies) |
 | **Expert Parallelism (MoE)** | Targeted routing to a specialist      | AlltoAll                   | Latency + Contention              |
@@ -602,7 +602,7 @@ The total hierarchical AllReduce takes approximately `{python} LlamaBudgetCalc.h
 
 ### Theory vs. practice: The NCCL reality gap {#sec-communication-nccl-reality}
 
-The Bandwidth-Latency Trade-off (Principle \ref{nte-alpha-beta-model}) provides useful first-order predictions, but real communication libraries introduce overheads that the idealized $\alpha$-$\beta$ model does not capture. NCCL, the dominant GPU communication library, adds protocol negotiation, memory registration, and internal pipelining that modify the effective alpha and beta values. @tbl-nccl-vs.-theory compares alpha-beta predictions against measured NCCL performance for common message sizes on an 8-node DGX H100 cluster (64 GPUs, InfiniBand NDR 400G).
+The Bandwidth-Latency Trade-off (Principle \ref{nte-alpha-beta-model}) provides useful first-order predictions, but real communication libraries introduce overheads that the idealized $\alpha$-$\beta$ model does not capture. NCCL, the dominant GPU communication library, adds protocol negotiation, memory registration, and internal pipelining that modify the effective alpha and beta values. @tbl-nccl-vs-theory compares alpha-beta predictions against measured NCCL performance for common message sizes on an 8-node DGX H100 cluster (64 GPUs, InfiniBand NDR 400G).
 
 | **Message Size** | **$\alpha$-$\beta$ Prediction** | **Measured NCCL** | **Ratio (Measured/Predicted)** | **Explanation**                         |
 |:-----------------|--------------------------------:|------------------:|-------------------------------:|:----------------------------------------|
@@ -613,7 +613,7 @@ The Bandwidth-Latency Trade-off (Principle \ref{nte-alpha-beta-model}) provides 
 | 1 GB             |                          ~20 ms |            ~23 ms |                  ~1.15$\times$ | Bandwidth-dominant; NCCL nearly optimal |
 | 10 GB            |                         ~200 ms |           ~215 ms |                  ~1.08$\times$ | Large payloads saturate the wire        |
 
-: **$\alpha$-$\beta$ Predictions vs. Measured NCCL Performance**: For small messages, NCCL's protocol overhead (memory registration, channel setup, kernel launch) inflates the effective latency by 7--8$\times$ over the bare-wire alpha. For large messages, NCCL achieves within 8--15 percent of theoretical bandwidth, validating the model's predictions in the bandwidth-bound regime. Measurements represent Ring AllReduce on 8-node DGX H100 clusters with InfiniBand NDR 400G. {#tbl-nccl-vs.-theory}
+: **$\alpha$-$\beta$ Predictions vs. Measured NCCL Performance**: For small messages, NCCL's protocol overhead (memory registration, channel setup, kernel launch) inflates the effective latency by 7--8$\times$ over the bare-wire alpha. For large messages, NCCL achieves within 8--15 percent of theoretical bandwidth, validating the model's predictions in the bandwidth-bound regime. Measurements represent Ring AllReduce on 8-node DGX H100 clusters with InfiniBand NDR 400G. {#tbl-nccl-vs-theory}
 
 The table reveals two critical lessons. First, the alpha-beta model underestimates small-message latency by 7--8$\times$ because it accounts only for wire-level propagation, not the software stack overhead. For latency-sensitive operations (tensor parallelism AllReduce, MoE token routing), the effective alpha is 5--10$\times$ higher than the physical wire latency. Second, for large messages the model is accurate to within 8--15 percent, confirming that bandwidth is the binding constraint and that NCCL's internal optimizations (channel pipelining, kernel fusion) successfully saturate the available links.
 
@@ -769,7 +769,7 @@ In practice, MoE routing is rarely perfectly uniform. Popular experts receive mo
 | **Training Strategy**    | **Primary Collective**     | **Bottleneck Characteristic**         |
 |:-------------------------|:---------------------------|:--------------------------------------|
 | **Data Parallelism**     | AllReduce                  | Bandwidth-bound (large gradients)     |
-| **FSDP/ZeRO-3**        | AllGather, ReduceScatter   | Bandwidth-bound, high frequency       |
+| **FSDP/ZeRO-3**          | AllGather, ReduceScatter   | Bandwidth-bound, high frequency       |
 | **Tensor Parallelism**   | AllReduce, AllGather       | Latency-bound (requires NVLink)       |
 | **Pipeline Parallelism** | Point-to-Point (Send/Recv) | Latency-bound (microbatch handoffs)   |
 | **Sequence Parallelism** | AllGather, ReduceScatter   | Bandwidth-bound (activation exchange) |
@@ -786,7 +786,7 @@ The memory optimization transforms the communication pattern. Before each layer'
 
 The consequence is a trade-off between memory and communication frequency. Standard data parallelism communicates once per training step (a single AllReduce of the full gradient). FSDP communicates twice per layer per step (AllGather in forward, ReduceScatter in backward), but each communication is smaller (only $1/N$ of the layer's parameters per GPU). For a model with $L$ layers, FSDP issues $2L$ collective operations per step instead of 1, but each operation transfers approximately the same total bytes as the single AllReduce would. The total communication volume is comparable, but the communication is spread across more, smaller operations.
 
-The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2L$ collectives pays the full NCCL startup overhead (25--50 $\mu$s per operation from @tbl-nccl-vs.-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through **prefetching** (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
+The higher operation count makes FSDP more sensitive to latency ($\alpha$) than standard data parallelism. If each of the $2L$ collectives pays the full NCCL startup overhead (25--50 $\mu$s per operation from @tbl-nccl-vs-theory), the aggregate overhead for a 100-layer model is 5--10 ms, which can represent a meaningful fraction of step time. FSDP implementations mitigate this through **prefetching** (launching the next layer's AllGather while the current layer is computing) and **communication stream pipelining** (using dedicated CUDA streams for communication that overlap with compute streams).
 
 Selecting the right collective algorithm at each invocation requires understanding these asymmetric patterns. The AllGather operations in FSDP are medium-sized (one layer's parameters, typically 10--100 MB for transformer models) and latency-sensitive (because computation blocks until the full parameters are available). The ReduceScatter operations are of similar size but can overlap with the next layer's backward computation. This asymmetry means the AllGather operations benefit more from low-latency algorithms (Tree or hybrid) while the ReduceScatter operations can use bandwidth-optimal algorithms (Ring) because their latency is hidden behind computation.
 
@@ -796,7 +796,7 @@ The collective primitives catalog above defines *what* must be communicated; the
 
 Imagine 1,000 GPUs, each holding a 1 GB gradient, all needing the exact sum of those 1,000 gradients simultaneously. If they all send their data to a central server, that server's network card will instantly saturate and stall the entire cluster. The AllReduce is the heartbeat of the fleet, and its algorithmic design dictates our scaling limits.
 
-### Naive approaches vs. the bandwidth bottleneck {#sec-communication-collective-operations-naive-vs.-optimal}
+### Naive approaches vs. the bandwidth bottleneck {#sec-communication-collective-operations-naive-vs-optimal}
 
 Consider a naive implementation using a **Parameter Server** (Star topology). All $N$ workers send their gradients to rank 0; rank 0 sums them and sends the result back.
 
