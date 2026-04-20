@@ -76,7 +76,7 @@ tito milestone list --simple
 
 ### Learn About Milestones
 
-<div style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff9800; margin: 1rem 0;">
+<div class="milestones-learn-box" style="background: #fff3e0; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #ff9800; margin: 1rem 0;">
 
 **Get Detailed Information**
 ```bash
