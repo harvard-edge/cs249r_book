@@ -1,0 +1,840 @@
+suites:
+  cloud:
+    nanogpt-train:
+      model: nanogpt-12m
+      params: 11.1M
+      params_note: Char-level vocab=128 (TinyShakespeare uses 65 unique chars). Earlier README/paper figures of 85.9M and
+        124.4M reflected a vocab=50,257 BPE config that was never reachable from the char-level data; iteration 1 reconciled
+        the model to its actual effective size.
+      dataset: tinyshakespeare
+      dataset_source: Karpathy (2015), character-level, 1.1MB, shipped in repo
+      quality_target:
+        metric: cross_entropy_loss
+        value: 2.3
+      verified_baseline:
+        train_loss: 2.248
+        val_loss: 2.205
+        epochs: 25
+        time_seconds: 89
+        baseline_note: Loss curves carry over from the prior 30.3M-with-wasted-vocab config because only the 65 active token
+          embeddings ever updated; needs re-verification on the cleaned 11M model in a follow-up iteration.
+      scenario: single_stream
+      provenance: Vaswani et al. 2017 (Transformer); maps to MLPerf Training GPT-3/LLaMA
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 67108864
+          note: "Per-layer activation peak ~12 MB at B=16 T=64; weights ~46 MB streamed once per epoch. Falls in the 6-48\
+            \ MB grey band; exact classification depends on batch and depends on caching behavior \u2014 measure with cache-miss\
+            \ counters."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 121.747
+          classification_rule: intensity 121.75 vs [low 13.71, high 54.84]; util 0.222 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-train_2026-04-16T21-02-31Z_17c2a18fb5ec.json
+          evidence_sha256_short: 2be2e6231554
+          measured_at: 2026-04-16T21-02-31Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Training-loop dispatch needs a roofline-emitter run; logged for iter 5.
+          utilization: 0.2225
+          achieved_bw_gbps: 26.419
+          classification_rule: intensity 121.75 vs [low 13.71, high 54.84]; util 0.222 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-train_2026-04-16T21-02-31Z_17c2a18fb5ec.json
+          evidence_sha256_short: 2be2e6231554
+          measured_at: 2026-04-16T21-02-31Z
+          platform_machine_class: apple-silicon
+    nano-moe-train:
+      model: nano-moe-12m
+      params: 17.4M
+      dataset: tinyshakespeare
+      dataset_source: Karpathy (2015), character-level, 1.1MB, shipped in repo
+      quality_target:
+        metric: cross_entropy_loss
+        value: 0.05
+      verified_baseline:
+        train_loss: 0.042
+        val_loss: 0.042
+        epochs: 25
+        time_seconds: 158
+      scenario: single_stream
+      provenance: Shazeer et al. 2017 (MoE); 8 experts, top-2 routing
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 20971520
+          note: "17M params, top-2 routing. ~21 MB per-step is in the 6-48 MB grey band; conditional compute pattern complicates\
+            \ cache modeling \u2014 measure."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 123.795
+          classification_rule: intensity 123.79 vs [low 13.71, high 54.84]; util 0.012 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nano-moe-train_2026-04-16T21-03-07Z_f228368b83bd.json
+          evidence_sha256_short: b87deba47fc8
+          measured_at: 2026-04-16T21-03-07Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Routing/gating may push to dispatch_bound at small batch; needs measurement.
+          utilization: 0.0123
+          achieved_bw_gbps: 1.435
+          classification_rule: intensity 123.79 vs [low 13.71, high 54.84]; util 0.012 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nano-moe-train_2026-04-16T21-03-07Z_f228368b83bd.json
+          evidence_sha256_short: b87deba47fc8
+          measured_at: 2026-04-16T21-03-07Z
+          platform_machine_class: apple-silicon
+    micro-dlrm-train:
+      model: micro-dlrm-1m
+      params: 23K
+      dataset: movielens-100k
+      dataset_source: "Harper & Konstan (2015), MovieLens-100K, 100K ratings from 943 users \xD7 1682 movies; ships in data/movielens/"
+      quality_target:
+        metric: accuracy
+        value: 0.7
+      verified_baseline:
+        train_loss: 0.58
+        val_loss: 0.61
+        accuracy: 0.71
+        epochs: 25
+        time_seconds: 5
+        note: "23K params; embedding tables (943\xD78 + 1682\xD78 \u2248 21KB) fit in L1 cache"
+      scenario: server
+      provenance: Naumov et al. 2019 (DLRM); maps to MLPerf Training DLRM
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 21504
+          note: 943x8 + 1682x8 + 21x8 ~ 21 KB embedding tables fit in L1 trivially.
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 179.508
+          classification_rule: intensity 179.51 vs [low 13.71, high 54.84]; util 0.004 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-dlrm-train_2026-04-16T21-03-36Z_12d9524eac39.json
+          evidence_sha256_short: c0d3b509c627
+          measured_at: 2026-04-16T21-03-36Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.0043
+          observation_source: iter-2 smoke_dlrm_dram.py probe; cache variant is dispatch-bound at any realistic batch size
+          achieved_bw_gbps: 0.349
+          classification_rule: intensity 179.51 vs [low 13.71, high 54.84]; util 0.004 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-dlrm-train_2026-04-16T21-03-36Z_12d9524eac39.json
+          evidence_sha256_short: c0d3b509c627
+          measured_at: 2026-04-16T21-03-36Z
+          platform_machine_class: apple-silicon
+    micro-dlrm-dram-train:
+      model: micro-dlrm-dram-1m
+      params: 512M
+      trainable_params: 23K
+      virtual_table_bytes: 2147483648
+      llc_capacity_factor: 170
+      dataset: movielens-100k
+      dataset_source: "Harper & Konstan (2015) \u2014 same dataset as micro-dlrm-train"
+      quality_target:
+        metric: accuracy
+        value: 0.65
+      verified_baseline:
+        baseline_note: Awaiting first verification run on iter-2 harness.
+      scenario: server
+      provenance: Naumov et al. 2019 (DLRM) + Weinberger et al. 2009 (hashing trick); production-realistic memory access pattern
+        at laptop scale
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 67108864
+          note: 2M-row x 256-dim virtual table = 2 GB total; per-step working set ~64 MB at B=8192 with random hashing
+        arithmetic_intensity:
+          value: unmeasured
+          flops_per_byte: 14.919
+          classification_rule: intensity 14.92 vs [low 13.71, high 54.84]; util 0.019 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-dlrm-dram-train_2026-04-16T21-04-03Z_a229b977a809.json
+          evidence_sha256_short: 0f986b0977e6
+          measured_at: 2026-04-16T21-04-03Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.0188
+          achieved_bw_gbps: 9.933
+          observation_source: 'iter-2 smoke_dlrm_dram.py: m_spa=256 explicitly chosen to clear PyTorch''s ~50us dispatch floor'
+          classification_rule: intensity 14.92 vs [low 13.71, high 54.84]; util 0.019 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-dlrm-dram-train_2026-04-16T21-04-03Z_a229b977a809.json
+          evidence_sha256_short: 0f986b0977e6
+          measured_at: 2026-04-16T21-04-03Z
+          platform_machine_class: apple-silicon
+    nano-lora-finetune:
+      model: nanogpt-small-86m + LoRA(rank=8, alpha=16, target=c_attn)
+      base_params: 88.3M
+      trainable_params: 294912
+      trainable_ratio_pct: 0.334
+      scenario: training
+      provenance: "Iter-7 (Han): LoRA fine-tuning workload demonstrating PEFT.
+        Random-init backbone (random training data) — measures the SYSTEMS cost
+        of LoRA, not task accuracy. Base parameters genuinely frozen
+        (smoke verifies base_grad_norm == 0)."
+      regime:
+        working_set: { value: dram_bound }
+        arithmetic_intensity: { value: unmeasured }
+        dispatch: { value: unmeasured }
+
+    mobilenet-cifar100-composed-fp16:
+      model: MobileNetV2-cifar100 + 2:4 sparsity + fake-INT8 + fp16
+      params: 2.4M
+      effective_compression_ratio: 5.9
+      scenario: inference
+      provenance: "Iter-8 (Han): composition of three compression techniques on
+        MobileNetV2. Algorithmic 5.9x bytes reduction; PyTorch+MPS runtime
+        speedup only 1.06x (no INT8/2:4 kernels). The gap is the lesson."
+      regime:
+        working_set: { value: cache_resident }
+        arithmetic_intensity: { value: unmeasured }
+        dispatch: { value: unmeasured }
+
+    micro-dlrm-distributed:
+      model: micro-dlrm-1m via torch.distributed (Gloo, 2 ranks, localhost)
+      params: 1.0M
+      world_size: 2
+      backend: gloo
+      transport: loopback
+      scenario: training
+      provenance: "Iter-10 (Dean): two-process DDP smoke. Demonstrates DDP-vs-
+        gradient-accumulation loss equivalence (delta 0.0064 < 0.02 gate).
+        AllReduce overhead 0.6 ms/step on M5 Max loopback Gloo."
+      regime:
+        working_set: { value: cache_resident }
+        arithmetic_intensity: { value: unmeasured }
+        dispatch: { value: dispatch_bound, note: "Per-step 0.6 ms AllReduce dominates micro-step compute" }
+
+    nanogpt-decode-fp32-b16:
+      model: nanogpt-small-86m
+      shared_checkpoint: nanogpt-small-train
+      params: 88.3M
+      default_prefill_ctx: 1024
+      default_decode_steps: 8
+      default_batch_size: 16
+      scenario: server
+      provenance: 'Iter-6 (Han): GPT-2-Small geometry decode at fp32. Real-LLM stand-in used to populate the bandwidth-bound
+        serving-regime cells. Random weights for roofline characterization; iter-6.5 will train on TinyShakespeare.'
+      regime:
+        working_set:
+          value: dram_bound
+          note: 337 MB weights + 32x1024x18KB = ~590 MB KV stream per step; >> M1 LLC.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          note: Pending sync from sidecar.
+          flops_per_byte: 1.81
+          classification_rule: intensity 1.81 vs [low 13.71, high 54.84]; util 0.119 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode-fp32-b16_2026-04-16T21-45-16Z_c3118df3a1ed.json
+          evidence_sha256_short: 4ef99feebf5f
+          measured_at: 2026-04-16T21-45-16Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Pending sync from sidecar.
+          utilization: 0.1186
+          achieved_bw_gbps: 62.512
+          classification_rule: intensity 1.81 vs [low 13.71, high 54.84]; util 0.119 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode-fp32-b16_2026-04-16T21-45-16Z_c3118df3a1ed.json
+          evidence_sha256_short: 4ef99feebf5f
+          measured_at: 2026-04-16T21-45-16Z
+          platform_machine_class: apple-silicon
+    nanogpt-decode-fp16-b16:
+      model: nanogpt-small-86m
+      shared_checkpoint: nanogpt-small-train
+      params: 88.3M
+      dtype: float16
+      default_prefill_ctx: 1024
+      default_decode_steps: 8
+      default_batch_size: 16
+      scenario: server
+      provenance: 'Iter-6 (Han): GPT-2-Small at fp16, the production default for LLM serving. Demonstrates the 1.2-1.5x speedup
+        that fp16 buys on MPS without custom kernels. Working set halves vs fp32.'
+      regime:
+        working_set:
+          value: dram_bound
+          note: 169 MB weights + halved KV stream; still >> LLC.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          note: Pending sync from sidecar.
+          flops_per_byte: 3.62
+          classification_rule: intensity 3.62 vs [low 13.71, high 54.84]; util 0.011 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode-fp16-b16_2026-04-16T21-45-41Z_f6c6cbd5d028.json
+          evidence_sha256_short: b20908e55384
+          measured_at: 2026-04-16T21-45-41Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Pending sync from sidecar.
+          utilization: 0.011
+          achieved_bw_gbps: 5.818
+          classification_rule: intensity 3.62 vs [low 13.71, high 54.84]; util 0.011 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode-fp16-b16_2026-04-16T21-45-41Z_f6c6cbd5d028.json
+          evidence_sha256_short: b20908e55384
+          measured_at: 2026-04-16T21-45-41Z
+          platform_machine_class: apple-silicon
+    nanogpt-decode-spec:
+      model: nanogpt-small-86m
+      params: 88.3M
+      draft_params: 11.1M
+      gamma: 4
+      default_prefill_ctx: 1024
+      default_decode_tokens: 16
+      scenario: server
+      provenance: 'Iter-6 (Han): speculative decoding with 11M draft + 88M target, gamma=4, lossless argmax verify. Pedagogical
+        demonstration that speculation only helps when draft and target agree often (random-init scaffold here gets 0% acceptance
+        and is therefore SLOWER than baseline -- the lesson is that the draft must be trained to mimic the target distribution).'
+      regime:
+        working_set:
+          value: dram_bound
+        arithmetic_intensity:
+          value: bandwidth_bound
+          note: Pending sync from sidecar.
+          flops_per_byte: 3.177
+          classification_rule: intensity 3.18 vs [low 13.71, high 54.84]; util 0.006 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode-spec_2026-04-16T21-46-07Z_c434d4e51821.json
+          evidence_sha256_short: b4eb96a293ba
+          measured_at: 2026-04-16T21-46-07Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Pending sync from sidecar.
+          utilization: 0.0059
+          achieved_bw_gbps: 3.127
+          classification_rule: intensity 3.18 vs [low 13.71, high 54.84]; util 0.006 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode-spec_2026-04-16T21-46-07Z_c434d4e51821.json
+          evidence_sha256_short: b4eb96a293ba
+          measured_at: 2026-04-16T21-46-07Z
+          platform_machine_class: apple-silicon
+    nanogpt-prefill:
+      model: nanogpt-12m
+      shared_checkpoint: nanogpt-train
+      params: 11.5M
+      default_context_len: 1792
+      scenario: offline
+      provenance: GPT-2 prefill regime; corresponds to MLPerf Inference 'prompt processing' phase
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 96468992
+          note: "Per-layer attention scores tensor (1792x1792 per head, 6 heads, fp32) is 19.3M floats = 77 MB alone \u2014\
+            \ well past the 4*LLC = 48 MB threshold. The cited 96 MB also includes Q/K/V and FFN activations."
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 289.277
+          classification_rule: intensity 289.28 vs [low 13.71, high 54.84]; util 0.218 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-prefill_2026-04-16T19-29-32Z_319b7d0e1597.json
+          evidence_sha256_short: 3f8a14d9d478
+          measured_at: 2026-04-16T19-29-32Z
+          platform_machine_class: apple-m1-16gb
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.2183
+          observation_source: iter-3 smoke_nanogpt_phases.py; prefill latency 13ms over 1792 tokens
+          achieved_bw_gbps: 10.913
+          classification_rule: intensity 289.28 vs [low 13.71, high 54.84]; util 0.218 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-prefill_2026-04-16T19-29-32Z_319b7d0e1597.json
+          evidence_sha256_short: 3f8a14d9d478
+          measured_at: 2026-04-16T19-29-32Z
+          platform_machine_class: apple-m1-16gb
+    nanogpt-decode:
+      model: nanogpt-12m
+      shared_checkpoint: nanogpt-train
+      params: 11.5M
+      default_prefill_ctx: 1792
+      default_decode_steps: 64
+      kv_bytes_per_token: 18432
+      scenario: server
+      provenance: GPT-2 autoregressive decode; the regime that dominates LLM serving cost in production (vLLM, TensorRT-LLM,
+        TGI all built around this)
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 34603008
+          note: 32 MB KV cache stream per step lands in the 6-48 MB grey band. Empirically the achieved BW (4 GB/s vs 68 GB/s
+            peak) suggests DRAM streaming dominates, but per-step working set technically classifies as ambiguous on this
+            axis. Real bottleneck is on Axis C.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.5
+          classification_rule: intensity 0.50 vs [low 13.71, high 54.84]; util 0.018 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode_2026-04-16T21-09-50Z_f5f554162523.json
+          evidence_sha256_short: 038cbc9c6448
+          measured_at: 2026-04-16T21-09-50Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.0175
+          achieved_bw_gbps: 9.248
+          observation_source: iter-3 smoke_nanogpt_phases.py on M-series MPS; the canonical dispatch_bound case
+          classification_rule: intensity 0.50 vs [low 13.71, high 54.84]; util 0.018 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/nanogpt-decode_2026-04-16T21-09-50Z_f5f554162523.json
+          evidence_sha256_short: 038cbc9c6448
+          measured_at: 2026-04-16T21-09-50Z
+          platform_machine_class: apple-silicon
+    micro-diffusion-train:
+      model: micro-diffusion-32px
+      params: 2.0M
+      dataset: cifar10
+      dataset_source: Krizhevsky (2009), auto-download via torchvision, 170MB
+      quality_target:
+        metric: mse_loss
+        value: 0.002
+      verified_baseline:
+        train_loss: 0.002
+        val_loss: 0.0
+        epochs: 20
+        time_seconds: 41
+      scenario: offline
+      provenance: Ho et al. 2020 (DDPM); U-Net denoising autoencoder
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 8388608
+          note: "2M-param U-Net on CIFAR-10 32x32; ~8 MB per-step in the grey band \u2014 measure."
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 3.636
+          classification_rule: intensity 3.64 vs [low 13.71, high 54.84]; util 0.014 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-diffusion-train_2026-04-16T21-04-27Z_dd0624db92be.json
+          evidence_sha256_short: b95acc78eacc
+          measured_at: 2026-04-16T21-04-27Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Conv kernel sizes likely large enough but verify
+          utilization: 0.0143
+          achieved_bw_gbps: 7.557
+          classification_rule: intensity 3.64 vs [low 13.71, high 54.84]; util 0.014 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-diffusion-train_2026-04-16T21-04-27Z_dd0624db92be.json
+          evidence_sha256_short: b95acc78eacc
+          measured_at: 2026-04-16T21-04-27Z
+          platform_machine_class: apple-silicon
+    micro-gnn-train:
+      model: micro-gnn
+      params: 5.6K
+      dataset: cora
+      dataset_source: Sen et al. (2008), Cora citation network (2708 nodes, 7 classes, 5429 edges); auto-download; synthetic
+        fallback available for offline use
+      quality_target:
+        metric: test_accuracy
+        value: 0.78
+      verified_baseline:
+        train_loss: 0.35
+        val_accuracy: 0.816
+        test_accuracy: 0.816
+        epochs: 50
+        time_seconds: 2
+        note: 81.6% matches Kipf & Welling (2017) published result on Cora
+      scenario: single_stream
+      provenance: Kipf & Welling 2017 (GCN); maps to MLPerf Training GNN
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 204800
+          note: Cora has 2708 nodes, 5429 edges; full graph fits in L1
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 2.0
+          classification_rule: sparse adjacency multiply has very low arithmetic intensity
+        dispatch:
+          value: unmeasured
+          note: Per-step kernels are microscopic; very likely dispatch_bound but needs measurement
+    micro-bert-train:
+      model: micro-bert
+      params: 432K
+      dataset: sst2
+      dataset_source: Socher et al. (2013), Stanford Sentiment Treebank binary, 67K train / 872 val; ships in data/sst2/
+      quality_target:
+        metric: val_accuracy
+        value: 0.78
+      verified_baseline:
+        train_loss: 0.15
+        val_accuracy: 0.77
+        epochs: 15
+        time_seconds: 45
+        note: Character-level tokenization; 77% on real SST-2 with 0.5M-param model
+      scenario: single_stream
+      provenance: Devlin et al. 2019 (BERT); bidirectional transformer for NLU
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 4194304
+          note: 432K params, short SST-2 sequences
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 455.764
+          classification_rule: intensity 455.76 vs [low 13.71, high 54.84]; util 0.066 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-bert-train_2026-04-16T21-04-51Z_12f7306a7fea.json
+          evidence_sha256_short: 85c06029464a
+          measured_at: 2026-04-16T21-04-51Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.0658
+          achieved_bw_gbps: 2.089
+          classification_rule: intensity 455.76 vs [low 13.71, high 54.84]; util 0.066 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-bert-train_2026-04-16T21-04-51Z_12f7306a7fea.json
+          evidence_sha256_short: 85c06029464a
+          measured_at: 2026-04-16T21-04-51Z
+          platform_machine_class: apple-silicon
+    micro-lstm-train:
+      model: micro-lstm
+      params: 51K
+      dataset: etth1
+      dataset_source: Zhou et al. (2021, AAAI Informer), ETTh1 hourly electricity transformer temps, 17K observations; ships
+        in data/etth1/
+      quality_target:
+        metric: val_mse
+        value: 0.13
+      verified_baseline:
+        train_loss: 0.017
+        val_loss: 0.17
+        epochs: 30
+        time_seconds: 20
+        note: "Classic overfitting pattern \u2014 val MSE plateaus at epoch 5 then rises"
+      scenario: single_stream
+      provenance: Hochreiter & Schmidhuber 1997 (LSTM); time-series forecasting
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 524288
+          note: 51K params, 96-step horizon
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 348.953
+          classification_rule: intensity 348.95 vs [low 13.71, high 54.84]; util 0.005 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-lstm-train_2026-04-16T21-05-16Z_101c2c64fd67.json
+          evidence_sha256_short: 53d6a03fd518
+          measured_at: 2026-04-16T21-05-16Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Sequential timesteps invite dispatch overhead; likely dispatch_bound, verify
+          utilization: 0.0046
+          achieved_bw_gbps: 0.192
+          classification_rule: intensity 348.95 vs [low 13.71, high 54.84]; util 0.005 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/micro-lstm-train_2026-04-16T21-05-16Z_101c2c64fd67.json
+          evidence_sha256_short: 53d6a03fd518
+          measured_at: 2026-04-16T21-05-16Z
+          platform_machine_class: apple-silicon
+    micro-rl-train:
+      model: micro-rl
+      params: 17K
+      dataset: cartpole_local
+      dataset_source: Pure-Python CartPole environment; physics from OpenAI Gym spec, no download
+      quality_target:
+        metric: avg_episode_reward
+        value: 195
+      verified_baseline:
+        avg_reward: 9.5
+        episodes: 500
+        time_seconds: 1
+        note: "REINFORCE is high-variance by design \u2014 pedagogical value in showing RL difficulty"
+      scenario: single_stream
+      provenance: Williams 1992 (REINFORCE); policy gradient on classic control
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 65536
+          note: 17K params, tiny actor-critic
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 2.0
+          classification_rule: env step in Python dominates; nn forward is microscopic
+        dispatch:
+          value: unmeasured
+          note: Almost certainly dispatch_bound; verify
+  edge:
+    resnet18-train:
+      model: resnet18
+      params: 11.2M
+      dataset: cifar100
+      dataset_source: Krizhevsky (2009), auto-download via torchvision, 170MB; cached locally after first download
+      quality_target:
+        metric: top1_accuracy
+        value: 0.36
+      verified_baseline:
+        train_loss: 2.456
+        val_loss: 2.485
+        accuracy: 0.363
+        epochs: 25
+        time_seconds: 64
+        note: 36.3% after 25 epochs; systems tuning (augmentation, schedule) reaches 50%+
+      scenario: single_stream
+      provenance: "He et al. 2016 (ResNet); FULLY LOCAL implementation \u2014 no torchvision.models dependency"
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 48234496
+          note: "11.2M params; activations + weights ~46 MB at B=64. Just under 4*LLC threshold; classification depends on\
+            \ whether activations stream or stay resident \u2014 measure."
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 3.931
+          classification_rule: intensity 3.93 vs [low 13.71, high 54.84]; util 0.059 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/resnet18-train_2026-04-16T21-05-40Z_01868a7fce6e.json
+          evidence_sha256_short: d600a1c86702
+          measured_at: 2026-04-16T21-05-40Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.0589
+          achieved_bw_gbps: 31.054
+          classification_rule: intensity 3.93 vs [low 13.71, high 54.84]; util 0.059 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/resnet18-train_2026-04-16T21-05-40Z_01868a7fce6e.json
+          evidence_sha256_short: d600a1c86702
+          measured_at: 2026-04-16T21-05-40Z
+          platform_machine_class: apple-silicon
+    mobilenetv2-train:
+      model: mobilenetv2
+      params: 2.4M
+      dataset: cifar100
+      dataset_source: Krizhevsky (2009), auto-download via torchvision, 170MB; cached locally after first download
+      quality_target:
+        metric: top1_accuracy
+        value: 0.4
+      verified_baseline:
+        epochs: 15
+        time_seconds: 60
+        note: Inverted residual architecture with depthwise separable convolutions
+      scenario: single_stream
+      provenance: "Sandler et al. 2018 (MobileNetV2); FULLY LOCAL \u2014 no torchvision.models dependency"
+      regime:
+        working_set:
+          value: unmeasured
+          peak_bytes_per_step: 10485760
+          note: "2.4M params, depthwise-separable convs; 10 MB per-step in grey band \u2014 measure."
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 3.691
+          classification_rule: intensity 3.69 vs [low 13.71, high 54.84]; util 0.005 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/mobilenetv2-train_2026-04-16T21-09-06Z_6a95ef082eee.json
+          evidence_sha256_short: 71606a91b999
+          measured_at: 2026-04-16T21-09-06Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Despite 'edge' label, MobileNetV2 is mostly memory-bound, not compute-bound
+          utilization: 0.005
+          achieved_bw_gbps: 2.645
+          classification_rule: intensity 3.69 vs [low 13.71, high 54.84]; util 0.005 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/mobilenetv2-train_2026-04-16T21-09-06Z_6a95ef082eee.json
+          evidence_sha256_short: 71606a91b999
+          measured_at: 2026-04-16T21-09-06Z
+          platform_machine_class: apple-silicon
+  tiny:
+    dscnn-kws-train:
+      model: dscnn-kws
+      params: 20K
+      dataset: speech_commands_v2
+      dataset_source: Warden (2018), auto-download via torchaudio, ~2GB
+      quality_target:
+        metric: top1_accuracy
+        value: 0.9
+      verified_baseline:
+        train_loss: 0.916
+        val_loss: 1.026
+        accuracy: 0.712
+        epochs: 10
+        time_seconds: 51
+        note: 71.2% after 10 epochs on 12-class (10 keywords + unknown + silence)
+      max_model_size_kb: 100
+      scenario: offline
+      provenance: Zhang et al. 2017 (Hello Edge); maps to MLPerf Tiny KWS
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 2097152
+          note: 20K params + 40x101 spectrogram inputs
+        arithmetic_intensity:
+          value: compute_bound
+          flops_per_byte: 70
+          classification_rule: moderate intensity from spectrogram convs
+        dispatch:
+          value: unmeasured
+    anomaly-ae-train:
+      model: anomaly-ae
+      params: 0.3M
+      dataset: mnist
+      dataset_source: LeCun et al. 1998, auto-download via torchvision, 12MB
+      quality_target:
+        metric: reconstruction_mse
+        value: 0.04
+      verified_baseline:
+        train_loss: 0.034
+        val_loss: 0.065
+        epochs: 20
+        time_seconds: 5
+        note: "Val loss intentionally higher \u2014 anomalous digits have high recon error"
+      max_model_size_kb: 32
+      scenario: offline
+      provenance: MLPerf Tiny AD benchmark; Koizumi et al. 2019 (ToyADMOS architecture)
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 2097152
+          note: 0.3M params FC autoencoder on MNIST
+        arithmetic_intensity:
+          value: unmeasured
+          flops_per_byte: 27.728
+          classification_rule: intensity 27.73 vs [low 13.71, high 54.84]; util 0.007 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/anomaly-ae-train_2026-04-16T21-08-06Z_147f35c69389.json
+          evidence_sha256_short: cc6fd54bba1d
+          measured_at: 2026-04-16T21-08-06Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.0068
+          achieved_bw_gbps: 3.567
+          classification_rule: intensity 27.73 vs [low 13.71, high 54.84]; util 0.007 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/anomaly-ae-train_2026-04-16T21-08-06Z_147f35c69389.json
+          evidence_sha256_short: cc6fd54bba1d
+          measured_at: 2026-04-16T21-08-06Z
+          platform_machine_class: apple-silicon
+    wake-vision-vww:
+      model: wake-vision-vww
+      params: 8.5K
+      dataset: wake_vision
+      dataset_source: Banbury et al. 2024 (CVPR), HuggingFace Harvard-Edge/Wake-Vision, 6GB; 5K pedagogical subset with CIFAR-10
+        proxy fallback
+      quality_target:
+        metric: binary_accuracy
+        value: 0.85
+      verified_baseline:
+        train_loss: 0.31
+        val_loss: 0.33
+        accuracy: 0.873
+        epochs: 20
+        time_seconds: 10
+      max_model_size_kb: 16
+      scenario: offline
+      provenance: Banbury et al. 2024 (Wake Vision, CVPR); maps to MLPerf Tiny VWW
+      regime:
+        working_set:
+          value: cache_resident
+          peak_bytes_per_step: 524288
+          note: 8.5K-param micro-CNN
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.128
+          classification_rule: intensity 0.13 vs [low 13.71, high 54.84]; util 0.007 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/wake-vision-vww_2026-04-16T21-08-42Z_99341b1751d0.json
+          evidence_sha256_short: acacdaca08f5
+          measured_at: 2026-04-16T21-08-42Z
+          platform_machine_class: apple-silicon
+        dispatch:
+          value: dispatch_bound
+          note: Tiny model may push dispatch overhead per step; verify
+          utilization: 0.0073
+          achieved_bw_gbps: 3.873
+          classification_rule: intensity 0.13 vs [low 13.71, high 54.84]; util 0.007 vs [dispatch 0.25, sat 0.5]
+          evidence_sidecar: roofline/wake-vision-vww_2026-04-16T21-08-42Z_99341b1751d0.json
+          evidence_sha256_short: acacdaca08f5
+          measured_at: 2026-04-16T21-08-42Z
+          platform_machine_class: apple-silicon
+  agent:
+    nano-rag-agent:
+      model: nano-rag-agent
+      params: 20.1M
+      dataset: react_traces
+      dataset_source: Structured multi-step reasoning traces; ReAct format
+      quality_target:
+        metric: retrieval_accuracy
+        value: 0.8
+      metrics:
+      - retrieve_latency_ms
+      - generate_latency_ms
+      - queries_per_second
+      scenario: server
+      provenance: Lewis et al. 2020 (RAG); measures retrieval vs generation bottleneck
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 88080384
+          note: 'Generation phase: 20M-param decode (~80 MB activations + weights re-read) + retrieval index lookup.'
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: generation is decode (bw-bound); retrieval is index gather
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
+          observation_source: 'composite workload: decode + retrieval, both small-kernel'
+    nano-codegen-agent:
+      model: nano-codegen-agent
+      params: 13.7M
+      dataset: mbpp
+      dataset_source: Austin et al. 2021 (MBPP); 20 curated Python problems with unit tests
+      quality_target:
+        metric: pass_at_1
+        value: 0.15
+      metrics:
+      - iterations_to_correct
+      - tokens_per_attempt
+      - context_growth_factor
+      scenario: server
+      provenance: Chen et al. 2021 (Codex); measures iterative retry cost
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 60817408
+          note: 13.7M-param iterative regeneration; per-step working set ~55 MB exceeds 4*LLC.
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: iterative decode loop
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
+    nano-react-agent:
+      model: nano-react-agent
+      params: 13.7M
+      dataset: react_traces
+      dataset_source: Structured multi-step reasoning traces; ReAct format
+      quality_target:
+        metric: trace_accuracy
+        value: 0.6
+      metrics:
+      - steps_to_answer
+      - reasoning_latency_per_step_ms
+      - tool_dispatch_latency_ms
+      scenario: server
+      provenance: Yao et al. 2023 (ReAct); measures multi-step reasoning + tool use
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 60817408
+          note: "13.7M-param multi-step reasoning; iter-2 found this still uses non-KV-cache forward \u2014 current 58 MB\
+            \ number assumes the (broken) recompute path; will shrink once iter-7 lands KV-cache."
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: ReAct decode loop
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
+          note: To be patched in iter-7 to use KV-cache path; regime values may shift
+    nano-toolcall-agent:
+      model: nano-toolcall-agent
+      params: 13.7M
+      dataset: react_traces
+      dataset_source: Structured multi-step reasoning traces; ReAct format
+      metrics:
+      - classification_latency_ms
+      - json_validity_rate
+      - queries_per_second
+      scenario: server
+      provenance: Schick et al. 2024 (Toolformer); measures structured output generation
+      regime:
+        working_set:
+          value: dram_bound
+          peak_bytes_per_step: 60817408
+          note: Bonus workload (not in core 16); structured output generation
+        arithmetic_intensity:
+          value: bandwidth_bound
+          flops_per_byte: 0.7
+          classification_rule: tool-call decode
+        dispatch:
+          value: dispatch_bound
+          utilization: 0.1
