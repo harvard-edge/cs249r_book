@@ -228,6 +228,18 @@ class ValidateCommand:
         self.chapter_discovery = chapter_discovery
 
     def run(self, args: List[str]) -> bool:
+        # Per-group help: `./binder check <group> help` prints a
+        # dedicated help panel for that group, including concrete
+        # error codes. This lives above argparse because `help` is
+        # not a valid scope in the GROUPS dict; intercepting it here
+        # keeps the argparse surface narrow while still giving each
+        # group room for bespoke guidance.
+        if len(args) == 2 and args[1] == "help":
+            group = args[0]
+            if group in self.GROUPS:
+                self._print_group_help(group)
+                return True
+
         all_group_names = list(self.GROUPS.keys()) + ["all"]
         parser = argparse.ArgumentParser(
             prog="binder check",
@@ -411,6 +423,115 @@ class ValidateCommand:
         console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# only citation check[/dim]")
         console.print("  [cyan]./binder check figures --vol1[/cyan]    [dim]# all figure checks, Vol I[/dim]")
         console.print("  [cyan]./binder check all[/cyan]               [dim]# everything[/dim]")
+        console.print("  [cyan]./binder check <group> help[/cyan]      [dim]# per-group error codes + guidance[/dim]")
+        console.print()
+
+    # ------------------------------------------------------------------
+
+    def _print_group_help(self, group: str) -> None:
+        """Dispatch to per-group help. Falls back to a generic listing."""
+        if group == "epub":
+            self._print_epub_help()
+            return
+        # Generic fallback: list scopes and a one-line description.
+        scopes = self.GROUPS.get(group, [])
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Scope", style="yellow")
+        table.add_column("Method", style="dim")
+        for s, m in scopes:
+            table.add_row(s, m)
+        console.print(Panel(table, title=f"binder check {group}", border_style="cyan"))
+        console.print(f"[dim]Run `./binder check {group}` to run every scope, or "
+                      f"`./binder check {group} --scope <name>` for one.[/dim]")
+        console.print()
+
+    def _print_epub_help(self) -> None:
+        """Dedicated help for the `epub` group: the three scopes, the
+        error codes each can surface, and how to fix them at source.
+
+        This panel exists because the `epub` group is the most common
+        source of unexpected failures for new contributors — the error
+        codes (RSC-005, RSC-016, RSC-020, OPF-014, smoke-css-*) are
+        cryptic in isolation, but map cleanly to a few source-level
+        patterns. Printing the mapping here saves cross-referencing
+        the README when a CI failure is in hand.
+        """
+        # --- Scopes panel -----------------------------------------------
+        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
+        scope_table.add_column("Scope", style="yellow", width=12)
+        scope_table.add_column("When to run", style="white", width=30)
+        scope_table.add_column("Cost", style="dim", width=18)
+        scope_table.add_column("Needs", style="dim", width=12)
+        scope_table.add_row("hygiene", "Every commit (pre-commit)", "<1s, scans source", "—")
+        scope_table.add_row("smoke", "After build, for reader compat", "~200ms, scans built EPUB", "—")
+        scope_table.add_row("epubcheck", "CI, before release", "~7s per volume", "Java + epubcheck")
+        console.print(Panel(scope_table, title="./binder check epub — scopes", border_style="cyan"))
+
+        # --- Error code table ------------------------------------------
+        # Scope is derivable from the code prefix: svg-/bib-* = hygiene,
+        # smoke-* = smoke, RSC-*/OPF-* = epubcheck. Dropping the column
+        # leaves room for readable Trigger / Fix copy.
+        code_table = Table(show_header=True, header_style="bold cyan", box=None)
+        code_table.add_column("Code", style="red", width=32)
+        code_table.add_column("Trigger", style="white", width=30)
+        code_table.add_column("Fix at source", style="green", width=32)
+
+        rows = [
+            ("svg-c0",
+             "C0 control char in SVG aria-label",
+             "Strip in Python plot title; or --fix"),
+            ("svg-dupe-marker",
+             "Duplicate <marker id=…/> in one SVG",
+             "Delete duplicate; or --fix"),
+            ("bib-url-escape-underscore",
+             r"\_ in bib url= or http doi=",
+             r"\_ → _ in the .bib; or --fix"),
+            ("bib-url-escape-percent",
+             r"\% in bib URL field",
+             r"\% → % in the .bib; or --fix"),
+            ("bib-url-raw-angle",
+             "raw < or > in bib URL field",
+             "%3C / %3E encode; or --fix"),
+            ("smoke-css-custom-property-decl",
+             "--var-name: value; in packaged CSS",
+             "Inline the literal value"),
+            ("smoke-css-custom-property-use",
+             "var(--x) in packaged CSS",
+             "Inline the literal value"),
+            ("smoke-external-resource",
+             "src=/<link href= to http(s)://",
+             "Package the asset or drop"),
+            ("RSC-016 (FATAL)",
+             "XML malformed (--, <br>, C0)",
+             "epub_postprocess sanitizes; fix at source if it recurs"),
+            ("RSC-005",
+             "Malformed markup (alt on wrong elem)",
+             "Fix the emitter in the Quarto filter"),
+            ("RSC-020",
+             "Invalid URL syntax in href",
+             "Same as bib-url-* above"),
+            ("RSC-012",
+             "Broken fragment ID",
+             "fix_cross_references.py handles this"),
+            ("OPF-014",
+             "Missing mathml / other OPF property",
+             "epub_postprocess declares mathml on nav"),
+        ]
+        for code, trigger, fix in rows:
+            code_table.add_row(code, trigger, fix)
+        console.print(Panel(code_table, title="Error codes", border_style="red"))
+
+        # --- Command quick reference -----------------------------------
+        console.print("[bold]Common invocations:[/bold]")
+        console.print("  [cyan]./binder check epub[/cyan]                        [dim]# hygiene + smoke + epubcheck[/dim]")
+        console.print("  [cyan]./binder check epub --scope hygiene[/cyan]        [dim]# source-only, fast[/dim]")
+        console.print("  [cyan]./binder check epub --scope hygiene --fix[/cyan]  [dim]# auto-repair source issues[/dim]")
+        console.print("  [cyan]./binder check epub --scope epubcheck --max-fatal 0 --max-errors 0[/cyan]")
+        console.print("  [dim]                                                    # CI-style strict gating[/dim]")
+        console.print("  [cyan]./binder check epub --json[/cyan]                 [dim]# structured output[/dim]")
+        console.print("  [cyan]./binder build epub --vol1 --skip-hygiene[/cyan]  [dim]# emergency build bypass[/dim]")
+        console.print()
+        console.print("[dim]Deep dive: book/cli/README.md → \"EPUB Checks — Two Layers, One CLI Surface\"[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
