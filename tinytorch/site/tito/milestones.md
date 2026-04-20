@@ -93,7 +93,7 @@ Shows:
 
 ### Run Milestones
 
-<div style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1rem 0;">
+<div class="milestones-run-box" style="background: #f3e5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #9c27b0; margin: 1rem 0;">
 
 **Run a Milestone**
 ```bash
