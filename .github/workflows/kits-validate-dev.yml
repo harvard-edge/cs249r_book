@@ -145,12 +145,28 @@ jobs:
       ref: ${{ github.ref }}
 
   # ===========================================================================
+  # Stage 4: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This Lychee pass adds external-URL
+  # reachability as a warning. Flip fail_on_broken=true once the baseline is
+  # clean (tracked in release-prep plan).
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './kits/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
   # Summary
   # ===========================================================================
   summary:
     name: '📊 Summary'
     runs-on: ubuntu-latest
-    needs: [validate-content, build-site, build-pdf]
+    needs: [validate-content, build-site, build-pdf, check-links]
     if: always()
 
     steps:
@@ -163,6 +179,7 @@ jobs:
           echo "| 🔍 Content Validation | ${{ needs.validate-content.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔨 Site Build (HTML) | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📚 PDF Build | ${{ needs.build-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
 
       - name: ❌ Check for failures
         run: |
@@ -172,4 +189,7 @@ jobs:
             echo "❌ Validation failed"
             exit 1
           fi
-          echo "✅ All checks passed"
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"
