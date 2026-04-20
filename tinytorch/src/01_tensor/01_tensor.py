@@ -291,6 +291,8 @@ class Tensor:
         HINT: Use np.array(data, dtype=np.float32) to convert data to NumPy array
         """
         ### BEGIN SOLUTION
+        if isinstance(data, (list, tuple)) and len(data) > 0 and isinstance(data[0], Tensor):
+            data = np.stack([t.data for t in data])
         self.data = np.array(data, dtype=np.float32)
         self.shape = self.data.shape
         self.size = self.data.size
@@ -331,7 +333,28 @@ class Tensor:
 
     def contiguous(self):
         """Return a contiguous copy of the tensor data (PyTorch-compatible)."""
-        return Tensor(self.data.copy())
+        return Tensor(np.ascontiguousarray(self.data))
+
+    def view(self, *shape):
+        """Alias for reshape, matching PyTorch's Tensor.view() for contiguous tensors."""
+        return self.reshape(*shape)
+
+    def masked_fill(self, mask, value):
+        """Fill positions where mask is True with value, matching PyTorch's masked_fill.
+
+        Used in transformer attention to set padding positions to -inf before softmax.
+
+        Args:
+            mask:  A Tensor or numpy array of booleans, same shape as self (or broadcastable).
+            value: Scalar fill value (e.g. float('-inf') for attention masking).
+
+        Returns:
+            New Tensor with masked positions replaced by value.
+        """
+        mask_array = mask.data.astype(bool) if isinstance(mask, Tensor) else np.asarray(mask, dtype=bool)
+        result = self.data.copy()
+        result[mask_array] = value
+        return Tensor(result)
 
     def __add__(self, other):
         """Add two tensors element-wise with broadcasting support.
