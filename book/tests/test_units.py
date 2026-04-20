@@ -14,11 +14,22 @@ registered in pint's registry, not just a Python variable.
 import sys
 import os
 
-# Add repo root to path so mlsysim is importable (works from any working directory)
+# Make `mlsysim` importable without requiring a pip install.
+#
+# Layout reminder:
+#   <repo_root>/mlsysim/                ← project directory (NOT a Python package)
+#   <repo_root>/mlsysim/mlsysim/        ← actual Python package (has __init__.py)
+#   <repo_root>/mlsysim/mlsysim/core/   ← submodule
+#
+# So the directory we must put on sys.path is `<repo_root>/mlsysim/`, NOT
+# `<repo_root>/`. The previous `_repo_root` insert "worked" only in dev
+# environments where `mlsysim` was pip-installed (e.g. `pip install -e mlsysim/`),
+# masking the bug. CI has no editable install, so the import failed there.
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_book_dir = os.path.dirname(_script_dir)          # book/
-_repo_root = os.path.dirname(_book_dir)            # repo root (contains mlsysim/)
-sys.path.insert(0, _repo_root)
+_book_dir = os.path.dirname(_script_dir)                  # book/
+_repo_root = os.path.dirname(_book_dir)                   # repo root
+_mlsysim_project = os.path.join(_repo_root, "mlsysim")    # contains the package
+sys.path.insert(0, _mlsysim_project)
 sys.path.insert(0, _book_dir)
 
 from mlsysim.core.constants import *
