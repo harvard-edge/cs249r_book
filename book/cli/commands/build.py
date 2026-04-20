@@ -10,7 +10,7 @@ import subprocess
 import signal
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -98,6 +98,157 @@ class BuildCommand:
                       "[dim]# build anyway (not recommended)[/dim]")
         return False
 
+    def _postflight_epub_validation(self, skip: bool = False) -> bool:
+        """Run smoke + epubcheck against the built EPUB(s) after render.
+
+        Returns True if validation passed (or was skipped), False on a
+        hard failure the caller should surface via a non-zero exit code.
+
+        Called from every `./binder build epub` entry point on success.
+        Mirrors the CI gate so a local build that passes here will pass
+        the `epub-validate` job in book-validate-dev.yml, and vice versa.
+
+        Rationale: the pre-render hygiene preflight catches source-level
+        problems, but it cannot catch renderer-emitted issues (markup
+        the post-process sanitizer handled, or a new class epubcheck
+        flags after a Quarto upgrade). Running smoke + epubcheck at
+        the end closes that loop without asking the user to remember
+        a follow-up command. Roughly ~7s added to a ~120s build.
+
+        Opt-out: `--skip-validate` on the build command, or explicit
+        `skip=True` for programmatic callers.
+        """
+        if skip:
+            console.print("[yellow]⚠ Skipping post-build EPUB validation (--skip-validate)[/yellow]")
+            return True
+
+        try:
+            from cli.commands._epub_checks import (
+                _discover_built_epubs,
+                emit_github_annotations,
+                run_epubcheck_on,
+                run_smoke_checks_on,
+            )
+        except ImportError:
+            console.print("[dim]ⓘ Post-build validation unavailable in this checkout; skipping.[/dim]")
+            return True
+
+        repo_root = self.config_manager.book_dir.parent.parent
+        epubs = _discover_built_epubs(repo_root)
+        if not epubs:
+            console.print("[dim]ⓘ No EPUB artifacts found under _build/epub-vol*/; skipping post-build validation.[/dim]")
+            return True
+
+        console.print("[cyan]🔍 Post-build EPUB validation[/cyan]")
+        overall_ok = True
+
+        # --- Smoke (reader-compat, no Java) ----------------------------
+        smoke_issues = []
+        for epub in epubs:
+            smoke_issues.extend(run_smoke_checks_on(epub, repo_root=repo_root))
+
+        if smoke_issues:
+            console.print(
+                f"  [red]✗ smoke[/red]: {len(smoke_issues)} reader-compat issue(s)"
+            )
+            for issue in smoke_issues[:5]:
+                console.print(
+                    f"    [red]{issue.code}[/red] "
+                    f"[dim]{issue.file}:{issue.line}[/dim] — {issue.message}"
+                )
+            if len(smoke_issues) > 5:
+                console.print(f"    [dim]… {len(smoke_issues) - 5} more[/dim]")
+            overall_ok = False
+        else:
+            console.print(f"  [green]✓ smoke[/green] [dim]({len(epubs)} EPUB(s), reader-compat clean)[/dim]")
+
+        # --- Epubcheck (W3C, needs Java) -------------------------------
+        # Use the same baseline file CI uses so local behaviour matches.
+        baseline_path = repo_root / "book" / "tools" / "audit" / "epubcheck-baseline.json"
+        baseline_counts: Dict[str, Dict[str, int]] = {}
+        if baseline_path.exists():
+            try:
+                import json as _json
+                baseline_counts = _json.loads(
+                    baseline_path.read_text(encoding="utf-8")
+                ).get("volumes", {}) or {}
+            except (OSError, ValueError):
+                baseline_counts = {}
+
+        total_fatal = 0
+        total_errors = 0
+        any_epubcheck_issue = False
+        ratchet_violations: List[str] = []
+
+        for epub in epubs:
+            vol_key = epub.parent.name.replace("epub-", "") or epub.stem
+            issues, counts = run_epubcheck_on(epub, repo_root=repo_root)
+            emit_github_annotations(issues)
+            total_fatal += counts.get("FATAL", 0)
+            total_errors += counts.get("ERROR", 0)
+            if issues:
+                any_epubcheck_issue = True
+
+            # Ratchet comparison per volume
+            recorded = baseline_counts.get(vol_key, {})
+            for severity in ("FATAL", "ERROR", "WARNING"):
+                current = counts.get(severity, 0)
+                allowed = int(recorded.get(severity, 0))
+                if current > allowed:
+                    ratchet_violations.append(
+                        f"{vol_key} {severity}: {current} > baseline {allowed} "
+                        f"(+{current - allowed})"
+                    )
+
+            # Missing-epubcheck sentinel — short-circuit gracefully.
+            if any(i.code == "epubcheck-missing" for i in issues):
+                console.print(
+                    "  [yellow]⚠ epubcheck[/yellow]: not installed locally; "
+                    "skipping full validation "
+                    "[dim](install via `pip install epubcheck` or `./binder doctor` for details)[/dim]"
+                )
+                # Don't fail the build just because Java is missing locally —
+                # CI will catch anything this local pass would have.
+                return overall_ok
+
+        if ratchet_violations:
+            console.print(
+                f"  [red]✗ epubcheck[/red]: regression against baseline "
+                f"({total_fatal} FATAL, {total_errors} ERROR total)"
+            )
+            for v in ratchet_violations:
+                console.print(f"    [red]•[/red] {v}")
+            console.print(
+                "    [dim]If this is an accepted increase, rerun with "
+                "`./binder check epub --scope epubcheck --baseline "
+                "book/tools/audit/epubcheck-baseline.json --update-baseline` "
+                "and commit the updated JSON.[/dim]"
+            )
+            overall_ok = False
+        elif any_epubcheck_issue:
+            # Issues exist but all within baseline — inform, don't fail.
+            console.print(
+                f"  [yellow]⚠ epubcheck[/yellow]: "
+                f"{total_fatal} FATAL, {total_errors} ERROR "
+                "[dim](all within baseline — no regression)[/dim]"
+            )
+        else:
+            console.print(
+                f"  [green]✓ epubcheck[/green] [dim]({len(epubs)} EPUB(s); "
+                f"0 FATAL, 0 ERROR)[/dim]"
+            )
+
+        if not overall_ok:
+            console.print()
+            console.print(
+                "[red]Build artifact written but validation failed.[/red] "
+                "Inspect the issues above, then either fix the underlying "
+                "cause or rebuild with [cyan]--skip-validate[/cyan] if "
+                "you need the artifact as-is."
+            )
+
+        return overall_ok
+
     def _open_output(self, output_dir: Path, format_type: str) -> None:
         """Open the build output using the system's default application.
 
@@ -128,7 +279,7 @@ class BuildCommand:
         elif system == "Windows":
             subprocess.Popen(["start", "", str(target)], shell=True)
 
-    def build_full(self, format_type: str = "html", skip_hygiene: bool = False) -> bool:
+    def build_full(self, format_type: str = "html", skip_hygiene: bool = False, skip_validate: bool = False) -> bool:
         """Build full book in specified format.
 
         Args:
@@ -136,9 +287,12 @@ class BuildCommand:
             skip_hygiene: For EPUB builds, skip the pre-render hygiene
                 check. Opt-in escape hatch for when a build must proceed
                 despite source-level invariants (rare).
+            skip_validate: For EPUB builds, skip the post-render smoke +
+                epubcheck validation. Use when iterating on a known-broken
+                build or when Java / epubcheck is unavailable locally.
 
         Returns:
-            True if build succeeded, False otherwise
+            True if build and post-build validation succeeded, False otherwise
         """
         console.print(f"[green]🔨 Building full {format_type.upper()} book...[/green]")
         console.print("[dim]📄 Building all files (full book mode)[/dim]")
@@ -211,6 +365,10 @@ class BuildCommand:
             if success:
                 console.print(f"[green]✅ {format_type.upper()} build completed: {output_dir}/[/green]")
                 self._open_output(output_dir, format_type)
+                # Post-flight validation closes the build→verify loop.
+                if format_type == "epub":
+                    if not self._postflight_epub_validation(skip=skip_validate):
+                        return False
             else:
                 console.print(f"[red]❌ {format_type.upper()} build failed[/red]")
 
@@ -220,16 +378,17 @@ class BuildCommand:
             if format_type in ["pdf", "epub"] and not self._config_restored:
                 self._restore_config(config_file)
 
-    def build_chapters(self, chapter_names: List[str], format_type: str = "html", skip_hygiene: bool = False) -> bool:
+    def build_chapters(self, chapter_names: List[str], format_type: str = "html", skip_hygiene: bool = False, skip_validate: bool = False) -> bool:
         """Build specific chapters.
 
         Args:
             chapter_names: List of chapter names to build
             format_type: Format to build ('html', 'pdf', 'epub')
             skip_hygiene: EPUB-only; skip the pre-render hygiene check.
+            skip_validate: EPUB-only; skip the post-render validation.
 
         Returns:
-            True if build succeeded, False otherwise
+            True if build and post-build validation succeeded, False otherwise
         """
         # Expand patterns like appendix* / re:^appendix_
         chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names)
@@ -307,6 +466,9 @@ class BuildCommand:
             if success:
                 console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
                 self._open_output(output_dir, format_type)
+                if format_type == "epub":
+                    if not self._postflight_epub_validation(skip=skip_validate):
+                        return False
             else:
                 console.print("[red]❌ Build failed[/red]")
 
@@ -323,7 +485,7 @@ class BuildCommand:
             except:
                 pass
 
-    def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str, skip_hygiene: bool = False) -> bool:
+    def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str, skip_hygiene: bool = False, skip_validate: bool = False) -> bool:
         """Build specific chapters using volume-specific configuration.
 
         Args:
@@ -331,9 +493,10 @@ class BuildCommand:
             format_type: Format to build ('html', 'pdf', 'epub')
             volume: Volume config to use ('vol1' or 'vol2')
             skip_hygiene: EPUB-only; skip the pre-render hygiene check.
+            skip_validate: EPUB-only; skip the post-render validation.
 
         Returns:
-            True if build succeeded, False otherwise
+            True if build and post-build validation succeeded, False otherwise
         """
         # Expand patterns like appendix* / re:^appendix_ within the requested volume
         chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names, volume=volume)
@@ -430,6 +593,9 @@ class BuildCommand:
             if success:
                 console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
                 self._open_output(output_dir, format_type)
+                if format_type == "epub":
+                    if not self._postflight_epub_validation(skip=skip_validate):
+                        return False
             else:
                 console.print("[red]❌ Build failed[/red]")
 
@@ -450,7 +616,7 @@ class BuildCommand:
             except:
                 pass
 
-    def build_volume(self, volume: str, format_type: str = "pdf", skip_hygiene: bool = False) -> bool:
+    def build_volume(self, volume: str, format_type: str = "pdf", skip_hygiene: bool = False, skip_validate: bool = False) -> bool:
         """Build a specific volume using its dedicated configuration.
 
         This uses the volume-specific config files (e.g., _quarto-pdf-vol1.yml)
@@ -461,9 +627,10 @@ class BuildCommand:
             volume: Volume to build ('vol1' or 'vol2')
             format_type: Format to build ('html', 'pdf', 'epub')
             skip_hygiene: EPUB-only; skip the pre-render hygiene check.
+            skip_validate: EPUB-only; skip the post-render validation.
 
         Returns:
-            True if build succeeded, False otherwise
+            True if build and post-build validation succeeded, False otherwise
         """
         volume_name = "Volume I" if volume == "vol1" else "Volume II"
         console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
@@ -525,6 +692,9 @@ class BuildCommand:
         if success:
             console.print(f"[green]✅ {volume_name} {format_type.upper()} build completed: {output_dir}/[/green]")
             self._open_output(output_dir, format_type)
+            if format_type == "epub":
+                if not self._postflight_epub_validation(skip=skip_validate):
+                    return False
         else:
             console.print(f"[red]❌ {volume_name} {format_type.upper()} build failed[/red]")
 

@@ -218,6 +218,54 @@ The three layers exist because none alone is sufficient:
 
 The rendered-EPUB layer also gets belt-and-suspenders support from `book/quarto/scripts/epub_postprocess.py`, a Quarto post-render hook that sanitizes XHTML/SVG/OPF in the built EPUB (strips `--` from HTML comments, closes bare `<br>` tags, strips C0 chars from SVG aria-labels, normalizes URL escapes, declares the `mathml` OPF property). So a regression caught at source by hygiene, missed there, rescued by post-process, and missed again is still caught by epubcheck in CI. Three independent nets.
 
+## EPUB — How This Integrates with the Book Workflow
+
+Three layers of defense, each invoked automatically at the moment it adds value:
+
+### Author workflow (writing and committing)
+
+1. **Write normally.** No new constraints on QMD content. The EPUB checks only fire on SVG and BibTeX source — prose changes pass through untouched.
+2. **Commit.** The `book-epub-hygiene` pre-commit hook runs `./binder check epub --scope hygiene` if you touched SVG, BibTeX, or the check implementation. Fails in <1s if an SVG has duplicate `<marker>` ids or a bib URL has `\_` escapes. The failure message tells you to auto-repair with `./binder check epub --scope hygiene --fix`.
+3. **Build locally.** `./binder build epub --vol1` runs:
+   - Hygiene preflight (fast-fail on source issues, ~100ms).
+   - Quarto render (~2 minutes).
+   - Post-render sanitizer (fixes renderer-emitted issues).
+   - Smoke + epubcheck post-flight (~7s) — verifies the final EPUB against the same CI baseline.
+4. **Push.** CI builds both volumes and re-runs `./binder check epub --scope epubcheck --baseline …`. Any regression past the recorded counts blocks the PR.
+
+### Release workflow (preparing an EPUB for readers)
+
+1. **Build:** `./binder build epub --all` (or per-volume). Post-flight already validates — if the final line is `✓ smoke` and `✓ epubcheck`, the file is ready.
+2. **Visual spot-check:** open the file in Sigil or Calibre Editor. Structural checks don't guarantee aesthetic quality.
+3. **Ship:** upload the file from `book/quarto/_build/epub-vol*/`.
+
+### When CI (or local post-flight) blocks you
+
+The failure line names the volume, severity, and delta:
+
+```
+epubcheck: regression against baseline (2 FATAL, 15 ERROR total)
+  • vol1 FATAL: 2 > baseline 0 (+2)
+```
+
+Two dispositions:
+
+- **Real regression:** fix the underlying issue. `./binder check epub help` maps every error code to a source-level fix. `./binder check epub --scope hygiene --fix` auto-repairs the four mechanical classes.
+- **Accepted increase** (e.g., a Quarto upgrade introduced a new warning class you're OK living with): `./binder check epub --scope epubcheck --baseline book/tools/audit/epubcheck-baseline.json --update-baseline` — commit the updated JSON in the same PR so the audit trail is clear.
+
+### Escape hatches
+
+Rare but real cases where you need to build anyway:
+
+- `./binder build epub --vol1 --skip-hygiene` — bypass pre-render hygiene (e.g., debugging a source-level issue that's triggering the check you're trying to investigate).
+- `./binder build epub --vol1 --skip-validate` — bypass post-render validation (e.g., iterating on a known-broken build; no Java locally).
+
+Both are loud about being bypassed — the skipped step prints a yellow warning so the bypass is never silent.
+
+### Onboarding
+
+A new contributor runs `./binder doctor` once. The EPUB section reports Java availability, epubcheck availability, existing EPUB artifacts, and source hygiene in one table, with install commands inline if anything is missing. No separate EPUB setup document to hunt for.
+
 ## Script Delegation
 
 Some commands still delegate to scripts under `book/tools/scripts/` (spelling, image formats, table formatting, Python formatting). These will be migrated to native CLI modules over time. EPUB checks have already been migrated: the `hygiene` and `epubcheck` scopes live in `book/cli/commands/_epub_checks.py` as pure Python, not subprocess-to-script.
