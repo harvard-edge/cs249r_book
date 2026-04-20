@@ -16,6 +16,8 @@ import { getLevelDef } from "@/lib/levels";
 import { buildReportUrl } from "@/lib/issue-url";
 import { track } from "@/lib/analytics";
 import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateSRCard } from "@/lib/progress";
+import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
+import { useToast } from "@/components/Toast";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import HardwareRef from "@/components/HardwareRef";
@@ -33,6 +35,7 @@ const DURATIONS = [
 ];
 
 export default function GauntletPage() {
+  const { show: showToast } = useToast();
   const [phase, setPhase] = useState<Phase>("setup");
   const [mounted, setMounted] = useState(false);
 
@@ -73,6 +76,7 @@ export default function GauntletPage() {
   // Review state (self-assessment per question)
   const [scores, setScores] = useState<number[]>([]);
   const [copied, setCopied] = useState(false);
+  const [rubricItems, setRubricItems] = useState<RubricItem[]>([]);
 
   // Per-question clarifications log — surfaced in the results phase as
   // "you asked N clarifications on this problem." Powers the metacognitive
@@ -196,7 +200,10 @@ export default function GauntletPage() {
     } else {
       selected = selectGauntletQuestions(selectedTrack, selectedLevel, dur.questions);
     }
-    if (selected.length === 0) return;
+    if (selected.length === 0) {
+      showToast({ type: 'info', title: 'No questions found', description: 'Try a different track or difficulty level.' });
+      return;
+    }
     setQuestions(selected);
     setCurrentIdx(0);
     setShowAnswer(false);
@@ -209,6 +216,15 @@ export default function GauntletPage() {
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
   const revealAnswer = () => {
+    const q = questions[currentIdx];
+    if (q) {
+      const items = extractRubric(
+        q.details.realistic_solution,
+        q.details.common_mistake,
+        q.details.napkin_math
+      );
+      setRubricItems(items);
+    }
     setShowAnswer(true);
   };
 
@@ -233,6 +249,7 @@ export default function GauntletPage() {
       setCurrentIdx(currentIdx + 1);
       setShowAnswer(false);
       setUserAnswer("");
+      setRubricItems([]);
     } else {
       // All questions answered — show results
       clearInterval(timerRef.current!);
@@ -563,26 +580,92 @@ export default function GauntletPage() {
                     </div>
                   )}
 
-                  {/* Self-assessment */}
-                  <div className="border-t border-border pt-5">
-                    <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">Rate yourself <span className="text-textTertiary/50 ml-2">Press 1-4</span></span>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {[
-                        { score: 0, label: "Skip", color: "border-border text-textTertiary hover:border-borderHighlight" },
-                        { score: 1, label: "Wrong", color: "border-accentRed/30 text-accentRed hover:bg-accentRed/10" },
-                        { score: 2, label: "Partial", color: "border-accentAmber/30 text-accentAmber hover:bg-accentAmber/10" },
-                        { score: 3, label: "Nailed It", color: "border-accentGreen/30 text-accentGreen hover:bg-accentGreen/10" },
-                      ].map(({ score, label, color }) => (
-                        <button
-                          key={score}
-                          onClick={() => scoreAndNext(score)}
-                          className={`px-3 py-2.5 rounded-lg border text-xs font-medium transition-all ${color}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                  {/* Rubric checkboxes */}
+                  {rubricItems.length > 0 && (
+                    <div className="border-t border-border pt-5">
+                      <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
+                        Did your answer cover? <span className="text-textTertiary/50 ml-1">{rubricItems.filter(i => i.checked).length}/{rubricItems.length}</span>
+                      </span>
+                      <div className="space-y-2">
+                        {rubricItems.map((item, idx) => (
+                          <label
+                            key={idx}
+                            className={clsx(
+                              "flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-all text-xs",
+                              item.checked
+                                ? "border-accentGreen/30 bg-accentGreen/5"
+                                : "border-border hover:border-borderHighlight"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={item.checked}
+                              onChange={() => {
+                                const updated = [...rubricItems];
+                                updated[idx] = { ...updated[idx], checked: !updated[idx].checked };
+                                setRubricItems(updated);
+                              }}
+                              className="mt-0.5 accent-accentGreen"
+                            />
+                            <span className={clsx(
+                              "leading-relaxed",
+                              item.checked ? "text-textPrimary" : "text-textSecondary"
+                            )}>
+                              {item.text}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      {rubricToScore(rubricItems) !== null && (
+                        <div className="mt-2 text-[10px] font-mono text-textTertiary">
+                          Rubric score: {rubricToScore(rubricItems)}/3 → {['Skip', 'Wrong', 'Partial', 'Nailed It'][rubricToScore(rubricItems)!]}
+                        </div>
+                      )}
                     </div>
-                  </div>
+                  )}
+
+                  {/* Self-assessment */}
+                  {(() => {
+                    const rubricScore = rubricItems.length > 0 ? rubricToScore(rubricItems) : null;
+                    const effectiveMaxScore = rubricScore !== null ? rubricScore : 3;
+                    return (
+                      <div className="border-t border-border pt-5">
+                        <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
+                          {rubricItems.length > 0 ? 'Confirm or override' : 'Rate yourself'}
+                          <span className="text-textTertiary/50 ml-2">Press 1-4</span>
+                        </span>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {[
+                            { score: 0, label: "Skip", color: "border-border text-textTertiary hover:border-borderHighlight" },
+                            { score: 1, label: "Wrong", color: "border-accentRed/30 text-accentRed hover:bg-accentRed/10" },
+                            { score: 2, label: "Partial", color: "border-accentAmber/30 text-accentAmber hover:bg-accentAmber/10" },
+                            { score: 3, label: "Nailed It", color: "border-accentGreen/30 text-accentGreen hover:bg-accentGreen/10" },
+                          ].map(({ score, label, color }) => {
+                            const disabled = score > effectiveMaxScore;
+                            const isRubricSuggested = rubricScore !== null && score === rubricScore;
+                            return (
+                              <button
+                                key={score}
+                                onClick={() => scoreAndNext(Math.min(score, effectiveMaxScore))}
+                                disabled={disabled}
+                                aria-label={`Rate yourself: ${label}`}
+                                className={clsx(
+                                  `px-3 py-2.5 rounded-lg border text-xs font-medium transition-all`,
+                                  disabled
+                                    ? "opacity-30 cursor-not-allowed border-border text-textTertiary"
+                                    : isRubricSuggested
+                                    ? `${color} ring-1 ring-accentBlue/50`
+                                    : color
+                                )}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </motion.div>
               )}
             </div>
