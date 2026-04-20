@@ -204,6 +204,8 @@ class MLSysBookCLI:
         format_type = None
         volume = None
         build_all = False
+        skip_hygiene = False
+        skip_validate = False
         remaining = []
 
         for arg in args:
@@ -214,6 +216,18 @@ class MLSysBookCLI:
                 volume = "vol2"
             elif lower == "--all":
                 build_all = True
+            elif lower == "--skip-hygiene":
+                # Emergency bypass for the EPUB pre-render hygiene check
+                # added in the fix/epub-issues work. See
+                # BuildCommand._preflight_epub_hygiene for context.
+                skip_hygiene = True
+            elif lower == "--skip-validate":
+                # Bypass the post-render smoke + epubcheck validation
+                # added in the fix/epub-issues work. See
+                # BuildCommand._postflight_epub_validation for context.
+                # Use when iterating on a known-broken build or when
+                # Java / epubcheck is unavailable locally.
+                skip_validate = True
             elif format_type is None and lower in ("html", "pdf", "epub"):
                 format_type = lower
             else:
@@ -223,7 +237,7 @@ class MLSysBookCLI:
             format_type = "html"
 
         chapters_arg = remaining[0] if remaining else None
-        return format_type, volume, build_all, chapters_arg
+        return format_type, volume, build_all, chapters_arg, skip_hygiene, skip_validate
 
     def handle_build_command(self, args):
         """Handle unified build command.
@@ -235,16 +249,19 @@ class MLSysBookCLI:
             ./binder build html intro,frameworks
         """
         if "-h" in args or "--help" in args:
-            console.print("Usage: ./binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--all]", markup=False)
+            console.print("Usage: ./binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--all] [--skip-hygiene] [--skip-validate]", markup=False)
             console.print("[dim]Examples:[/dim]")
             console.print("[dim]  ./binder build[/dim]")
             console.print("[dim]  ./binder build pdf[/dim]")
             console.print("[dim]  ./binder build pdf intro,training --vol1[/dim]")
             console.print("[dim]  ./binder build html --all[/dim]")
+            console.print("[dim]  ./binder build epub --vol1[/dim]")
+            console.print("[dim]  ./binder build epub --vol1 --skip-hygiene    # bypass pre-render hygiene check[/dim]")
+            console.print("[dim]  ./binder build epub --vol1 --skip-validate   # bypass post-render smoke + epubcheck[/dim]")
             return True
 
         self.config_manager.show_symlink_status()
-        format_type, volume, build_all, chapters_arg = self._parse_build_args(args)
+        format_type, volume, build_all, chapters_arg, skip_hygiene, skip_validate = self._parse_build_args(args)
 
         if build_all and chapters_arg:
             console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
@@ -255,29 +272,29 @@ class MLSysBookCLI:
                 console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
                 return self.build_command.build_html_only()
             console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
-            return self.build_command.build_full(format_type)
+            return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         if volume and not chapters_arg:
             volume_name = "Volume I" if volume == "vol1" else "Volume II"
             console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
-            return self.build_command.build_volume(volume, format_type)
+            return self.build_command.build_volume(volume, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         if volume and chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
             console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
-            return self.build_command.build_chapters_with_volume(chapter_list, format_type, volume)
+            return self.build_command.build_chapters_with_volume(chapter_list, format_type, volume, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         if chapters_arg:
             chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
             console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
             if format_type == "html":
                 return self.build_command.build_html_only(chapter_list)
-            return self.build_command.build_chapters(chapter_list, format_type)
+            return self.build_command.build_chapters(chapter_list, format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
         console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
         if format_type == "html":
             return self.build_command.build_full("html")
-        return self.build_command.build_full(format_type)
+        return self.build_command.build_full(format_type, skip_hygiene=skip_hygiene, skip_validate=skip_validate)
 
     def handle_format_reset_command(self, format_type: str, args) -> bool:
         """Handle shorthand reset command, e.g. ./binder pdf reset --vol1."""

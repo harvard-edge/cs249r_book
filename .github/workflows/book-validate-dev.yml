@@ -348,6 +348,111 @@ jobs:
           echo "linux_epub_vol1_artifact=$LINUX_EPUB_VOL1" >> $GITHUB_OUTPUT
           echo "linux_epub_vol2_artifact=$LINUX_EPUB_VOL2" >> $GITHUB_OUTPUT
 
+  # Step 4a: Epubcheck validation (Tier 1 — blocks on FATAL)
+  # The pre-commit hook `book-epub-hygiene` catches source-level issues
+  # that historically caused EPUB rejection (SVG control chars, dupe
+  # marker ids, BibTeX URL escapes). Epubcheck is the full structural
+  # validator and catches the rest: OPF manifest shape, XHTML XML
+  # validity, cross-file references, URI syntax.
+  #
+  # Failure policy: FATAL > 0 fails the job (Kindle and ClearView
+  # reject any EPUB with FATAL, so this is a ship-stopper). ERROR > 0
+  # is reported as a warning but does NOT fail the job, to let
+  # remaining legacy errors be cleaned up incrementally without
+  # blocking feature work. Tighten this by setting MAX_ERRORS=0 once
+  # the baseline is clean in both volumes.
+  epub-validate:
+    name: '📘 EPUB validate (epubcheck via binder)'
+    needs: [collect-results]
+    if: |
+      always() &&
+      needs.collect-results.outputs.linux_success == 'true' &&
+      needs.collect-results.outputs.linux_epub_vol1_artifact != '' &&
+      needs.collect-results.outputs.linux_epub_vol2_artifact != ''
+    runs-on: ubuntu-latest
+    env:
+      # Ratchet baseline — fails if epubcheck counts exceed recorded
+      # per-volume ceilings. Update with
+      #   ./binder check epub --scope epubcheck \
+      #       --baseline book/tools/audit/epubcheck-baseline.json \
+      #       --update-baseline
+      # after a cleanup lands, and commit the changed file in the
+      # same PR as the cleanup. This replaces the older flat
+      # MAX_FATAL/MAX_ERRORS approach: a ratchet prevents regression
+      # without cliff-failing during incremental cleanup.
+      BASELINE_PATH: 'book/tools/audit/epubcheck-baseline.json'
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📥 Download vol1 EPUB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol1_artifact }}
+          # Materialize into the canonical location the binder CLI
+          # discovers (_discover_built_epubs walks
+          # book/quarto/_build/epub-vol*/).
+          path: book/quarto/_build/epub-vol1
+
+      - name: 📥 Download vol2 EPUB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol2_artifact }}
+          path: book/quarto/_build/epub-vol2
+
+      - name: ☕ Set up Java (for the epubcheck jar)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: ⬇️ Install book Python dependencies
+        # Installs the `epubcheck` PyPI wrapper (declared in
+        # book/tools/dependencies/requirements.txt) alongside rich,
+        # pyyaml, and the rest of the binder runtime. The wrapper
+        # bundles the epubcheck jar and exposes it on PATH.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r book/tools/dependencies/requirements.txt
+
+      - name: 📘 Run `binder check epub --scope epubcheck` with baseline ratchet
+        # Both source-level hygiene and post-build epubcheck validation
+        # live inside the binder CLI. This step invokes the same
+        # command a developer runs locally, so CI and local behaviour
+        # stay in lockstep.
+        #
+        # The --baseline ratchet means CI fails only when the per-
+        # volume FATAL/ERROR/WARNING count *exceeds* what was
+        # recorded last time the baseline was updated. Prevents
+        # regression without forcing a cliff-cleanup of every
+        # pre-existing issue on every PR.
+        env:
+          BASELINE_PATH: ${{ env.BASELINE_PATH }}
+        run: |
+          set -euo pipefail
+          cd book
+          # JSON pass: machine-readable artifact (uploaded below).
+          # GITHUB_ACTIONS=true is set automatically, so _epub_checks
+          # emits `::error` annotations inline on the PR diff.
+          ./binder check epub --scope epubcheck \
+              --baseline "${BASELINE_PATH}" \
+              --json > epubcheck-report.json || true
+          # Human pass: exit code gates the CI job via the ratchet.
+          ./binder check epub --scope epubcheck --baseline "${BASELINE_PATH}"
+
+      - name: 📤 Upload epubcheck report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: epubcheck-report
+          path: book/epubcheck-report.json
+          retention-days: 14
+
   # Step 4b: Link integrity (Tier 2 — non-blocking baseline)
   # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
   # broken internal links + anchors. This Lychee pass adds external reachability
@@ -367,7 +472,7 @@ jobs:
   validation-summary:
     name: '🎯 Validation Summary'
     if: always()
-    needs: [pre-commit, build-config, collect-results, check-links]
+    needs: [pre-commit, build-config, collect-results, epub-validate, check-links]
     runs-on: ubuntu-latest
 
     steps:
@@ -406,6 +511,13 @@ jobs:
           else
             echo "⏭️ Windows build: SKIPPED"
           fi
+
+          case "${{ needs.epub-validate.result }}" in
+            success) echo "✅ EPUB validate (epubcheck): PASSED" ;;
+            failure) echo "❌ EPUB validate (epubcheck): FAILED" ;;
+            skipped) echo "⏭️ EPUB validate (epubcheck): SKIPPED" ;;
+            *)       echo "⚠️ EPUB validate (epubcheck): ${{ needs.epub-validate.result }}" ;;
+          esac
 
           echo ""
           echo "🎯 OVERALL STATUS:"

@@ -199,7 +199,18 @@ class ValidateCommand:
             ("tikz", "_run_spelling_tikz"),
         ],
         "epub": [
-            ("structure", "_run_epub"),
+            # Fast source-level invariants. No EPUB build required. Suitable
+            # for pre-commit — runs in <1s across all SVGs + .bib files.
+            ("hygiene", "_run_epub_hygiene"),
+            # Reader-compatibility smoke checks against the built EPUB.
+            # No Java required; catches patterns epubcheck does not, e.g.
+            # CSS custom properties (ClearView / Tolino compat) and
+            # external resource references.
+            ("smoke", "_run_epub_smoke"),
+            # Full W3C epubcheck validation of built EPUB artifacts under
+            # _build/epub-vol*/. Requires epubcheck + JRE. Slow (~30s per
+            # volume) — appropriate for CI, not pre-commit.
+            ("epubcheck", "_run_epubcheck"),
         ],
         "sources": [
             ("citations", "_run_sources"),
@@ -217,6 +228,18 @@ class ValidateCommand:
         self.chapter_discovery = chapter_discovery
 
     def run(self, args: List[str]) -> bool:
+        # Per-group help: `./binder check <group> help` prints a
+        # dedicated help panel for that group, including concrete
+        # error codes. This lives above argparse because `help` is
+        # not a valid scope in the GROUPS dict; intercepting it here
+        # keeps the argparse surface narrow while still giving each
+        # group room for bespoke guidance.
+        if len(args) == 2 and args[1] == "help":
+            group = args[0]
+            if group in self.GROUPS:
+                self._print_group_help(group)
+                return True
+
         all_group_names = list(self.GROUPS.keys()) + ["all"]
         parser = argparse.ArgumentParser(
             prog="binder check",
@@ -256,6 +279,38 @@ class ValidateCommand:
         parser.add_argument("--refs-cache", dest="refs_cache", metavar="FILE", help="references: cache file (default: .references_verified.json in repo root)")
         parser.add_argument("--only-from-report", dest="refs_only_from_report", metavar="FILE", help="references: validate only keys that had issues in this report file")
         parser.add_argument("--only-keys", dest="refs_only_keys_file", metavar="FILE", help="references: validate only keys listed in FILE (one key per line)")
+        # epub --scope hygiene: auto-repair source files in-place.
+        parser.add_argument(
+            "--fix", action="store_true",
+            help="epub --scope hygiene: auto-repair SVG / BibTeX source invariants in place",
+        )
+        # epub --scope epubcheck: thresholds for FATAL and ERROR counts.
+        # Defaults: MAX_FATAL=0 (any FATAL fails the check — Kindle /
+        # ClearView reject), MAX_ERRORS=unlimited (grandfathered while the
+        # RSC-005/RSC-012 baselines stabilize). Tighten with --max-errors 0
+        # once the baseline is clean.
+        parser.add_argument(
+            "--max-fatal", type=int, default=0,
+            help="epub --scope epubcheck: max FATAL issues allowed before failure (default: 0)",
+        )
+        parser.add_argument(
+            "--max-errors", type=int, default=None,
+            help="epub --scope epubcheck: max ERROR issues allowed before failure (default: unlimited)",
+        )
+        # Ratchet: fail only when counts *increase* over a recorded baseline.
+        # Lets CI block regression without cliff-failing during incremental
+        # cleanup. Pairs with --update-baseline to re-record after a fix.
+        parser.add_argument(
+            "--baseline",
+            metavar="PATH",
+            default=None,
+            help="epub --scope epubcheck: JSON baseline of per-volume counts; fail only if current counts exceed baseline",
+        )
+        parser.add_argument(
+            "--update-baseline",
+            action="store_true",
+            help="epub --scope epubcheck: rewrite --baseline file with current counts (requires --baseline)",
+        )
 
         try:
             ns = parser.parse_args(args)
@@ -333,6 +388,19 @@ class ValidateCommand:
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
+            elif method_name == "_run_epubcheck":
+                # Thresholds come from --max-fatal / --max-errors; when not
+                # supplied on the CLI we keep max_errors=None (unlimited).
+                # The ratchet takes over when --baseline is supplied.
+                results.append(method(
+                    root,
+                    max_fatal=ns.max_fatal,
+                    max_errors=ns.max_errors,
+                    baseline_path=ns.baseline,
+                    update_baseline=ns.update_baseline,
+                ))
+            elif method_name == "_run_epub_hygiene":
+                results.append(method(root, fix=getattr(ns, 'fix', False)))
             else:
                 results.append(method(root))
         return results
@@ -355,7 +423,7 @@ class ValidateCommand:
             "json": "JSON file syntax validation",
             "units": "Physics engine unit conversion tests",
             "spelling": "Prose and TikZ spell checking (requires aspell)",
-            "epub": "EPUB file validation",
+            "epub": "EPUB hygiene (source), epubcheck (built), structure (legacy)",
             "sources": "Source citation analysis and validation",
             "references": "Bibliography vs academic DBs (hallucinator)",
             "content": "Content tree (shared/, frontmatter/ required)",
@@ -372,6 +440,115 @@ class ValidateCommand:
         console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# only citation check[/dim]")
         console.print("  [cyan]./binder check figures --vol1[/cyan]    [dim]# all figure checks, Vol I[/dim]")
         console.print("  [cyan]./binder check all[/cyan]               [dim]# everything[/dim]")
+        console.print("  [cyan]./binder check <group> help[/cyan]      [dim]# per-group error codes + guidance[/dim]")
+        console.print()
+
+    # ------------------------------------------------------------------
+
+    def _print_group_help(self, group: str) -> None:
+        """Dispatch to per-group help. Falls back to a generic listing."""
+        if group == "epub":
+            self._print_epub_help()
+            return
+        # Generic fallback: list scopes and a one-line description.
+        scopes = self.GROUPS.get(group, [])
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Scope", style="yellow")
+        table.add_column("Method", style="dim")
+        for s, m in scopes:
+            table.add_row(s, m)
+        console.print(Panel(table, title=f"binder check {group}", border_style="cyan"))
+        console.print(f"[dim]Run `./binder check {group}` to run every scope, or "
+                      f"`./binder check {group} --scope <name>` for one.[/dim]")
+        console.print()
+
+    def _print_epub_help(self) -> None:
+        """Dedicated help for the `epub` group: the three scopes, the
+        error codes each can surface, and how to fix them at source.
+
+        This panel exists because the `epub` group is the most common
+        source of unexpected failures for new contributors — the error
+        codes (RSC-005, RSC-016, RSC-020, OPF-014, smoke-css-*) are
+        cryptic in isolation, but map cleanly to a few source-level
+        patterns. Printing the mapping here saves cross-referencing
+        the README when a CI failure is in hand.
+        """
+        # --- Scopes panel -----------------------------------------------
+        scope_table = Table(show_header=True, header_style="bold cyan", box=None)
+        scope_table.add_column("Scope", style="yellow", width=12)
+        scope_table.add_column("When to run", style="white", width=30)
+        scope_table.add_column("Cost", style="dim", width=18)
+        scope_table.add_column("Needs", style="dim", width=12)
+        scope_table.add_row("hygiene", "Every commit (pre-commit)", "<1s, scans source", "—")
+        scope_table.add_row("smoke", "After build, for reader compat", "~200ms, scans built EPUB", "—")
+        scope_table.add_row("epubcheck", "CI, before release", "~7s per volume", "Java + epubcheck")
+        console.print(Panel(scope_table, title="./binder check epub — scopes", border_style="cyan"))
+
+        # --- Error code table ------------------------------------------
+        # Scope is derivable from the code prefix: svg-/bib-* = hygiene,
+        # smoke-* = smoke, RSC-*/OPF-* = epubcheck. Dropping the column
+        # leaves room for readable Trigger / Fix copy.
+        code_table = Table(show_header=True, header_style="bold cyan", box=None)
+        code_table.add_column("Code", style="red", width=32)
+        code_table.add_column("Trigger", style="white", width=30)
+        code_table.add_column("Fix at source", style="green", width=32)
+
+        rows = [
+            ("svg-c0",
+             "C0 control char in SVG aria-label",
+             "Strip in Python plot title; or --fix"),
+            ("svg-dupe-marker",
+             "Duplicate <marker id=…/> in one SVG",
+             "Delete duplicate; or --fix"),
+            ("bib-url-escape-underscore",
+             r"\_ in bib url= or http doi=",
+             r"\_ → _ in the .bib; or --fix"),
+            ("bib-url-escape-percent",
+             r"\% in bib URL field",
+             r"\% → % in the .bib; or --fix"),
+            ("bib-url-raw-angle",
+             "raw < or > in bib URL field",
+             "%3C / %3E encode; or --fix"),
+            ("smoke-css-custom-property-decl",
+             "--var-name: value; in packaged CSS",
+             "Inline the literal value"),
+            ("smoke-css-custom-property-use",
+             "var(--x) in packaged CSS",
+             "Inline the literal value"),
+            ("smoke-external-resource",
+             "src=/<link href= to http(s)://",
+             "Package the asset or drop"),
+            ("RSC-016 (FATAL)",
+             "XML malformed (--, <br>, C0)",
+             "epub_postprocess sanitizes; fix at source if it recurs"),
+            ("RSC-005",
+             "Malformed markup (alt on wrong elem)",
+             "Fix the emitter in the Quarto filter"),
+            ("RSC-020",
+             "Invalid URL syntax in href",
+             "Same as bib-url-* above"),
+            ("RSC-012",
+             "Broken fragment ID",
+             "fix_cross_references.py handles this"),
+            ("OPF-014",
+             "Missing mathml / other OPF property",
+             "epub_postprocess declares mathml on nav"),
+        ]
+        for code, trigger, fix in rows:
+            code_table.add_row(code, trigger, fix)
+        console.print(Panel(code_table, title="Error codes", border_style="red"))
+
+        # --- Command quick reference -----------------------------------
+        console.print("[bold]Common invocations:[/bold]")
+        console.print("  [cyan]./binder check epub[/cyan]                        [dim]# hygiene + smoke + epubcheck[/dim]")
+        console.print("  [cyan]./binder check epub --scope hygiene[/cyan]        [dim]# source-only, fast[/dim]")
+        console.print("  [cyan]./binder check epub --scope hygiene --fix[/cyan]  [dim]# auto-repair source issues[/dim]")
+        console.print("  [cyan]./binder check epub --scope epubcheck --max-fatal 0 --max-errors 0[/cyan]")
+        console.print("  [dim]                                                    # CI-style strict gating[/dim]")
+        console.print("  [cyan]./binder check epub --json[/cyan]                 [dim]# structured output[/dim]")
+        console.print("  [cyan]./binder build epub --vol1 --skip-hygiene[/cyan]  [dim]# emergency build bypass[/dim]")
+        console.print()
+        console.print("[dim]Deep dive: book/cli/README.md → \"EPUB Checks — Two Layers, One CLI Surface\"[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -3271,7 +3448,398 @@ class ValidateCommand:
         return self._delegate_script(script, [], "spelling-tikz")
 
     # ------------------------------------------------------------------
-    # EPUB validation  (delegated to validate_epub.py)
+    # EPUB validation
+    #
+    # Three scopes share this section, each targeting a different layer of
+    # the EPUB build pipeline. See book/cli/commands/_epub_checks.py for
+    # the per-check logic and the rationale for the layering.
+    #
+    #   hygiene   — source-level invariants (pre-build, fast, pre-commit)
+    #   epubcheck — W3C validator on built artifacts (post-build, CI)
+    #   structure — legacy custom checks on built EPUB (no Java required)
+    # ------------------------------------------------------------------
+
+    def _run_epub_hygiene(self, root: Path, *, fix: bool = False) -> ValidationRunResult:
+        """Run the pre-commit-grade EPUB source hygiene checks.
+
+        Walks `book/quarto/contents/**/*.svg` and `book/quarto/**/*.bib`
+        looking for the four source-level patterns that produced FATAL
+        or ERROR-level epubcheck failures in April 2026:
+
+          1. C0 control chars inside SVG aria-label attributes
+          2. Duplicate `<marker id="X"/>` defs inside one SVG
+          3. BibTeX `\\_` or `\\%` escapes inside url= / http doi= fields
+          4. Raw `<` or `>` inside those same URL fields
+
+        Runs in <1s and is safe to invoke from pre-commit on every push.
+
+        When `fix=True` (from `--fix`), the detected issues are rewritten
+        in place before reporting. The returned issue list then reflects
+        what the check found BEFORE the fix — so a first `--fix` run
+        reports "N issues found, N auto-fixed" and a second run reports 0.
+        """
+        from cli.commands._epub_checks import (
+            find_hygiene_issues,
+            fix_hygiene_issues,
+        )
+
+        t0 = time.time()
+        # Walk from repo root so the check sees both volumes.
+        repo_root = Path(__file__).resolve().parents[3]
+
+        fixes: Dict[str, int] = {}
+        if fix:
+            fixes = fix_hygiene_issues(repo_root)
+
+        epub_issues, files_checked = find_hygiene_issues(repo_root)
+
+        issues = [
+            ValidationIssue(
+                file=e.file,
+                line=e.line,
+                code=e.code,
+                message=e.message,
+                severity="error",  # hygiene issues are always blocking
+            )
+            for e in epub_issues
+        ]
+
+        description = "EPUB source hygiene (SVG + BibTeX invariants)"
+        if fix:
+            touched = sum(fixes.values())
+            description += (
+                f" — --fix applied: "
+                f"{fixes.get('svg_c0_chars_removed', 0)} C0 chars stripped, "
+                f"{fixes.get('svg_duplicate_markers', 0)} duplicate markers removed, "
+                f"{fixes.get('bib_url_rewrites', 0)} URL-field rewrites "
+                f"(touched {touched} total)"
+            )
+
+        return ValidationRunResult(
+            name="epub-hygiene",
+            description=description,
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _check_baseline(
+        self,
+        *,
+        baseline_path: Optional[str],
+        update_baseline: bool,
+        per_volume_counts: Dict[str, Dict[str, int]],
+    ) -> List[ValidationIssue]:
+        """Ratchet: compare per-volume counts against a recorded baseline.
+
+        If *baseline_path* is None, do nothing (the flat --max-fatal /
+        --max-errors thresholds take over in the caller).
+
+        If *update_baseline* is True, rewrite the baseline file with the
+        current counts and return an empty issue list. This is the way
+        to lower the ceiling after a cleanup lands.
+
+        Otherwise: load the baseline file, compare to current counts,
+        and return a synthetic ValidationIssue per volume + severity
+        that regressed.
+        """
+        if baseline_path is None:
+            if update_baseline:
+                # No path to update into — emit a clear error.
+                return [ValidationIssue(
+                    file="(baseline)", line=0,
+                    code="EPUBCHECK-BASELINE-NO-PATH",
+                    message="--update-baseline supplied without --baseline PATH",
+                    severity="error",
+                )]
+            return []
+
+        import datetime as _dt
+        import json as _json
+
+        baseline_file = Path(baseline_path)
+
+        # --- Update mode ------------------------------------------------
+        if update_baseline:
+            payload = {
+                "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(
+                    timespec="seconds"
+                ),
+                "generated_by": "binder check epub --scope epubcheck --update-baseline",
+                "description": (
+                    "Max allowed per-volume epubcheck counts. "
+                    "`./binder check epub --scope epubcheck --baseline <this>` "
+                    "fails only if any current count exceeds the recorded "
+                    "value. Run `--update-baseline` again after a cleanup "
+                    "to lower the ceiling."
+                ),
+                "volumes": per_volume_counts,
+            }
+            baseline_file.parent.mkdir(parents=True, exist_ok=True)
+            baseline_file.write_text(_json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            console.print(
+                f"[green]✓ Baseline updated:[/green] {baseline_file} "
+                f"[dim]({len(per_volume_counts)} volumes recorded)[/dim]"
+            )
+            return []
+
+        # --- Compare mode -----------------------------------------------
+        if not baseline_file.exists():
+            return [ValidationIssue(
+                file=str(baseline_file), line=0,
+                code="EPUBCHECK-BASELINE-MISSING",
+                message=(
+                    f"Baseline file not found: {baseline_file}. Initialize "
+                    "with `./binder check epub --scope epubcheck "
+                    f"--baseline {baseline_file} --update-baseline`."
+                ),
+                severity="error",
+            )]
+
+        try:
+            payload = _json.loads(baseline_file.read_text(encoding="utf-8"))
+        except _json.JSONDecodeError as e:
+            return [ValidationIssue(
+                file=str(baseline_file), line=0,
+                code="EPUBCHECK-BASELINE-INVALID",
+                message=f"Baseline file is not valid JSON: {e}",
+                severity="error",
+            )]
+
+        recorded = payload.get("volumes", {}) or {}
+        issues: List[ValidationIssue] = []
+        any_under = False
+
+        for vol, counts in per_volume_counts.items():
+            base = recorded.get(vol, {})
+            for severity in ("FATAL", "ERROR", "WARNING"):
+                current = counts.get(severity, 0)
+                allowed = int(base.get(severity, 0))
+                if current > allowed:
+                    issues.append(ValidationIssue(
+                        file="(epubcheck baseline)",
+                        line=0,
+                        code=f"EPUBCHECK-BASELINE-{severity}",
+                        message=(
+                            f"{vol}: {severity} count regressed — current "
+                            f"{current} > baseline {allowed} (delta "
+                            f"+{current - allowed}). Fix the underlying "
+                            f"issues or run `--update-baseline` after "
+                            f"verifying this is an accepted increase."
+                        ),
+                        severity="error",
+                    ))
+                elif current < allowed:
+                    any_under = True
+
+        if any_under and not issues:
+            console.print(
+                "[dim]ⓘ epubcheck counts are under baseline in one or more "
+                "volumes; run `--update-baseline` to lower the ceiling.[/dim]"
+            )
+
+        return issues
+
+    def _run_epub_smoke(self, root: Path) -> ValidationRunResult:
+        """Reader-compatibility smoke checks against the built EPUB(s).
+
+        Epubcheck validates EPUB 3 spec conformance. This scope catches
+        patterns that pass epubcheck but break specific readers:
+
+          * CSS custom properties (`--var`, `var(--x)`) that older
+            ClearView / Tolino firmware cannot resolve.
+          * External resource references (`src="https://..."`,
+            `<link href="https://...">`) that EPUB readers do not fetch.
+
+        Runs against every EPUB discovered under `_build/epub-vol*/`.
+        Does not require Java — safe to run on any dev machine.
+        """
+        from cli.commands._epub_checks import (
+            _discover_built_epubs,
+            run_smoke_checks_on,
+        )
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        epubs = _discover_built_epubs(repo_root)
+
+        if not epubs:
+            return ValidationRunResult(
+                name="epub-smoke",
+                description="EPUB reader-compatibility smoke (no built EPUBs found)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        all_issues: List[ValidationIssue] = []
+        for epub in epubs:
+            for e in run_smoke_checks_on(epub, repo_root=repo_root):
+                all_issues.append(ValidationIssue(
+                    file=e.file,
+                    line=e.line,
+                    code=e.code,
+                    message=e.message,
+                    # Smoke issues are advisory (warnings), not blockers,
+                    # because they flag reader-subset behavior rather than
+                    # spec violations. Promote to error by fixing at source.
+                    severity=e.severity,
+                ))
+
+        return ValidationRunResult(
+            name="epub-smoke",
+            description=(
+                f"EPUB reader-compatibility smoke "
+                f"({len(epubs)} EPUB(s) scanned)"
+            ),
+            files_checked=len(epubs),
+            issues=all_issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_epubcheck(
+        self,
+        root: Path,
+        *,
+        max_fatal: int = 0,
+        max_errors: Optional[int] = None,
+        baseline_path: Optional[str] = None,
+        update_baseline: bool = False,
+    ) -> ValidationRunResult:
+        """Run the W3C `epubcheck` validator against the built EPUBs.
+
+        Discovers every `book/quarto/_build/epub-vol*/*.epub` (most recent
+        per volume), invokes `epubcheck --json -` on each, parses the
+        JSON message array, and converts each message to a
+        `ValidationIssue`. Also emits GitHub Actions `::error` annotations
+        when running under CI so the findings appear inline on PR diffs.
+
+        Threshold semantics
+        -------------------
+        Any FATAL above *max_fatal* marks the run as failed. Any ERROR
+        above *max_errors* (when supplied) marks the run as failed.
+        ERRORs below the threshold are still reported in the issue list
+        so reviewers see them; they just do not fail the build. The
+        default `max_errors=None` treats ERRORs as report-only, which
+        matches the current grandfathered CI policy.
+        """
+        from cli.commands._epub_checks import (
+            _discover_built_epubs,
+            emit_github_annotations,
+            run_epubcheck_on,
+        )
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        epubs = _discover_built_epubs(repo_root)
+
+        if not epubs:
+            # Not a failure by itself; mirror the existing _run_epub
+            # behaviour when no EPUB has been built yet.
+            return ValidationRunResult(
+                name="epubcheck",
+                description="epubcheck (no built EPUBs found under _build/epub-vol*/)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        all_issues: List[ValidationIssue] = []
+        per_volume_counts: Dict[str, Dict[str, int]] = {}
+        total_fatal = 0
+        total_errors = 0
+
+        for epub in epubs:
+            # Derive a stable volume key from the parent directory name.
+            # `_build/epub-vol1/foo.epub` → "vol1"; falls back to the
+            # EPUB's stem if the path layout is unexpected.
+            vol_key = epub.parent.name.replace("epub-", "") or epub.stem
+
+            epub_issues, counts = run_epubcheck_on(epub, repo_root=repo_root)
+            emit_github_annotations(epub_issues)
+
+            per_volume_counts[vol_key] = {
+                "FATAL": counts.get("FATAL", 0),
+                "ERROR": counts.get("ERROR", 0),
+                "WARNING": counts.get("WARNING", 0),
+            }
+            total_fatal += counts.get("FATAL", 0)
+            total_errors += counts.get("ERROR", 0)
+
+            for e in epub_issues:
+                all_issues.append(ValidationIssue(
+                    file=e.file,
+                    line=e.line,
+                    code=e.code,
+                    message=e.message,
+                    # Map FATAL to "error" for ValidationIssue (which only
+                    # has error/warning/info). The code field and message
+                    # preserve the FATAL distinction for the summary line
+                    # below so the user sees FATAL vs ERROR counts.
+                    severity="error" if e.severity in ("fatal", "error") else e.severity,
+                ))
+
+        # --- Ratchet / baseline handling --------------------------------
+        # The baseline is per-volume, per-severity. Semantics:
+        #   current == baseline  → pass silently
+        #   current <  baseline  → pass; print a hint that the baseline
+        #                          can be tightened (don't auto-update
+        #                          without --update-baseline to avoid
+        #                          silently lowering the bar).
+        #   current >  baseline  → fail; emit a synthetic issue with the
+        #                          per-volume delta so reviewers see what
+        #                          regressed.
+        baseline_issues = self._check_baseline(
+            baseline_path=baseline_path,
+            update_baseline=update_baseline,
+            per_volume_counts=per_volume_counts,
+        )
+        all_issues.extend(baseline_issues)
+
+        # Threshold enforcement (applied only when the ratchet is not in
+        # use — supplying --baseline tells the tool to use the ratchet
+        # instead of flat thresholds).
+        if baseline_path is None:
+            if total_fatal > max_fatal:
+                all_issues.append(ValidationIssue(
+                    file="(epubcheck)",
+                    line=0,
+                    code="EPUBCHECK-FATAL-THRESHOLD",
+                    message=(
+                        f"FATAL count {total_fatal} exceeds threshold "
+                        f"{max_fatal} — Kindle / ClearView will reject this EPUB."
+                    ),
+                    severity="error",
+                ))
+            if max_errors is not None and total_errors > max_errors:
+                all_issues.append(ValidationIssue(
+                    file="(epubcheck)",
+                    line=0,
+                    code="EPUBCHECK-ERROR-THRESHOLD",
+                    message=(
+                        f"ERROR count {total_errors} exceeds threshold "
+                        f"{max_errors}. Tighten or fix the underlying RSC-* issues."
+                    ),
+                    severity="error",
+                ))
+
+        # Build the description so the user sees the severity summary even
+        # when all issues are warnings/info.
+        desc = (
+            f"epubcheck ({len(epubs)} EPUB(s); "
+            f"{total_fatal} FATAL, {total_errors} ERROR)"
+        )
+
+        return ValidationRunResult(
+            name="epubcheck",
+            description=desc,
+            files_checked=len(epubs),
+            issues=all_issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # EPUB structure (legacy custom check — no Java required)
     # ------------------------------------------------------------------
 
     def _run_epub(self, root: Path) -> ValidationRunResult:
