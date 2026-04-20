@@ -34,6 +34,69 @@ class BuildCommand:
         self.verbose = verbose
         self.open_after = open_after
 
+    def _preflight_epub_hygiene(self, skip: bool = False) -> bool:
+        """Run the `hygiene` scope of `./binder check epub` before an EPUB build.
+
+        Returns True if the build should proceed, False if it should abort.
+
+        Rationale: the hygiene check runs in <1s across all SVG and
+        BibTeX source files, while an EPUB render takes ~2 minutes per
+        volume. Catching a regression now saves iterations later, and
+        short-circuiting avoids producing a half-broken artifact that
+        the user then has to diagnose.
+
+        If hygiene fails, the method tells the user how to auto-repair
+        (`./binder check epub --scope hygiene --fix`) and how to bypass
+        (`--skip-hygiene`) so the blocker is never mysterious.
+
+        Opt-out: `--skip-hygiene` on the build command, or explicit
+        `skip=True` for programmatic callers.
+        """
+        if skip:
+            console.print("[yellow]⚠ Skipping EPUB hygiene preflight (--skip-hygiene)[/yellow]")
+            return True
+
+        # Lazy import: don't pay the cost when building HTML or PDF.
+        try:
+            from cli.commands._epub_checks import find_hygiene_issues
+        except ImportError:
+            # Running from an older checkout without the check module —
+            # don't break the build, just note and continue.
+            console.print("[dim]ⓘ Hygiene preflight unavailable in this checkout; skipping.[/dim]")
+            return True
+
+        repo_root = self.config_manager.book_dir.parent
+        issues, files_checked = find_hygiene_issues(repo_root)
+
+        if not issues:
+            console.print(
+                f"[green]✓ EPUB hygiene preflight[/green] [dim]"
+                f"({files_checked} SVG/BibTeX files scanned, 0 issues)[/dim]"
+            )
+            return True
+
+        console.print(
+            f"[red]✗ EPUB hygiene preflight failed[/red] [dim]"
+            f"({len(issues)} issue(s) across {files_checked} scanned files)[/dim]"
+        )
+        # Show up to 5 issues so the user sees the shape of the problem
+        # without drowning in output. Full detail is one command away.
+        for issue in issues[:5]:
+            console.print(
+                f"  [red]{issue.code}[/red] "
+                f"[dim]{issue.file}:{issue.line}[/dim] — {issue.message}"
+            )
+        if len(issues) > 5:
+            console.print(f"  [dim]… {len(issues) - 5} more. "
+                          f"See `./binder check epub --scope hygiene` for all.[/dim]")
+        console.print()
+        console.print("[yellow]Resolve with one of:[/yellow]")
+        console.print("  [cyan]./binder check epub --scope hygiene --fix[/cyan]  "
+                      "[dim]# auto-repair source files in place[/dim]")
+        console.print("  [cyan]./binder build epub --skip-hygiene[/cyan]       "
+                      "[dim]# build anyway (not recommended)[/dim]")
+        return False
+
     def _open_output(self, output_dir: Path, format_type: str) -> None:
         """Open the build output using the system's default application.
 
@@ -64,11 +127,14 @@ class BuildCommand:
         elif system == "Windows":
             subprocess.Popen(["start", "", str(target)], shell=True)
 
-    def build_full(self, format_type: str = "html") -> bool:
+    def build_full(self, format_type: str = "html", skip_hygiene: bool = False) -> bool:
         """Build full book in specified format.
 
         Args:
             format_type: Format to build ('html', 'pdf', 'epub')
+            skip_hygiene: For EPUB builds, skip the pre-render hygiene
+                check. Opt-in escape hatch for when a build must proceed
+                despite source-level invariants (rare).
 
         Returns:
             True if build succeeded, False otherwise
@@ -79,6 +145,12 @@ class BuildCommand:
         # Handle special case for building both HTML and PDF
         if format_type == "both":
             return self._build_both_formats()
+
+        # EPUB preflight: catch source-level regressions before the
+        # ~2-minute render rather than after.
+        if format_type == "epub":
+            if not self._preflight_epub_hygiene(skip=skip_hygiene):
+                return False
 
         # Create build directory
         output_dir = self.config_manager.get_output_dir(format_type)
@@ -147,12 +219,13 @@ class BuildCommand:
             if format_type in ["pdf", "epub"] and not self._config_restored:
                 self._restore_config(config_file)
 
-    def build_chapters(self, chapter_names: List[str], format_type: str = "html") -> bool:
+    def build_chapters(self, chapter_names: List[str], format_type: str = "html", skip_hygiene: bool = False) -> bool:
         """Build specific chapters.
 
         Args:
             chapter_names: List of chapter names to build
             format_type: Format to build ('html', 'pdf', 'epub')
+            skip_hygiene: EPUB-only; skip the pre-render hygiene check.
 
         Returns:
             True if build succeeded, False otherwise
@@ -162,6 +235,10 @@ class BuildCommand:
 
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type})[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
+
+        if format_type == "epub":
+            if not self._preflight_epub_hygiene(skip=skip_hygiene):
+                return False
 
         try:
             # Validate chapters exist
@@ -245,13 +322,14 @@ class BuildCommand:
             except:
                 pass
 
-    def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str) -> bool:
+    def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str, skip_hygiene: bool = False) -> bool:
         """Build specific chapters using volume-specific configuration.
 
         Args:
             chapter_names: List of chapter names to build
             format_type: Format to build ('html', 'pdf', 'epub')
             volume: Volume config to use ('vol1' or 'vol2')
+            skip_hygiene: EPUB-only; skip the pre-render hygiene check.
 
         Returns:
             True if build succeeded, False otherwise
@@ -262,6 +340,10 @@ class BuildCommand:
         volume_name = "Volume I" if volume == "vol1" else "Volume II"
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type}, {volume_name} config)[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
+
+        if format_type == "epub":
+            if not self._preflight_epub_hygiene(skip=skip_hygiene):
+                return False
 
         try:
             # Auto-prefix chapter names with volume to disambiguate
@@ -367,7 +449,7 @@ class BuildCommand:
             except:
                 pass
 
-    def build_volume(self, volume: str, format_type: str = "pdf") -> bool:
+    def build_volume(self, volume: str, format_type: str = "pdf", skip_hygiene: bool = False) -> bool:
         """Build a specific volume using its dedicated configuration.
 
         This uses the volume-specific config files (e.g., _quarto-pdf-vol1.yml)
@@ -377,12 +459,17 @@ class BuildCommand:
         Args:
             volume: Volume to build ('vol1' or 'vol2')
             format_type: Format to build ('html', 'pdf', 'epub')
+            skip_hygiene: EPUB-only; skip the pre-render hygiene check.
 
         Returns:
             True if build succeeded, False otherwise
         """
         volume_name = "Volume I" if volume == "vol1" else "Volume II"
         console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
+
+        if format_type == "epub":
+            if not self._preflight_epub_hygiene(skip=skip_hygiene):
+                return False
 
         # Check if volume-specific config exists
         config_file = self.config_manager.get_config_file(format_type, volume)
