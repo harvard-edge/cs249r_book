@@ -122,14 +122,18 @@ const BRAND_COLOR = '#333';     // Matches shared/_navbar.scss .navbar-brand col
 
 const S = {
   nav: {
-    padding: '0 16px',
-    height: 52,
+    // Bootstrap navbar default: 0.5rem top/bottom padding → ~56px total height
+    // (28px logo + 8px*2 padding + 4px border). Matches shared/_navbar.scss.
+    padding: '8px 16px',
     fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: 16,  // --bs-body-font-size: 1rem
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap' as const,
+    // Do NOT wrap: wrapping produces a stacked/offset layout at intermediate
+    // widths that looks broken. The hamburger path handles narrow screens.
+    flexWrap: 'nowrap' as const,
+    minHeight: 56,
   },
   brand: {
     display: 'flex',
@@ -141,6 +145,8 @@ const S = {
     fontWeight: 500,  // Matches shared/_navbar.scss .navbar-brand
     whiteSpace: 'nowrap' as const,
     marginRight: 16,  // --bs-navbar-brand-margin-end: 1rem
+    minWidth: 0,     // Allow title to truncate rather than clipping the shield
+    overflow: 'hidden' as const,
   },
   navLink: {
     color: NAV_COLOR,
@@ -250,7 +256,7 @@ export default function EcosystemBar() {
         onMouseLeave={() => { if (openMenu !== menu.id) setHoveredLink(null); }}
       >
         {menu.icon && <i className={`bi ${menu.icon}`} />}
-        <span className={menu.alignEnd ? "hidden xl:inline" : ""}>{menu.label}</span>
+        <span className={menu.alignEnd ? "hidden nav-xl:inline" : ""}>{menu.label}</span>
         <span style={{
           display: 'inline-block', marginLeft: 4,
           borderTop: '4px solid currentColor', borderRight: '4px solid transparent', borderLeft: '4px solid transparent',
@@ -294,13 +300,19 @@ export default function EcosystemBar() {
           <img
             src={`${ASSET_PREFIX}/logo-seas-shield.png`}
             alt=""
-            style={{ height: 28, width: 'auto' }}
+            style={{ height: 28, width: 'auto', flexShrink: 0 }}
           />
-          <span className="hidden sm:inline">Machine Learning Systems</span>
+          <span
+            className="hidden nav-sm:inline"
+            style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}
+          >
+            Machine Learning Systems
+          </span>
         </a>
 
-        {/* Desktop nav */}
-        <div className="hidden lg:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16 }}>
+        {/* Desktop nav — appears at Bootstrap's lg breakpoint (992px) to match
+            the Quarto navbar (collapse-below: lg in navbar-common.yml). */}
+        <div className="hidden nav-lg:flex" style={{ alignItems: 'center', gap: 0, flex: 1, marginLeft: 16, minWidth: 0 }}>
           {/* Left menus */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {LEFT_MENUS.map(renderDropdown)}
@@ -319,7 +331,7 @@ export default function EcosystemBar() {
               onMouseEnter={() => setHoveredLink('support')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-heart" /> <span className="hidden xl:inline">Support</span>
+              <i className="bi bi-heart" /> <span className="hidden nav-xl:inline">Support</span>
             </a>
             <a
               href="https://github.com/harvard-edge/cs249r_book"
@@ -329,7 +341,7 @@ export default function EcosystemBar() {
               onMouseEnter={() => setHoveredLink('star')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-star" /> <span className="hidden xl:inline">Star</span>
+              <i className="bi bi-star" /> <span className="hidden nav-xl:inline">Star</span>
             </a>
             <a
               href="#subscribe"
@@ -337,7 +349,7 @@ export default function EcosystemBar() {
               onMouseEnter={() => setHoveredLink('subscribe')}
               onMouseLeave={() => setHoveredLink(null)}
             >
-              <i className="bi bi-envelope" /> <span className="hidden xl:inline">Subscribe</span>
+              <i className="bi bi-envelope" /> <span className="hidden nav-xl:inline">Subscribe</span>
             </a>
             {/* Dark mode toggle — matches Quarto navbar position */}
             <button
@@ -354,7 +366,7 @@ export default function EcosystemBar() {
         {/* Mobile hamburger */}
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="lg:hidden"
+          className="nav-lg:hidden"
           style={{ ...S.navLink, padding: 8 }}
           aria-label="Toggle navigation"
         >
@@ -369,7 +381,7 @@ export default function EcosystemBar() {
 
       {/* Mobile expanded */}
       {mobileOpen && (
-        <div className="lg:hidden" style={{ borderTop: `1px solid ${borderColor}`, backgroundColor: bgColor, padding: '12px 16px' }}>
+        <div className="nav-lg:hidden" style={{ borderTop: `1px solid ${borderColor}`, backgroundColor: bgColor, padding: '12px 16px' }}>
           {LEFT_MENUS.map((menu) => (
             <div key={menu.id} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: '#adb5bd', textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>

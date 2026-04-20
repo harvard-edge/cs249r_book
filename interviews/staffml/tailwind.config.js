@@ -7,6 +7,14 @@ module.exports = {
   ],
   theme: {
     extend: {
+      // Bootstrap-aligned breakpoints for the ecosystem navbar so
+      // StaffML's collapse points match the Quarto sites exactly.
+      // Defaults (sm/md/lg/xl/2xl) remain untouched for app layouts.
+      screens: {
+        'nav-sm': '576px',   // bs sm — brand title visible
+        'nav-lg': '992px',   // bs lg — desktop nav appears, hamburger hides
+        'nav-xl': '1200px',  // bs xl — right-side text labels appear
+      },
       colors: {
         background: "var(--background)",
         surface: "var(--surface)",
