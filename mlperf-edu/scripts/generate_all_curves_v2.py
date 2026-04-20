@@ -14,7 +14,8 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Device: {device}")
 
 # Load existing data
-data_path = "/Users/VJ/GitHub/mlperf-edu/paper/figures/training_data.json"
+FIGURES_DIR = os.path.join(os.path.dirname(__file__), '..', 'paper', 'figures')
+data_path = os.path.join(FIGURES_DIR, 'training_data.json')
 if os.path.exists(data_path):
     with open(data_path) as f:
         saved = json.load(f)
@@ -375,7 +376,8 @@ for idx, (ax, (name, div, key, core)) in enumerate(zip(axes.flat, workloads)):
     ax.tick_params(labelsize=6)
 
 plt.tight_layout(rect=[0, 0, 1, 0.97])
-out_path = "/Users/VJ/GitHub/mlperf-edu/paper/figures/all_training_curves.pdf"
+os.makedirs(FIGURES_DIR, exist_ok=True)
+out_path = os.path.join(FIGURES_DIR, 'all_training_curves.pdf')
 plt.savefig(out_path, dpi=300, bbox_inches='tight')
 plt.savefig(out_path.replace('.pdf', '.png'), dpi=200, bbox_inches='tight')
 print(f"\nFigure saved: {out_path}")

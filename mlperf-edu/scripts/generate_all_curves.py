@@ -492,8 +492,10 @@ if __name__ == "__main__":
     for k, v in results.items():
         if v is not None and v[0] is not None:
             save_data[k] = {"train": v[0], "val": v[1]}
-    with open("/Users/VJ/GitHub/mlperf-edu/paper/figures/training_data.json", 'w') as f:
+    figures_dir = os.path.join(os.path.dirname(__file__), '..', 'paper', 'figures')
+    os.makedirs(figures_dir, exist_ok=True)
+    with open(os.path.join(figures_dir, 'training_data.json'), 'w') as f:
         json.dump(save_data, f, indent=2)
     
     # Generate figure
-    plot_all_curves(results, "/Users/VJ/GitHub/mlperf-edu/paper/figures/all_training_curves.pdf")
+    plot_all_curves(results, os.path.join(figures_dir, 'all_training_curves.pdf'))
