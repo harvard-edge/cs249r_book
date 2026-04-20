@@ -98,6 +98,50 @@ def _sanitize_href_url(match):
 _HREF_ATTR = re.compile(r'href="([^"]+)"')
 
 
+# Match an opening tag that carries an alt="..." attribute.
+# Groups: 1=tag name, 2=attrs-before-alt, 3=alt value, 4=attrs-after-alt.
+# The regex intentionally matches the whole `<tag ...>` so we can rewrite it
+# atomically and avoid the edge case where a textual `alt="..."` appears
+# inside a text node (which would never be preceded by `<tag`).
+_ALT_ON_TAG = re.compile(
+    r'<(\w+)\b([^>]*?)\balt="([^"]*)"([^>]*)>',
+    flags=re.DOTALL,
+)
+
+# Elements where `alt` is actually a legal HTML attribute. Every other
+# element that Quarto emits `alt="..."` onto (notably the `<div>` wrapper
+# of a `quarto-figure`) produces RSC-005 under strict XHTML.
+_ALT_LEGAL_TAGS = frozenset({'img', 'area', 'input'})
+
+
+def _rewrite_alt_on_wrapper(match):
+    """Rewrite alt="..." on a non-img element to aria-label="...".
+
+    Quarto emits `fig-alt` onto the enclosing `<div class="quarto-figure">`
+    in addition to the inner `<img>` (the inner `<img>` carries alt=""
+    because the wrapper already has it). Epubcheck rejects `alt` on
+    non-image elements. aria-label is valid on any element and preserves
+    the accessibility data for screen readers.
+
+    If the tag already has an aria-label, we strip the alt rather than
+    duplicate the attribute.
+    """
+    tag = match.group(1).lower()
+    if tag in _ALT_LEGAL_TAGS:
+        return match.group(0)
+
+    pre = match.group(2)
+    value = match.group(3)
+    post = match.group(4)
+
+    # If aria-label already present, strip alt rather than duplicate.
+    if 'aria-label=' in pre or 'aria-label=' in post:
+        return f'<{match.group(1)}{pre}{post}>'
+
+    # Otherwise rewrite alt -> aria-label, preserving attribute position.
+    return f'<{match.group(1)}{pre} aria-label="{value}"{post}>'
+
+
 def sanitize_xml_for_epubcheck(temp_dir):
     """Run post-render passes that make the EPUB strict-XML-clean.
 
@@ -114,12 +158,18 @@ def sanitize_xml_for_epubcheck(temp_dir):
         'bare_br': 0,          # <br> not self-closed       (RSC-016 FATAL)
         'svg_aria_c0': 0,      # C0 chars in aria-label     (RSC-016 FATAL)
         'href_rewritten': 0,   # href URLs needing sanitization (RSC-020)
+        'alt_on_wrapper': 0,   # alt="..." on non-img element  (RSC-005)
     }
 
     def sanitize_xhtml(text):
         """Apply all XHTML-level passes. Returns (new_text, deltas_dict)."""
         out = text
-        deltas = {'comment_dashes': 0, 'bare_br': 0, 'href_rewritten': 0}
+        deltas = {
+            'comment_dashes': 0,
+            'bare_br': 0,
+            'href_rewritten': 0,
+            'alt_on_wrapper': 0,
+        }
 
         new_out, _ = _HTML_COMMENT.subn(_sanitize_comment_body, out)
         if new_out != out:
@@ -148,6 +198,21 @@ def sanitize_xml_for_epubcheck(temp_dir):
         new_out = _HREF_ATTR.sub(count_rewrite, out)
         if rewrites:
             deltas['href_rewritten'] = rewrites
+            out = new_out
+
+        # Rename/strip alt="..." on wrapper elements (non-img).
+        alt_rewrites = 0
+
+        def count_alt_rewrite(m):
+            nonlocal alt_rewrites
+            replacement = _rewrite_alt_on_wrapper(m)
+            if replacement != m.group(0):
+                alt_rewrites += 1
+            return replacement
+
+        new_out = _ALT_ON_TAG.sub(count_alt_rewrite, out)
+        if alt_rewrites:
+            deltas['alt_on_wrapper'] = alt_rewrites
             out = new_out
 
         return out, deltas
@@ -191,6 +256,7 @@ def sanitize_xml_for_epubcheck(temp_dir):
     print(f"      ✅ Bare <br> → <br/>:             {counts['bare_br']}")
     print(f"      ✅ SVG aria-label C0 chars:       {counts['svg_aria_c0']}")
     print(f"      ✅ href URLs normalized:          {counts['href_rewritten']}")
+    print(f"      ✅ alt→aria-label on wrappers:    {counts['alt_on_wrapper']}")
 
     return counts
 
