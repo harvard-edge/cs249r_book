@@ -58,7 +58,7 @@ Later files override earlier files.
 
 There are currently **8 top-level book configs** (`_quarto-{html,pdf,pdf-copyedit,epub}-{vol1,vol2}.yml`),
 totalling ~1,500 lines. Each one already pulls many fragments from
-`shared/`, but each also re-declares a fair amount of per-format and
+`shared/`, but each also redeclares a fair amount of per-format and
 per-volume metadata.
 
 A future refactor could compress this further using YAML anchors or
