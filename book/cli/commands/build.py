@@ -65,7 +65,8 @@ class BuildCommand:
             console.print("[dim]ⓘ Hygiene preflight unavailable in this checkout; skipping.[/dim]")
             return True
 
-        repo_root = self.config_manager.book_dir.parent
+        # book_dir is `book/quarto/`; repo root is two levels up.
+        repo_root = self.config_manager.book_dir.parent.parent
         issues, files_checked = find_hygiene_issues(repo_root)
 
         if not issues:

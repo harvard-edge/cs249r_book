@@ -79,6 +79,11 @@ class DoctorCommand:
             self._check_permissions()
             progress.update(task, completed=True)
 
+            # EPUB tooling + source hygiene
+            task = progress.add_task("Checking EPUB tooling and source hygiene...", total=None)
+            self._check_epub_health()
+            progress.update(task, completed=True)
+
         # Display results
         self._display_results()
 
@@ -255,6 +260,171 @@ class DoctorCommand:
                 "passed": True,
                 "message": "✅ All core chapters present",
                 "details": None
+            })
+
+    def _check_epub_health(self) -> None:
+        """Check EPUB tooling availability and source hygiene.
+
+        Emits four checks under the "EPUB" category:
+
+          1. Java runtime (JRE 8+) — required by epubcheck.
+          2. epubcheck (Python wrapper or system binary) — the W3C
+             validator used by the `epubcheck` scope.
+          3. Built EPUB artifacts — whether there is something for
+             `./binder check epub --scope epubcheck` to validate.
+          4. Source hygiene — runs the hygiene scope in-process; any
+             issue here is a ship-stopper for the next EPUB build.
+        """
+        import shutil
+        import subprocess
+
+        # --- 1. Java runtime --------------------------------------------
+        java = shutil.which("java")
+        if java:
+            try:
+                # java -version writes to stderr in every JDK distribution.
+                out = subprocess.run(
+                    [java, "-version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                version_line = (out.stderr or out.stdout).strip().splitlines()[0] if (out.stderr or out.stdout) else "unknown"
+                self.checks.append({
+                    "category": "EPUB",
+                    "name": "Java runtime",
+                    "passed": True,
+                    "message": f"✅ {version_line}",
+                    "details": None,
+                })
+            except Exception as e:
+                self.checks.append({
+                    "category": "EPUB",
+                    "name": "Java runtime",
+                    "passed": False,
+                    "message": "⚠️ `java` found but reported an error",
+                    "details": str(e),
+                })
+        else:
+            self.checks.append({
+                "category": "EPUB",
+                "name": "Java runtime",
+                "passed": False,
+                "message": "⚠️ `java` not on PATH",
+                "details": (
+                    "Required for epubcheck. Install with "
+                    "`brew install temurin` (macOS), "
+                    "`apt install default-jre` (Debian/Ubuntu), "
+                    "or `dnf install java-17-openjdk` (Fedora)."
+                ),
+            })
+
+        # --- 2. epubcheck ------------------------------------------------
+        epubcheck_cli = shutil.which("epubcheck")
+        epubcheck_py = False
+        try:
+            import epubcheck  # noqa: F401
+            epubcheck_py = True
+        except ImportError:
+            pass
+
+        if epubcheck_cli or epubcheck_py:
+            modes = []
+            if epubcheck_cli:
+                modes.append("system binary")
+            if epubcheck_py:
+                modes.append("Python wrapper")
+            self.checks.append({
+                "category": "EPUB",
+                "name": "epubcheck",
+                "passed": True,
+                "message": f"✅ Available via {' + '.join(modes)}",
+                "details": None,
+            })
+        else:
+            self.checks.append({
+                "category": "EPUB",
+                "name": "epubcheck",
+                "passed": False,
+                "message": "⚠️ epubcheck not found",
+                "details": (
+                    "Install with `pip install epubcheck` (Python wrapper, "
+                    "requires JRE 8+) or via your OS package manager "
+                    "(`brew install epubcheck` / `apt install epubcheck`)."
+                ),
+            })
+
+        # --- 3. Built EPUB artifacts ------------------------------------
+        try:
+            from cli.commands._epub_checks import _discover_built_epubs
+        except ImportError:
+            _discover_built_epubs = None
+
+        # book_dir is `book/quarto/`; repo root is two levels up.
+        repo_root = self.config_manager.book_dir.parent.parent
+        if _discover_built_epubs is not None:
+            epubs = _discover_built_epubs(repo_root)
+            if epubs:
+                names = ", ".join(p.name for p in epubs)
+                self.checks.append({
+                    "category": "EPUB",
+                    "name": "Built artifacts",
+                    "passed": True,
+                    "message": f"✅ {len(epubs)} EPUB(s) under _build/epub-vol*/",
+                    "details": names,
+                })
+            else:
+                self.checks.append({
+                    "category": "EPUB",
+                    "name": "Built artifacts",
+                    "passed": True,  # not a failure — just informational
+                    "message": "📁 No built EPUBs yet — run `./binder build epub --vol1`",
+                    "details": None,
+                })
+        else:
+            self.checks.append({
+                "category": "EPUB",
+                "name": "Built artifacts",
+                "passed": True,
+                "message": "ⓘ _epub_checks module unavailable (older checkout)",
+                "details": None,
+            })
+
+        # --- 4. Source hygiene ------------------------------------------
+        try:
+            from cli.commands._epub_checks import find_hygiene_issues
+        except ImportError:
+            self.checks.append({
+                "category": "EPUB",
+                "name": "Source hygiene",
+                "passed": True,
+                "message": "ⓘ hygiene check unavailable (older checkout)",
+                "details": None,
+            })
+            return
+
+        issues, files_checked = find_hygiene_issues(repo_root)
+        if not issues:
+            self.checks.append({
+                "category": "EPUB",
+                "name": "Source hygiene",
+                "passed": True,
+                "message": f"✅ clean ({files_checked} SVG/BibTeX files)",
+                "details": None,
+            })
+        else:
+            # Group by code for a compact summary.
+            by_code: Dict[str, int] = {}
+            for i in issues:
+                by_code[i.code] = by_code.get(i.code, 0) + 1
+            summary = ", ".join(f"{code}:{n}" for code, n in sorted(by_code.items()))
+            self.checks.append({
+                "category": "EPUB",
+                "name": "Source hygiene",
+                "passed": False,
+                "message": f"❌ {len(issues)} issue(s) across {files_checked} files",
+                "details": (
+                    f"{summary}. Fix with "
+                    "`./binder check epub --scope hygiene --fix`."
+                ),
             })
 
     def _check_build_artifacts(self) -> None:
