@@ -359,7 +359,7 @@ jobs:
   # blocking feature work. Tighten this by setting MAX_ERRORS=0 once
   # the baseline is clean in both volumes.
   epub-validate:
-    name: '📘 EPUB validate (epubcheck)'
+    name: '📘 EPUB validate (epubcheck via binder)'
     needs: [collect-results]
     if: |
       always() &&
@@ -368,100 +368,79 @@ jobs:
       needs.collect-results.outputs.linux_epub_vol2_artifact != ''
     runs-on: ubuntu-latest
     env:
-      EPUBCHECK_VERSION: '5.3.0'
       MAX_FATAL: '0'
-      # Grandfathered threshold: tighten to 0 after RSC-005 cleanup lands.
-      # A higher number here means "ERRORs allowed up to this count before
-      # the job fails". Set to a very large value to make ERROR non-blocking.
-      MAX_ERRORS: '9999'
+      # Leave MAX_ERRORS blank to treat ERRORs as report-only. Set to
+      # "0" here once the RSC-005 / RSC-012 baselines are clean to
+      # block any ERROR from merging.
+      MAX_ERRORS: ''
     steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: 📥 Download vol1 EPUB artifact
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.collect-results.outputs.linux_epub_vol1_artifact }}
-          path: artifacts/vol1
+          # Materialize into the canonical location the binder CLI
+          # discovers (_discover_built_epubs walks
+          # book/quarto/_build/epub-vol*/).
+          path: book/quarto/_build/epub-vol1
 
       - name: 📥 Download vol2 EPUB artifact
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.collect-results.outputs.linux_epub_vol2_artifact }}
-          path: artifacts/vol2
+          path: book/quarto/_build/epub-vol2
 
-      - name: ☕ Set up Java (for epubcheck)
+      - name: ☕ Set up Java (for the epubcheck jar)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: ⬇️ Install epubcheck
+      - name: ⬇️ Install book Python dependencies
+        # Installs the `epubcheck` PyPI wrapper (declared in
+        # book/tools/dependencies/requirements.txt) alongside rich,
+        # pyyaml, and the rest of the binder runtime. The wrapper
+        # bundles the epubcheck jar and exposes it on PATH.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r book/tools/dependencies/requirements.txt
+
+      - name: 📘 Run `binder check epub --scope epubcheck`
+        # Both source-level hygiene and post-build epubcheck validation
+        # live inside the binder CLI. This step invokes the same
+        # command a developer runs locally, so CI and local behaviour
+        # stay in lockstep.
+        env:
+          MAX_FATAL: ${{ env.MAX_FATAL }}
+          MAX_ERRORS: ${{ env.MAX_ERRORS }}
         run: |
           set -euo pipefail
-          cd /tmp
-          curl -sSL -o epubcheck.zip \
-            "https://github.com/w3c/epubcheck/releases/download/v${EPUBCHECK_VERSION}/epubcheck-${EPUBCHECK_VERSION}.zip"
-          unzip -q epubcheck.zip
-          echo "EPUBCHECK_JAR=/tmp/epubcheck-${EPUBCHECK_VERSION}/epubcheck.jar" >> "$GITHUB_ENV"
-
-      - name: 📘 Run epubcheck and enforce thresholds
-        run: |
-          set -euo pipefail
-
-          # Find each volume's EPUB artifact. The build job writes
-          # Machine-Learning-Systems-VolN.epub inside the artifact.
-          VOL1_EPUB=$(find artifacts/vol1 -name '*.epub' -type f | head -1)
-          VOL2_EPUB=$(find artifacts/vol2 -name '*.epub' -type f | head -1)
-
-          if [[ -z "$VOL1_EPUB" || -z "$VOL2_EPUB" ]]; then
-            echo "::error::Could not locate built EPUB artifacts"
-            echo "Vol1 search: $(ls -la artifacts/vol1 || true)"
-            echo "Vol2 search: $(ls -la artifacts/vol2 || true)"
-            exit 1
+          cd book
+          args=(check epub --scope epubcheck --max-fatal "${MAX_FATAL}")
+          if [[ -n "${MAX_ERRORS}" ]]; then
+            args+=(--max-errors "${MAX_ERRORS}")
           fi
+          # JSON pass: machine-readable artifact (uploaded below).
+          # GITHUB_ACTIONS=true is set automatically, so _epub_checks
+          # emits `::error` annotations inline on the PR diff.
+          ./binder "${args[@]}" --json > epubcheck-report.json || true
+          # Human pass: exit code gates the CI job via --max-fatal
+          # (and --max-errors when MAX_ERRORS is set).
+          ./binder "${args[@]}"
 
-          echo "Validating: $VOL1_EPUB"
-          echo "Validating: $VOL2_EPUB"
-
-          # Run epubcheck on each volume and capture both the log and
-          # a summary of error codes. Exit codes from epubcheck:
-          #   0 = no errors
-          #   1 = warnings only
-          #   2 = errors present (includes FATAL)
-          # We always continue past epubcheck's exit code and gate on
-          # our own FATAL / ERROR thresholds below.
-          java -jar "$EPUBCHECK_JAR" "$VOL1_EPUB" 2>vol1-epubcheck.log || true
-          java -jar "$EPUBCHECK_JAR" "$VOL2_EPUB" 2>vol2-epubcheck.log || true
-
-          FAIL=0
-          for vol in vol1 vol2; do
-            LOG="${vol}-epubcheck.log"
-            FATAL_COUNT=$(grep -c '^FATAL' "$LOG" || true)
-            ERROR_COUNT=$(grep -c '^ERROR' "$LOG" || true)
-            echo ""
-            echo "=== $vol ==="
-            echo "FATAL: $FATAL_COUNT (threshold: $MAX_FATAL)"
-            echo "ERROR: $ERROR_COUNT (threshold: $MAX_ERRORS)"
-            grep -oE '(FATAL|ERROR)\([A-Z]+-[0-9]+\)' "$LOG" | sort | uniq -c | sort -rn || true
-
-            if (( FATAL_COUNT > MAX_FATAL )); then
-              echo "::error title=$vol EPUB has FATAL errors::FATAL count $FATAL_COUNT exceeds threshold $MAX_FATAL"
-              FAIL=1
-            fi
-            if (( ERROR_COUNT > MAX_ERRORS )); then
-              echo "::error title=$vol EPUB exceeds ERROR threshold::ERROR count $ERROR_COUNT exceeds threshold $MAX_ERRORS"
-              FAIL=1
-            fi
-          done
-
-          exit "$FAIL"
-
-      - name: 📤 Upload epubcheck logs
+      - name: 📤 Upload epubcheck report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: epubcheck-logs
-          path: |
-            vol1-epubcheck.log
-            vol2-epubcheck.log
+          name: epubcheck-report
+          path: book/epubcheck-report.json
           retention-days: 14
 
   # Step 4b: Link integrity (Tier 2 — non-blocking baseline)

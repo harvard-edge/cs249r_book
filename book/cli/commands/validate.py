@@ -199,7 +199,20 @@ class ValidateCommand:
             ("tikz", "_run_spelling_tikz"),
         ],
         "epub": [
-            ("structure", "_run_epub"),
+            # Fast source-level invariants. No EPUB build required. Suitable
+            # for pre-commit — runs in <1s across all SVGs + .bib files.
+            ("hygiene", "_run_epub_hygiene"),
+            # Full W3C epubcheck validation of built EPUB artifacts under
+            # _build/epub-vol*/. Requires epubcheck + JRE. Slow (~30s per
+            # volume) — appropriate for CI, not pre-commit.
+            ("epubcheck", "_run_epubcheck"),
+            # Note: the legacy `structure` scope (validate_epub.py) has
+            # been retired from the default run. epubcheck supersedes its
+            # coverage and this module's `hygiene` check catches the
+            # source-level cases it was written for. The script itself
+            # remains at book/tools/scripts/utilities/validate_epub.py
+            # and can still be invoked directly if someone needs a
+            # no-Java smoke check.
         ],
         "sources": [
             ("citations", "_run_sources"),
@@ -256,6 +269,19 @@ class ValidateCommand:
         parser.add_argument("--refs-cache", dest="refs_cache", metavar="FILE", help="references: cache file (default: .references_verified.json in repo root)")
         parser.add_argument("--only-from-report", dest="refs_only_from_report", metavar="FILE", help="references: validate only keys that had issues in this report file")
         parser.add_argument("--only-keys", dest="refs_only_keys_file", metavar="FILE", help="references: validate only keys listed in FILE (one key per line)")
+        # epub --scope epubcheck: thresholds for FATAL and ERROR counts.
+        # Defaults: MAX_FATAL=0 (any FATAL fails the check — Kindle /
+        # ClearView reject), MAX_ERRORS=unlimited (grandfathered while the
+        # RSC-005/RSC-012 baselines stabilize). Tighten with --max-errors 0
+        # once the baseline is clean.
+        parser.add_argument(
+            "--max-fatal", type=int, default=0,
+            help="epub --scope epubcheck: max FATAL issues allowed before failure (default: 0)",
+        )
+        parser.add_argument(
+            "--max-errors", type=int, default=None,
+            help="epub --scope epubcheck: max ERROR issues allowed before failure (default: unlimited)",
+        )
 
         try:
             ns = parser.parse_args(args)
@@ -333,6 +359,14 @@ class ValidateCommand:
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
+            elif method_name == "_run_epubcheck":
+                # Thresholds come from --max-fatal / --max-errors; when not
+                # supplied on the CLI we keep max_errors=None (unlimited).
+                results.append(method(
+                    root,
+                    max_fatal=ns.max_fatal,
+                    max_errors=ns.max_errors,
+                ))
             else:
                 results.append(method(root))
         return results
@@ -355,7 +389,7 @@ class ValidateCommand:
             "json": "JSON file syntax validation",
             "units": "Physics engine unit conversion tests",
             "spelling": "Prose and TikZ spell checking (requires aspell)",
-            "epub": "EPUB file validation",
+            "epub": "EPUB hygiene (source), epubcheck (built), structure (legacy)",
             "sources": "Source citation analysis and validation",
             "references": "Bibliography vs academic DBs (hallucinator)",
             "content": "Content tree (shared/, frontmatter/ required)",
@@ -3271,7 +3305,167 @@ class ValidateCommand:
         return self._delegate_script(script, [], "spelling-tikz")
 
     # ------------------------------------------------------------------
-    # EPUB validation  (delegated to validate_epub.py)
+    # EPUB validation
+    #
+    # Three scopes share this section, each targeting a different layer of
+    # the EPUB build pipeline. See book/cli/commands/_epub_checks.py for
+    # the per-check logic and the rationale for the layering.
+    #
+    #   hygiene   — source-level invariants (pre-build, fast, pre-commit)
+    #   epubcheck — W3C validator on built artifacts (post-build, CI)
+    #   structure — legacy custom checks on built EPUB (no Java required)
+    # ------------------------------------------------------------------
+
+    def _run_epub_hygiene(self, root: Path) -> ValidationRunResult:
+        """Run the pre-commit-grade EPUB source hygiene checks.
+
+        Walks `book/quarto/contents/**/*.svg` and `book/quarto/**/*.bib`
+        looking for the four source-level patterns that produced FATAL
+        or ERROR-level epubcheck failures in April 2026:
+
+          1. C0 control chars inside SVG aria-label attributes
+          2. Duplicate `<marker id="X"/>` defs inside one SVG
+          3. BibTeX `\\_` or `\\%` escapes inside url= / http doi= fields
+          4. Raw `<` or `>` inside those same URL fields
+
+        Runs in <1s and is safe to invoke from pre-commit on every push.
+        """
+        from cli.commands._epub_checks import find_hygiene_issues
+
+        t0 = time.time()
+        # Walk from repo root so the check sees both volumes.
+        repo_root = Path(__file__).resolve().parents[3]
+        epub_issues, files_checked = find_hygiene_issues(repo_root)
+
+        issues = [
+            ValidationIssue(
+                file=e.file,
+                line=e.line,
+                code=e.code,
+                message=e.message,
+                severity="error",  # hygiene issues are always blocking
+            )
+            for e in epub_issues
+        ]
+        return ValidationRunResult(
+            name="epub-hygiene",
+            description="EPUB source hygiene (SVG + BibTeX invariants)",
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_epubcheck(
+        self,
+        root: Path,
+        *,
+        max_fatal: int = 0,
+        max_errors: Optional[int] = None,
+    ) -> ValidationRunResult:
+        """Run the W3C `epubcheck` validator against the built EPUBs.
+
+        Discovers every `book/quarto/_build/epub-vol*/*.epub` (most recent
+        per volume), invokes `epubcheck --json -` on each, parses the
+        JSON message array, and converts each message to a
+        `ValidationIssue`. Also emits GitHub Actions `::error` annotations
+        when running under CI so the findings appear inline on PR diffs.
+
+        Threshold semantics
+        -------------------
+        Any FATAL above *max_fatal* marks the run as failed. Any ERROR
+        above *max_errors* (when supplied) marks the run as failed.
+        ERRORs below the threshold are still reported in the issue list
+        so reviewers see them; they just do not fail the build. The
+        default `max_errors=None` treats ERRORs as report-only, which
+        matches the current grandfathered CI policy.
+        """
+        from cli.commands._epub_checks import (
+            _discover_built_epubs,
+            emit_github_annotations,
+            run_epubcheck_on,
+        )
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        epubs = _discover_built_epubs(repo_root)
+
+        if not epubs:
+            # Not a failure by itself; mirror the existing _run_epub
+            # behaviour when no EPUB has been built yet.
+            return ValidationRunResult(
+                name="epubcheck",
+                description="epubcheck (no built EPUBs found under _build/epub-vol*/)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        all_issues: List[ValidationIssue] = []
+        total_fatal = 0
+        total_errors = 0
+
+        for epub in epubs:
+            epub_issues, counts = run_epubcheck_on(epub, repo_root=repo_root)
+            emit_github_annotations(epub_issues)
+            total_fatal += counts.get("FATAL", 0)
+            total_errors += counts.get("ERROR", 0)
+
+            for e in epub_issues:
+                all_issues.append(ValidationIssue(
+                    file=e.file,
+                    line=e.line,
+                    code=e.code,
+                    message=e.message,
+                    # Map FATAL to "error" for ValidationIssue (which only
+                    # has error/warning/info). The code field and message
+                    # preserve the FATAL distinction for the summary line
+                    # below so the user sees FATAL vs ERROR counts.
+                    severity="error" if e.severity in ("fatal", "error") else e.severity,
+                ))
+
+        # Threshold enforcement: if thresholds are exceeded, add a synthetic
+        # top-level issue describing the violation. This way the normal
+        # "any issues" failure check surfaces the threshold failure too.
+        if total_fatal > max_fatal:
+            all_issues.append(ValidationIssue(
+                file="(epubcheck)",
+                line=0,
+                code="EPUBCHECK-FATAL-THRESHOLD",
+                message=(
+                    f"FATAL count {total_fatal} exceeds threshold "
+                    f"{max_fatal} — Kindle / ClearView will reject this EPUB."
+                ),
+                severity="error",
+            ))
+        if max_errors is not None and total_errors > max_errors:
+            all_issues.append(ValidationIssue(
+                file="(epubcheck)",
+                line=0,
+                code="EPUBCHECK-ERROR-THRESHOLD",
+                message=(
+                    f"ERROR count {total_errors} exceeds threshold "
+                    f"{max_errors}. Tighten or fix the underlying RSC-* issues."
+                ),
+                severity="error",
+            ))
+
+        # Build the description so the user sees the severity summary even
+        # when all issues are warnings/info.
+        desc = (
+            f"epubcheck ({len(epubs)} EPUB(s); "
+            f"{total_fatal} FATAL, {total_errors} ERROR)"
+        )
+
+        return ValidationRunResult(
+            name="epubcheck",
+            description=desc,
+            files_checked=len(epubs),
+            issues=all_issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # EPUB structure (legacy custom check — no Java required)
     # ------------------------------------------------------------------
 
     def _run_epub(self, root: Path) -> ValidationRunResult:
