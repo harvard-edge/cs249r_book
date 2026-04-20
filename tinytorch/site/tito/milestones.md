@@ -325,7 +325,7 @@ Unlock by completing module: 09
 
 TinyTorch tracks progress in three ways (all are related but distinct):
 
-<div style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1rem 0;">
+<div class="milestones-tracking-box" style="background: #f8f9fa; padding: 1.5rem; border-radius: 0.5rem; margin: 1rem 0;">
 
 **1. Module Completion** (`tito module status`)
 - Which modules (01-20) you've implemented
