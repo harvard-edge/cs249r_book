@@ -392,7 +392,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md) for details.
 
 - **[DATASHEET.md](DATASHEET.md)** - Comprehensive dataset metadata (Gebru et al. format)
 - **[examples/demo_usage.py](examples/demo_usage.py)** - Complete usage examples
-- **[scripts/README.md](scripts/README.md)** - Scripts documentation
+- **[scripts/](scripts/)** - Generation, validation, and statistics scripts
 
 ---
 

@@ -133,10 +133,10 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 텍스트북](https://mlsysbook.ai) | ML 시스템 개념 이해 | [book/](book/README.md) |
+| **READ** | [📖 텍스트북](https://mlsysbook.ai) | ML 시스템 개념 이해 | [book/](../book/README.md) |
 | **EXPLORE** | 🔮 Software Co‑Labs | 레이턴시·메모리·에너지·비용 실험 | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 프레임워크 구현을 직접 경험 | [tinytorch/](tinytorch/README.md) |
-| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | 메모리·전력·시간·안전 제약 하드웨어 엔지니어링 | [kits/](kits/README.md) |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 프레임워크 구현을 직접 경험 | [tinytorch/](../tinytorch/README.md) |
+| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | 메모리·전력·시간·안전 제약 하드웨어 엔지니어링 | [kits/](../kits/README.md) |
 | **PROVE** | 🏆 AI Olympics | 모든 트랙에서 경쟁·벤치마크 | *Coming 2026* |
 
 **각 경로가 가르치는 내용:**
@@ -255,9 +255,9 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | I want to… | Go here |
 |--------------|---------|
-| 오타 수정·챕터 개선 | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
-| TinyTorch 모듈 추가·버그 수정 | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
-| 하드웨어 실험 개선 | [kits/README.md](kits/README.md) |
+| 오타 수정·챕터 개선 | [book/docs/CONTRIBUTING.md](../book/docs/CONTRIBUTING.md) |
+| TinyTorch 모듈 추가·버그 수정 | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
+| 하드웨어 실험 개선 | [kits/README.md](../kits/README.md) |
 | 이슈 보고 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
 | 질문하기 | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
 
@@ -284,8 +284,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | Component | License | What It Means |
 |-----------|---------|---------------|
-| **Book content** | [CC BY‑NC‑ND 4.0](LICENSE.md) | 출처 표시·비상업·변경 금지 조건으로 자유 배포 |
-| **TinyTorch code** | [Apache 2.0](tinytorch/LICENSE) | 자유 사용·수정·배포·특허 보호 포함 |
+| **Book content** | [CC BY‑NC‑ND 4.0](../LICENSE.md) | 출처 표시·비상업·변경 금지 조건으로 자유 배포 |
+| **TinyTorch code** | [Apache 2.0](../tinytorch/LICENSE) | 자유 사용·수정·배포·특허 보호 포함 |
 
 텍스트북 내용(챕터·그림·설명)은 교육 자료이며, 출처 표시와 비상업적 사용을 전제로 자유롭게 공유됩니다. 소프트웨어 프레임워크는 누구나 사용·수정·통합할 수 있도록 설계된 도구입니다.
 

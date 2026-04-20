@@ -14,7 +14,7 @@ From the **repository root**:
 
 If your shell is already in **`book/`**, use `./binder` instead of `./book/binder`.
 
-Full command list, validation options, and setup: **[`book/docs/BINDER.md`](../docs/BINDER.md)**.
+Full command list, validation options, and setup: **[`book/docs/BINDER.md`](../../docs/BINDER.md)**.
 
 Direct `python3 book/tools/scripts/...` use is for maintenance or cases not wired into Binder yet. Prefer `./book/binder` when a subcommand exists.
 
