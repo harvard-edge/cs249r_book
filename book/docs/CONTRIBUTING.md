@@ -58,7 +58,21 @@ git remote add upstream https://github.com/harvard-edge/cs249r_book.git
 
 The upstream remote is read-only. You will push to your fork and open a Pull Request to merge upstream.
 
-### 3. Create a Branch
+### 3. Set Up the Development Environment
+
+Run the one-time setup command:
+
+```bash
+./book/binder setup
+```
+
+This installs the pre-commit hooks declared in `.pre-commit-config.yaml` (EPUB source hygiene, vault corpus-guard, BibTeX validation, figure-div syntax, and ~60 other checks) and runs `./binder doctor` to report the state of your tooling (Python, Quarto, Java, epubcheck, and so on).
+
+Without this step, the config file ships with the repo but the framework is never actually invoked on your commits — so bugs that the hooks would have blocked can slip through to CI and waste the maintainers' review time. Run it once per fresh clone.
+
+If setup reports `pre-commit` is missing, install it with `pip install pre-commit` (or activate the project's virtualenv that includes it) and re-run.
+
+### 4. Create a Branch
 
 Always branch from `dev`, not `main`. Use descriptive branch names with the issue number:
 
@@ -70,7 +84,7 @@ git checkout -b iss14-fix-typo-in-introduction
 
 Examples: `iss5-add-new-example`, `iss42-fix-figure-caption`, `iss100-improve-training-section`.
 
-### 4. Make Your Changes
+### 5. Make Your Changes
 
 Please make sure that your changes are consistent with the style of the existing content.
 
@@ -78,7 +92,7 @@ Please make sure that your changes are consistent with the style of the existing
 - **Images** go in the chapter's `images/png/` (raster) or `images/svg/` (vector) subdirectory.
 - **Editorial standards**: For prose contributions, please review the style conventions in the repository. We follow an academic textbook register (active voice, quantitative claims, no blog-post informality).
 
-### 5. Commit Your Changes
+### 6. Commit Your Changes
 
 Stage files explicitly (do not use `git add .`):
 
@@ -88,7 +102,7 @@ git add book/quarto/contents/vol1/introduction/images/svg/new-figure.svg
 git commit -m "Fix caption formatting in introduction chapter (issue #14)"
 ```
 
-### 6. Render the Book
+### 7. Render the Book
 
 Please render the book to verify your contribution does not raise errors or warnings:
 
@@ -98,7 +112,7 @@ quarto render --profile vol1-html
 quarto render --profile vol2-html
 ```
 
-### 7. Push and Open a Pull Request
+### 8. Push and Open a Pull Request
 
 ```bash
 git push origin your-branch-name
