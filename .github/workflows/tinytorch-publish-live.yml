@@ -189,6 +189,77 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
+      - name: 🛡️ No-downgrade guard
+        if: github.event.inputs.site_only != 'true'
+        run: |
+          # ----------------------------------------------------------------
+          # No-downgrade guard.
+          #
+          # The version-bump step computes NEW_VERSION from the latest git
+          # tag (`tinytorch-v*`). That works perfectly when the source files
+          # are kept in lockstep with the tags. It silently DOWNGRADES the
+          # source if someone manually pre-bumps `pyproject.toml` and then
+          # forgets to also tag.
+          #
+          # Concrete failure mode this guard prevents:
+          #   - latest tag:        tinytorch-v0.1.9
+          #   - pyproject.toml:    0.10.0   (manually pre-bumped for a non-
+          #                                  incremental jump)
+          #   - workflow dispatch: release_type=patch (the default!)
+          #   - workflow computes: 0.1.10
+          #   - sed step rewrites: pyproject.toml = 0.1.10
+          #   → silent downgrade from 0.10.0 to 0.1.10, no error.
+          #
+          # The guard refuses to proceed if the planned NEW_VERSION is not
+          # strictly greater (semver-wise) than the version already in the
+          # source-of-truth file. The fix when this trips:
+          #   1. If you intended the higher version, re-run with
+          #      explicit_version=<higher>. The override path is exempt
+          #      from the source-comparison only if it equals the source
+          #      (no-op write) or exceeds it (forward bump).
+          #   2. If you intended a lower version (rare, e.g. backing out
+          #      a botched bump), edit pyproject.toml manually first so
+          #      source and intent agree.
+          # ----------------------------------------------------------------
+
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          NEW_BARE="${NEW_VERSION#tinytorch-v}"
+          SRC_BARE=$(grep -E '^version *= *"' tinytorch/pyproject.toml \
+                     | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+
+          echo "📂 source-of-truth (pyproject.toml): $SRC_BARE"
+          echo "🎯 planned new version:              $NEW_BARE"
+
+          if [ -z "$SRC_BARE" ]; then
+            echo "❌ Could not read version from tinytorch/pyproject.toml — refusing to proceed."
+            exit 1
+          fi
+
+          if [ "$NEW_BARE" = "$SRC_BARE" ]; then
+            echo "✅ planned version equals source — no-op write, allowed."
+            exit 0
+          fi
+
+          # sort -V puts the higher semver last
+          HIGHEST=$(printf '%s\n%s\n' "$NEW_BARE" "$SRC_BARE" | sort -V | tail -n1)
+          if [ "$HIGHEST" != "$NEW_BARE" ]; then
+            echo ""
+            echo "❌ DOWNGRADE BLOCKED"
+            echo "   pyproject.toml is at $SRC_BARE but this run would write $NEW_BARE."
+            echo "   sort -V says $SRC_BARE > $NEW_BARE."
+            echo ""
+            echo "   This usually means pyproject.toml was manually pre-bumped"
+            echo "   to $SRC_BARE without a matching tinytorch-v$SRC_BARE tag."
+            echo ""
+            echo "   To proceed, re-run this workflow with:"
+            echo "     explicit_version: $SRC_BARE          (publish current source as-is)"
+            echo "   or a higher value if you want to jump further. Or revert the"
+            echo "   manual pre-bump in pyproject.toml so source matches latest tag."
+            exit 1
+          fi
+
+          echo "✅ planned $NEW_BARE > source $SRC_BARE — forward bump, allowed."
+
   preflight:
     name: '✈️ Preflight Checks'
     needs: validate-inputs
