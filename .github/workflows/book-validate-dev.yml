@@ -345,6 +345,125 @@ jobs:
           echo "linux_epub_vol1_artifact=$LINUX_EPUB_VOL1" >> $GITHUB_OUTPUT
           echo "linux_epub_vol2_artifact=$LINUX_EPUB_VOL2" >> $GITHUB_OUTPUT
 
+  # Step 4a: Epubcheck validation (Tier 1 — blocks on FATAL)
+  # The pre-commit hook `book-epub-hygiene` catches source-level issues
+  # that historically caused EPUB rejection (SVG control chars, dupe
+  # marker ids, BibTeX URL escapes). Epubcheck is the full structural
+  # validator and catches the rest: OPF manifest shape, XHTML XML
+  # validity, cross-file references, URI syntax.
+  #
+  # Failure policy: FATAL > 0 fails the job (Kindle and ClearView
+  # reject any EPUB with FATAL, so this is a ship-stopper). ERROR > 0
+  # is reported as a warning but does NOT fail the job, to let
+  # remaining legacy errors be cleaned up incrementally without
+  # blocking feature work. Tighten this by setting MAX_ERRORS=0 once
+  # the baseline is clean in both volumes.
+  epub-validate:
+    name: '📘 EPUB validate (epubcheck)'
+    needs: [collect-results]
+    if: |
+      always() &&
+      needs.collect-results.outputs.linux_success == 'true' &&
+      needs.collect-results.outputs.linux_epub_vol1_artifact != '' &&
+      needs.collect-results.outputs.linux_epub_vol2_artifact != ''
+    runs-on: ubuntu-latest
+    env:
+      EPUBCHECK_VERSION: '5.3.0'
+      MAX_FATAL: '0'
+      # Grandfathered threshold: tighten to 0 after RSC-005 cleanup lands.
+      # A higher number here means "ERRORs allowed up to this count before
+      # the job fails". Set to a very large value to make ERROR non-blocking.
+      MAX_ERRORS: '9999'
+    steps:
+      - name: 📥 Download vol1 EPUB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol1_artifact }}
+          path: artifacts/vol1
+
+      - name: 📥 Download vol2 EPUB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol2_artifact }}
+          path: artifacts/vol2
+
+      - name: ☕ Set up Java (for epubcheck)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: ⬇️ Install epubcheck
+        run: |
+          set -euo pipefail
+          cd /tmp
+          curl -sSL -o epubcheck.zip \
+            "https://github.com/w3c/epubcheck/releases/download/v${EPUBCHECK_VERSION}/epubcheck-${EPUBCHECK_VERSION}.zip"
+          unzip -q epubcheck.zip
+          echo "EPUBCHECK_JAR=/tmp/epubcheck-${EPUBCHECK_VERSION}/epubcheck.jar" >> "$GITHUB_ENV"
+
+      - name: 📘 Run epubcheck and enforce thresholds
+        run: |
+          set -euo pipefail
+
+          # Find each volume's EPUB artifact. The build job writes
+          # Machine-Learning-Systems-VolN.epub inside the artifact.
+          VOL1_EPUB=$(find artifacts/vol1 -name '*.epub' -type f | head -1)
+          VOL2_EPUB=$(find artifacts/vol2 -name '*.epub' -type f | head -1)
+
+          if [[ -z "$VOL1_EPUB" || -z "$VOL2_EPUB" ]]; then
+            echo "::error::Could not locate built EPUB artifacts"
+            echo "Vol1 search: $(ls -la artifacts/vol1 || true)"
+            echo "Vol2 search: $(ls -la artifacts/vol2 || true)"
+            exit 1
+          fi
+
+          echo "Validating: $VOL1_EPUB"
+          echo "Validating: $VOL2_EPUB"
+
+          # Run epubcheck on each volume and capture both the log and
+          # a summary of error codes. Exit codes from epubcheck:
+          #   0 = no errors
+          #   1 = warnings only
+          #   2 = errors present (includes FATAL)
+          # We always continue past epubcheck's exit code and gate on
+          # our own FATAL / ERROR thresholds below.
+          java -jar "$EPUBCHECK_JAR" "$VOL1_EPUB" 2>vol1-epubcheck.log || true
+          java -jar "$EPUBCHECK_JAR" "$VOL2_EPUB" 2>vol2-epubcheck.log || true
+
+          FAIL=0
+          for vol in vol1 vol2; do
+            LOG="${vol}-epubcheck.log"
+            FATAL_COUNT=$(grep -c '^FATAL' "$LOG" || true)
+            ERROR_COUNT=$(grep -c '^ERROR' "$LOG" || true)
+            echo ""
+            echo "=== $vol ==="
+            echo "FATAL: $FATAL_COUNT (threshold: $MAX_FATAL)"
+            echo "ERROR: $ERROR_COUNT (threshold: $MAX_ERRORS)"
+            grep -oE '(FATAL|ERROR)\([A-Z]+-[0-9]+\)' "$LOG" | sort | uniq -c | sort -rn || true
+
+            if (( FATAL_COUNT > MAX_FATAL )); then
+              echo "::error title=$vol EPUB has FATAL errors::FATAL count $FATAL_COUNT exceeds threshold $MAX_FATAL"
+              FAIL=1
+            fi
+            if (( ERROR_COUNT > MAX_ERRORS )); then
+              echo "::error title=$vol EPUB exceeds ERROR threshold::ERROR count $ERROR_COUNT exceeds threshold $MAX_ERRORS"
+              FAIL=1
+            fi
+          done
+
+          exit "$FAIL"
+
+      - name: 📤 Upload epubcheck logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: epubcheck-logs
+          path: |
+            vol1-epubcheck.log
+            vol2-epubcheck.log
+          retention-days: 14
+
   # Step 4b: Link integrity (Tier 2 — non-blocking baseline)
   # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
   # broken internal links + anchors. This Lychee pass adds external reachability
@@ -364,7 +483,7 @@ jobs:
   validation-summary:
     name: '🎯 Validation Summary'
     if: always()
-    needs: [pre-commit, build-config, collect-results, check-links]
+    needs: [pre-commit, build-config, collect-results, epub-validate, check-links]
     runs-on: ubuntu-latest
 
     steps:
@@ -403,6 +522,13 @@ jobs:
           else
             echo "⏭️ Windows build: SKIPPED"
           fi
+
+          case "${{ needs.epub-validate.result }}" in
+            success) echo "✅ EPUB validate (epubcheck): PASSED" ;;
+            failure) echo "❌ EPUB validate (epubcheck): FAILED" ;;
+            skipped) echo "⏭️ EPUB validate (epubcheck): SKIPPED" ;;
+            *)       echo "⚠️ EPUB validate (epubcheck): ${{ needs.epub-validate.result }}" ;;
+          esac
 
           echo ""
           echo "🎯 OVERALL STATUS:"
