@@ -267,6 +267,11 @@ class ValidateCommand:
         parser.add_argument("--refs-cache", dest="refs_cache", metavar="FILE", help="references: cache file (default: .references_verified.json in repo root)")
         parser.add_argument("--only-from-report", dest="refs_only_from_report", metavar="FILE", help="references: validate only keys that had issues in this report file")
         parser.add_argument("--only-keys", dest="refs_only_keys_file", metavar="FILE", help="references: validate only keys listed in FILE (one key per line)")
+        # epub --scope hygiene: auto-repair source files in-place.
+        parser.add_argument(
+            "--fix", action="store_true",
+            help="epub --scope hygiene: auto-repair SVG / BibTeX source invariants in place",
+        )
         # epub --scope epubcheck: thresholds for FATAL and ERROR counts.
         # Defaults: MAX_FATAL=0 (any FATAL fails the check — Kindle /
         # ClearView reject), MAX_ERRORS=unlimited (grandfathered while the
@@ -365,6 +370,8 @@ class ValidateCommand:
                     max_fatal=ns.max_fatal,
                     max_errors=ns.max_errors,
                 ))
+            elif method_name == "_run_epub_hygiene":
+                results.append(method(root, fix=getattr(ns, 'fix', False)))
             else:
                 results.append(method(root))
         return results
@@ -3314,7 +3321,7 @@ class ValidateCommand:
     #   structure — legacy custom checks on built EPUB (no Java required)
     # ------------------------------------------------------------------
 
-    def _run_epub_hygiene(self, root: Path) -> ValidationRunResult:
+    def _run_epub_hygiene(self, root: Path, *, fix: bool = False) -> ValidationRunResult:
         """Run the pre-commit-grade EPUB source hygiene checks.
 
         Walks `book/quarto/contents/**/*.svg` and `book/quarto/**/*.bib`
@@ -3327,12 +3334,25 @@ class ValidateCommand:
           4. Raw `<` or `>` inside those same URL fields
 
         Runs in <1s and is safe to invoke from pre-commit on every push.
+
+        When `fix=True` (from `--fix`), the detected issues are rewritten
+        in place before reporting. The returned issue list then reflects
+        what the check found BEFORE the fix — so a first `--fix` run
+        reports "N issues found, N auto-fixed" and a second run reports 0.
         """
-        from cli.commands._epub_checks import find_hygiene_issues
+        from cli.commands._epub_checks import (
+            find_hygiene_issues,
+            fix_hygiene_issues,
+        )
 
         t0 = time.time()
         # Walk from repo root so the check sees both volumes.
         repo_root = Path(__file__).resolve().parents[3]
+
+        fixes: Dict[str, int] = {}
+        if fix:
+            fixes = fix_hygiene_issues(repo_root)
+
         epub_issues, files_checked = find_hygiene_issues(repo_root)
 
         issues = [
@@ -3345,9 +3365,21 @@ class ValidateCommand:
             )
             for e in epub_issues
         ]
+
+        description = "EPUB source hygiene (SVG + BibTeX invariants)"
+        if fix:
+            touched = sum(fixes.values())
+            description += (
+                f" — --fix applied: "
+                f"{fixes.get('svg_c0_chars_removed', 0)} C0 chars stripped, "
+                f"{fixes.get('svg_duplicate_markers', 0)} duplicate markers removed, "
+                f"{fixes.get('bib_url_rewrites', 0)} URL-field rewrites "
+                f"(touched {touched} total)"
+            )
+
         return ValidationRunResult(
             name="epub-hygiene",
-            description="EPUB source hygiene (SVG + BibTeX invariants)",
+            description=description,
             files_checked=files_checked,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),

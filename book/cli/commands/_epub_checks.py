@@ -229,6 +229,143 @@ def check_bibtex_url_escapes(bib_file: Path, repo_root: Path) -> list[EpubIssue]
     return issues
 
 
+# ---------------------------------------------------------------------------
+# Hygiene auto-repair. Mirrors the rewriters in
+# `book/quarto/scripts/epub_postprocess.py` but applied to SOURCE files,
+# not to the extracted EPUB. Running the fixer once against a stale
+# checkout removes every legacy occurrence of the four invariant
+# classes at source; future regressions are caught at commit time by
+# the hygiene scope.
+#
+# All rewrites are deterministic and idempotent. Running `--fix` twice
+# produces the same output as running it once.
+# ---------------------------------------------------------------------------
+
+
+def _fix_svg_aria_label_c0(svg_file: Path) -> int:
+    """Strip C0 control chars from aria-label values. Returns bytes removed."""
+    text = _read(svg_file)
+    if text is None:
+        return 0
+    removed = 0
+
+    def strip(m):
+        nonlocal removed
+        value = m.group(1)
+        cleaned = _C0_CONTROL_RE.sub('', value)
+        if cleaned == value:
+            return m.group(0)
+        removed += len(value) - len(cleaned)
+        return f'aria-label="{cleaned}"'
+
+    new_text = _SVG_ARIA_LABEL_RE.sub(strip, text)
+    if new_text != text:
+        svg_file.write_text(new_text, encoding='utf-8')
+    return removed
+
+
+# Regex that captures an entire `<marker ...>...</marker>` block (compact
+# or expanded) for deduplication. DOTALL so it spans lines.
+_MARKER_BLOCK_RE = re.compile(
+    r'<marker\b[^>]*\bid="([^"]+)"[^>]*>(?:(?!<marker\b).)*?</marker>',
+    flags=re.DOTALL,
+)
+
+
+def _fix_svg_duplicate_markers(svg_file: Path) -> int:
+    """Remove duplicate `<marker id="X"/>` blocks; keep the first occurrence."""
+    text = _read(svg_file)
+    if text is None:
+        return 0
+
+    seen: set[str] = set()
+    removed = 0
+
+    def dedup(m):
+        nonlocal removed
+        mid = m.group(1)
+        if mid in seen:
+            removed += 1
+            return ""  # drop duplicate
+        seen.add(mid)
+        return m.group(0)
+
+    new_text = _MARKER_BLOCK_RE.sub(dedup, text)
+    if removed == 0:
+        return 0
+    # Collapse blank-line runs left by removed blocks for readable diffs.
+    new_text = re.sub(r'\n\s*\n\s*\n+', '\n\n', new_text)
+    svg_file.write_text(new_text, encoding='utf-8')
+    return removed
+
+
+def _fix_bibtex_url_escapes(bib_file: Path) -> int:
+    r"""Rewrite URL fields to strip BibTeX escapes and percent-encode < >."""
+    text = _read(bib_file)
+    if text is None:
+        return 0
+    fixes = 0
+
+    def sanitize(m):
+        nonlocal fixes
+        prefix, field, eq, value, close = m.groups()
+        is_urlish = 'http' in value.lower() or field == 'url'
+        if not is_urlish:
+            return m.group(0)
+        new_value = value
+        if r'\_' in new_value:
+            fixes += new_value.count(r'\_')
+            new_value = new_value.replace(r'\_', '_')
+        if r'\%' in new_value:
+            fixes += new_value.count(r'\%')
+            new_value = new_value.replace(r'\%', '%')
+        if '<' in new_value:
+            fixes += new_value.count('<')
+            new_value = new_value.replace('<', '%3C')
+        if '>' in new_value:
+            fixes += new_value.count('>')
+            new_value = new_value.replace('>', '%3E')
+        if new_value == value:
+            return m.group(0)
+        return f"{prefix}{field}{eq}{new_value}{close}"
+
+    new_text = _BIB_URL_FIELD_RE.sub(sanitize, text)
+    if new_text != text:
+        bib_file.write_text(new_text, encoding='utf-8')
+    return fixes
+
+
+def fix_hygiene_issues(repo_root: Path) -> dict[str, int]:
+    """Auto-repair every hygiene issue at source.
+
+    Returns a counts dict with keys:
+      svg_c0_chars_removed:        characters stripped across all SVGs
+      svg_duplicate_markers:       <marker> blocks removed across all SVGs
+      bib_url_rewrites:            BibTeX URL-field substitutions performed
+
+    The fix is deterministic and idempotent; the counts reflect how much
+    work was done on this invocation, not the total number of remaining
+    legacy occurrences (running a second time yields zeros).
+    """
+    contents_dir = repo_root / "book" / "quarto" / "contents"
+    quarto_dir = repo_root / "book" / "quarto"
+
+    counts = {
+        "svg_c0_chars_removed": 0,
+        "svg_duplicate_markers": 0,
+        "bib_url_rewrites": 0,
+    }
+
+    for svg in _iter_svgs(contents_dir):
+        counts["svg_c0_chars_removed"] += _fix_svg_aria_label_c0(svg)
+        counts["svg_duplicate_markers"] += _fix_svg_duplicate_markers(svg)
+
+    for bib in _iter_bibs(quarto_dir):
+        counts["bib_url_rewrites"] += _fix_bibtex_url_escapes(bib)
+
+    return counts
+
+
 def find_hygiene_issues(repo_root: Path) -> tuple[list[EpubIssue], int]:
     """Walk repo source and return (issues, num_files_checked).
 
