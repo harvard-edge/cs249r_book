@@ -156,24 +156,54 @@ class MaintenanceCommand:
         return True
 
     def setup_environment(self) -> bool:
-        """Setup development environment (simplified version)."""
+        """Setup development environment.
+
+        Two-step onboarding:
+          1. Install pre-commit hooks (activates the framework so every
+             commit runs the hygiene / corpus-guard / formatting hooks
+             declared in .pre-commit-config.yaml).
+          2. Run the doctor health check to report state.
+
+        Step 1 is the load-bearing bit: without it, the .pre-commit-
+        config.yaml file is committed but never runs on contributor
+        commits. Pre-commit-framework's `install` command writes a
+        shim to .git/hooks/pre-commit that dispatches to the
+        framework; if there was already a different hook there
+        (e.g. a hand-installed script) pre-commit moves it aside
+        with a `.legacy` suffix, so running this twice is safe.
+        """
         console.print("[bold blue]🔧 MLSysBook Environment Setup[/bold blue]")
         console.print("[dim]Setting up your development environment...[/dim]\n")
 
-        # Run doctor command for comprehensive check
-        console.print("[blue]🏥 Running health check first...[/blue]")
+        # --- Step 1: install pre-commit hooks ---------------------------
+        console.print("[blue]🪝 Installing pre-commit hooks...[/blue]")
+        hooks_ok = self._install_pre_commit_hooks()
+        if hooks_ok:
+            console.print(
+                "[green]   ✅ Pre-commit framework active[/green] "
+                "[dim](hooks in .pre-commit-config.yaml now run on every commit)[/dim]\n"
+            )
+        else:
+            console.print(
+                "[yellow]   ⚠️ Could not install pre-commit hooks automatically[/yellow]\n"
+                "[dim]   Install manually with: pip install pre-commit && pre-commit install[/dim]\n"
+            )
+
+        # --- Step 2: run doctor health check ---------------------------
+        console.print("[blue]🏥 Running health check...[/blue]")
 
         # Import and run doctor (avoiding circular imports)
         from .doctor import DoctorCommand
         doctor = DoctorCommand(self.config_manager, self.chapter_discovery)
         health_ok = doctor.run_health_check()
 
-        if health_ok:
+        overall_ok = hooks_ok and health_ok
+        if overall_ok:
             console.print("\n[green]✅ Environment setup complete![/green]")
             console.print("[dim]💡 Your system is healthy and ready for development[/dim]")
         else:
             console.print("\n[yellow]⚠️ Environment setup completed with issues[/yellow]")
-            console.print("[dim]💡 Please review the health check results above[/dim]")
+            console.print("[dim]💡 Please review the output above[/dim]")
 
         # Show next steps
         next_steps = Panel(
@@ -187,7 +217,90 @@ class MaintenanceCommand:
         )
         console.print(next_steps)
 
-        return health_ok
+        return overall_ok
+
+    def _install_pre_commit_hooks(self) -> bool:
+        """Run `pre-commit install` from the repo root.
+
+        Returns True on success, False on failure. Does not raise — a
+        missing `pre-commit` binary or a non-git working tree both
+        result in a clean False return so the caller can surface a
+        helpful install hint rather than crashing mid-setup.
+        """
+        import shutil
+        import subprocess
+
+        repo_root = self.config_manager.book_dir.parent
+        if not (repo_root / ".pre-commit-config.yaml").is_file():
+            console.print(
+                f"[yellow]   No .pre-commit-config.yaml at {repo_root}; skipping.[/yellow]"
+            )
+            return False
+
+        if not shutil.which("pre-commit"):
+            console.print(
+                "[yellow]   `pre-commit` not on PATH.[/yellow] "
+                "[dim]Install it with `pip install pre-commit`.[/dim]"
+            )
+            return False
+
+        # pre-commit refuses to install when `core.hooksPath` is
+        # explicitly set (even to the default), to avoid surprising a
+        # contributor who configured a custom hooks directory. That
+        # turns into a confusing error message for someone running
+        # setup — detect the case and surface a one-liner fix.
+        try:
+            probe = subprocess.run(
+                ["git", "config", "--get", "core.hooksPath"],
+                cwd=repo_root, capture_output=True, text=True, timeout=5,
+            )
+            if probe.returncode == 0 and probe.stdout.strip():
+                console.print(
+                    "[yellow]   core.hooksPath is set in this clone "
+                    f"({probe.stdout.strip()}).[/yellow]"
+                )
+                console.print(
+                    "[dim]   pre-commit refuses to install over an explicit "
+                    "hooksPath. Unset it with:[/dim]"
+                )
+                console.print(
+                    "     [cyan]git config --unset core.hooksPath[/cyan]"
+                )
+                console.print(
+                    "[dim]   Then re-run `./binder setup`.[/dim]"
+                )
+                return False
+        except (subprocess.TimeoutExpired, OSError):
+            # Probe failure is non-fatal — fall through to the install
+            # attempt, which will surface any real error itself.
+            pass
+
+        try:
+            result = subprocess.run(
+                ["pre-commit", "install"],
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            console.print(f"[red]   pre-commit install failed: {e}[/red]")
+            return False
+
+        if result.returncode != 0:
+            # Print the first line of stderr for diagnosis without flooding.
+            msg = (result.stderr or result.stdout or "").strip().splitlines()
+            if msg:
+                console.print(f"[red]   pre-commit install error: {msg[0]}[/red]")
+            return False
+
+        # Capture the "pre-commit installed at .git/hooks/pre-commit" line
+        # when present, so the user sees confirmation.
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if line:
+                console.print(f"[dim]   {line}[/dim]")
+        return True
 
     def run_namespace(self, args) -> bool:
         """Handle `binder maintain ...` namespace commands."""
