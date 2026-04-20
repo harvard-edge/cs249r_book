@@ -122,9 +122,10 @@ const BRAND_COLOR = '#333';     // Matches shared/_navbar.scss .navbar-brand col
 
 const S = {
   nav: {
-    // Bootstrap navbar default: 0.5rem top/bottom padding → ~56px total height
-    // (28px logo + 8px*2 padding + 4px border). Matches shared/_navbar.scss.
-    padding: '8px 16px',
+    // Bootstrap navbar default: 0.5rem top/bottom padding plus brand line
+    // height → ~60 px total at desktop widths. Matches the measured height
+    // of Quarto sites (60.5 px) so StaffML sits flush with ecosystem nav.
+    padding: '10px 16px',
     fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: 16,  // --bs-body-font-size: 1rem
     display: 'flex',
@@ -133,7 +134,7 @@ const S = {
     // Do NOT wrap: wrapping produces a stacked/offset layout at intermediate
     // widths that looks broken. The hamburger path handles narrow screens.
     flexWrap: 'nowrap' as const,
-    minHeight: 56,
+    minHeight: 60,
   },
   brand: {
     display: 'flex',
@@ -363,11 +364,20 @@ export default function EcosystemBar() {
           </div>
         </div>
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — display is controlled entirely by Tailwind
+            responsive classes; do NOT set `display` in the inline style,
+            because an inline `display: flex` would beat the `nav-lg:hidden`
+            media-query rule and leave the hamburger visible at 992 px+. */}
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
-          className="nav-lg:hidden"
-          style={{ ...S.navLink, padding: 8 }}
+          className="flex nav-lg:hidden items-center"
+          style={{
+            color: NAV_COLOR,
+            padding: 8,
+            cursor: 'pointer',
+            border: 'none',
+            background: 'none',
+          }}
           aria-label="Toggle navigation"
         >
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={NAV_COLOR} strokeWidth="2">
