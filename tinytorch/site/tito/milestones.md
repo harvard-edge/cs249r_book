@@ -117,7 +117,7 @@ tito milestone run 03 --skip-checks
 
 ### Track Progress
 
-<div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1rem 0;">
+<div class="milestones-track-box" style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1rem 0;">
 
 **View Milestone Progress**
 ```bash
