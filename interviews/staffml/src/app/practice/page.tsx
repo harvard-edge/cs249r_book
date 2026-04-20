@@ -338,7 +338,7 @@ function PracticePage() {
 
   const handleScore = (score: number) => {
     if (current) {
-      const finalScore = Math.min(score, maxScore);
+      const finalScore = Math.min(score, effectiveMaxScore);
       saveAttempt({
         questionId: current.id,
         competencyArea: current.competency_area,
@@ -989,12 +989,12 @@ function PracticePage() {
                           { score: 2, label: "Partial", color: "border-accentAmber/30 text-accentAmber hover:bg-accentAmber/10" },
                           { score: 3, label: "Nailed It", color: "border-accentGreen/30 text-accentGreen hover:bg-accentGreen/10" },
                         ].map(({ score, label, color }) => {
-                          const disabled = score > maxScore;
+                          const disabled = score > effectiveMaxScore;
                           const isRubricSuggested = rubricScore !== null && score === rubricScore;
                           return (
                             <button
                               key={score}
-                              onClick={() => handleScore(Math.min(score, maxScore))}
+                              onClick={() => handleScore(Math.min(score, effectiveMaxScore))}
                               disabled={disabled}
                               aria-label={`Rate yourself: ${label} (${score} of 3)`}
                               className={clsx(
