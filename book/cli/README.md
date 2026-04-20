@@ -196,10 +196,18 @@ Runs the W3C `epubcheck` validator against every EPUB discovered under `book/qua
 
 Requires the `epubcheck` Python package (pinned in `book/tools/dependencies/requirements.txt`) plus a Java runtime (JRE 8+). If neither `python -m epubcheck` nor the `epubcheck` system binary is available, the check emits an `epubcheck-missing` issue with install instructions rather than silently passing.
 
-Thresholds (from the command line, environment variables, or the CI workflow):
+Thresholds (from the command line, environment variables, or the CI workflow). Two modes:
 
-- `--max-fatal N` — fail the run if FATAL count exceeds N (default: 0). Kindle and ClearView reject any EPUB with FATAL, so 0 is the correct production threshold.
-- `--max-errors N` — fail the run if ERROR count exceeds N (default: unlimited while the RSC-005 / RSC-012 baselines stabilize). Tighten to 0 once the baseline is clean.
+- **Flat thresholds** (for local use or simple CI):
+  - `--max-fatal N` — fail if FATAL count exceeds N (default: 0). Kindle and ClearView reject any EPUB with FATAL, so 0 is the correct production threshold.
+  - `--max-errors N` — fail if ERROR count exceeds N (default: unlimited). Tighten to 0 once the baseline is clean.
+
+- **Baseline ratchet** (preferred in CI):
+  - `--baseline PATH` — fail only if per-volume counts **increase** over what is recorded at `PATH` (JSON). Doesn't cliff-fail during incremental cleanup.
+  - `--update-baseline` — rewrite the baseline file to the current counts. Run after a cleanup lands; commit the updated file in the same PR. This is how you lower the ceiling.
+  - When `--baseline` is supplied, the flat thresholds are ignored.
+
+The canonical baseline lives at `book/tools/audit/epubcheck-baseline.json`. The CI workflow (`book-validate-dev.yml`) uses the ratchet by default — a PR cannot land if epubcheck counts regress past that file. Initial state (April 2026) is `0/0/0` for both volumes, so *any* new FATAL, ERROR, or WARNING blocks the PR.
 
 ### Defense in depth
 

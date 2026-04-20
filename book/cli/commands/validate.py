@@ -297,6 +297,20 @@ class ValidateCommand:
             "--max-errors", type=int, default=None,
             help="epub --scope epubcheck: max ERROR issues allowed before failure (default: unlimited)",
         )
+        # Ratchet: fail only when counts *increase* over a recorded baseline.
+        # Lets CI block regression without cliff-failing during incremental
+        # cleanup. Pairs with --update-baseline to re-record after a fix.
+        parser.add_argument(
+            "--baseline",
+            metavar="PATH",
+            default=None,
+            help="epub --scope epubcheck: JSON baseline of per-volume counts; fail only if current counts exceed baseline",
+        )
+        parser.add_argument(
+            "--update-baseline",
+            action="store_true",
+            help="epub --scope epubcheck: rewrite --baseline file with current counts (requires --baseline)",
+        )
 
         try:
             ns = parser.parse_args(args)
@@ -377,10 +391,13 @@ class ValidateCommand:
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
                 # supplied on the CLI we keep max_errors=None (unlimited).
+                # The ratchet takes over when --baseline is supplied.
                 results.append(method(
                     root,
                     max_fatal=ns.max_fatal,
                     max_errors=ns.max_errors,
+                    baseline_path=ns.baseline,
+                    update_baseline=ns.update_baseline,
                 ))
             elif method_name == "_run_epub_hygiene":
                 results.append(method(root, fix=getattr(ns, 'fix', False)))
@@ -3506,6 +3523,123 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    def _check_baseline(
+        self,
+        *,
+        baseline_path: Optional[str],
+        update_baseline: bool,
+        per_volume_counts: Dict[str, Dict[str, int]],
+    ) -> List[ValidationIssue]:
+        """Ratchet: compare per-volume counts against a recorded baseline.
+
+        If *baseline_path* is None, do nothing (the flat --max-fatal /
+        --max-errors thresholds take over in the caller).
+
+        If *update_baseline* is True, rewrite the baseline file with the
+        current counts and return an empty issue list. This is the way
+        to lower the ceiling after a cleanup lands.
+
+        Otherwise: load the baseline file, compare to current counts,
+        and return a synthetic ValidationIssue per volume + severity
+        that regressed.
+        """
+        if baseline_path is None:
+            if update_baseline:
+                # No path to update into — emit a clear error.
+                return [ValidationIssue(
+                    file="(baseline)", line=0,
+                    code="EPUBCHECK-BASELINE-NO-PATH",
+                    message="--update-baseline supplied without --baseline PATH",
+                    severity="error",
+                )]
+            return []
+
+        import datetime as _dt
+        import json as _json
+
+        baseline_file = Path(baseline_path)
+
+        # --- Update mode ------------------------------------------------
+        if update_baseline:
+            payload = {
+                "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(
+                    timespec="seconds"
+                ),
+                "generated_by": "binder check epub --scope epubcheck --update-baseline",
+                "description": (
+                    "Max allowed per-volume epubcheck counts. "
+                    "`./binder check epub --scope epubcheck --baseline <this>` "
+                    "fails only if any current count exceeds the recorded "
+                    "value. Run `--update-baseline` again after a cleanup "
+                    "to lower the ceiling."
+                ),
+                "volumes": per_volume_counts,
+            }
+            baseline_file.parent.mkdir(parents=True, exist_ok=True)
+            baseline_file.write_text(_json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            console.print(
+                f"[green]✓ Baseline updated:[/green] {baseline_file} "
+                f"[dim]({len(per_volume_counts)} volumes recorded)[/dim]"
+            )
+            return []
+
+        # --- Compare mode -----------------------------------------------
+        if not baseline_file.exists():
+            return [ValidationIssue(
+                file=str(baseline_file), line=0,
+                code="EPUBCHECK-BASELINE-MISSING",
+                message=(
+                    f"Baseline file not found: {baseline_file}. Initialize "
+                    "with `./binder check epub --scope epubcheck "
+                    f"--baseline {baseline_file} --update-baseline`."
+                ),
+                severity="error",
+            )]
+
+        try:
+            payload = _json.loads(baseline_file.read_text(encoding="utf-8"))
+        except _json.JSONDecodeError as e:
+            return [ValidationIssue(
+                file=str(baseline_file), line=0,
+                code="EPUBCHECK-BASELINE-INVALID",
+                message=f"Baseline file is not valid JSON: {e}",
+                severity="error",
+            )]
+
+        recorded = payload.get("volumes", {}) or {}
+        issues: List[ValidationIssue] = []
+        any_under = False
+
+        for vol, counts in per_volume_counts.items():
+            base = recorded.get(vol, {})
+            for severity in ("FATAL", "ERROR", "WARNING"):
+                current = counts.get(severity, 0)
+                allowed = int(base.get(severity, 0))
+                if current > allowed:
+                    issues.append(ValidationIssue(
+                        file="(epubcheck baseline)",
+                        line=0,
+                        code=f"EPUBCHECK-BASELINE-{severity}",
+                        message=(
+                            f"{vol}: {severity} count regressed — current "
+                            f"{current} > baseline {allowed} (delta "
+                            f"+{current - allowed}). Fix the underlying "
+                            f"issues or run `--update-baseline` after "
+                            f"verifying this is an accepted increase."
+                        ),
+                        severity="error",
+                    ))
+                elif current < allowed:
+                    any_under = True
+
+        if any_under and not issues:
+            console.print(
+                "[dim]ⓘ epubcheck counts are under baseline in one or more "
+                "volumes; run `--update-baseline` to lower the ceiling.[/dim]"
+            )
+
+        return issues
+
     def _run_epub_smoke(self, root: Path) -> ValidationRunResult:
         """Reader-compatibility smoke checks against the built EPUB(s).
 
@@ -3569,6 +3703,8 @@ class ValidateCommand:
         *,
         max_fatal: int = 0,
         max_errors: Optional[int] = None,
+        baseline_path: Optional[str] = None,
+        update_baseline: bool = False,
     ) -> ValidationRunResult:
         """Run the W3C `epubcheck` validator against the built EPUBs.
 
@@ -3609,12 +3745,24 @@ class ValidateCommand:
             )
 
         all_issues: List[ValidationIssue] = []
+        per_volume_counts: Dict[str, Dict[str, int]] = {}
         total_fatal = 0
         total_errors = 0
 
         for epub in epubs:
+            # Derive a stable volume key from the parent directory name.
+            # `_build/epub-vol1/foo.epub` → "vol1"; falls back to the
+            # EPUB's stem if the path layout is unexpected.
+            vol_key = epub.parent.name.replace("epub-", "") or epub.stem
+
             epub_issues, counts = run_epubcheck_on(epub, repo_root=repo_root)
             emit_github_annotations(epub_issues)
+
+            per_volume_counts[vol_key] = {
+                "FATAL": counts.get("FATAL", 0),
+                "ERROR": counts.get("ERROR", 0),
+                "WARNING": counts.get("WARNING", 0),
+            }
             total_fatal += counts.get("FATAL", 0)
             total_errors += counts.get("ERROR", 0)
 
@@ -3631,31 +3779,49 @@ class ValidateCommand:
                     severity="error" if e.severity in ("fatal", "error") else e.severity,
                 ))
 
-        # Threshold enforcement: if thresholds are exceeded, add a synthetic
-        # top-level issue describing the violation. This way the normal
-        # "any issues" failure check surfaces the threshold failure too.
-        if total_fatal > max_fatal:
-            all_issues.append(ValidationIssue(
-                file="(epubcheck)",
-                line=0,
-                code="EPUBCHECK-FATAL-THRESHOLD",
-                message=(
-                    f"FATAL count {total_fatal} exceeds threshold "
-                    f"{max_fatal} — Kindle / ClearView will reject this EPUB."
-                ),
-                severity="error",
-            ))
-        if max_errors is not None and total_errors > max_errors:
-            all_issues.append(ValidationIssue(
-                file="(epubcheck)",
-                line=0,
-                code="EPUBCHECK-ERROR-THRESHOLD",
-                message=(
-                    f"ERROR count {total_errors} exceeds threshold "
-                    f"{max_errors}. Tighten or fix the underlying RSC-* issues."
-                ),
-                severity="error",
-            ))
+        # --- Ratchet / baseline handling --------------------------------
+        # The baseline is per-volume, per-severity. Semantics:
+        #   current == baseline  → pass silently
+        #   current <  baseline  → pass; print a hint that the baseline
+        #                          can be tightened (don't auto-update
+        #                          without --update-baseline to avoid
+        #                          silently lowering the bar).
+        #   current >  baseline  → fail; emit a synthetic issue with the
+        #                          per-volume delta so reviewers see what
+        #                          regressed.
+        baseline_issues = self._check_baseline(
+            baseline_path=baseline_path,
+            update_baseline=update_baseline,
+            per_volume_counts=per_volume_counts,
+        )
+        all_issues.extend(baseline_issues)
+
+        # Threshold enforcement (applied only when the ratchet is not in
+        # use — supplying --baseline tells the tool to use the ratchet
+        # instead of flat thresholds).
+        if baseline_path is None:
+            if total_fatal > max_fatal:
+                all_issues.append(ValidationIssue(
+                    file="(epubcheck)",
+                    line=0,
+                    code="EPUBCHECK-FATAL-THRESHOLD",
+                    message=(
+                        f"FATAL count {total_fatal} exceeds threshold "
+                        f"{max_fatal} — Kindle / ClearView will reject this EPUB."
+                    ),
+                    severity="error",
+                ))
+            if max_errors is not None and total_errors > max_errors:
+                all_issues.append(ValidationIssue(
+                    file="(epubcheck)",
+                    line=0,
+                    code="EPUBCHECK-ERROR-THRESHOLD",
+                    message=(
+                        f"ERROR count {total_errors} exceeds threshold "
+                        f"{max_errors}. Tighten or fix the underlying RSC-* issues."
+                    ),
+                    severity="error",
+                ))
 
         # Build the description so the user sees the severity summary even
         # when all issues are warnings/info.

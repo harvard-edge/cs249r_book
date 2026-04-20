@@ -368,11 +368,16 @@ jobs:
       needs.collect-results.outputs.linux_epub_vol2_artifact != ''
     runs-on: ubuntu-latest
     env:
-      MAX_FATAL: '0'
-      # Leave MAX_ERRORS blank to treat ERRORs as report-only. Set to
-      # "0" here once the RSC-005 / RSC-012 baselines are clean to
-      # block any ERROR from merging.
-      MAX_ERRORS: ''
+      # Ratchet baseline — fails if epubcheck counts exceed recorded
+      # per-volume ceilings. Update with
+      #   ./binder check epub --scope epubcheck \
+      #       --baseline book/tools/audit/epubcheck-baseline.json \
+      #       --update-baseline
+      # after a cleanup lands, and commit the changed file in the
+      # same PR as the cleanup. This replaces the older flat
+      # MAX_FATAL/MAX_ERRORS approach: a ratchet prevents regression
+      # without cliff-failing during incremental cleanup.
+      BASELINE_PATH: 'book/tools/audit/epubcheck-baseline.json'
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
@@ -412,28 +417,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r book/tools/dependencies/requirements.txt
 
-      - name: 📘 Run `binder check epub --scope epubcheck`
+      - name: 📘 Run `binder check epub --scope epubcheck` with baseline ratchet
         # Both source-level hygiene and post-build epubcheck validation
         # live inside the binder CLI. This step invokes the same
         # command a developer runs locally, so CI and local behaviour
         # stay in lockstep.
+        #
+        # The --baseline ratchet means CI fails only when the per-
+        # volume FATAL/ERROR/WARNING count *exceeds* what was
+        # recorded last time the baseline was updated. Prevents
+        # regression without forcing a cliff-cleanup of every
+        # pre-existing issue on every PR.
         env:
-          MAX_FATAL: ${{ env.MAX_FATAL }}
-          MAX_ERRORS: ${{ env.MAX_ERRORS }}
+          BASELINE_PATH: ${{ env.BASELINE_PATH }}
         run: |
           set -euo pipefail
           cd book
-          args=(check epub --scope epubcheck --max-fatal "${MAX_FATAL}")
-          if [[ -n "${MAX_ERRORS}" ]]; then
-            args+=(--max-errors "${MAX_ERRORS}")
-          fi
           # JSON pass: machine-readable artifact (uploaded below).
           # GITHUB_ACTIONS=true is set automatically, so _epub_checks
           # emits `::error` annotations inline on the PR diff.
-          ./binder "${args[@]}" --json > epubcheck-report.json || true
-          # Human pass: exit code gates the CI job via --max-fatal
-          # (and --max-errors when MAX_ERRORS is set).
-          ./binder "${args[@]}"
+          ./binder check epub --scope epubcheck \
+              --baseline "${BASELINE_PATH}" \
+              --json > epubcheck-report.json || true
+          # Human pass: exit code gates the CI job via the ratchet.
+          ./binder check epub --scope epubcheck --baseline "${BASELINE_PATH}"
 
       - name: 📤 Upload epubcheck report
         if: always()
