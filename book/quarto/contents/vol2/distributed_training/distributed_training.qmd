@@ -101,8 +101,8 @@ class DistTrainConstants:
     # ┌── 1. LOAD (Constants) ──────────────────────────────
     a100_mem_gb = A100_MEM_CAPACITY.m_as(GB)
     h100_mem_gb = H100_MEM_CAPACITY.m_as(GB)
-    nvlink_a100_gbs = NVLINK_A100_BW.m_as(GB / second)
-    nvlink_h100_gbs = NVLINK_H100_BW.m_as(GB / second)
+    nvlink_a100_gbs = NVLINK_A100_BW.m_as(GB/second)
+    nvlink_h100_gbs = NVLINK_H100_BW.m_as(GB/second)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────
     # (direct unit conversions only)
@@ -500,8 +500,8 @@ The simplest approach gives each GPU a complete, identical copy of the model and
 
 ***Data Parallelism***\index{Data Parallelism!definition} is a distributed training strategy in which each worker holds a complete replica of the model and processes an independent shard of the minibatch, then synchronizes gradient updates via AllReduce so all replicas apply identical parameter changes each step.
 
-1.  **Significance (Quantitative):** With $N$ workers each processing batch size $B$, the effective global batch size is $N \times B$, scaling throughput linearly while keeping per-worker memory constant. For a 1B-parameter model at 2 GB in BF16, 1,024 workers achieve 1,024$\times$ the single-GPU throughput — until the gradient AllReduce (2 GB per step at ring-optimal $2(N-1)/N$ per worker) exceeds backward compute time and creates the communication bottleneck.
-2.  **Distinction (Durable):** Unlike model parallelism, where parameters are partitioned so no single worker holds the full model, data parallelism requires every worker to have sufficient memory capacity to store the complete model state — making it inapplicable for models larger than a single accelerator's memory without combining it with model sharding (ZeRO, FSDP).
+1.  **Significance (Quantitative):** With $N$ workers each processing batch size $B$, the effective global batch size is $N \times B$, scaling throughput linearly while keeping per-worker memory constant. For a 1B-parameter model at 2 GB in BF16, 1,024 workers achieve 1,024$\times$ the single-GPU throughput—until the gradient AllReduce (2 GB per step at ring-optimal $2(N-1)/N$ per worker) exceeds backward compute time and creates the communication bottleneck.
+2.  **Distinction (Durable):** Unlike model parallelism, where parameters are partitioned so no single worker holds the full model, data parallelism requires every worker to have sufficient memory capacity to store the complete model state—making it inapplicable for models larger than a single accelerator's memory without combining it with model sharding (ZeRO, FSDP).
 3.  **Common Pitfall:** A frequent misconception is that data parallelism scales indefinitely with worker count. Scaling the effective batch size beyond the critical batch size (roughly 8,192 for ResNet-50, ~4M tokens for LLM pretraining) degrades statistical efficiency, requiring more training steps to reach target loss and eroding the throughput gains from adding more workers.
 
 :::
@@ -735,7 +735,7 @@ The cycle of splitting data, computing gradients, synchronizing results, and upd
 
 Data parallelism is the default strategy for a reason: it scales **throughput** linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the **Communication-Computation Ratio**.
 
-Data parallelism offers three principal advantages. First, throughput scales linearly for compute-bound models: scaling ResNet-50 on ImageNet from 1 to 256 GPUs yields near-linear speedup because the gradient exchange is small relative to the compute time. Second, the model architecture remains unchanged; the framework wraps the model in a data-parallel container that intercepts backward-pass hooks to trigger gradient synchronization automatically. Third, utilization remains high because, unlike model parallelism, there are no pipeline bubbles — all GPUs work on the forward and backward pass simultaneously.
+Data parallelism offers three principal advantages. First, throughput scales linearly for compute-bound models: scaling ResNet-50 on ImageNet from 1 to 256 GPUs yields near-linear speedup because the gradient exchange is small relative to the compute time. Second, the model architecture remains unchanged; the framework wraps the model in a data-parallel container that intercepts backward-pass hooks to trigger gradient synchronization automatically. Third, utilization remains high because, unlike model parallelism, there are no pipeline bubbles—all GPUs work on the forward and backward pass simultaneously.
 
 Three hard ceilings limit these advantages. The memory wall requires every GPU to hold a full copy of the model parameters, gradients, and optimizer states; for a `{python} FrontierTrainingContext.frontier_params_b_str`B parameter model, this demands more than 1 TB of memory per GPU, which is physically impossible on current hardware without ZeRO sharding. The bandwidth wall emerges as $N$ grows: the AllReduce cost $2(N-1)/N \times M/B$ eventually dominates, and for large language models gradient synchronization can consume more than 50 percent of the step time, collapsing efficiency. The batch size trap compounds the problem: scaling to thousands of GPUs requires increasing the global batch size ($B_{global} = N \times B_{local}$), and eventually the **Critical Batch Size** is reached, where adding more data per step yields diminishing returns in convergence.
 
@@ -782,14 +782,14 @@ class Scaling8GPU:
     # Ring All-Reduce: 2*(N-1)/N * Params * 2 bytes (FP16)
     # For large N, ~2 * Params * 2 = 4 * Params.
     sync_size_gb = (params_b * BILLION * 4) / BILLION
-    comm_8gpu_ms_val = (sync_size_gb / nvlink_bw) * 1000
+    comm_8gpu_ms_val = (sync_size_gb/nvlink_bw) * 1000
 
     total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
-    # Speedup = (N * b / T_N) / (b / T_1) = N * (T_1 / T_N)
+    # Speedup = (N * b/T_N) / (b/T_1) = N * (T_1 / T_N)
     speedup_8gpu_val = gpus_per_node * (single_gpu_step_s / (total_8gpu_ms_val / 1000))
-    efficiency_8gpu_val = speedup_8gpu_val / gpus_per_node * 100
+    efficiency_8gpu_val = speedup_8gpu_val/gpus_per_node * 100
     training_hours_1gpu = 25
-    training_hours_8gpu_val = training_hours_1gpu / (speedup_8gpu_val / gpus_per_node)
+    training_hours_8gpu_val = training_hours_1gpu / (speedup_8gpu_val/gpus_per_node)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_8gpu_val > 95, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
@@ -842,13 +842,13 @@ class Scaling32GPU:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     sync_size_gb = (params_b * BILLION * 4) / BILLION
-    inter_node_ms_val = (sync_size_gb / net_bw) * 1000
+    inter_node_ms_val = (sync_size_gb/net_bw) * 1000
 
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
 
-    compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
-    comm_pct_val = comm_32gpu_ms_val / total_32gpu_ms_val * 100
+    compute_pct_val = compute_32gpu_ms/total_32gpu_ms_val * 100
+    comm_pct_val = comm_32gpu_ms_val/total_32gpu_ms_val * 100
 
     speedup_32gpu_val = 32 * (single_gpu_step_s / (total_32gpu_ms_val / 1000))
     efficiency_32gpu_val = speedup_32gpu_val / 32 * 100
@@ -891,7 +891,7 @@ class GradAccumScenario:
     overhead_val = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
     # Effective speedup: 8 GPUs, nearly no comm overhead
     effective_speedup = n_gpus_ga * (1 - overhead_val / 100)
-    ga_training_hours_val = training_hours_1gpu / effective_speedup
+    ga_training_hours_val = training_hours_1gpu/effective_speedup
     ga_cost_val = ga_training_hours_val * hourly_rate
     ga_savings_val = Scaling32GPU.training_32gpu_hours_val * hourly_rate - ga_cost_val
     ga_savings_pct_val = ga_savings_val / (Scaling32GPU.training_32gpu_hours_val * hourly_rate) * 100
@@ -967,7 +967,7 @@ Better Approach: 8 GPUs with Gradient Accumulation
 3. **Training Duration**: Total time reduces to **`{python} GradAccumScenario.ga_training_hours_str` hours**.
 4. **Total Cost**: `{python} GradAccumScenario.ga_training_hours_str` hrs $\times$ \$128/hr = **\$`{python} GradAccumScenario.ga_cost_str`**.
 
-**The Systems Insight**: Gradient accumulation saves **\$`{python} GradAccumScenario.ga_savings_str`** (`{python} GradAccumScenario.ga_savings_pct_str` percent) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When the network is slow, do not scale out — scale the batch size locally.
+**The Systems Insight**: Gradient accumulation saves **\$`{python} GradAccumScenario.ga_savings_str`** (`{python} GradAccumScenario.ga_savings_pct_str` percent) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When the network is slow, do not scale out—scale the batch size locally.
 
 :::
 
@@ -1069,7 +1069,7 @@ In 2017, Facebook AI Research shattered the "batch size ceiling" by training Res
 
 ## Scaling Efficiency and Convergence {#sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488}
 
-When doubling the number of GPUs yields only 1.5$\times$ speedup, communication overhead and synchronization barriers have consumed the missing 25 percent of compute budget. Data parallelism revealed the practical mechanics of gradient synchronization and memory sharding, but understanding *why* scaling efficiency degrades and *how* convergence changes with parallelism requires a quantitative framework. The metrics and convergence theory in this section apply to all parallelism strategies — data, model, pipeline, and hybrid — governing the fundamental trade-offs between throughput, communication cost, and optimization quality.
+When doubling the number of GPUs yields only 1.5$\times$ speedup, communication overhead and synchronization barriers have consumed the missing 25 percent of compute budget. Data parallelism revealed the practical mechanics of gradient synchronization and memory sharding, but understanding *why* scaling efficiency degrades and *how* convergence changes with parallelism requires a quantitative framework. The metrics and convergence theory in this section apply to all parallelism strategies—data, model, pipeline, and hybrid—governing the fundamental trade-offs between throughput, communication cost, and optimization quality.
 
 Communication overhead represents the primary bottleneck in distributed training systems. AllReduce operations consume 10--40 percent of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs experiences communication overhead reaching 35 percent of total runtime, while GPT-3 scale models experience 55 percent overhead on 1,024 GPUs.
 
@@ -1085,7 +1085,7 @@ Synchronization frequency presents a trade-off between communication efficiency 
 
 Just as the Iron Law of Processor Performance governs single-thread execution, distributed training is governed by an extended version of Amdahl's Law that explicitly accounts for communication overhead. The time to complete one training step on $N$ devices is not simply $T_{single} / N$, but is constrained by the sequential nature of synchronization.
 
-@fig-scaling-tax visualizes this divergence from ideal linear scaling as the **Scaling Tax** — a direct consequence of the Scaling Efficiency Bound (Principle \ref{nte-scaling-efficiency}). It shows how communication overhead ($r$) acts as a drag on performance, creating a "Communication Wall" where adding more GPUs yields diminishing returns.
+@fig-scaling-tax visualizes this divergence from ideal linear scaling as the **Scaling Tax**—a direct consequence of the Scaling Efficiency Bound (Principle \ref{nte-scaling-efficiency}). It shows how communication overhead ($r$) acts as a drag on performance, creating a "Communication Wall" where adding more GPUs yields diminishing returns.
 
 ::: {#fig-scaling-tax fig-env="figure" fig-pos="htb" fig-cap="**The Scaling Tax.** Effective speedup vs. number of GPUs. While ideal scaling (dashed black) is linear, real-world systems pay a 'tax' for communication. Compute-bound models like ResNet (green) scale well because they have high arithmetic intensity. Bandwidth-bound models like GPT-3 (red) hit a 'Communication Wall' where adding more GPUs yields diminishing returns (efficiency < 50 percent)." fig-alt="Line chart of Speedup vs GPU Count (log-log). Green line (Compute Bound) stays close to the ideal linear diagonal. Red line (Bandwidth Bound) flattens out, showing diminishing returns as GPUs are added."}
 
@@ -1182,7 +1182,7 @@ Where:
 
 The distributed step time equation leads to the **Scaling Efficiency** metric:
 
-This is the Scaling Efficiency Bound (Principle \ref{nte-scaling-efficiency}): perfect linear scaling ($\eta = 1.0$) is a theoretical limit, not a practical target. Real systems achieve $\eta = 0.85$–$0.95$ at moderate scale and degrade further as $N$ grows. The gap between $\eta = 1.0$ and the achieved efficiency is the **communication tax** — the price of coordination.
+This is the Scaling Efficiency Bound (Principle \ref{nte-scaling-efficiency}): perfect linear scaling ($\eta = 1.0$) is a theoretical limit, not a practical target. Real systems achieve $\eta = 0.85$–$0.95$ at moderate scale and degrade further as $N$ grows. The gap between $\eta = 1.0$ and the achieved efficiency is the **communication tax**—the price of coordination.
 
 $$ \text{Efficiency}(N) = \frac{T_{\text{compute}}}{N \times T_{\text{step}}(N)} = \frac{1}{1 + \frac{N(T_{\text{comm}}(N) - T_{\text{overlap}})}{T_{\text{compute}}}} $$
 
@@ -1200,7 +1200,7 @@ Scaling efficiency follows predictable patterns across different GPU counts. In 
 
 Hardware selection critically impacts these scaling characteristics. NVIDIA DGX systems with NVLink achieve `{python} DistTrainConstants.nvlink_a100_str` GB/s bisection bandwidth, enabling 90 percent parallel efficiency up to 8 GPUs per node. Multi-node scaling requires InfiniBand networks, where EDR at 100 Gbps supports efficient training up to 64 nodes, while HDR at 200 Gbps enables scaling to 256+ nodes with greater than 70 percent efficiency.
 
-The efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Pipeline parallelism reduces device idle time but introduces complexity in managing microbatches. The optimal strategy depends on which constraint — memory, bandwidth, or synchronization — dominates the target workload.
+The efficiency metrics directly influence the choice of parallelism strategy. Data parallelism works well in the linear scaling regime but becomes communication-bound at scale. Model parallelism addresses memory constraints but introduces sequential dependencies that limit efficiency. Pipeline parallelism reduces device idle time but introduces complexity in managing microbatches. The optimal strategy depends on which constraint—memory, bandwidth, or synchronization—dominates the target workload.
 
 ### Convergence guarantees for distributed optimization {#sec-distributed-training-systems-systems-convergence-guarantees-distributed-optimization-350e}
 
@@ -1417,8 +1417,8 @@ class ScalingWorkers:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     batch_8 = n8 * b
     batch_64 = n64 * b
-    exp_iter_8 = base_iters / n8
-    exp_iter_64 = base_iters / n64
+    exp_iter_8 = base_iters/n8
+    exp_iter_64 = base_iters/n64
     speedup_8 = base_iters / (actual_8bsp * (1 + comm_8bsp))
     speedup_64 = base_iters / (actual_64bsp * (1 + comm_64bsp))
     speedup_ssp = base_iters / (actual_ssp * (1 + comm_ssp))
@@ -1493,9 +1493,9 @@ The 64-GPU BSP configuration achieves 40$\times$ speedup despite only 91 percent
 
 **Cost Analysis** (assuming \$3/GPU-hour):
 
-- 8 GPU: 12.8K iters$\times$ 0.4s/iter$\times$ 8 GPUs / SEC_PER_HOUR$\times$ \$3 = \$34
-- 64 GPU BSP: 1.72K iters$\times$ 0.58s/iter$\times$ 64 GPUs / SEC_PER_HOUR$\times$ \$3 = \$53
-- 64 GPU SSP: 2.1K iters$\times$ 0.50s/iter$\times$ 64 GPUs / SEC_PER_HOUR$\times$ \$3 = \$56
+- 8 GPU: 12.8K iters$\times$ 0.4s/iter$\times$ 8 GPUs/SEC_PER_HOUR$\times$ \$3 = \$34
+- 64 GPU BSP: 1.72K iters$\times$ 0.58s/iter$\times$ 64 GPUs/SEC_PER_HOUR$\times$ \$3 = \$53
+- 64 GPU SSP: 2.1K iters$\times$ 0.50s/iter$\times$ 64 GPUs/SEC_PER_HOUR$\times$ \$3 = \$56
 
 Despite higher parallelism, 64-GPU training costs more per run due to communication overhead and reduced sample efficiency. The 8-GPU configuration is more cost-efficient but takes 6$\times$ longer wall-clock time. The choice depends on whether minimizing cost or minimizing time-to-result is the priority.
 
@@ -1580,7 +1580,7 @@ class MemoryWallAnalysis:
     param_gb = params_b * bytes_fp16
     optim_gb = params_b * bytes_adam
     total_static_gb = param_gb + optim_gb
-    per_gpu_static = total_static_gb / n_gpus
+    per_gpu_static = total_static_gb/n_gpus
     total_per_gpu = int(per_gpu_static) + activation_approx_gb
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -1728,9 +1728,9 @@ As @fig-pipeline-parallelism shows, each device, as represented by the rows in t
 
 ***Pipeline Parallelism***\index{Pipeline Parallelism!definition} is a model parallelism technique that partitions a neural network's layers into sequential stages assigned to different devices, passing activations forward and gradients backward between stages while overlapping computation across stages using micro-batches to maintain throughput.
 
-1.  **Significance (Quantitative):** Inter-stage communication transmits only the activation tensor at each stage boundary — for a hidden dimension of 8,192 at BF16 with micro-batch size 1, this is $8192 \times 2 = 16$ KB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes $(p-1)/m$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches — with $p=8$ stages and $m=32$ micro-batches, bubble overhead is 22 percent.
-2.  **Distinction (Durable):** Unlike tensor parallelism, which shards individual matrix multiplications within a single layer and requires AllReduce on every layer's output (demanding NVLink-class bandwidth within each stage), pipeline parallelism shards at layer boundaries and requires only point-to-point activation transfers between stages — tolerating InfiniBand bandwidth between nodes.
-3.  **Common Pitfall:** A frequent misconception is that adding more pipeline stages always improves throughput. The pipeline bubble fraction grows as $(p-1)/(m+p-1)$: with $p=16$ stages and $m=16$ micro-batches, 48 percent of compute is wasted idle — requiring large micro-batch counts ($m \gg p$) to keep the bubble below 10 percent, which in turn increases peak activation memory and the memory pressure on each stage.
+1.  **Significance (Quantitative):** Inter-stage communication transmits only the activation tensor at each stage boundary—for a hidden dimension of 8,192 at BF16 with micro-batch size 1, this is $8192 \times 2 = 16$ KB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes $(p-1)/m$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches—with $p=8$ stages and $m=32$ micro-batches, bubble overhead is 22 percent.
+2.  **Distinction (Durable):** Unlike tensor parallelism, which shards individual matrix multiplications within a single layer and requires AllReduce on every layer's output (demanding NVLink-class bandwidth within each stage), pipeline parallelism shards at layer boundaries and requires only point-to-point activation transfers between stages—tolerating InfiniBand bandwidth between nodes.
+3.  **Common Pitfall:** A frequent misconception is that adding more pipeline stages always improves throughput. The pipeline bubble fraction grows as $(p-1)/(m+p-1)$: with $p=16$ stages and $m=16$ micro-batches, 48 percent of compute is wasted idle—requiring large micro-batch counts ($m \gg p$) to keep the bubble below 10 percent, which in turn increases peak activation memory and the memory pressure on each stage.
 
 :::
 
@@ -1811,11 +1811,11 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 
 ::: {.callout-definition title="Tensor Parallelism"}
 
-***Tensor Parallelism***\index{Tensor Parallelism!definition} is a model parallelism technique that partitions individual tensor operations — primarily matrix multiplications — across multiple devices using column-parallel or row-parallel weight splits, requiring one AllReduce per transformer block to sum partial results from all participating devices.
+***Tensor Parallelism***\index{Tensor Parallelism!definition} is a model parallelism technique that partitions individual tensor operations—primarily matrix multiplications—across multiple devices using column-parallel or row-parallel weight splits, requiring one AllReduce per transformer block to sum partial results from all participating devices.
 
-1.  **Significance (Quantitative):** Megatron-LM style tensor parallelism places two AllReduce operations per transformer block — one after attention and one after the MLP — with each AllReduce transferring the activation tensor ($\text{hidden\_dim} \times \text{batch} \times 2$ bytes in BF16). At degree $t=8$ on NVLink with 900 GB/s bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (50 GB/s) takes 2–10 ms per layer — with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
+1.  **Significance (Quantitative):** Megatron-LM style tensor parallelism places two AllReduce operations per transformer block—one after attention and one after the MLP—with each AllReduce transferring the activation tensor ($\text{hidden\_dim} \times \text{batch} \times 2$ bytes in BF16). At degree $t=8$ on NVLink with 900 GB/s bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (50 GB/s) takes 2–10 ms per layer—with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
 2.  **Distinction (Durable):** Unlike pipeline parallelism, which communicates only at layer boundaries and transfers small activation slices, tensor parallelism synchronizes within every layer via AllReduce, making it sensitive to the per-operation latency of the interconnect and restricting it to within-node NVLink fabrics in practice.
-3.  **Common Pitfall:** A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately 900 GB/s bidirectional bandwidth; InfiniBand NDR delivers 50 GB/s — an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
+3.  **Common Pitfall:** A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately 900 GB/s bidirectional bandwidth; InfiniBand NDR delivers 50 GB/s—an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
 
 :::
 
@@ -1943,7 +1943,7 @@ In this regime, Parameter Servers (often rebranded as "Embedding Servers") shine
 2.  **Sparse Lookups**: Workers send a list of IDs to the PS.
 3.  **Sparse Updates**: The PS returns only the requested embedding vectors, not the full table.
 
-The **Sparse Pull / Sparse Push** pattern avoids the bandwidth bottleneck of dense AllReduce. Modern implementations like TorchRec or Meta's hierarchical sharding place "hot" embeddings on GPUs and "cold" embeddings on CPU PS nodes, creating a tiered memory hierarchy for model parameters.
+The **Sparse Pull/Sparse Push** pattern avoids the bandwidth bottleneck of dense AllReduce. Modern implementations like TorchRec or Meta's hierarchical sharding place "hot" embeddings on GPUs and "cold" embeddings on CPU PS nodes, creating a tiered memory hierarchy for model parameters.
 
 ### Expert parallelism (mixture of experts) {#sec-distributed-training-systems-systems-expert-parallelism-mixture-experts-bc45}
 
@@ -1985,7 +1985,7 @@ Model parallelism breaks the memory wall but introduces sequential dependencies 
 
 Model parallelism offers three principal advantages. Memory scaling enables training of models that exceed single-device capacity: with 8-way tensor parallelism, a `{python} FrontierTrainingContext.frontier_params_b_str`B model fits comfortably on A100s. Splitting the model also allows larger global batch sizes without out-of-memory errors, since each GPU processes a smaller parameter slice. The approach maps naturally to the physical structure of transformers, where attention heads split via tensor parallelism and layers split via pipeline parallelism.
 
-The advantages come at the cost of three fundamental limitations. Pipeline bubbles cause GPUs to sit idle while filling and draining the pipeline; the bubble fraction is $(P-1)/M$, where $P$ is pipeline stages and $M$ is microbatches, and achieving more than 90 percent efficiency requires $M \gg P$, which increases activation memory. Communication intensity in tensor parallelism is equally constraining: 2 AllReduce operations execute *per layer* on the critical path, demanding extremely high-bandwidth, low-latency interconnects (NVLink) and typically preventing scaling beyond a single node (8 GPUs) before hitting the bandwidth wall. Implementation complexity rounds out the trade-off, requiring invasive changes to the model definition — replacing standard linear layers with column-parallel and row-parallel variants — unlike data parallelism, which wraps the model externally without modifying internals.
+The advantages come at the cost of three fundamental limitations. Pipeline bubbles cause GPUs to sit idle while filling and draining the pipeline; the bubble fraction is $(P-1)/M$, where $P$ is pipeline stages and $M$ is microbatches, and achieving more than 90 percent efficiency requires $M \gg P$, which increases activation memory. Communication intensity in tensor parallelism is equally constraining: 2 AllReduce operations execute *per layer* on the critical path, demanding extremely high-bandwidth, low-latency interconnects (NVLink) and typically preventing scaling beyond a single node (8 GPUs) before hitting the bandwidth wall. Implementation complexity rounds out the trade-off, requiring invasive changes to the model definition—replacing standard linear layers with column-parallel and row-parallel variants—unlike data parallelism, which wraps the model externally without modifying internals.
 
 ## Advanced Training Primitives {#sec-distributed-training-advanced-primitives}
 
@@ -2322,11 +2322,11 @@ The parallelism strategies examined so far assume a single model being trained o
 
 Standard pretraining involves one model, one loss function, and one gradient stream. RLHF alignment, by contrast, orchestrates a *system of models* that interact during every training step. In the Proximal Policy Optimization (PPO) formulation [@ouyang2022training], four distinct models must operate in concert:
 
-1. The **policy model** (the model being aligned) requires full training state: parameters, gradients, optimizer moments, and activations. For a 70B parameter model in mixed precision with Adam, this consumes approximately 70B $\times$ (2 + 2 + 12) = 1,120 GB of memory — the same budget as standard pretraining.
+1. The **policy model** (the model being aligned) requires full training state: parameters, gradients, optimizer moments, and activations. For a 70B parameter model in mixed precision with Adam, this consumes approximately 70B $\times$ (2 + 2 + 12) = 1,120 GB of memory—the same budget as standard pretraining.
 
 2. The **reference model** (a frozen copy of the pretrained policy) requires only inference-mode memory: parameters in FP16/BF16 without gradients or optimizer state. The same 70B model in inference mode needs 70B $\times$ 2 = 140 GB, roughly 8$\times$ less than the training configuration. The reference model computes KL-divergence penalties that prevent the policy from drifting too far from the pretrained distribution.
 
-3. The **reward model** (typically a separate model trained on human preference data) also runs in inference mode. Reward models are often smaller than the policy — a 13B reward model requires approximately 26 GB in FP16 — but must process every generated sequence to produce scalar reward signals.
+3. The **reward model** (typically a separate model trained on human preference data) also runs in inference mode. Reward models are often smaller than the policy—a 13B reward model requires approximately 26 GB in FP16—but must process every generated sequence to produce scalar reward signals.
 
 4. The **value model** (the PPO critic that estimates expected future reward) requires its own training state. If the value model shares the policy's architecture, it adds another 1,120 GB of training memory; in practice, value models are often smaller or share the policy backbone with a separate value head, reducing this to 200--400 GB.
 
@@ -2334,19 +2334,19 @@ The aggregate memory demand of the four-model PPO system dwarfs standard pretrai
 
 ### Infrastructure asymmetry: training versus inference models {#sec-distributed-training-rlhf-asymmetry}
 
-The defining infrastructure challenge of RLHF is not the total memory footprint but the *asymmetry* between the models' compute profiles. The policy and value models require full backward passes with gradient computation, activation checkpointing, and optimizer updates — compute-intensive operations that benefit from tensor parallelism and high arithmetic intensity. The reference and reward models, by contrast, perform only forward passes: they are inference workloads embedded within a training loop, with memory access patterns dominated by KV cache management rather than gradient accumulation.
+The defining infrastructure challenge of RLHF is not the total memory footprint but the *asymmetry* between the models' compute profiles. The policy and value models require full backward passes with gradient computation, activation checkpointing, and optimizer updates—compute-intensive operations that benefit from tensor parallelism and high arithmetic intensity. The reference and reward models, by contrast, perform only forward passes: they are inference workloads embedded within a training loop, with memory access patterns dominated by KV cache management rather than gradient accumulation.
 
-The asymmetry creates a placement dilemma. Co-locating training and inference models on the same GPUs wastes compute during the generation phase (when the training models sit idle) and wastes memory during the gradient phase (when the inference models' parameter storage could be reclaimed for activations). Separating them onto dedicated GPU pools eliminates waste but introduces network latency for reward queries — each generated token batch must traverse the interconnect to reach the reward model and return a scalar signal before the policy gradient can be computed.
+The asymmetry creates a placement dilemma. Co-locating training and inference models on the same GPUs wastes compute during the generation phase (when the training models sit idle) and wastes memory during the gradient phase (when the inference models' parameter storage could be reclaimed for activations). Separating them onto dedicated GPU pools eliminates waste but introduces network latency for reward queries—each generated token batch must traverse the interconnect to reach the reward model and return a scalar signal before the policy gradient can be computed.
 
-The generation phase itself introduces a sequential bottleneck absent from standard pretraining. RLHF requires the policy model to *generate* complete sequences (typically 256--2,048 tokens) autoregressively before computing rewards and policy gradients. Autoregressive generation is memory-bandwidth-bound, not compute-bound: each token requires a full forward pass through the model to produce a single output token, with the KV cache growing by approximately $2 \times n_{layers} \times d_{model} \times 2$ bytes per token (in FP16). For a 70B model generating 1,024-token sequences with a batch of 256 prompts, the KV cache alone consumes $2 \times 80 \times 8192 \times 1024 \times 256 \times 2 \approx 172$ GB — more than two H100 GPUs' worth of HBM, dedicated entirely to storing intermediate attention state that is discarded after reward computation.
+The generation phase itself introduces a sequential bottleneck absent from standard pretraining. RLHF requires the policy model to *generate* complete sequences (typically 256--2,048 tokens) autoregressively before computing rewards and policy gradients. Autoregressive generation is memory-bandwidth-bound, not compute-bound: each token requires a full forward pass through the model to produce a single output token, with the KV cache growing by approximately $2 \times n_{layers} \times d_{model} \times 2$ bytes per token (in FP16). For a 70B model generating 1,024-token sequences with a batch of 256 prompts, the KV cache alone consumes $2 \times 80 \times 8192 \times 1024 \times 256 \times 2 \approx 172$ GB—more than two H100 GPUs' worth of HBM, dedicated entirely to storing intermediate attention state that is discarded after reward computation.
 
-Production RLHF systems address this asymmetry through temporal multiplexing. During the generation phase, the cluster operates as an inference system: the policy model generates sequences while the reference model computes log-probabilities, both using inference-optimized kernels (continuous batching, speculative decoding, PagedAttention for KV cache management). During the training phase, the cluster switches to training mode: gradients are computed through the policy and value models using the standard 3D parallelism configuration. This two-phase approach recovers most of the efficiency lost to model asymmetry but requires the orchestration layer to manage the transition between inference and training configurations — a scheduling challenge that standard training frameworks do not address.
+Production RLHF systems address this asymmetry through temporal multiplexing. During the generation phase, the cluster operates as an inference system: the policy model generates sequences while the reference model computes log-probabilities, both using inference-optimized kernels (continuous batching, speculative decoding, PagedAttention for KV cache management). During the training phase, the cluster switches to training mode: gradients are computed through the policy and value models using the standard 3D parallelism configuration. This two-phase approach recovers most of the efficiency lost to model asymmetry but requires the orchestration layer to manage the transition between inference and training configurations—a scheduling challenge that standard training frameworks do not address.
 
 ### DPO: Simplifying the fleet {#sec-distributed-training-rlhf-dpo}
 
 Direct Preference Optimization (DPO) [@rafailov2024direct] eliminates the reward model and value model entirely by reformulating the alignment objective as a classification loss over preference pairs. Instead of generating sequences, computing rewards, and estimating advantages, DPO directly optimizes the policy to assign higher log-probability to preferred responses over dispreferred ones, using the reference model only to compute a KL-divergence regularization term.
 
-The infrastructure implications are substantial. DPO reduces the multi-model system from four models to two: the policy model (training mode) and the reference model (inference mode). For our 70B example, the memory budget drops from 2,406 GB to 1,120 + 140 = 1,260 GB — a 48 percent reduction that cuts the minimum GPU count roughly in half. DPO also eliminates the autoregressive generation phase entirely. Training operates on a fixed dataset of (prompt, preferred response, dispreferred response) triples, restoring the standard pretraining data pipeline: fixed-length sequences, deterministic batching, and no sequential token-by-token generation. The training loop becomes a standard supervised learning step with a modified loss function, amenable to the same 3D parallelism, gradient accumulation, and communication overlap techniques used for pretraining.
+The infrastructure implications are substantial. DPO reduces the multi-model system from four models to two: the policy model (training mode) and the reference model (inference mode). For our 70B example, the memory budget drops from 2,406 GB to 1,120 + 140 = 1,260 GB—a 48 percent reduction that cuts the minimum GPU count roughly in half. DPO also eliminates the autoregressive generation phase entirely. Training operates on a fixed dataset of (prompt, preferred response, dispreferred response) triples, restoring the standard pretraining data pipeline: fixed-length sequences, deterministic batching, and no sequential token-by-token generation. The training loop becomes a standard supervised learning step with a modified loss function, amenable to the same 3D parallelism, gradient accumulation, and communication overlap techniques used for pretraining.
 
 The trade-off is capability. DPO operates on a static preference dataset, meaning the policy cannot explore new responses and receive feedback during training. PPO's online generation allows the policy to improve iteratively on its own outputs, potentially discovering better strategies that the static dataset does not contain. For deployment scenarios where the preference data comprehensively covers the target distribution, DPO's infrastructure simplification dominates. For scenarios requiring adaptive exploration (training models to solve novel reasoning tasks, for example), PPO's online feedback loop may justify the 2$\times$ infrastructure overhead.
 
@@ -2395,14 +2395,14 @@ class RLHFBudget:
     policy_mem = policy_b * bytes_train
     ref_mem = ref_b * bytes_infer
     n_gpus = tp * pp
-    policy_per_gpu = policy_mem / n_gpus
-    ref_per_gpu = ref_mem / n_gpus
-    ref_per_gpu_sep = ref_mem / tp
+    policy_per_gpu = policy_mem/n_gpus
+    ref_per_gpu = ref_mem/n_gpus
+    ref_per_gpu_sep = ref_mem/tp
     reward_mem = reward_b * bytes_infer
     value_mem = value_b * bytes_train
     static_per_gpu = policy_per_gpu + ref_per_gpu
     remaining = h100_mem - static_per_gpu
-    kv_per_gpu = kv_total_gb / n_gpus
+    kv_per_gpu = kv_total_gb/n_gpus
     remaining_after_kv = remaining - kv_per_gpu
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2441,7 +2441,7 @@ Total static memory (co-located policy + reference on `{python} RLHFBudget.n_gpu
 
 The policy model uses the same `{python} RLHFBudget.policy_per_gpu_str` GB per GPU. The reference model adds `{python} RLHFBudget.ref_per_gpu_str` GB per GPU (co-located). No reward model, no value model, no KV cache for generation.
 
-Total static memory: `{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` = `{python} RLHFBudget.static_per_gpu_str` GB per GPU — identical to PPO's static footprint, but without the generation-phase KV cache burden. The full $\sim$ `{python} RLHFBudget.remaining_str` GB remaining is available for training activations, permitting 2$\times$ larger micro-batch sizes or eliminating the need for activation checkpointing that PPO requires.
+Total static memory: `{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` = `{python} RLHFBudget.static_per_gpu_str` GB per GPU—identical to PPO's static footprint, but without the generation-phase KV cache burden. The full $\sim$ `{python} RLHFBudget.remaining_str` GB remaining is available for training activations, permitting 2$\times$ larger micro-batch sizes or eliminating the need for activation checkpointing that PPO requires.
 
 **Throughput Comparison**
 
@@ -2594,9 +2594,9 @@ class YoungDaly:
 
     t_opt_min_val = math.sqrt(2 * c_min * mtbf_min)
 
-    # Overhead: (C / T_opt) + (T_opt / 2 * MTBF)
+    # Overhead: (C/T_opt) + (T_opt / 2 * MTBF)
     # (Simplified Young-Daly first-order approximation)
-    ckpt_overhead = c_min / t_opt_min_val
+    ckpt_overhead = c_min/t_opt_min_val
     rework_overhead = (t_opt_min_val / 2) / mtbf_min
     total_overhead = ckpt_overhead + rework_overhead
 
