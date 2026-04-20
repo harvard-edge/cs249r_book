@@ -24,7 +24,7 @@ Each milestone script imports **YOUR code** from the TinyTorch package you built
 
 ## Quick Start
 
-<div style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
+<div class="milestones-quickstart-box" style="background: #f8f9fa; padding: 1.5rem; border: 1px solid #dee2e6; border-radius: 0.5rem; margin: 1.5rem 0;">
 
 **Typical workflow:**
 
