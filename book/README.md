@@ -41,11 +41,13 @@ This directory contains the textbook source and build system for contributors.
 
 ## What You Will Learn
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="50%">ML Concepts</th>
-      <th width="50%">Systems Engineering</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">ML Concepts</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">Systems Engineering</th>
     </tr>
   </thead>
   <tbody>
@@ -71,14 +73,19 @@ This directory contains the textbook source and build system for contributors.
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ### The ML ↔ Systems Bridge
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="50%">You know...</th>
-      <th width="50%">You will learn...</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">You know...</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">You will learn...</th>
     </tr>
   </thead>
   <tbody>
@@ -104,17 +111,22 @@ This directory contains the textbook source and build system for contributors.
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ### Book Structure
 
 This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="20%">Volume</th>
-      <th width="30%">Theme</th>
-      <th width="50%">Focus</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Volume</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="30%">Theme</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">Focus</th>
     </tr>
   </thead>
   <tbody>
@@ -130,15 +142,20 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 #### Volume I: Build, Optimize, Deploy
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="20%">Part</th>
-      <th width="25%">Focus</th>
-      <th width="55%">Chapters</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Part</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Focus</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="55%">Chapters</th>
     </tr>
   </thead>
   <tbody>
@@ -164,15 +181,20 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 #### Volume II: Scale, Distribute, Govern
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Part</th>
-      <th width="20%">Focus</th>
-      <th width="55%">Chapters</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Part</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Focus</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="55%">Chapters</th>
     </tr>
   </thead>
   <tbody>
@@ -198,6 +220,9 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 
@@ -276,11 +301,13 @@ book/
 
 ## Documentation
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="20%">Audience</th>
-      <th width="80%">Resources</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Audience</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="80%">Resources</th>
     </tr>
   </thead>
   <tbody>
@@ -298,6 +325,9 @@ book/
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 Binder is the public automation API for book build/validate/maintenance workflows.
 Use Binder subcommands in editor integrations and CI where possible.
@@ -319,11 +349,13 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
 
 ## Related
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="30%">Component</th>
-      <th width="70%">Description</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="30%">Component</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Description</th>
     </tr>
   </thead>
   <tbody>
@@ -345,6 +377,9 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 

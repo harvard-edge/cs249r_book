@@ -100,12 +100,14 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ## Current Status
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="33%">Ready</th>
-      <th width="33%">In Progress</th>
-      <th width="34%">Coming Soon</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="33%">Ready</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="33%">In Progress</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="34%">Coming Soon</th>
     </tr>
   </thead>
   <tbody>
@@ -131,6 +133,9 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
@@ -142,12 +147,14 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 Build your framework through four progressive parts:
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="20%">Part</th>
-      <th width="15%">Modules</th>
-      <th width="65%">What You Build</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Part</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="15%">Modules</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="65%">What You Build</th>
     </tr>
   </thead>
   <tbody>
@@ -173,6 +180,9 @@ Build your framework through four progressive parts:
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 Each module asks: **"Can I build this capability from scratch?"**
 
@@ -184,12 +194,14 @@ Each module asks: **"Can I build this capability from scratch?"**
 
 As you progress, unlock recreations of landmark ML achievements:
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="15%">Year</th>
-      <th width="35%">Milestone</th>
-      <th width="50%">Your Achievement</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="15%">Year</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="35%">Milestone</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">Your Achievement</th>
     </tr>
   </thead>
   <tbody>
@@ -225,6 +237,9 @@ As you progress, unlock recreations of landmark ML achievements:
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 **These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
 
@@ -254,11 +269,13 @@ model.fit(X, y)  # Magic happens
 
 ## Documentation
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Audience</th>
-      <th width="75%">Resources</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Audience</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="75%">Resources</th>
     </tr>
   </thead>
   <tbody>
@@ -276,6 +293,9 @@ model.fit(X, y)  # Magic happens
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 

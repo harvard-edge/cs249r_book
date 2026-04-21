@@ -40,11 +40,13 @@ This is where AI systems meet the physical world.
 
 ## 🎓 What You Will Learn
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Concept</th>
-      <th width="75%">What You Do</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Concept</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="75%">What You Do</th>
     </tr>
   </thead>
   <tbody>
@@ -74,15 +76,20 @@ This is where AI systems meet the physical world.
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ### 🛠️ Hardware Platforms
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Platform</th>
-      <th width="50%">Description</th>
-      <th width="25%">Best For</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Platform</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">Description</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Best For</th>
     </tr>
   </thead>
   <tbody>
@@ -108,6 +115,9 @@ This is where AI systems meet the physical world.
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 
@@ -140,12 +150,14 @@ This is where AI systems meet the physical world.
 
 Each platform includes progressive labs:
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Lab</th>
-      <th width="50%">What You Build</th>
-      <th width="25%">Skills</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Lab</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">What You Build</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Skills</th>
     </tr>
   </thead>
   <tbody>
@@ -176,6 +188,9 @@ Each platform includes progressive labs:
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 
@@ -201,7 +216,15 @@ kits/
 
 ## 📚 Documentation
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Who</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="80%">Resources</th>
+    </tr>
+  </thead>
   <tbody>
     <tr>
       <td width="20%" align="center"><b>Learners</b></td>
@@ -212,7 +235,9 @@ kits/
       <td>See build instructions above</td>
     </tr>
   </tbody>
+</table></td></tr>
 </table>
+</div>
 
 ---
 
@@ -229,7 +254,15 @@ We welcome contributions to the hardware labs! To contribute:
 
 ## 🔗 Related
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Component</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="75%">Description</th>
+    </tr>
+  </thead>
   <tbody>
     <tr>
       <td width="25%" align="center"><b><a href="../README.md">Main README</a></b></td>
@@ -248,7 +281,9 @@ We welcome contributions to the hardware labs! To contribute:
       <td>Read labs online</td>
     </tr>
   </tbody>
+</table></td></tr>
 </table>
+</div>
 
 ---
 

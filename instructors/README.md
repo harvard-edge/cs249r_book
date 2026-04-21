@@ -21,7 +21,15 @@
 
 "The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course.
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Area</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="80%">What you get</th>
+    </tr>
+  </thead>
   <tbody>
     <tr>
       <td width="15%" align="center"><b>📅 Syllabi</b></td>
@@ -48,7 +56,9 @@
       <td><b>FAQ</b> for adopting instructors.</td>
     </tr>
   </tbody>
+</table></td></tr>
 </table>
+</div>
 
 ---
 

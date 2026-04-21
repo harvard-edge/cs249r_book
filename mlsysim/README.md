@@ -141,14 +141,28 @@ MLSysim is an **analytical hardware calculator**, not a production deployment si
 The 22 walls model physical and economic constraints that bound ML system performance.
 Several critical production concerns are deliberately **out of scope**:
 
-| Concern | Why It Matters | Where to Learn More |
-|---------|---------------|-------------------|
-| **Data drift / distribution shift** | The #1 cause of production ML failures — model accuracy degrades silently as input distributions change | Sculley et al. (2015), "Hidden Technical Debt in ML Systems" |
-| **Model versioning & rollback** | Production requires running multiple versions, A/B testing, and safe rollback | Huyen (2022), *Designing Machine Learning Systems* |
-| **Monitoring & observability** | You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates | Google SRE Book (2016); Huyen (2022) |
-| **Feature store freshness** | Stale features silently degrade real-time models (recommendations, fraud detection) | Uber Michelangelo (2017) |
-| **Software bugs & misconfigurations** | Most outages are caused by software, not hardware | Barroso et al. (2018) |
-| **Human factors** | Team velocity, on-call burden, and organizational alignment often dominate outcomes | Brooks (1975), *The Mythical Man-Month* |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="22%">Concern</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="38%">Why it matters</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Where to learn more</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td><b>Data drift / distribution shift</b></td><td>The #1 cause of production ML failures — model accuracy degrades silently as input distributions change</td><td>Sculley et al. (2015), &quot;Hidden Technical Debt in ML Systems&quot;</td></tr>
+    <tr><td><b>Model versioning &amp; rollback</b></td><td>Production requires running multiple versions, A/B testing, and safe rollback</td><td>Huyen (2022), <i>Designing Machine Learning Systems</i></td></tr>
+    <tr bgcolor="#fafbfc"><td><b>Monitoring &amp; observability</b></td><td>You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates</td><td>Google SRE Book (2016); Huyen (2022)</td></tr>
+    <tr><td><b>Feature store freshness</b></td><td>Stale features silently degrade real-time models (recommendations, fraud detection)</td><td>Uber Michelangelo (2017)</td></tr>
+    <tr bgcolor="#fafbfc"><td><b>Software bugs &amp; misconfigurations</b></td><td>Most outages are caused by software, not hardware</td><td>Barroso et al. (2018)</td></tr>
+    <tr><td><b>Human factors</b></td><td>Team velocity, on-call burden, and organizational alignment often dominate outcomes</td><td>Brooks (1975), <i>The Mythical Man-Month</i></td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 **Passing all 22 walls is necessary but not sufficient for a successful production deployment.**
 
@@ -214,14 +228,28 @@ print(evaluation.scorecard())
 
 The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
 
-| Scenario | Efficiency | Rationale |
-|----------|-----------|-----------|
-| Training (Megatron-LM, large Transformer) | 0.40–0.55 | Well-optimized GEMM + FlashAttention |
-| Training (PyTorch eager, small model) | 0.08–0.15 | Kernel launch overhead dominates |
-| Inference decode, batch=1 | 0.01–0.05 | Memory-bound; compute nearly idle |
-| Inference decode, batch=32+ | 0.15–0.35 | Batch amortizes weight loading |
-| Inference prefill, long context | 0.30–0.50 | Compute-bound GEMM + attention |
-| TinyML (TFLite Micro on ESP32) | 0.05–0.15 | Interpreter overhead, no tensor cores |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Scenario</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="18%">Efficiency</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="42%">Rationale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td>Training (Megatron-LM, large Transformer)</td><td align="center">0.40–0.55</td><td>Well-optimized GEMM + FlashAttention</td></tr>
+    <tr><td>Training (PyTorch eager, small model)</td><td align="center">0.08–0.15</td><td>Kernel launch overhead dominates</td></tr>
+    <tr bgcolor="#fafbfc"><td>Inference decode, batch=1</td><td align="center">0.01–0.05</td><td>Memory-bound; compute nearly idle</td></tr>
+    <tr><td>Inference decode, batch=32+</td><td align="center">0.15–0.35</td><td>Batch amortizes weight loading</td></tr>
+    <tr bgcolor="#fafbfc"><td>Inference prefill, long context</td><td align="center">0.30–0.50</td><td>Compute-bound GEMM + attention</td></tr>
+    <tr><td>TinyML (TFLite Micro on ESP32)</td><td align="center">0.05–0.15</td><td>Interpreter overhead, no tensor cores</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 ---
 

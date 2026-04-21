@@ -55,12 +55,14 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
 
 ### Volume I: Foundations (17 labs · Single-machine ML systems)
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="5%">#</th>
-      <th width="25%">Slug</th>
-      <th width="70%">Title</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="5%">#</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Slug</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Title</th>
     </tr>
   </thead>
   <tbody>
@@ -151,15 +153,20 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ### Volume II: At Scale (16 labs · Distributed ML systems)
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="5%">#</th>
-      <th width="25%">Slug</th>
-      <th width="70%">Title</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="5%">#</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Slug</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Title</th>
     </tr>
   </thead>
   <tbody>
@@ -245,6 +252,9 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ## The Design Ledger
 
@@ -279,11 +289,13 @@ pytest tests/test_static.py -v
 
 ## Related Resources
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="30%">Resource</th>
-      <th width="70%">Description</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="30%">Resource</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Description</th>
     </tr>
   </thead>
   <tbody>
@@ -301,6 +313,9 @@ pytest tests/test_static.py -v
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 

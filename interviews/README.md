@@ -44,15 +44,32 @@
 
 StaffML is a free, open-source interview prep platform for ML systems engineers. Browse a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track. Built by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi), Harvard University.
 
-| Feature | Description |
-|---------|-------------|
-| **Vault** | Browse questions by area, topic, and difficulty |
-| **Practice** | Drill with spaced repetition and daily challenges |
-| **Gauntlet** | Timed mock interview sessions with self-assessment |
-| **Progress** | Track coverage across competency areas and tracks |
-| **Chains** | Deepening sequences from L1 Recall to L6+ Architect |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="22%">Feature</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="78%">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td><b>Vault</b></td><td>Browse questions by area, topic, and difficulty</td></tr>
+    <tr><td><b>Practice</b></td><td>Drill with spaced repetition and daily challenges</td></tr>
+    <tr bgcolor="#fafbfc"><td><b>Gauntlet</b></td><td>Timed mock interview sessions with self-assessment</td></tr>
+    <tr><td><b>Progress</b></td><td>Track coverage across competency areas and tracks</td></tr>
+    <tr bgcolor="#fafbfc"><td><b>Chains</b></td><td>Deepening sequences from L1 Recall to L6+ Architect</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
-> If StaffML helps your prep, **[give us a star](https://github.com/harvard-edge/cs249r_book)** — it helps others find this resource.
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="14" bgcolor="#f6f8fa"><tr><td align="center">
+<p align="center">If StaffML helps your prep, <b><a href="https://github.com/harvard-edge/cs249r_book">give us a star</a></b> — it helps others find this resource.</p>
+</td></tr></table>
+</div>
 
 **Data:** [`vault/corpus.json`](vault/corpus.json) · [`vault/taxonomy.json`](vault/taxonomy.json) · **App source:** [`staffml/`](staffml/)
 
@@ -62,12 +79,26 @@ StaffML is a free, open-source interview prep platform for ML systems engineers.
 
 Each track targets a different deployment regime — different physics, different constraints, different interview questions.
 
-| Track | Focus | Primary Constraint |
-|-------|-------|-------------------|
-| ☁️ **Cloud** | Data center training & serving | Memory bandwidth / network |
-| 🤖 **Edge** | Autonomous vehicles, robotics | Thermal envelope / real-time |
-| 📱 **Mobile** | On-device AI for smartphones | Battery life / shared resources |
-| 🔬 **TinyML** | Microcontroller & ultra-low-power | SRAM capacity / hard real-time |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="18%">Track</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="42%">Focus</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Primary constraint</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td>☁️ <b>Cloud</b></td><td>Data center training &amp; serving</td><td>Memory bandwidth / network</td></tr>
+    <tr><td>🤖 <b>Edge</b></td><td>Autonomous vehicles, robotics</td><td>Thermal envelope / real-time</td></tr>
+    <tr bgcolor="#fafbfc"><td>📱 <b>Mobile</b></td><td>On-device AI for smartphones</td><td>Battery life / shared resources</td></tr>
+    <tr><td>🔬 <b>TinyML</b></td><td>Microcontroller &amp; ultra-low-power</td><td>SRAM capacity / hard real-time</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 ---
 
@@ -75,14 +106,29 @@ Each track targets a different deployment regime — different physics, differen
 
 Every question is tagged with a mastery level mapped to [Bloom's taxonomy](https://en.wikipedia.org/wiki/Bloom%27s_taxonomy):
 
-| Level | Name | Scope | What the interviewer hears |
-|-------|------|-------|---------------------------|
-| 🔵 **L1** | Recall | Own a task | "HBM is 300x slower than L1 cache." |
-| 🟢 **L2** | Understand | Own a task | "The Roofline model relates compute to memory bandwidth." |
-| 🟡 **L3** | Apply | Own a component | "This workload is memory-bound because its arithmetic intensity is below the ridge point." |
-| 🟠 **L4** | Analyze | Own a system | "Switching from A100 to H100 won't help because the ridge point shifts." |
-| 🔴 **L5** | Evaluate | Own the architecture | "Let me derive the optimal parallelism from the NVLink topology." |
-| 🟣 **L6+** | Architect | Own the org | "Here's a fault-tolerant training architecture for 1T params across 3 data centers." |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="12" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="10%">Level</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="12%">Name</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="14%">Scope</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="64%">What the interviewer hears</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td>🔵 <b>L1</b></td><td>Recall</td><td>Own a task</td><td>&quot;HBM is 300x slower than L1 cache.&quot;</td></tr>
+    <tr><td>🟢 <b>L2</b></td><td>Understand</td><td>Own a task</td><td>&quot;The Roofline model relates compute to memory bandwidth.&quot;</td></tr>
+    <tr bgcolor="#fafbfc"><td>🟡 <b>L3</b></td><td>Apply</td><td>Own a component</td><td>&quot;This workload is memory-bound because its arithmetic intensity is below the ridge point.&quot;</td></tr>
+    <tr><td>🟠 <b>L4</b></td><td>Analyze</td><td>Own a system</td><td>&quot;Switching from A100 to H100 won&apos;t help because the ridge point shifts.&quot;</td></tr>
+    <tr bgcolor="#fafbfc"><td>🔴 <b>L5</b></td><td>Evaluate</td><td>Own the architecture</td><td>&quot;Let me derive the optimal parallelism from the NVLink topology.&quot;</td></tr>
+    <tr><td>🟣 <b>L6+</b></td><td>Architect</td><td>Own the org</td><td>&quot;Here&apos;s a fault-tolerant training architecture for 1T params across 3 data centers.&quot;</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 ---
 
@@ -92,29 +138,60 @@ Questions are organized into **chains** — sequences that deepen understanding 
 
 **Example: GPU Memory Hierarchy Chain (6 questions)**
 
-| Step | Level | Question |
-|------|-------|----------|
-| 1 | 🔵 L1 | The HBM vs L1 Latency Gap |
-| 2 | 🟢 L2 | The FP16 Model Footprint |
-| 3 | 🟡 L3 | KV Cache Memory for 7B Model Serving |
-| 4 | 🟠 L4 | OOM at Step 500 but Not Step 1 |
-| 5 | 🔴 L5 | CPU Offloading vs Activation Recomputation |
-| 6 | 🟣 L6+ | Memory Budget for High-Concurrency LLM Serving |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="10%">Step</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="14%">Level</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="76%">Question</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td align="center">1</td><td>🔵 L1</td><td>The HBM vs L1 Latency Gap</td></tr>
+    <tr><td align="center">2</td><td>🟢 L2</td><td>The FP16 Model Footprint</td></tr>
+    <tr bgcolor="#fafbfc"><td align="center">3</td><td>🟡 L3</td><td>KV Cache Memory for 7B Model Serving</td></tr>
+    <tr><td align="center">4</td><td>🟠 L4</td><td>OOM at Step 500 but Not Step 1</td></tr>
+    <tr bgcolor="#fafbfc"><td align="center">5</td><td>🔴 L5</td><td>CPU Offloading vs Activation Recomputation</td></tr>
+    <tr><td align="center">6</td><td>🟣 L6+</td><td>Memory Budget for High-Concurrency LLM Serving</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
-> The vault contains **1,000+ chains** across all tracks. In the app, chains appear after you answer a question — click "Next in chain" to go deeper.
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="14" bgcolor="#f6f8fa"><tr><td align="center">
+<p align="center">The vault contains <b>1,000+ chains</b> across all tracks. In the app, chains appear after you answer a question — click &quot;Next in chain&quot; to go deeper.</p>
+</td></tr></table>
+</div>
 
 ---
 
 ## Vault Stats
 
-| Metric | Count |
-|--------|-------|
-| Questions | 9,000+ |
-| Chains | 1,000+ |
-| Taxonomy Concepts | 650+ |
-| Competency Areas | 12 |
-| Deployment Tracks | 4 + Global |
-| Mastery Levels | L1–L6+ |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="45%">Metric</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="55%">Count</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td>Questions</td><td>9,000+</td></tr>
+    <tr><td>Chains</td><td>1,000+</td></tr>
+    <tr bgcolor="#fafbfc"><td>Taxonomy concepts</td><td>650+</td></tr>
+    <tr><td>Competency areas</td><td>12</td></tr>
+    <tr bgcolor="#fafbfc"><td>Deployment tracks</td><td>4 + Global</td></tr>
+    <tr><td>Mastery levels</td><td>L1–L6+</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 ---
 

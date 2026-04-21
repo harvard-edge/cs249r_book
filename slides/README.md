@@ -36,12 +36,14 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
 
 ## Coverage
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Volume</th>
-      <th width="15%">Chapters</th>
-      <th width="60%">Topics</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Volume</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="15%">Chapters</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="60%">Topics</th>
     </tr>
   </thead>
   <tbody>
@@ -57,6 +59,9 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ## Structure
 
