@@ -4231,26 +4231,28 @@ class ValidateCommand:
     def _run_heading_case(self, root: Path) -> ValidationRunResult:
         """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
 
-        Delegates to `book/tools/audit/heading_fix.py check`, which encodes
-        the ten sentence-case exceptions (acronyms, hyphenated-acronym
-        compounds, digit-letter models, single-letter labels, slash acronyms,
-        CamelCase product names, lowercase API names, math spans, named
-        laws, legislation) and compound proper nouns. Running in `check`
-        mode is idempotent on a compliant tree — zero changes proposed,
-        zero output. On a regression, the script prints the offending
-        line(s) and the expected sentence-case form, exits non-zero.
+        Native implementation: imports from cli.commands.headings directly.
+        Emits one ValidationIssue per violation with the offending current
+        form and the expected sentence-case form.
         """
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "audit" / "heading_fix.py"
-        )
+        from cli.commands.headings import find_violations
+        t0 = time.time()
         qmd_files = [str(f) for f in sorted(root.rglob("*.qmd"))]
-        if not qmd_files:
-            return ValidationRunResult(
-                name="heading-case", description="heading-case",
-                files_checked=0, issues=[], elapsed_ms=0,
-            )
-        return self._delegate_script(script, ["check"] + qmd_files, "heading-case")
+        violations = find_violations(qmd_files)
+        issues: List[ValidationIssue] = []
+        for v in violations:
+            rel = v.path.replace(str(root) + "/", "")
+            issues.append(ValidationIssue(
+                file=rel, line=v.line, code="heading-case",
+                message=f"expected: {v.expected.strip()}",
+                severity="error", context=v.current.strip(),
+            ))
+        return ValidationRunResult(
+            name="heading-case",
+            description="H1/H2 headline + H3+ sentence case (§10.3.1)",
+            files_checked=len(qmd_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
 
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
         """Validate .bib files against §5 Bibliography Hygiene schema.
