@@ -8,6 +8,26 @@ MLPerf EDU brings industry-standard ML benchmarking to the classroom. Every mode
 
 ---
 
+<!-- EARLY-RELEASE-CALLOUT:START -->
+<div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">MLPerf EDU ships alongside the <b>2026</b> MLSysBook ecosystem. Workloads, harness scripts, compliance checks, and teaching notes are <b>actively iterated</b> as we align classroom benchmarks with the core curriculum.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+
+</td></tr>
+</table>
+
+</td></tr>
+</table>
+</div>
+<!-- EARLY-RELEASE-CALLOUT:END -->
+
 ## Quick Start
 
 ```bash

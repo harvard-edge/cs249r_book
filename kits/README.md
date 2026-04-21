@@ -10,6 +10,26 @@
 
 ---
 
+<!-- EARLY-RELEASE-CALLOUT:START -->
+<div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">Hardware Kits shipped with the <b>2026</b> MLSysBook refresh. Labs, build recipes, board notes, and PDF exports are <b>actively iterated</b> as hardware and SDKs evolve.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+
+</td></tr>
+</table>
+
+</td></tr>
+</table>
+</div>
+<!-- EARLY-RELEASE-CALLOUT:END -->
+
 ## What This Is
 
 The Hardware Kits teach you how to deploy ML models to real embedded devices. You will face actual hardware constraints: limited memory, power budgets, and latency requirements that do not exist in cloud environments.
