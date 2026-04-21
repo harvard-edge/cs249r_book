@@ -125,7 +125,9 @@ class HumanReview(BaseModel):
 
 
 class Details(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Allow unknown keys: a few imported YAMLs carry legacy fields
+    # (e.g. details.question) that we preserve but do not validate strictly.
+    model_config = ConfigDict(extra="allow")
 
     realistic_solution: str
     common_mistake: str | None = None
