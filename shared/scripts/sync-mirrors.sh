@@ -41,6 +41,10 @@ SYNC_MAP=(
 # Mirrors that are intentionally NOT synced (different content per subsite):
 #   tinytorch/site-quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
 #   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
+#
+# SocratiQ Interactive Widget (Canonicals only, no mirrors needed):
+#   book/quarto/tools/scripts/socratiQ/bundle.js
+#   book/quarto/tools/scripts/socratiQ/assets/style.css
 
 stale=0
 synced=0
