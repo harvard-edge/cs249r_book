@@ -418,20 +418,28 @@ def _find_epubcheck_executable() -> list[str] | None:
     """Return a subprocess argv prefix for invoking epubcheck, or None.
 
     Preference order:
-      1. `epubcheck` on PATH (brew / apt install).
-      2. `python -m epubcheck` (the PyPI wrapper package, bundles the jar
-         and provides a CLI entry point — see `epubcheck` on PyPI).
+      1. `java -jar <bundled-jar>` when the `epubcheck` PyPI package is
+         importable. The PyPI package ships the official W3C epubcheck
+         jar and exposes its location as `epubcheck.const.EPUBCHECK`.
+         Its own `epubcheck` / `python -m epubcheck` entry points are a
+         thin wrapper with a reduced CLI (`[-x XLS] [-c CSV] [-r]`) that
+         does NOT support `--json`, so we bypass the wrapper and invoke
+         the jar directly to get the full Java CLI (including `--json -`
+         for JSON on stdout). This is what CI hits.
+      2. `epubcheck` on PATH (brew / apt install) — the real Java CLI.
       3. None — caller must emit an "epubcheck not available" message.
     """
+    try:
+        from epubcheck import const as _ec_const  # type: ignore
+        jar = getattr(_ec_const, "EPUBCHECK", None)
+        java = getattr(_ec_const, "JAVA", "java") or "java"
+        if jar and Path(jar).is_file():
+            return [java, "-jar", jar]
+    except ImportError:
+        pass
     if shutil.which("epubcheck"):
         return ["epubcheck"]
-    # The PyPI package installs an `epubcheck` command too (handled by 1),
-    # but on some systems the command lives only as a module. Try both.
-    try:
-        import epubcheck  # noqa: F401
-        return ["python3", "-m", "epubcheck"]
-    except ImportError:
-        return None
+    return None
 
 
 def _discover_built_epubs(repo_root: Path) -> list[Path]:
