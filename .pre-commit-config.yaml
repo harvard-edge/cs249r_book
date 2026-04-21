@@ -1,15 +1,18 @@
 # MLSysBook Pre-commit Configuration
 # =============================================================================
-# Combined configuration for both Book and TinyTorch projects
+# Shared configuration covering the book, TinyTorch, CI, and StaffML vault.
 #
-# Install: pip install pre-commit && pre-commit install
-# Run all: pre-commit run --all-files
-# Run specific hook: pre-commit run <hook-id> --all-files
+# Install:           pip install pre-commit && pre-commit install
+# Run all hooks:     pre-commit run --all-files
+# Run one hook:      pre-commit run <hook-id> --all-files
+# Run manual hook:   pre-commit run --hook-stage manual <hook-id>
 #
 # STRUCTURE:
-#   1. GLOBAL HOOKS - Apply to entire repo
-#   2. BOOK HOOKS - Quarto content validation (book/ directory)
-#   3. TINYTORCH HOOKS - CLI and module validation (tinytorch/ directory)
+#   1. GLOBAL HOOKS  - Repo-wide hygiene + third-party formatters/checkers
+#   2. BOOK HOOKS    - Quarto content validation (book/quarto/contents/)
+#   3. CI SANITY     - GitHub Actions workflow hygiene (.github/workflows/)
+#   4. STAFFML HOOKS - Vault data validation (interviews/)
+#   *  DISABLED      - Commented-out hooks kept as documented reference
 # =============================================================================
 
 repos:
@@ -17,6 +20,7 @@ repos:
   # SECTION 1: GLOBAL HOOKS (apply to entire repo)
   # ===========================================================================
 
+  # --- Global: Syntax + spelling hygiene (third-party) ---
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -37,6 +41,19 @@ repos:
       - id: check-yaml
         name: "Global: Validate YAML syntax"
         exclude: "^(_site/)"
+      - id: check-merge-conflict
+        name: "Global: Block unresolved merge-conflict markers"
+      - id: check-added-large-files
+        name: "Global: Block accidentally committed large files (>5 MB)"
+        # 5 MB is comfortably larger than normal PNG/SVG figures but
+        # catches datasets, model weights, and video assets that do
+        # not belong in the repo. Raise selectively via a per-hook
+        # override if a legitimate large asset must be added.
+        args: ["--maxkb=5120"]
+      - id: detect-private-key
+        name: "Global: Detect committed private keys"
+      - id: check-case-conflict
+        name: "Global: Block filename case collisions (macOS/Linux)"
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.3.0
@@ -46,6 +63,46 @@ repos:
         args: ["--skip", "*.json,*.bib,*.js,*.tex,*.pdf,_site,_book,node_modules,.venv,htmlcov", "--ignore-words", ".codespell-ignore-words.txt"]
         exclude: "^(_site/|_book/|htmlcov/|.*\\.js$|.*\\.pdf$)"
 
+  # --- Global: Bibliography (format + semantic) ---
+  # Repo-wide bibtex auto-formatter. Matches every .bib file in the repo
+  # (book/, tinytorch/paper/, anywhere else). The bib-lint hook below runs
+  # after this one so it validates the post-tidy state.
+  - repo: https://github.com/FlamingTempura/bibtex-tidy
+    rev: v1.14.0
+    hooks:
+      - id: bibtex-tidy
+        name: "Global: Tidy bibtex files (format)"
+        args: [
+          '--align=space',
+          '--curly',
+          '--sort=key',
+          '--sort-fields',
+          '--duplicates=key',
+          '--remove-empty-fields',
+          '--space=2',
+          '--trailing-commas',
+          '--escape',
+          '--wrap=100',
+          '--blank-lines'
+        ]
+        files: \.bib$
+
+  # Repo-wide bibtex semantic validator (§5 Bibliography Hygiene).
+  # Runs AFTER bibtex-tidy so it validates the post-tidy state. Uses the
+  # baseline allow-list at book/tools/bib_lint_baseline.json to grandfather
+  # pre-existing violations — only NEW violations block the commit.
+  # Regenerate baseline via: python3 book/tools/bib_lint.py --all --baseline
+  # (do this only when intentionally accepting new violations).
+  - repo: local
+    hooks:
+      - id: bib-lint
+        name: "Global: Validate bibtex against §5 (semantic)"
+        entry: python3 book/tools/bib_lint.py --check
+        language: system
+        pass_filenames: true
+        files: \.bib$
+
+  # --- Global: Local repo guards ---
   # Vault corpus guard — refuses direct edits to the generated
   # `interviews/vault/corpus.json` unless the commit carries the
   # `Vault-Override: corpus-json-hand-edit` trailer. The underlying
@@ -85,10 +142,11 @@ repos:
         pass_filenames: false
         always_run: true
 
-  # --- Repo-wide internal link integrity (Tier 1 of release-prep link strategy) ---
-  # Validates relative-path markdown links and same-file anchors in changed
-  # .md/.qmd files. External (http/https) links are NOT checked here — that's
-  # Lychee's job in CI (Tier 2 per-site validate, Tier 3 nightly rot scan).
+  # Repo-wide internal link integrity (Tier 1 of the release-prep link
+  # strategy). Validates relative-path markdown links and same-file anchors
+  # in changed .md/.qmd files. External (http/https) links are NOT checked
+  # here — that's Lychee's job in CI (Tier 2 per-site validate, Tier 3
+  # nightly rot scan).
   # See: shared/scripts/check-internal-links.py for scope and rationale.
   - repo: local
     hooks:
@@ -120,6 +178,9 @@ repos:
   # ===========================================================================
 
   # --- Book: Auto-formatters ---
+  # Formatters mutate files; they run before validators so downstream
+  # checks see the already-formatted source. Order within the block goes
+  # structure → whitespace → lists → tables.
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.9
     hooks:
@@ -129,43 +190,6 @@ repos:
         files: ^book/quarto/contents/.*\.qmd$
         pass_filenames: true
 
-  - repo: https://github.com/FlamingTempura/bibtex-tidy
-    rev: v1.14.0
-    hooks:
-      - id: bibtex-tidy
-        name: "Repo: Tidy bibtex files (format)"
-        args: [
-          '--align=space',
-          '--curly',
-          '--sort=key',
-          '--sort-fields',
-          '--duplicates=key',
-          '--remove-empty-fields',
-          '--space=2',
-          '--trailing-commas',
-          '--escape',
-          '--wrap=100',
-          '--blank-lines'
-        ]
-        files: \.bib$
-
-  # --- Repo-wide bibtex semantic validator (§5 Bibliography Hygiene) ---
-  # Runs AFTER bibtex-tidy so it validates the post-tidy state. Uses the
-  # baseline allow-list at book/tools/bib_lint_baseline.json to
-  # grandfather pre-existing violations — only NEW violations block
-  # the commit. Regenerate baseline via: python3 book/tools/bib_lint.py
-  # --all --baseline (do this only when intentionally accepting new
-  # violations after a sweep closes).
-  - repo: local
-    hooks:
-      - id: bib-lint
-        name: "Repo: Validate bibtex against §5 (semantic)"
-        entry: python3 book/tools/bib_lint.py --check
-        language: system
-        pass_filenames: true
-        files: \.bib$
-
-  # --- Book: Content validators ---
   - repo: local
     hooks:
       - id: book-format-python
@@ -189,6 +213,16 @@ repos:
         pass_filenames: true
         files: ^book/quarto/contents/.*\.qmd$
 
+      - id: book-prettify-pipe-tables
+        name: "Book: Prettify pipe tables (align columns)"
+        entry: ./book/binder format prettify
+        language: system
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
+
+  # --- Book: Content validators ---
+  - repo: local
+    hooks:
       - id: book-validate-json
         name: "Book: Validate JSON files"
         entry: ./book/binder check json
@@ -294,13 +328,6 @@ repos:
         entry: ./book/binder check rendering --scope grid-tables
         language: system
         pass_filenames: false
-        files: ^book/quarto/contents/.*\.qmd$
-
-      - id: book-prettify-pipe-tables
-        name: "Book: Prettify pipe tables (align columns)"
-        entry: ./book/binder format prettify
-        language: system
-        pass_filenames: true
         files: ^book/quarto/contents/.*\.qmd$
 
       - id: book-check-render-patterns
@@ -470,7 +497,6 @@ repos:
         pass_filenames: false
         files: ^book/quarto/contents/.*\.qmd$
 
-
       - id: mitpress-vs-period
         name: "MIT Press: Use vs. with period (not bare vs)"
         entry: ./book/binder check rendering --scope mitpress-vs-period
@@ -547,38 +573,12 @@ repos:
         stages: [manual]
 
   # ===========================================================================
-  # SECTION 3: TINYTORCH HOOKS (CLI and module validation)
-  # Files: tinytorch/**/*.md, tinytorch/**/*.py
-  # ===========================================================================
-
-  # --- TinyTorch: Auto-formatters ---
-  - repo: https://github.com/FlamingTempura/bibtex-tidy
-    rev: v1.14.0
-    hooks:
-      - id: bibtex-tidy
-        name: "TinyTorch: Tidy paper bibtex"
-        args: [
-          '--align=space',
-          '--curly',
-          '--sort=key',
-          '--sort-fields',
-          '--duplicates=key',
-          '--remove-empty-fields',
-          '--space=2',
-          '--trailing-commas',
-          '--escape',
-          '--wrap=100',
-          '--blank-lines'
-        ]
-        files: ^tinytorch/paper/.*\.bib$
-
-  # --- TinyTorch: Content validators ---
-  # Removed: TinyTorch has its own CLI validation system
-
-  # ===========================================================================
-  # SECTION 3.5: CI SANITY (workflow hygiene)
+  # SECTION 3: CI SANITY (GitHub Actions workflow hygiene)
   # Files: .github/workflows/*.yml
   # ===========================================================================
+  # NOTE: TinyTorch bibtex files are covered by the repo-wide `bibtex-tidy`
+  # and `bib-lint` hooks in Section 1. TinyTorch also has its own CLI
+  # validation system for module content — not duplicated here.
 
   - repo: local
     hooks:
@@ -615,9 +615,11 @@ repos:
   #       files: ^book/quarto/contents/.*\.qmd$
   #       args: ["--quiet", "-c", "config/linting/.mdlintconfig.yml"]
 
-  # - id: book-yamllint
-  #   name: "Book: Validate YAML files"
-  #   entry: yamllint
-  #   language: system
-  #   args: [--config-file=.yamllint]
-  #   files: ^book/.*\.(yml|yaml)$
+  # - repo: local
+  #   hooks:
+  #     - id: book-yamllint
+  #       name: "Book: Validate YAML files"
+  #       entry: yamllint
+  #       language: system
+  #       args: [--config-file=.yamllint]
+  #       files: ^book/.*\.(yml|yaml)$
