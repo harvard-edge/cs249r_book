@@ -39,6 +39,15 @@ from vault_cli.commands import (
     lint as lint_cmd_mod,
 )
 from vault_cli.commands import (
+    ls as ls_cmd_mod,
+)
+from vault_cli.commands import (
+    show as show_cmd_mod,
+)
+from vault_cli.commands import (
+    chain as chain_cmd_mod,
+)
+from vault_cli.commands import (
     promote as promote_cmd_mod,
 )
 from vault_cli.commands import (
@@ -75,6 +84,9 @@ promote_cmd_mod.register(app)
 dup_cmd_mod.register(app)
 generate_cmd_mod.register(app)
 lint_cmd_mod.register(app)
+ls_cmd_mod.register(app)
+show_cmd_mod.register(app)
+chain_cmd_mod.register(app)
 
 
 def _version_callback(value: bool) -> None:
