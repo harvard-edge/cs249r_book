@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-1578
+track: cloud
+level: L4
+zone: diagnosis
+topic: mixture-of-experts
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: Diagnosing MoE Routing and OOM Bottlenecks
+scenario: You are serving an 8x7B Mixture of Experts (MoE) model (56B total parameters, 14B active per
+  token) across an 8x A100 80GB node using Expert Parallelism (1 expert per GPU). The total model weights
+  are ~112GB in FP16, easily fitting in the 640GB cluster memory. However, at a batch size of 256 and
+  sequence length of 2048, you experience intermittent Out-of-Memory (OOM) crashes on specific GPUs and
+  massive tail latency spikes. Standard metrics show average cluster GPU utilization is below 40%. Diagnose
+  the root cause of the OOM crashes and the latency degradation.
+details:
+  realistic_solution: The root cause is severe load imbalance (token skew) where the router sends a disproportionate
+    number of tokens to a single expert. This causes the target GPU to exceed its 80GB VRAM limit due
+    to localized activation and KV cache spikes, and serializes compute, causing tail latency. The fix
+    is to implement a strict expert capacity limit (token dropping/overflow to other experts) and combine
+    Expert Parallelism with Tensor Parallelism to distribute the hot expert's memory footprint.
+  common_mistake: Candidates often blame the total KV cache size or general all-to-all communication overhead,
+    missing that Expert Parallelism makes individual GPU memory and compute dependent on dynamic routing
+    distributions. They often suggest global batch size reduction instead of addressing expert imbalance.
+  napkin_math: 'Total VRAM: 8x80GB = 640GB. Model: 56B * 2B = 112GB (14GB/GPU). Remaining VRAM/GPU: 66GB.
+    Normal per-GPU KV/activations at balanced load (1/8th of tokens): ~8GB. If routing is heavily skewed
+    (e.g., 90% of tokens to Expert 2), GPU 2 processes ~470k tokens instead of 65k. The activation/KV
+    memory for 470k tokens on a single GPU balloons past the 66GB remaining headroom, causing an OOM on
+    GPU 2 while GPUs 0, 1, 3-7 sit idle with plenty of free memory.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-259
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T23:39:17.456643'

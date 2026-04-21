@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: mobile-0632
+track: mobile
+level: L5
+zone: specification
+topic: interconnect-topology
+competency_area: networking
+bloom_level: evaluate
+phase: inference
+title: The Multi-Node Latency Catastrophe
+scenario: Your team is launching an 'AI Stylizer' feature on a mobile app. It sends a user's photo to
+  a cloud-hosted generative model that runs distributed across 8 H100 GPUs. In staging, on a single server
+  with 8 GPUs connected by NVLink, the P99 latency is 2 seconds, which meets the product requirement.
+  To handle launch traffic, the backend is scaled to a large cluster of these 8-GPU servers, now connected
+  by InfiniBand NDR. Immediately after launch, the mobile app experiences frequent timeouts. Monitoring
+  shows the end-to-end P99 latency has shot up to 10 seconds, while average GPU utilization is only 60%.
+  Your infrastructure team says the servers are fine. Evaluate this system design. Why did latency increase
+  non-linearly instead of scaling gracefully, and what specific hardware interaction is the likely cause?
+details:
+  realistic_solution: The system is suffering from a 'Topology Lottery' where inference requests are crossing
+    the node boundary, forcing communication over a much slower interconnect. On a single server, all
+    inter-GPU communication for the 8-GPU model happens over the ultra-fast 900 GB/s NVLink bus. In the
+    multi-node cluster, the load balancer, unaware of topology, might route a request to a server where
+    some GPUs are busy. If the inference scheduler then grabs idle GPUs from a *different server* to assemble
+    its 8-GPU quorum, the model's intermediate tensors must traverse the much slower 50 GB/s InfiniBand
+    network. A single request is now bottlenecked by the slowest link it touches. The P99 latency explodes
+    because a fraction of users are 'unlucky' and their requests are forced to pay this massive communication
+    tax multiple times during a single inference pass. The fix is to implement topology-aware scheduling,
+    ensuring that a single inference request stays within one NVLink-connected server boundary whenever
+    possible.
+  common_mistake: The most common mistake is to blame the mobile-to-server network connection or suggest
+    generic solutions like 'add more servers.' Network RTT would add a constant offset to latency, not
+    a 5x non-linear explosion in the P99 tail. Adding more servers would exacerbate the problem if the
+    underlying topology issue isn't fixed.
+  napkin_math: 16GB tensor exchange. On a single server, 8 H100s use NVLink at 900GB/s per GPU. 16GB /
+    900GB/s = 17.7ms latency. On the cloud, distributing across nodes uses InfiniBand NDR (50GB/s). 16GB
+    / 50GB/s = 320ms latency per step! Network I/O becomes the severe bottleneck, expanding a 20ms step
+    to >300ms.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+chains:
+- id: mobile-chain-008
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

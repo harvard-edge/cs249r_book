@@ -1,0 +1,64 @@
+schema_version: '1.0'
+id: cloud-fill-00177
+track: cloud
+level: L4
+zone: diagnosis
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Diagnosing KV-Cache Eviction on Google TPU v5e
+scenario: You are running a large language model (LLM) with a context window of 32k tokens on a Google
+  TPU v5e (16 GB HBM, 197 TFLOPS BF16, 1.6 TB/s memory bandwidth). Recently, you've observed a significant
+  increase in latency and a decrease in throughput during inference, especially when processing longer
+  sequences. Monitoring shows spikes in memory utilization and frequent 'HBM out of memory' errors, despite
+  the total model parameters fitting comfortably within the 16 GB HBM. You suspect KV-cache thrashing.
+  How would you diagnose this issue on the TPU v5e, pinpointing the root cause, and what initial steps
+  would you take to mitigate it?
+details:
+  realistic_solution: The primary approach would be to refine KV-cache management. First, verify the KV-cache
+    memory usage profile by instrumenting the attention mechanism to log the number of active KV-cache
+    entries and their associated memory footprint over time. If 'paged attention' is enabled, analyze
+    its page utilization and fragmentation. Consider dynamic KV-cache sizing or more aggressive cache
+    eviction policies if the working set of KV-cache entries is smaller than the allocated capacity for
+    typical query patterns. Implementing a 'prefill' strategy for long contexts, where the KV-cache is
+    populated efficiently once and then used for subsequent token generation, can reduce redundant computation
+    and memory pressure. If the issue persists, explore quantization for the KV-cache keys and values,
+    or partitioning the attention mechanism to distribute KV-cache across multiple TPUs (if available
+    and feasible).
+  common_mistake: Immediately jumping to reducing model size or batch size without first understanding
+    the KV-cache's actual memory footprint and eviction behavior. Overlooking the possibility of inefficient
+    paged attention configurations or sub-optimal KV-cache sizing for the specific sequence lengths being
+    processed.
+  napkin_math: Assume each token's KV-cache entry requires 2 * hidden_dim * num_heads * 2 bytes (for float16).
+    If hidden_dim = 4096 and num_heads = 32, then each token requires ~512 KB. For a 32k context window,
+    the maximum KV-cache size would be 32,768 tokens * 512 KB/token = 16 GB. This calculation shows that
+    the KV-cache for a full 32k context could indeed consume the entire 16 GB HBM of the TPU v5e. This
+    leaves no room for model weights (even if quantized) or activations, explaining 'HBM out of memory'
+    errors. Paged attention aims to mitigate this by only storing active pages, but if many contexts are
+    active and long, or if fragmentation is high, it can still lead to thrashing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Napkin Math states 512KB/token for KV-cache, but calculation 2 * hidden_dim * num_heads * 2 bytes is
+  incorrect. It should be (hidden_dim * num_heads) * 2 * 2 bytes if hidden_dim is total per layer, or
+  (head_dim * num_heads) * 2 * 2 bytes if head_dim is per head.
+- Napkin Math section is incomplete.
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Mathematical calculation matches the stated numbers, but assumes an unusually large head_dim of 4096
+  (which would imply a hidden_size of 131072 with 32 heads).
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

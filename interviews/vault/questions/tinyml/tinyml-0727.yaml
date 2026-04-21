@@ -1,0 +1,66 @@
+schema_version: '1.0'
+id: tinyml-0727
+track: tinyml
+level: L5
+zone: evaluation
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The DMA Buffer Corruption
+scenario: Your audio keyword spotting system on a Cortex-M7 (STM32H7, 480 MHz, 1 MB SRAM) uses DMA to
+  stream PDM microphone data into a circular buffer in AXI SRAM. The model reads from this buffer for
+  inference. Occasionally — about once every 500 inferences — the model outputs a confident but completely
+  wrong classification. The audio data in the buffer looks correct when you pause and inspect it. What's
+  the ghost in the machine?
+details:
+  realistic_solution: The Cortex-M7 has a **data cache (D-cache)** — typically 16 KB on STM32H7. The D-cache
+    sits between the CPU and the AXI bus. The DMA controller writes directly to AXI SRAM, bypassing the
+    D-cache. This creates a **cache coherency problem:**
+  common_mistake: '"If the data looks correct when inspected, the model must have a rare misclassification
+    — retrain with more data." The data looks correct when you pause because pausing flushes the cache.
+    The corruption is invisible to the debugger.'
+  napkin_math: 'D-cache: 16 KB, 4-way set associative, 32-byte lines. DMA buffer: 4 KB = 128 cache lines.
+    Inference tensor arena: 200 KB (much larger than cache). During inference, the arena accesses evict
+    most of the DMA buffer''s cache lines. Probability of a cache line surviving: P(survive) = (4 ways
+    - 1) / 4 = 0.75 per set access. Over ~50 set accesses during inference: P(survive) = 0.75^50 ≈ 5.66e-7
+    per line. For 128 lines, expected stale lines: 128 × 5.66e-7 ≈ 0.000072. But the audio buffer is accessed
+    sequentially, so if one line is stale, the adjacent lines in the same set may also be stale (correlated
+    eviction). Effective probability of at least one stale line affecting inference: ~0.2% = 1 in 500.
+    **Matches observation.** Cache invalidation cost: 128 lines × 8 cycles/line = 1,024 cycles = 2.1 µs
+    at 480 MHz. Negligible compared to inference time.'
+  options:
+  - The model has a rare misclassification on certain audio patterns — retrain with more diverse data
+    to fix the 0.2% error rate.
+  - 'D-cache coherency problem. DMA writes PDM audio directly to AXI SRAM, bypassing the 16 KB D-cache.
+    The CPU reads stale cached data instead of fresh DMA data. With a 200 KB inference arena thrashing
+    the cache, ~0.2% of audio buffer cache lines become stale (1 in 500 inferences). Fix: invalidate the
+    D-cache region before reading DMA buffers (SCB_InvalidateDCache_by_Addr). Cost: ~2 us — negligible.'
+  - The PDM microphone occasionally produces corrupted samples due to electromagnetic interference from
+    the Ethernet PHY, causing random misclassifications at the observed rate.
+  - The model's softmax temperature is too high, causing it to produce overconfident predictions on noisy
+    input. Reducing the temperature parameter would fix the sporadic misclassifications.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The 'Realistic Solution' explanation ends prematurely, leaving the solution for the cache coherency
+  problem incomplete.
+- The 'Napkin Math' explanation also ends abruptly, not fully connecting the probability of stale lines
+  to the observed corruption.
+- The question is missing 'reasoning_competency' and 'reasoning_mode' classifications.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

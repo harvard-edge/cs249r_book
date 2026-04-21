@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: global-0117
+track: global
+level: L6+
+zone: design
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Massive Context KV Cache Paging
+scenario: You are designing an inference engine to serve a 1-million context window Llama-3 8B model.
+  The hardware is a single node with 8x H100 (80GB) GPUs, 2TB Host DRAM, and 4x Gen5 NVMe drives. The
+  KV cache for a single request exceeds the available HBM. Design a paging architecture to stream KV cache
+  across the memory hierarchy while maintaining at least 10 tokens/sec decoding speed.
+details:
+  realistic_solution: Design an explicit, software-managed 3-tier memory hierarchy (NVMe -> Host DRAM
+    -> HBM). Divide the KV cache into fixed-size block chunks (e.g., 256 tokens). Pin a sliding window
+    of the most recent blocks in HBM. As generation proceeds, use dedicated background CUDA streams to
+    prefetch upcoming KV blocks from Host DRAM via PCIe, while simultaneously evicting older blocks. Use
+    Host DRAM as an L2 cache, pulling from NVMe asynchronously via io_uring or SPDK to bypass OS page
+    cache overhead. Compute and I/O must be perfectly overlapped.
+  common_mistake: Relying on OS-level Unified Memory (UVM) or mmap to automatically page the KV cache
+    from NVMe to HBM, which causes severe thread blocking and unpredictable latency spikes.
+  napkin_math: 1M tokens KV cache = 1M * 32 layers * 8 KV heads * 128 dim * 4 bytes (FP16 K+V) = 131GB.
+    With 80GB HBM, only ~40GB is available for KV cache after model weights. We must page ~90GB. To sustain
+    10 tokens/sec, the attention operation needs to process 1M tokens per 100ms. PCIe Gen5 x16 bandwidth
+    = 64GB/s. We can transfer 6.4GB per 100ms step. Therefore, we cannot fetch the entire 131GB per token;
+    we must use a Ring Attention or FlashAttention-style block-wise compute that keeps older blocks in
+    Host DRAM and only streams them into HBM in chunks of <6.4GB during the attention pass.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The Napkin Math for KV Cache size is correct (131GB), but the statement 'With 80GB HBM, only ~40GB is
+  available for KV cache after model weights' implies model weights are ~40GB. This contradicts the general
+  understanding of Llama-3 8B model size (FP16 weights would be ~16GB, leaving much more for KV cache).
+- The statement 'To sustain 10 tokens/sec, the attention operation needs to process 1M tokens per 100ms'
+  is not directly derived or obvious and seems to jump to a conclusion.
+validation_status_pro: OK
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

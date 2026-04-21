@@ -1,0 +1,72 @@
+schema_version: '1.0'
+id: cloud-2202
+track: cloud
+level: L4
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The MFU vs HFU Confusion
+scenario: Your team reports that their GPT-3 175B training run achieves '62% GPU utilization' on a cluster
+  of 1,024 A100s. You ask whether this is Model FLOPS Utilization (MFU) or Hardware FLOPS Utilization
+  (HFU). They don't know the difference. Why does this distinction matter, and which metric should you
+  trust for comparing different training configurations?
+details:
+  realistic_solution: 'MFU (Model FLOPS Utilization) = (model FLOPS per step / step time) / peak FLOPS.
+    It counts only the ''useful'' FLOPS — the theoretical compute needed for one forward + backward pass
+    based on the model architecture. MFU excludes recomputation from activation checkpointing, communication
+    overhead, and idle time. HFU (Hardware FLOPS Utilization) = (total FLOPS executed on hardware / step
+    time) / peak FLOPS. It counts all FLOPS the hardware actually performs, including recomputed activations.
+    If activation checkpointing recomputes 33% of the forward pass, HFU = MFU x 1.33 for the compute portion.
+    A training run with MFU=47% and HFU=62% tells you: (1) the hardware is reasonably well-utilized at
+    62%, but (2) 24% of that hardware work (62%-47%)/62% is ''wasted'' on recomputation. MFU is the correct
+    metric for comparing training efficiency across configurations because it normalizes for implementation
+    choices like checkpointing depth.'
+  common_mistake: Treating MFU and HFU as interchangeable, or worse, using nvidia-smi's 'GPU utilization'
+    percentage (which measures time the GPU has any active kernel, not actual compute efficiency — a kernel
+    running at 1% of peak FLOPS still shows 100% utilization).
+  napkin_math: 'GPT-3 175B: ~314 PFLOPS per forward+backward (approx 6 × N × tokens per step). At 1,024
+    A100s (312 TFLOPS FP16 each), peak = 319 PFLOPS. If MFU = 47%, then step time = 314 PFLOPS / (0.47
+    × 319 PFLOPS) ≈ 2.1s. With activation checkpointing adding 33% recompute: actual hardware FLOPS =
+    314 × 1.33 = 418 PFLOPS per step. HFU = 418 / (319 × 2.1) = 418 / 670 ≈ 62%. The 15pp gap (62% − 47%)
+    means roughly (62−47)/62 = 24% of the hardware''s work is ''wasted'' on recomputation. MFU is the
+    right metric for comparing training configurations because it normalizes out implementation choices
+    like checkpointing depth.'
+  options:
+  - MFU and HFU are identical metrics with different names used by different frameworks (MFU by Megatron,
+    HFU by DeepSpeed); the 62% figure is valid regardless of which term you use
+  - 'MFU (Model FLOPS Utilization) measures useful model FLOPS / peak hardware FLOPS, counting only the
+    theoretical 6ND FLOPS of training. HFU (Hardware FLOPS Utilization) counts all FLOPS including activation
+    recomputation from checkpointing. With checkpointing adding ~33% recompute: HFU ≈ 1.33 × MFU. The
+    reported 62% is likely HFU; true MFU ≈ 47%. MFU is the better metric because it normalizes out implementation
+    choices like checkpointing depth.'
+  - HFU is always higher than MFU because it measures GPU utilization via nvidia-smi, which includes memory
+    operations; MFU only counts compute operations. Use HFU for hardware procurement decisions
+  - The distinction only matters for inference, not training; during training both metrics converge because
+    there is no recomputation. The 62% likely reflects I/O bottlenecks, not the MFU/HFU distinction
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- The napkin math contains multiple arithmetic errors; the MFU calculation `314 / 319 = 47%` and the HFU
+  calculation `418 / (319 * 1.33) = 62%` are both incorrect.
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- PFLOPS is a rate (PetaFLOPs per second). The text uses it to denote a total count of operations per
+  step, which should properly be PFLOPs.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

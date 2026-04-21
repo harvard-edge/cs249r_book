@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-1763
+track: cloud
+level: L4
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: both
+title: Diagnosing QAT Divergence in LLMs
+scenario: Your team is fine-tuning a 7B parameter causal LLM for a cloud-based code completion service.
+  To deploy efficiently on T4 GPUs (16GB VRAM), you require INT8 weights and activations. Post-Training
+  Quantization (PTQ) degraded pass@1 accuracy from 42% to 28%. You initiate Quantization-Aware Training
+  (QAT) to recover performance, simulating INT8 precision in the forward pass using the Straight-Through
+  Estimator (STE). However, within the first 500 steps, the training loss diverges completely. Telemetry
+  shows layer norm outputs exhibiting extreme magnitude spikes (e.g., >120) that didn't destabilize FP16
+  training but are destroying the QAT process. Diagnose the mechanism behind this divergence and propose
+  a quantitative corrective strategy.
+details:
+  realistic_solution: The divergence occurs because standard moving-average min/max observers fail to
+    adapt instantly to sudden activation outliers, resulting in catastrophic clipping errors. The solution
+    is to use Learned Step Size Quantization (LSQ) to make the scaling factor a differentiable parameter,
+    initialize quantizer parameters using thorough PTQ calibration, and freeze the quantizer ranges for
+    the first 1000 steps to allow weights to adapt to the simulated quantization noise before updating
+    the step size with a 10x lower learning rate.
+  common_mistake: Attempting to fix the divergence by modifying the Straight-Through Estimator (STE) logic
+    or applying standard global gradient clipping, while ignoring the interaction between activation outliers
+    and dynamic range observers.
+  napkin_math: If an observer's running max is 10, the INT8 scale factor is S = 10 / 127 ≈ 0.078. A sudden
+    outlier of 120 is heavily clipped to 10, creating a massive forward error of 110. During backprop,
+    the STE treats the rounding operation as the identity function, passing the gradient of this massive
+    error unmodified to the preceding weights. The resulting weight update Δw ∝ ∇L × x creates an explosive
+    feedback loop in subsequent layers.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-326
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T00:36:27.794829'

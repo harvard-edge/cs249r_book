@@ -1,0 +1,66 @@
+schema_version: '1.0'
+id: cloud-2236
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The I/O Jitter Amplification
+scenario: 'A 16,000-GPU training job uses synchronous data parallelism. Each training step takes 2 seconds:
+  1.5s of compute and 0.5s of AllReduce. The data pipeline prefetches 3 batches ahead on each worker.
+  Occasionally, one or two workers experience an I/O ''hiccup'' where a Lustre read takes 500ms instead
+  of the usual 50ms. When this happens, the entire training step — across all 16,000 GPUs — slows down
+  by 450ms. Explain the amplification mechanism and propose a fix.'
+details:
+  realistic_solution: 'In synchronous data parallelism, every GPU must complete its forward + backward
+    pass before the AllReduce can begin (or the next step can start, depending on the overlap strategy).
+    When one worker''s data pipeline stalls for 500ms, its compute start is delayed by 500ms - 50ms =
+    450ms (above normal). The prefetch buffer absorbs typical jitter — with 3 batches at 2s each, the
+    buffer covers 6 seconds of I/O delay. But the buffer only helps if the stall is *isolated*. If the
+    Lustre hiccup affects a busy OST that serves data to dozens of workers, multiple workers stall simultaneously,
+    draining the prefetch buffer across all of them. Once any worker''s buffer empties, that worker''s
+    compute start delays, and the synchronization barrier forces all 15,999 other GPUs to wait. The amplification
+    is: one storage hiccup on one OST → multiple workers stall → barrier delays all GPUs → 16,000 × 450ms
+    of wasted GPU-time per incident. Fix: increase prefetch depth to 5-8 batches, shard data across more
+    OSTs to reduce per-OST hotspots, use local NVMe as an async staging tier so the data pipeline never
+    reads from Lustre synchronously, and implement straggler detection that skips the slow worker''s gradient
+    contribution rather than stalling the entire collective.'
+  common_mistake: Thinking the I/O delay only affects the slow worker. 'It is just one worker out of 16,000
+    — the impact should be negligible.' This ignores the synchronization barrier inherent in data-parallel
+    training.
+  napkin_math: 'Single I/O stall cost: 450ms $\times$ 16,000 GPUs = 7,200 GPU-seconds = 2 GPU-hours wasted
+    per incident. At \$2/GPU-hour: \$4 per stall. If stalls occur 10 times per hour: \$40/hour = \$960/day
+    = \$350K/year in wasted compute — from storage jitter alone. Increasing prefetch from 3→8 batches
+    costs $5 \times 2\text{s} \times 100\text{ MB/s} = 1\text{ GB}$ additional DRAM per worker — trivial
+    cost to eliminate \$350K/year waste.'
+  options:
+  - Expert parallelism uses the same AllReduce as data parallelism; the only difference is that expert
+    weights are split across GPUs instead of being replicated, but gradient synchronization is identical
+  - Expert parallelism requires no communication because each expert processes tokens independently; tokens
+    are pre-assigned to experts based on a static hash function before the forward pass begins
+  - Expert parallelism scales communication linearly with the number of experts (not GPUs); doubling experts
+    from 64 to 128 doubles the all-to-all volume regardless of the number of GPUs
+  - 'Expert parallelism assigns MoE experts to different GPUs, requiring all-to-all communication to route
+    tokens to the correct expert. For a model with E experts, G GPUs: each GPU holds E/G experts. Per-MoE-layer
+    communication = B × S × top_k × d_model × 2 bytes × 2 (send+receive). On 64 GPUs with 64 experts,
+    batch 4096 tokens, top-2, d=4096: 4096 × 2 × 4096 × 2 × 2 = 128 MB all-to-all per layer.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

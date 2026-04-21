@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-r2-43046
+track: tinyml
+level: L3
+zone: implement
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: Tensor Arena Sizing for MobileNetV2 on Cortex-M7
+scenario: You're deploying a quantized INT8 MobileNetV2 (96×96 input) on a Cortex-M7+Ethos-U55 (480 MHz,
+  512 KB SRAM). TFLite Micro requires a statically allocated tensor arena for all intermediate activations.
+  The model has 52 operators. The largest single activation tensor is 96×96×32 = 294,912 bytes. A naive
+  estimate says you need the sum of all activation tensors (~2.1 MB). Why is this wrong, and what's the
+  actual arena size needed?
+details:
+  realistic_solution: 'TFLite Micro''s memory planner analyzes the tensor lifetime graph — each tensor
+    is ''alive'' from its producing operator to its last consuming operator. The planner schedules tensors
+    to reuse memory from dead tensors (memory aliasing). For MobileNetV2: depthwise separable convolutions
+    have two stages — the depthwise conv output is consumed immediately by the pointwise conv. The peak
+    memory occurs at the widest point of the network where feature maps are largest AND residual connections
+    keep two tensors alive simultaneously. For 96×96 input: peak is at the first inverted residual block
+    where input (96×96×32 = 288 KB) and output (96×96×16 = 144 KB) must coexist = 432 KB. Plus operator
+    scratch buffers (~20 KB for im2col). Total arena: ~452 KB. This fits in 512 KB SRAM with 60 KB remaining
+    for stack and globals. The memory planner typically achieves 3-5× reduction versus naive sum.'
+  common_mistake: Summing all activation tensors across all layers. In sequential execution, earlier layer
+    outputs can be freed once consumed. The arena size is determined by the peak simultaneous memory usage,
+    not the total.
+  napkin_math: 'Naive sum: all 52 operator outputs ≈ 2.1 MB. Peak concurrent: largest layer input + output
+    + scratch = 288 KB + 144 KB + 20 KB = 452 KB. Reduction: 2.1 MB / 452 KB = 4.6×. Remaining SRAM: 512
+    - 452 = 60 KB for stack (8 KB typical), globals (4 KB), and model weights in SRAM (if not executing
+    from flash). Tight but feasible. If peak exceeds 512 KB: options are reduce input resolution to 64×64
+    (peak drops 4× to ~113 KB) or use channel pruning to reduce the 32-channel layer.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

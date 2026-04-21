@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1336
+track: cloud
+level: L3
+zone: fluency
+topic: graph-compilation
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: Graph Tracing Control Flow OOM
+scenario: 'You are deploying a custom Transformer on an NVIDIA T4 (16GB VRAM). The model''s `forward`
+  method contains data-dependent control flow to optimize memory: `if seq_len > 512: return flash_attn(x)`
+  else `return standard_attn(x)`. You compile the model for production using `torch.jit.trace` with a
+  dummy input of shape `[batch=1, seq_len=128]`. The `standard_attn` path consumes 0.5GB of VRAM at `seq_len=128`
+  and its memory scales quadratically. During peak hours, a request with `seq_len=1024` arrives. Calculate
+  the resulting memory footprint of this request and explain the system''s behavior.'
+details:
+  realistic_solution: '`torch.jit.trace` only records the sequence of operations executed by the dummy
+    input, silently omitting unexecuted control flow branches. The trace bakes in the `standard_attn`
+    path. The `seq_len=1024` request will be forced through `standard_attn`, which requires 32GB of VRAM.
+    Since the T4 only has 16GB, it will trigger an Out-Of-Memory (OOM) crash. The correct approach is
+    to use `torch.jit.script` (which parses Python AST to preserve control flow) or modern compilers like
+    `torch.compile`.'
+  common_mistake: Assuming the traced model dynamically evaluates the `if` statement at runtime and routes
+    to the linear-scaling `flash_attn` branch, thereby keeping memory usage low and successfully processing
+    the request.
+  napkin_math: 'Sequence length scale factor = 1024 / 128 = 8x. Standard attention memory scales quadratically
+    with sequence length: O(N^2). Expected VRAM = 0.5 GB * (8^2) = 0.5 GB * 64 = 32 GB. 32 GB required
+    > 16 GB available on T4 GPU, leading to an inevitable OOM crash.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-173
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:38:10.647801'

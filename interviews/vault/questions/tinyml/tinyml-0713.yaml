@@ -1,0 +1,67 @@
+schema_version: '1.0'
+id: tinyml-0713
+track: tinyml
+level: L4
+zone: diagnosis
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: The Flash Corruption After 10,000 OTA Updates
+scenario: Your fleet of 50,000 smart agriculture sensors uses STM32H7 (Cortex-M7, 480 MHz, 1 MB SRAM,
+  2 MB internal flash). You push OTA model updates weekly. After 3 years (~156 updates), field reports
+  show 2% of devices producing garbage inference results. The model binary is verified correct via CRC
+  after each update. What's failing?
+details:
+  realistic_solution: Internal NOR flash on STM32H7 is rated for **10,000 program/erase cycles** per sector.
+    Each OTA update erases and reprograms the model storage sectors. After 156 weekly updates, you've
+    used only 1.6% of the endurance budget — so raw endurance isn't the issue yet.
+  common_mistake: '"If the CRC passes, the flash contents are correct — must be a firmware bug." CRC checks
+    verify the data immediately after writing. It doesn''t catch degradation that occurs between writes.'
+  napkin_math: 'Flash endurance: 10,000 cycles. Model sectors: 4 × 128 KB. Model writes: 156 updates ×
+    1 write = 156 cycles (safe). Metadata sector: 156 updates × 20 writes = 3,120 cycles (31% of endurance).
+    With retries on bad signal: 156 × 50 = 7,800 cycles (78% — danger). Fleet of 50,000: 2% failure =
+    1,000 devices. Expected failures at 7,800 cycles (assuming normal distribution of endurance around
+    10,000 with σ = 1,500): P(failure at 7,800) = P(endurance < 7,800) = Φ((7,800 - 10,000) / 1,500) =
+    Φ(-1.47) = 7.1%. Actual 2% suggests only the worst-signal devices (top quartile of retry counts) are
+    affected.'
+  options:
+  - The CRC passes, so flash contents are correct. The 2% failure rate is caused by a rare firmware bug
+    triggered by specific sensor input combinations that only occur after prolonged deployment.
+  - Internal NOR flash endurance is 10,000 P/E cycles. While 156 model writes (1.6%) is safe, the OTA
+    metadata sector experiences far more writes (retries on bad signal, version tracking, rollback state).
+    Devices with poor connectivity may hit 7,800+ cycles on the metadata sector, approaching endurance
+    limits. The 2% failure rate corresponds to the tail of the endurance distribution. Additionally, read
+    disturb from repeated XIP access to the same model sectors can degrade bits between writes — CRC only
+    validates at write time.
+  - After 3 years, the external flash chip's solder joints have developed micro-cracks from thermal cycling,
+    causing intermittent read errors that pass CRC but produce bit-flipped weights during inference.
+  - The model binary CRC is valid, but cosmic ray-induced single-event upsets (SEUs) are flipping bits
+    in the flash at a rate of ~2% per device per 3 years, matching the observed failure rate.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly set to `None` for
+  a question that clearly tests Flash Memory, Wear Leveling, and System Reliability.
+- Math correctness - The `P(failure at 7,800) = P(endurance < 7,800) = Φ((7,800 - 10,000) / 1,500) = Φ(-1.47)`
+  uses a standard normal distribution (Φ) but the resulting `7%` is not explicitly calculated and should
+  be clarified (Φ(-1.47) is approximately 0.0708 or 7.08%).
+validation_status_pro: WARN
+validation_issues_pro:
+- The final calculation in the napkin math is incomplete, ending abruptly with 'Φ(-1.47) = 7'.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

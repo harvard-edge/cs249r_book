@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: edge-cell-13260
+track: edge
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: Diagnose KV Cache Eviction Causing Latency Spikes on Jetson Orin
+scenario: 'A Jetson Orin-based LLM serving system shows bimodal latency: 80% of requests complete in 600ms,
+  20% take 2.8s. The 3B model (INT4, 1.5GB) leaves 6.5GB for KV cache in 8GB LPDDR5. Each request uses
+  512 context × 32 layers × 8 heads × 64 dim × 2B = 16.8MB KV cache. System handles up to 8 concurrent
+  requests (134MB total KV). Profiling shows 20% of requests trigger SRAM-to-DRAM KV cache migration.
+  Diagnose the cache eviction policy and fix it.'
+details:
+  realistic_solution: 'KV cache usage: 8 concurrent × 16.8MB = 134MB << 6.5GB capacity. No eviction should
+    occur. Root cause: PagedAttention-style allocator with 2MB page size. 16.8MB per request = 9 pages.
+    If allocator pre-allocates 4MB pages for safety and fragments: 8 × 12MB reserved = 96MB. But fragmentation
+    leaves 6.5GB - 96MB = 6.4GB free — still no eviction needed. True cause: likely a bug where completed
+    requests'' KV pages aren''t released before new requests arrive (GC lag). Fix: implement synchronous
+    KV page release on request completion, not async. Validate: 100% of requests should have KV cache
+    in LPDDR5.'
+  common_mistake: Increasing model quantization to free more KV cache memory; the issue is cache management
+    policy (LRU eviction on cold requests), not absolute memory shortage — 6.5GB >> 134MB.
+  napkin_math: 'KV per request: 2×32×8×64×512×2B = 33,554,432B = 32MB (correcting: 2×32×8×64×512×2=33.6MB).
+    8 concurrent: 8×32MB=256MB << 6.5GB. Theoretical headroom: 6.5GB/32MB = 203 concurrent requests. Eviction
+    at 8 concurrent is a bug. Latency split: 600ms normal, 2.8ms spiky = 4.7× slowdown during eviction/migration.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

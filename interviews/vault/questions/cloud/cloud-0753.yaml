@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0753
+track: cloud
+level: L4
+zone: evaluation
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: The Checkpoint Storage Bottleneck
+scenario: You're training a 175B parameter model on 512 H100 GPUs using 3D parallelism. The training lead
+  wants to checkpoint every 20 minutes (matching the cluster's estimated MTBF). Each checkpoint must be
+  written to persistent storage. What's the checkpoint size, how long does the write take, and what's
+  the impact on training throughput?
+details:
+  realistic_solution: 'A full checkpoint includes FP16 weights (350 GB), FP32 master weights (700 GB),
+    Adam moments (1,400 GB), and gradient buffers (350 GB) = **2.8 TB total**. With FSDP, each GPU writes
+    its shard: 2.8 TB / 512 = 5.47 GB per GPU. The bottleneck is aggregate storage bandwidth. A high-end
+    parallel filesystem (Lustre/GPFS) might provide 200 GB/s aggregate write bandwidth. 2.8 TB / 200 GB/s
+    = **14 seconds** write time. But 512 GPUs issuing concurrent writes create metadata storms and I/O
+    contention, realistically 2-3× slower: **30-42 seconds**. At 20-minute intervals, that''s 2.5-3.5%
+    overhead — acceptable. The real solution: write to local NVMe first (each GPU has ~3.5 GB/s write),
+    then async-flush to persistent storage.'
+  common_mistake: '"175B × 2 bytes = 350 GB, write it to NFS, done in a few seconds." This forgets the
+    optimizer state (which is the majority of the checkpoint) and ignores that 512 GPUs writing simultaneously
+    will saturate any shared storage system.'
+  napkin_math: 'Checkpoint size: 175B × (2 + 4 + 4 + 4 + 2) bytes (including gradients) = 175B × 16B =
+    **2.8 TB**. Local NVMe write: 5.47 GB / 3.5 GB/s = 1.56 seconds per GPU (parallel, no contention).
+    Background flush to Lustre: 2.8 TB / 200 GB/s = 14 seconds (overlapped with training). Training step
+    ≈ 2 seconds. Checkpoint every 20 min = 600 steps. Overhead with local NVMe: 1.56s / (600 × 2s) = **0.13%**
+    — negligible. Without local NVMe (direct to Lustre with contention, taking ~42s): 42s / 1200s = **3.5%**.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2354
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Diagnosing PCIe NUMA Mismatch
+scenario: You deploy a ResNet-50 training job on a dual-socket server with 8x A100 GPUs. GPUs 0-3 achieve
+  1500 images/s each, but GPUs 4-7 consistently drop to 700 images/s, limiting total throughput to 8800
+  img/s instead of the expected 12000 img/s. GPU utilization on 4-7 fluctuates wildly between 40-60%.
+  The PyTorch dataloader uses 64 CPU workers configured with default settings.
+details:
+  realistic_solution: The root cause is a NUMA (Non-Uniform Memory Access) topology mismatch. By default,
+    the OS may spawn all 64 dataloader CPU workers on NUMA node 0. GPUs 0-3 are attached to CPU 0's PCIe
+    root complex, enjoying direct PCIe Gen4 x16 bandwidth. However, GPUs 4-7 are attached to CPU 1. Data
+    fetched by workers on CPU 0 must traverse the inter-socket UPI (Ultra Path Interconnect) link to reach
+    CPU 1 before going to GPUs 4-7. The UPI link is bottlenecked by the heavy cross-traffic. The solution
+    is to use `numactl` or PyTorch's `DataLoader` affinity settings to pin workers 0-31 to NUMA node 0
+    for GPUs 0-3, and workers 32-63 to NUMA node 1 for GPUs 4-7.
+  common_mistake: Assuming the GPUs 4-7 are thermally throttling or defective, leading to a hardware swap.
+  napkin_math: 1500 img/s * 3MB/img = 4.5 GB/s per GPU. 4 GPUs = 18 GB/s. A typical UPI link delivers
+    ~20 GB/s real-world throughput. If 4 GPUs pull 18 GB/s across the UPI link simultaneously, it saturates,
+    causing the host-device transfer for GPUs 4-7 to drop to ~8.4 GB/s (equivalent to 700 img/s * 3MB
+    * 4 GPUs).
+  options:
+  - Deploy new model versions directly to 100% of traffic to avoid the complexity of managing multiple
+    versions; if issues arise, retrain the model with corrected data and redeploy
+  - Model versioning is unnecessary because ML models are deterministic — the same architecture trained
+    on the same data produces identical weights, so there is no version to manage
+  - Shadow deployments waste GPU resources by running inference on traffic that is never served; A/B testing
+    is strictly superior because it tests on real traffic and provides direct metric comparison
+  - 'Model versioning for production serving: (1) Blue-green deployment — run old and new model versions
+    simultaneously, switch traffic atomically after validation. (2) Canary deployment — route 1-5% traffic
+    to new version, monitor metrics (accuracy, latency, error rate) for 24-48 hours before full rollout.
+    (3) Shadow deployment — run new model on a copy of live traffic without serving results, compare outputs
+    offline. (4) Rollback: keep previous 2-3 model versions warm for instant rollback (<1 minute).'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

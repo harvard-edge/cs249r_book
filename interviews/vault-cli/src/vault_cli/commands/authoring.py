@@ -135,7 +135,7 @@ def register(app: typer.Typer) -> None:
         Runs ``git pull --rebase`` on the registry first to reduce collision
         rate, per §3.3 concurrency contract.
         """
-        classification = Classification(track=track, level=level, zone=zone)
+        # v1.0: classification lives in YAML, filesystem uses track only.
         topic_slug = _slug(topic)
         h = _short_hash(title)
 
@@ -149,26 +149,30 @@ def register(app: typer.Typer) -> None:
                     check=False, capture_output=True,
                 )
 
-        # Allocate seq by scanning existing files in the cell.
-        cell_dir = path_for_question(vault_dir, classification, "").parent
+        # Allocate seq by scanning existing files under the track directory.
+        cell_dir = path_for_question(vault_dir, track.value, "").parent
         cell_dir.mkdir(parents=True, exist_ok=True)
         seq = 1
         while True:
-            filename = f"{topic_slug}-{h}-{seq:04d}.yaml"
+            filename = f"{track.value}-{topic_slug}-{h}-{seq:04d}.yaml"
             candidate = cell_dir / filename
             if not candidate.exists():
                 break
             seq += 1
 
-        qid = f"{track.value}-{level.value}-{zone.value}-{topic_slug}-{h}-{seq:04d}"
+        qid = f"{track.value}-{topic_slug}-{h}-{seq:04d}"
         now = _now()
 
         author = _git_user_email()
+        # v1.0: classification lives in the YAML body, not the path.
         payload: dict = {
-            "schema_version": 1,
+            "schema_version": "1.0",
             "id": qid,
-            "title": title,
+            "track": track.value,
+            "level": level.value,
+            "zone": zone.value,
             "topic": topic,
+            "title": title,
             "status": "draft",
             "created_at": now,
             "last_modified": now,
@@ -368,7 +372,7 @@ def register(app: typer.Typer) -> None:
                 )
                 raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
 
-        target = path_for_question(vault_dir, classification, match.path.name)
+        target = path_for_question(vault_dir, classification.track.value, match.path.name)
         target.parent.mkdir(parents=True, exist_ok=True)
 
         if dry_run:

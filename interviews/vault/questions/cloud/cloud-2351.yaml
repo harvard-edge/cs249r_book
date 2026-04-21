@@ -1,0 +1,64 @@
+schema_version: '1.0'
+id: cloud-2351
+track: cloud
+level: L6+
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: The Multi-AZ AllReduce Cost Explosion
+scenario: Your team expanded a 256-node H100 cluster by adding 128 new nodes in a secondary Availability
+  Zone (AZ-B) because AZ-A hit a strict 3MW datacenter power cap. The cluster uses standard Dominant Resource
+  Fairness (DRF) scheduling. Immediately after the expansion, average distributed training throughput
+  dropped by 40% (from 160 to 96 TFLOPS/GPU), and your cloud provider's cross-AZ data transfer bill unexpectedly
+  spiked by $150,000 per week. Diagnose the root cause of the throughput collapse and the massive cost
+  spike.
+details:
+  realistic_solution: The root cause is a topology-agnostic scheduler causing synchronous training to
+    span across Availability Zones. Standard DRF evaluates resource quantities (CPUs, RAM, GPUs) but ignores
+    physical network topology. When a 32-node (256 GPU) job is submitted, the scheduler randomly allocates
+    nodes across both AZ-A and AZ-B. Synchronous training relies on Ring AllReduce; if a job spans AZs,
+    gradients must traverse the inter-AZ link at every step. This inter-AZ link has significantly lower
+    bandwidth and higher latency than intra-AZ Infiniband, acting as a severe bottleneck that stalls the
+    GPUs (causing the 40% throughput drop). Furthermore, cloud providers charge for cross-AZ egress (typically
+    ~$0.01/GB). The constant streaming of hundreds of gigabytes of gradients per second incurs massive
+    costs. The solution is to implement locality-aware placement (gang-scheduling jobs strictly within
+    a single AZ) and use hierarchical AllReduce if a job absolutely must exceed a single AZ's capacity.
+  common_mistake: Blaming the new AZ-B nodes for having defective networking hardware or attempting to
+    optimize the training loop with FP8 quantization to regain throughput.
+  napkin_math: 'Job size: 32 nodes (256 GPUs). Model: 70B parameters = 140GB gradients (FP16). Ring AllReduce
+    transfers ~2× model size = 280GB per step. If the logical ring crosses the AZ boundary, ~140GB crosses
+    the inter-AZ link per step. At 1 step/second, cross-AZ traffic is 140 GB/s. Cost calculation: 140
+    GB/s × 3,600 s/hr × $0.01/GB = $5,040/hour. Over a 168-hour week running at 20% duty cycle, cost ≈
+    $169,344/week. Bandwidth bottleneck: Inter-AZ links are typically 100-400 Gbps, whereas intra-AZ IB
+    is 3.2 Tbps, starving the GPUs.'
+  options:
+  - Disaggregated serving means running prefill and decode on different CPU cores within the same GPU
+    server; the 'disaggregation' refers to thread-level separation, not hardware separation
+  - 'Disaggregated serving architecture: (1) Prefill cluster — compute-optimized GPUs (high TFLOPS) process
+    prompts in parallel, producing KV cache. (2) KV cache transfer — send computed KV cache to decode
+    cluster via RDMA or shared memory. (3) Decode cluster — memory-bandwidth-optimized GPUs generate tokens
+    autoregressively. Benefits: each cluster is tuned for its workload profile, eliminating interference.
+    KV transfer overhead: for 70B model, 4K context KV ≈ 10 GB, transfer time over 100 Gbps ≈ 0.8 seconds
+    — amortized over long generation sequences.'
+  - KV cache transfer between clusters is negligible because only the final attention output (a single
+    vector per layer) needs to be transferred, not the full KV cache matrices
+  - Disaggregated serving increases total cost by 3-5× because it requires twice the GPU fleet; the operational
+    complexity never justifies the performance improvement for any production workload
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

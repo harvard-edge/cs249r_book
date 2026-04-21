@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: global-0060
+track: global
+level: L5
+zone: evaluation
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Tiered KV-Cache Page Size Tradeoffs
+scenario: You are architecting a tiered KV-cache (HBM3 + Host DRAM) for serving a 70B LLM (256 KB KV-cache
+  per token) handling highly variable sequence lengths (100 to 50,000 tokens). To prevent OOMs, the system
+  aggressively swaps KV-cache to Host DRAM via PCIe Gen5 x16 (64 GB/s). You must determine the uniform
+  memory block size for the PagedAttention memory manager. Option A uses 16-token blocks (4MB); Option
+  B uses 256-token blocks (64MB). Small blocks minimize internal fragmentation but risk poor PCIe utilization
+  due to scatter-gather DMA overhead during Host-to-Device prefetching. Large blocks optimize PCIe burst
+  transfers but waste precious HBM capacity. Evaluate this tradeoff and design a solution that maximizes
+  both batch size and PCIe utilization.
+details:
+  realistic_solution: 'Adopt a decoupled, two-level memory management architecture to get the best of
+    both worlds. Use 16-token (4MB) logical pages in HBM to strictly minimize internal fragmentation,
+    which is critical since HBM is the primary capacity bottleneck. For a batch of 1024 requests, large
+    64MB pages would waste ~32GB of HBM due to internal fragmentation (average 32MB wasted per sequence).
+    Small 4MB pages reduce this waste to ~2GB, freeing 30GB of HBM for larger batch sizes. To resolve
+    the PCIe scatter-gather latency tradeoff, manage Host DRAM in large 256-token (64MB) physical segments.
+    Implement an asynchronous compaction engine: when evicting, gather 16-token HBM pages into a contiguous
+    64MB Host DRAM buffer. When prefetching, issue a single 64MB DMA read over PCIe Gen5 (achieving ~95%
+    peak bandwidth, taking ~1ms), and scatter the result into free 4MB HBM pages. This trades cheaper
+    Host DRAM capacity and minor CPU compaction overhead for strictly optimal HBM utilization and maximum
+    PCIe throughput.'
+  common_mistake: Selecting 256-token blocks to maximize PCIe throughput, ignoring that internal fragmentation
+    will waste ~32GB of HBM across a typical batch, causing OOMs before PCIe bandwidth becomes the bottleneck.
+  napkin_math: '1. Internal Fragmentation (256-token blocks): Average waste = 128 tokens = 32MB/request.
+
+    2. Total waste for 1024 requests = 1024 * 32MB = 32.7 GB of HBM.
+
+    3. Internal Fragmentation (16-token blocks): Average waste = 8 tokens = 2MB/request.
+
+    4. Total waste = 1024 * 2MB = 2.0 GB. HBM Saved = 30.7 GB.
+
+    5. PCIe Gen5 x16 bandwidth = 64 GB/s. A 64MB transfer takes exactly 1ms.
+
+    6. DMA setup overhead is ~5us per transaction. 16 uncoalesced 4MB transfers add 16 * 5us = 80us overhead
+    (8% penalty) plus severe bus contention. A single coalesced 64MB transfer amortizes this to <0.5%
+    overhead.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: global-chain-033
+  position: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-1794
+track: cloud
+level: L5
+zone: specification
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: 'Evaluating Autograd Engines: Forward vs Reverse Mode'
+scenario: Your team is training a 50B parameter dense Transformer model on a fleet of A100 (80GB) GPUs.
+  To alleviate the massive activation memory overhead required during the forward pass, a researcher proposes
+  switching the autograd engine from Reverse Mode Differentiation to Forward Mode Differentiation. They
+  argue that Forward Mode requires O(1) memory caching since it computes directional derivatives concurrently
+  with the forward pass. Evaluate the algorithmic and hardware trade-offs of this proposal for calculating
+  the gradient of the scalar loss with respect to the 50B parameters, and justify your design decision.
+details:
+  realistic_solution: Reject the proposal. Forward Mode calculates the Jacobian column-by-column, requiring
+    one full pass per input dimension. For a 50B parameter model with a single scalar loss output, it
+    requires 50 billion forward passes per training step. Reverse Mode computes the gradient in a single
+    backward pass because its complexity scales with the number of outputs. The correct architectural
+    solution to the memory wall is Activation Checkpointing (recomputation), which reduces activation
+    memory from O(L) to O(sqrt(L)) at the heavily amortized cost of just one additional forward pass,
+    yielding a checkpointed cost of 3 passes total versus 50 billion for forward mode — a ~16.7 billion
+    times difference.
+  common_mistake: Candidates correctly identify that Forward Mode eliminates activation caching to save
+    memory, but fail to realize its computational complexity scales linearly with the number of inputs
+    (parameters), rendering it impossible for deep learning.
+  napkin_math: Inputs (N) = 50e9 parameters. Outputs (M) = 1 scalar loss. Forward Mode compute cost =
+    N passes = 50,000,000,000 forward passes. Reverse Mode compute cost = M passes = 1 backward pass.
+    Checkpointed Reverse Mode = 2 forward + 1 backward pass. Compute multiplier (Forward / Checkpointed
+    Reverse) = 50e9 / 3 ≈ 16.7 billion times slower compute for Forward Mode.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+chains:
+- id: cloud-chain-338
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Checkpointed Reverse Mode requires 3 passes (2 forward + 1 backward). The compute multiplier should
+  be 50e9 / 3 = 16.67e9, not 50e9.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T00:44:28.791510'

@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: cloud-2230
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: The Metadata Storm
+scenario: You manage a 10,000-GPU training cluster. At the start of each training run, all 10,000 workers
+  simultaneously open and stat their data shards on a Lustre filesystem. The metadata server (MDS) becomes
+  unresponsive for 2-3 minutes, delaying job startup for the entire cluster. Once training begins, data
+  throughput is fine. The MDS has 256 GB of RAM and 24 CPU cores. Why does this 'metadata storm' happen,
+  and how do you fix it without upgrading the MDS hardware?
+details:
+  realistic_solution: 'Lustre separates metadata (handled by MDS) from data (handled by OSTs). When 10,000
+    workers simultaneously issue open() + stat() + read-stripe-layout for their data files, the MDS must
+    handle 10,000+ metadata operations in a burst. Each operation requires a lock on the directory entry,
+    a lookup in the inode table, and a response. Lustre''s MDS processes roughly 50,000-200,000 metadata
+    ops/sec depending on configuration. A 10,000-node stampede issuing 3-5 ops each (open, stat, readdir,
+    getattr) creates 30,000-50,000 concurrent metadata requests. If these all target the same directory,
+    directory lock contention serializes them. The fix is architectural, not hardware: (1) distribute
+    data files across many directories to avoid single-directory contention, (2) stagger job startup with
+    a jittered delay (each worker waits random(0, 30s) before opening files), (3) use a metadata caching
+    layer where one worker per node resolves paths and broadcasts to local GPUs, (4) use Data-on-MDT (DoM)
+    for small metadata-heavy files to reduce round-trips.'
+  common_mistake: Assuming the problem is data throughput. The MDS does not serve data — it serves metadata
+    (file paths, permissions, stripe layout). The bottleneck is metadata operations per second (IOPS),
+    not bandwidth.
+  napkin_math: '10,000 workers $\times$ 4 metadata ops each = 40,000 ops in a burst. MDS capacity: ~100,000
+    ops/sec (cached). But single-directory lock contention reduces effective throughput to ~5,000 ops/sec
+    under contention. Time to drain: $40{,}000 / 5{,}000 = 8$s — plus TCP backoff and retries from clients
+    that timed out, creating a feedback loop that extends the storm to 2-3 minutes. With jittered startup
+    over 30s: peak rate = $40{,}000 / 30 \approx 1{,}333$ ops/sec — well within MDS capacity.'
+  options:
+  - Cosine annealing oscillates the learning rate up and down in cosine waves throughout training; the
+    periodic increases help escape local minima, which is why it's called 'annealing'
+  - Cosine annealing is mathematically equivalent to linear decay but with a cosmetic difference in the
+    shape of the curve; the training outcome is identical to linear LR scheduling
+  - 'Cosine annealing decays the learning rate following a cosine curve from max LR to near-zero over
+    the training run: η(t) = η_min + 0.5(η_max - η_min)(1 + cos(πt/T)). This provides: (1) fast exploration
+    at high LR early in training, (2) gradual refinement as LR decreases, (3) a smooth, monotonic decay
+    that avoids the sharp drops of step-wise schedules. Combined with warmup, it consistently outperforms
+    step decay for large-scale training.'
+  - Cosine annealing requires knowing the exact optimal learning rate in advance; if the initial LR is
+    set incorrectly, cosine decay amplifies the error, making it less robust than constant LR
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

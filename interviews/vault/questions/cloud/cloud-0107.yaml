@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-0107
+track: cloud
+level: L3
+zone: diagnosis
+topic: batching-strategies
+competency_area: latency
+bloom_level: apply
+phase: inference
+title: The Continuous Batching Hiccup
+scenario: Your team runs a multi-tenant LLM inference service using continuous batching. You notice that
+  P99 end-to-end latency is spiking, even at moderate load. The profiler shows that some requests with
+  very short prompts and short generation lengths are getting stuck behind requests that generate very
+  long sequences (e.g., summarizing a document). What is the most likely design flaw in your continuous
+  batching scheduler?
+details:
+  realistic_solution: The scheduler is likely using a simple First-In, First-Out (FIFO) policy to add
+    new requests to the running batch. When a long-running request (e.g., generating 4000 tokens) is active
+    in a batch, it occupies a slot for a long time. Any new, short requests (e.g., generate 20 tokens)
+    that arrive get added but cannot complete and be evicted until the long request is finished, as the
+    batch iteration proceeds in lock-step. This is a form of head-of-line blocking *within* the batching
+    mechanism itself. A better scheduler would allow finished sequences to be evicted and replaced, or
+    even preempt long-running requests.
+  common_mistake: Blaming the hardware (e.g., 'we need more HBM for the KV cache') or the model. While
+    these can be factors, a common and subtle issue is a naive scheduler implementation in continuous
+    batching that doesn't account for heterogeneous workloads.
+  napkin_math: If the batch size is full (e.g., max 8 requests) and all 8 slots are taken by long-generation
+    queries (4,000 tokens), new short requests (e.g., 20 tokens) sit in the pending queue until a slot
+    frees up. If TPOT is 15ms, a 4,000-token request takes 4000 * 15ms = 60 seconds to finish! A simple
+    FIFO queue causes massive P99 latency spikes here.
+  options:
+  - The KV cache is fragmented, forcing expensive memory reallocation mid-generation.
+  - The scheduler lacks preemption or a fair-queuing policy, causing short requests to be blocked by long-running
+    requests already in the batch.
+  - The Python GIL is causing contention in the request handling server, preventing the scheduler from
+    adding new requests fast enough.
+  - The system is thrashing HBM because the combined KV cache of all requests exceeds the 80 GB HBM capacity.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

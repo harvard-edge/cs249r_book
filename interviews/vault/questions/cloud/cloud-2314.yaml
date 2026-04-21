@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-2314
+track: cloud
+level: L5
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Evaluating MLIR Fusion for Bandwidth
+scenario: 'Optimizing a custom Transformer on A100 GPUs (2 TB/s effective HBM bandwidth). Profiling reveals
+  a bottleneck in a custom gating network: Out = Tanh(X) * Sigmoid(Y). X and Y are large activations,
+  each 400M FP16 elements (800MB each). The current ML compiler lowers this to 3 sequential kernels (Tanh,
+  Sigmoid, Multiply), taking ~2.8ms total. You propose an MLIR lowering pass to fuse these element-wise
+  operations. What is the expected speedup?'
+details:
+  realistic_solution: The bottleneck is not compute, but memory bandwidth due to materializing intermediate
+    tensors to HBM. By introducing a custom fusion pass at the MLIR linalg/tensor level, the compiler
+    can lower the entire block into a single GPU kernel. This fused kernel loads X and Y directly into
+    SRAM/registers, performs the Tanh, Sigmoid, and Multiply operations on-chip, and writes Out back to
+    HBM. This eliminates the reading and writing of the intermediate Tanh(X) and Sigmoid(Y) tensors, drastically
+    reducing total memory traffic and directly cutting latency.
+  common_mistake: Assuming compute is the bottleneck and attempting to optimize the FP16 math instructions.
+  napkin_math: 'Unfused Traffic:
+
+    1) Tanh: Read X (800MB), Write T1 (800MB) = 1.6GB
+
+    2) Sigmoid: Read Y (800MB), Write T2 (800MB) = 1.6GB
+
+    3) Multiply: Read T1 (800MB), Read T2 (800MB), Write Out (800MB) = 2.4GB
+
+    Total Unfused = 5.6GB. Time = 5.6GB / 2.0 TB/s = ~2.8ms.
+
+    Fused Traffic:
+
+    Read X (800MB), Read Y (800MB), Write Out (800MB) = 2.4GB
+
+    Total Fused = 2.4GB. Time = 2.4GB / 2.0 TB/s = 1.2ms.
+
+    Expected Latency Reduction = 2.8ms - 1.2ms = 1.6ms (a 57% speedup).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: global-0110
+track: global
+level: L6+
+zone: evaluation
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: LLM Decode Batch Size Limits
+scenario: You are optimizing a Llama-70B serving cluster on 4x 80GB A100 GPUs. At batch size 1, the decode
+  phase achieves 18 tokens/s per user. To hit a throughput target of 2000 tokens/s, the team proposes
+  aggressively increasing the batch size to 256. However, at batch size 64, latency already spikes beyond
+  the 100ms/token SLA, and throughput plateaus. Explain this bottleneck using the roofline model.
+details:
+  realistic_solution: The decode phase of LLM generation is fundamentally memory-bandwidth bound. At batch
+    size 1, you must read the entire 140GB model from HBM to generate a single token, resulting in an
+    extremely low arithmetic intensity (I ≈ 2 FLOPs/byte). As you increase batch size, you reuse the weights
+    across multiple requests, increasing arithmetic intensity (I ≈ 2 * B). This moves the workload to
+    the right on the Roofline model. However, increasing batch size also increases the KV cache size.
+    Before you ever reach the compute-bound ridge point, you hit a memory capacity bound. The KV cache
+    fills the remaining VRAM, forcing the system to either swap to CPU memory (shattering bandwidth) or
+    recompute, which destroys latency. The plateau occurs because the system becomes bottlenecked by KV
+    cache paging overheads and memory fragmentation, not ALU limits.
+  common_mistake: Assuming that increasing batch size linearly increases throughput until you run out
+    of compute TFLOPS.
+  napkin_math: 'A100 Ridge Point: 312 TFLOPS / 2 TB/s ≈ 156 FLOPs/byte. 70B model in FP16 = 140GB weights.
+    Distributed across 4 GPUs = 35GB/GPU. Max BW = 2 TB/s per GPU. Weight load time = 35GB / 2TB/s = 17.5ms
+    per token. At BS=1, I = 2. At BS=64, I = 128 (still on the memory-bound slope!). KV Cache for BS=64
+    at 2k context = 64 (batch) * 2 (K+V) * 80 layers * 8 heads * 128 dim * 2000 seq_len * 2 bytes ≈ 41.9
+    GB. Total VRAM used: 35GB (weights) + 41.9GB (KV) + activations. You are out of VRAM before hitting
+    the compute ridge.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 15
+chains:
+- id: global-chain-031
+  position: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- llm-serving
+- roofline
+- batching

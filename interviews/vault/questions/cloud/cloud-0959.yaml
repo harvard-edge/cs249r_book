@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: cloud-0959
+track: cloud
+level: L5
+zone: specification
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: evaluate
+phase: training
+title: Mitigating Checkpoint Storms in LLM Training
+scenario: 'You are architecting the checkpointing mechanism for a 175B parameter model training on 256
+  compute nodes (2,048 GPUs). The model uses mixed-precision training with Adam optimizer. A full checkpoint
+  includes: model parameters in FP16 (175B * 2 bytes = 350 GB), Adam optimizer states — momentum and variance
+  in FP32 (175B * 4 bytes * 2 = 1.4 TB), plus a master copy of weights in FP32 (175B * 4 bytes = 700 GB),
+  totaling approximately 2.45 TB per checkpoint. Writing directly to a centralized NFS cluster capable
+  of 10 GB/s stalls training for over 4 minutes per checkpoint. Evaluate the trade-offs between upgrading
+  to a dedicated Lustre parallel file system (provisioned for 500 GB/s burst bandwidth) versus implementing
+  a two-tier asynchronous checkpointing strategy using the 4x 1.9 TB local NVMe drives available on each
+  compute node. Justify your architectural choice quantitatively.'
+details:
+  realistic_solution: Adopt a two-tier asynchronous checkpointing strategy. GPUs dump their sharded state
+    locally to node-attached NVMe SSDs in ~1 second (each node writes only ~9.6 GB at ~10 GB/s), allowing
+    compute to resume immediately. A background daemon then asynchronously replicates the checkpoint to
+    durable object storage at ~1.4 GB/s continuous load before the next checkpoint interval. This cuts
+    GPU idle time from 245s (NFS) to ~1s while avoiding the $500K-$1M cost of a dedicated Lustre deployment.
+  common_mistake: Candidates often default to recommending expensive parallel file systems like Lustre
+    or GPFS, ignoring the severe cost-inefficiency of provisioning massive shared storage bandwidth that
+    sits idle 99% of the time between infrequent checkpoint events.
+  napkin_math: 'NFS stall time: 2.45 TB / 10 GB/s = ~245s (~4 min). Lustre stall time: 2.45 TB / 500 GB/s
+    = ~5s. Local NVMe tiering: Each node holds ~2.45 TB / 256 nodes = ~9.6 GB of sharded state. Each node''s
+    NVMe writes at ~10 GB/s, so local write completes in ~1s. Aggregate bandwidth: 256 * 10 GB/s = 2.56
+    TB/s. Total local write time: 2.45 TB / 2.56 TB/s ≈ 1s. Async background transfer to object storage
+    before next checkpoint (e.g., 30-min interval): 2.45 TB / 1,800s = ~1.4 GB/s continuous network load
+    — easily achievable. The two-tier approach cuts GPU idle time from 245s to ~1s while avoiding the
+    premium cost of a 500 GB/s Lustre deployment. Lustre achieves 5s stall (good) but costs $500K-$1M+
+    and sits idle 99% of the time. The local NVMe approach leverages hardware already present on compute
+    nodes.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+chains:
+- id: cloud-chain-039
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- The stated checkpoint size of 40 TB is factually inconsistent with a 175B parameter model, which would
+  generate a checkpoint of approximately 1.75 TB with Adam states.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:16:54.224279'

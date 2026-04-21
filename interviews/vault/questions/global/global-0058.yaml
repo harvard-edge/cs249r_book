@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: global-0058
+track: global
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: The Memory-Bound Custom MLP
+scenario: 'You are optimizing a custom 13B parameter model on an H100 GPU (3.35 TB/s HBM bandwidth). The
+  model uses a novel activation function in its MLP: `CustomGLU(x) = x * tanh(alpha * x + beta)`. For
+  a batch size of 4 and sequence length of 2048, the MLP expansion layer (hidden size 5120 -> 13824) is
+  a major bottleneck. Profiling shows SM compute utilization is only 15%, but HBM bandwidth utilization
+  is pinned at 96% (~3.2 TB/s).'
+details:
+  realistic_solution: The symptom (low SM utilization, maxed HBM bandwidth on element-wise operations)
+    indicates that intermediate tensors are being fully materialized to global memory (HBM) instead of
+    being kept in SRAM/registers. In standard eager execution, the framework dispatches separate kernels
+    for `alpha * x`, `+ beta`, `tanh`, and `* x`. Each discrete kernel must read from and write back to
+    HBM. To fix this, you must apply operator fusion (via `torch.compile`, XLA, or writing a custom Triton
+    kernel). Fusion combines these sequential element-wise operations into a single kernel. The intermediate
+    results (`alpha * x`, etc.) are kept in the GPU's fast registers, drastically reducing the number
+    of trips to HBM from multiple round-trips to exactly one read and one write.
+  common_mistake: Attempting to quantize the weights (e.g., to INT8 or FP8) to reduce memory bandwidth,
+    missing that the bottleneck is the intermediate activation reads/writes.
+  napkin_math: 'Expansion tensor `x` size: 4 (batch) * 2048 (seq) * 13824 (dim) * 2 bytes (BF16) = 226
+    MB. Eager execution memory traffic: 1) `a = alpha * x` (Read 226MB, Write 226MB). 2) `b = a + beta`
+    (Read 226MB, Write 226MB). 3) `c = tanh(b)` (Read 226MB, Write 226MB). 4) `d = x * c` (Read 226MB
+    of x + 226MB of c, Write 226MB). Total HBM traffic = 9 * 226 MB = 2.03 GB. At 3.35 TB/s, memory movement
+    takes ~0.6ms. Fused kernel: Read `x` (226MB), compute all math in registers, Write `d` (226MB). Total
+    traffic = 452 MB. Time = 452 MB / 3.35 TB/s = ~0.13ms. Fusion yields a ~4.6x speedup on this block.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: global-chain-034
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

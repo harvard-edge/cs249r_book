@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: mobile-0453
+track: mobile
+level: L3
+zone: fluency
+topic: interconnect-topology
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: The Mystery of the Slow Avatar
+scenario: 'You''re a Mobile ML Engineer for a social media app. You''ve built a "Magic Avatar" feature
+  that sends user photos to a cloud backend. The backend runs a large generative model sharded for tensor
+  parallelism across 4 H100 GPUs in the *same physical server*. End-to-end P99 latency is a sluggish 1500ms.
+  Your mobile-side instrumentation shows:'
+details:
+  realistic_solution: The raw hardware transfer time for 1GB of data is negligible on modern interconnects,
+    even the 'slower' ones. The ~1200ms latency points to a massive software overhead issue. The most
+    likely cause is a misconfiguration in the distributed communication library (e.g., NCCL, Gloo). The
+    framework is failing to detect or use the high-speed, kernel-bypassing interconnects (like NVLink
+    or direct PCIe access). Instead, it's falling back to using the standard kernel networking stack (TCP/IP
+    over a basic Ethernet interface), where protocol processing, buffer copying, and context switching
+    for gigabytes of data can easily add over a second of latency.
+  common_mistake: Engineers often blame the hardware they've heard is 'slower' (like PCIe vs. NVLink)
+    without doing the math. They see a big number (1 GB) and assume the transfer must be the slow part.
+    They forget that modern interconnects are incredibly fast, and a multi-millisecond latency is often
+    a symptom of a *software* problem (like protocol overhead) rather than a hardware bottleneck.
+  napkin_math: Total latency is 1500ms. Mobile processing (40ms) + network round-trip (60ms) + compute
+    (200ms) = 300ms. The missing 1200ms must be inter-GPU communication. 4 H100s do an All-Reduce sync.
+    If they communicate 40GB of activations per request via PCIe Gen4 (32GB/s) instead of NVLink, transfer
+    takes 40GB / 32GB/s = 1.25s (1250ms). The backend is missing NVLink bridges or is misconfigured to
+    use PCIe.
+  options:
+  - The communication library (e.g., NCCL) is misconfigured, falling back to the kernel's TCP/IP stack
+    instead of using a direct interconnect, and the software overhead is causing the delay.
+  - The GPUs are connected via the PCIe Gen5 bus instead of NVLink, and this slower bus is causing the
+    1.2s transfer delay.
+  - The 4 GPUs are actually in different servers, and the 1.2s delay is the time spent transferring data
+    over the InfiniBand network.
+  - The model's compute time is highly variable, and the 200ms figure is an average; P99 compute is likely
+    over 1.4s, accounting for the entire delay.
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

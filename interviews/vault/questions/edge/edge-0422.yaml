@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: edge-0422
+track: edge
+level: L3
+zone: fluency
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: both
+title: The Drone's 25ms Mystery
+scenario: 'You are an ML Systems Engineer diagnosing a real-time perception pipeline on an autonomous
+  drone. The system uses two co-processors (Module A and Module B, both Jetson AGX Orins) on the same
+  carrier board, connected by a PCIe Gen4 bus. Module A performs sensor fusion and generates a 67 MB feature
+  map, which it sends to Module B for object detection. Your profiling reveals the following:'
+details:
+  realistic_solution: 'The root cause is the lack of a true peer-to-peer (P2P) transfer. The data transfer
+    is being mediated by the host CPU, causing a ''CPU bounce'': Module A''s VRAM -> Host System RAM ->
+    Module B''s VRAM. Each leg of this journey (VRAM to RAM, RAM to VRAM) incurs significant driver and
+    OS scheduling overhead. The solution is to ensure the system''s driver, BIOS, and IOMMU are correctly
+    configured to allow Remote Direct Memory Access (RDMA, also called P2P DMA). This enables Module A
+    to write directly into Module B''s memory without any CPU intervention, eliminating the software overhead
+    and bringing the transfer time down to what the physics of the bus allows.'
+  common_mistake: Engineers often calculate theoretical bandwidth (`Time = Data / Bandwidth`) but forget
+    that without a direct memory access path, the host CPU and OS get involved. This 'software overhead'
+    from managing the transfer can be 5-10x larger than the physical data movement time, especially for
+    moderately sized transfers where setup costs dominate.
+  napkin_math: 'Payload = 67 MB. Theoretical PCIe Gen4 x8 bandwidth = 15.75 GB/s. Direct P2P transfer
+    time: 67 MB / 15,750 MB/s = ~4.25 ms. With a ''CPU bounce'', data goes Module A -> RAM -> Module B,
+    doubling the bus traversal (2 * 67 MB = 134 MB). Latency becomes at least 8.5 ms, plus OS scheduling
+    overhead, blowing past tight budgets.'
+  options:
+  - The 67 MB payload is too large for the PCIe Gen4 bus, which is saturated. The system requires an interconnect
+    with higher bandwidth like NVLink.
+  - The LPDDR5 memory on the receiving module (Module B) is the bottleneck; its bandwidth is insufficient
+    to ingest the 67 MB payload from the PCIe bus at speed.
+  - The transfer is defaulting to a CPU-mediated path instead of using direct peer-to-peer DMA (RDMA),
+    introducing significant OS and driver overhead.
+  - The system is using a TCP/IP stack over the PCIe bus for communication, and the network protocol overhead
+    is the source of the high latency.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: edge-chain-110
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

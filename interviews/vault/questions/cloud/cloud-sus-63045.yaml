@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-sus-63045
+track: cloud
+level: L4
+zone: analyze
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: MI300X AllReduce Performance in 8-GPU Data Parallel Training vs H100
+scenario: An 8-GPU MI300X server uses AMD's xGMI/Infinity Fabric interconnect providing 896 GB/s total
+  bidirectional bandwidth between GPUs (equivalent to a full-mesh at 128 GB/s per GPU pair). An 8-GPU
+  H100 SXM5 server uses NVLink 4.0 at 900 GB/s per GPU bidirectional. For data parallel training of a
+  7B model, the gradient AllReduce after each backward pass transfers 14GB of FP32 gradients. Calculate
+  the AllReduce time on both platforms using ring-AllReduce.
+details:
+  realistic_solution: 'Ring AllReduce formula: T = 2 × (N-1)/N × M / B_per_link. MI300X xGMI: scenario
+    specifies full-mesh at 128 GB/s per GPU pair. For ring topology each GPU uses one link at 128 GB/s.
+    T_MI300X = 2 × (7/8) × 14GB / 128GB/s = 0.191s = 191ms. H100 NVLink 4.0: 900 GB/s per GPU bidirectional
+    = 450 GB/s per direction. T_H100 = 2 × (7/8) × 14GB / 450GB/s = 0.054s = 54ms. H100 is 3.5× faster
+    for gradient AllReduce. For a training step with 200ms compute time: H100 communication overhead =
+    27%, MI300X = 96% (communication-dominated). MI300X needs gradient compression or a dedicated high-bandwidth
+    GPU-to-GPU fabric to be competitive with H100 NVLink for data-parallel training.'
+  common_mistake: Using total fabric bandwidth (896 GB/s or 900 GB/s aggregate) instead of per-GPU link
+    bandwidth for ring AllReduce. Ring AllReduce uses each GPU's send and receive bandwidth, not total
+    cross-sectional bandwidth. Each GPU in an 8-GPU ring sends to exactly one neighbor and receives from
+    exactly one neighbor.
+  napkin_math: 'Gradient size: 7B × 4 bytes (FP32) = 28GB. Ring AllReduce: 2×(7/8)×28GB = 49GB transferred.
+    H100 NVLink per-GPU BW: 450 GB/s send (900 GB/s bidirectional / 2). T_H100 = 49/450 = 0.109s = 109ms.
+    MI300X xGMI per-GPU: scenario states 128 GB/s per pair in full-mesh; using 128 GB/s. T_MI300X = 49/128
+    = 0.383s = 383ms. NVLink is 3.5× faster. Training step compute: 7B params × 6 × batch 64 × seq 512
+    = 1,376 TFLOPs ÷ (8 × 989 TFLOPS × 0.50) = 1376/3956 = 0.348s = 348ms. MI300X: ÷ (8 × 1307 × 0.50)
+    = 1376/5228 = 0.263s = 263ms. H100: compute 348ms + AllReduce 109ms = 457ms per step. MI300X: compute
+    263ms + AllReduce 383ms = 646ms per step. H100 is 1.4× faster for 8-GPU data parallel training — xGMI
+    is the bottleneck.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Incorrect topology calculation: The math divides the 896 GB/s total per-GPU bidirectional bandwidth
+  by 8 to get 112 GB/s, contradicting the scenario''s premise of a full-mesh topology equivalent to 128
+  GB/s per GPU pair.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

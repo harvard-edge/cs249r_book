@@ -1,0 +1,84 @@
+schema_version: '1.0'
+id: cloud-fill-00490
+track: cloud
+level: L6+
+zone: mastery
+topic: mixed-precision-training
+competency_area: precision
+bloom_level: analyze
+phase: training
+title: Optimizing LLM Training with Mixed-Precision on AMD MI300X
+scenario: You are tasked with optimizing the training of a 175-billion parameter large language model
+  (LLM) on a cluster of AMD MI300X accelerators. Each MI300X provides 192 GB HBM3, 1,307 TFLOPS FP16 sparse
+  compute, and 5.3 TB/s memory bandwidth. The training requires a global batch size of 2048 and a sequence
+  length of 4096. Your primary objective is to implement a mixed-precision training strategy (using FP16,
+  BF16, or FP8) to maximize throughput while maintaining convergence stability and accuracy. Detail your
+  design choices for data types (weights, activations, gradients, optimizer states), describe your loss
+  scaling approach, and outline how you would address numerical stability challenges. Additionally, provide
+  a high-level sizing estimate for the number of accelerators required and discuss the implications of
+  your precision choices on memory footprint and computational efficiency, specifically referencing the
+  MI300X's capabilities.
+details:
+  realistic_solution: 'Data Types:
+
+    - Weights/Activations (Forward Pass): BF16 is generally preferred for its wider dynamic range, reducing
+    the risk of overflow/underflow compared to FP16, especially for activations. If FP16 must be used
+    for higher throughput (e.g., due to sparse FP16 TFLOPS on MI300X), careful monitoring and gradient
+    clipping are essential. FP8 (E4M3 or E5M2) could be explored for specific parts (e.g., attention weights)
+    if the framework supports it and stability can be maintained with quantization-aware training.
+
+    - Gradients: Compute gradients in FP16/BF16 and convert to FP32 for accumulation.
+
+    - Optimizer States: Maintain master weights and optimizer states in FP32 for numerical stability.
+    Use techniques like ZeRO-stage 2 or 3 to shard optimizer states and potentially gradients across multiple
+    devices to fit within the 192 GB HBM3.
+
+    Loss Scaling: Dynamic loss scaling is crucial for FP16 training to prevent vanishing gradients due
+    to underflow. The loss is scaled up before the backward pass, and gradients are scaled down before
+    updating FP32 master weights.
+
+    Numerical Stability: Implement gradient clipping, monitor loss and gradient norms, and utilize automatic
+    mixed precision features of frameworks (e.g., PyTorch AMP) which handle type casting and loss scaling
+    transparently. Consider BF16 if FP16 introduces too many stability issues.'
+  common_mistake: Overlooking the collective memory footprint of the optimizer states (often FP32) when
+    calculating memory per device, especially for large models and optimizers like Adam. This frequently
+    leads to Out-of-Memory (OOM) errors even when model weights are in reduced precision (e.g., FP16/BF16),
+    requiring advanced techniques like optimizer sharding (e.g., ZeRO). Another common mistake is static
+    loss scaling that is not robust enough for the dynamic range of gradients, leading to NaNs/Infs.
+  napkin_math: 'Model Parameters: 175 billion parameters.
+
+    FP16 Model Memory: 175B params * 2 bytes/param (FP16) = 350 GB.
+
+    FP32 Optimizer States (Adam, 2x params): 175B params * 2 states/param * 4 bytes/state (FP32) = 1.4
+    TB.
+
+    Total Model + Optimizer Memory: 350 GB (FP16 model) + 1.4 TB (FP32 optimizer) = 1.75 TB.
+
+    Required MI300X Cards (minimal): 1.75 TB / 192 GB/card ≈ 9.11 cards. Therefore, at least 10 MI300X
+    accelerators are needed for just the model and optimizer states, assuming aggressive sharding (e.g.,
+    ZeRO-3).
+
+    Compute (High-level consideration): The MI300X''s 1,307 TFLOPS FP16 sparse compute is impressive,
+    but dense FP16 compute will be lower. The primary challenge will be ensuring effective utilization
+    across the cluster and managing communication overhead, especially with a global batch size of 2048
+    and sequence length of 4096. Memory bandwidth (5.3 TB/s) is high, but I/O and inter-card communication
+    for activations and gradients will also be critical.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Hardware spec mismatch: MI300X FP16 sparse computation is 1307 TFLOPS, not 1300 TFLOPS.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

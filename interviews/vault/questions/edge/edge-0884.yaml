@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: edge-0884
+track: edge
+level: L6+
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: KV Cache Quantization Cast Overhead
+scenario: To fit a 3B model onto a mobile NPU (8GB RAM, 50GB/s bandwidth), you quantize the KV cache from
+  FP16 to INT8. Memory usage successfully drops from 3GB to 1.5GB. However, token generation latency regresses
+  drastically, jumping from 30ms/token to 65ms/token.
+details:
+  realistic_solution: The root cause is the lack of native mixed-precision support for Attention on the
+    NPU, leading to massive dequantization overhead. While reading INT8 data saves memory bandwidth, the
+    NPU's attention hardware (specifically when applying Rotary Positional Embeddings or calculating softmax)
+    likely requires FP16 inputs. Therefore, at every single layer, for every single token generated, the
+    NPU must read the INT8 KV cache, cast/dequantize it to FP16, perform the attention mechanism, and
+    potentially cast the new token back. This continuous casting turns a memory-bound operation into a
+    compute-bound (or instruction-bound) bottleneck. The solution is either to fuse the dequantization
+    step directly into the attention kernel (if custom kernels are supported) or to keep the KV cache
+    in FP16 and rely on grouped-query attention (GQA) to reduce memory footprint instead of quantization.
+  common_mistake: Assuming the INT8 memory is simply slower to read than FP16 memory due to alignment
+    issues.
+  napkin_math: 'For 2000 tokens, 32 layers, 3B model (hidden size 3072): KV cache size is 2000 * 3072
+    * 2 (K,V) * 32 = 393 MB in INT8. Reading 393 MB at 50 GB/s takes ~8ms. However, dequantizing 393 million
+    INT8 values to FP16 takes ~4 operations per value = ~1.5 Giga-ops per token. If the NPU scalar ALU
+    handles 50 GOPS, this adds 1.5 / 50 = 30ms of pure compute overhead per token. Total latency: 30ms
+    (base) - 8ms (bandwidth savings) + 30ms (cast) = ~52-65ms.'
+  options:
+  - The root cause is the lack of native mixed-precision support for Attention on the NPU, leading to
+    massive dequantization overhead. While reading INT8 data saves memory bandwidth, the NPU's attention
+    hardware (specifically when applying Rotary Positional Embeddings or calculating softmax) likely requires
+    FP16 inputs.
+  - Operator fusion primarily reduces compute time by eliminating redundant arithmetic operations between
+    layers.
+  - Assuming the INT8 memory is simply slower to read than FP16 memory due to alignment issues.
+  - The bottleneck is in the software framework, not the hardware; switching to a lower-level API will
+    achieve near-theoretical-peak performance.
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

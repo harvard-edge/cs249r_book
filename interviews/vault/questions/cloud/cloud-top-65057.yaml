@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-top-65057
+track: cloud
+level: L5
+zone: realization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Context Caching with Disaggregated KV Stores
+scenario: A disaggregated serving system receives many requests sharing a common 1024-token system prompt.
+  Without caching, each request re-computes the system prompt KV cache during prefill. Design a distributed
+  KV cache store to serve the shared prefix.
+details:
+  realistic_solution: 'Distributed prefix KV store architecture: (1) Centralized KV store: use a dedicated
+    high-bandwidth memory node (e.g., 2×H100 with 160GB HBM as shared KV store). Shared prefix KV cache
+    (1024 tokens, 70B): 2.68 GB. Fits easily. Transfer: 2.68 GB at 400 Gbps = 53.6ms — too slow for interactive.
+    (2) Local cache per prefill node: each prefill node caches the top-K most common shared prefixes in
+    HBM. For K=11 prefixes at 2.68GB each: 29.5GB. H100 has 80GB — feasible for K=10-14 prefixes. Cache
+    hit: skip prefix prefill entirely. Cache miss: compute and cache. (3) Bloom filter for cache presence
+    check: 64-byte prefix hash lookup in bloom filter → determine if local cache hit or compute needed.
+    Cache hit rate for system prompt: >95% in steady state. Prefill savings: 1024-token prefix skip saves
+    2×1024×70B/989T = 145ms per request with 95% hit rate.'
+  common_mistake: Storing the shared prefix KV cache in the prefill node's local GPU memory. When prefill
+    nodes scale horizontally, each node stores its own copy, wasting memory. The cache also evicts under
+    memory pressure, causing frequent recomputation.
+  napkin_math: '1024-token shared prefix KV cache (70B): 2*80*64*128*1024*2B = 2,684,354,560 bytes = 2.5
+    GiB (2.68 GB). Local cache on H100 (80GB): reserve 40GB for KV cache of active requests, 30GB for
+    shared prefix cache: 30GB/2.68GB = 11 prefixes storable. Cache hit rate for top-11 prefixes in production:
+    ~85-95% depending on product. Per-request savings at 95% hit rate: prefill skip + KV transfer savings.
+    At 500 RPS: ROI is excellent.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 2*80*64*128*1024*2B is 2.68GB, not 3.36GB
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

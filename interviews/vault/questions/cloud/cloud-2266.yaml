@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: cloud-2266
+track: cloud
+level: L5
+zone: evaluation
+topic: graph-compilation
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: The Compilation Latency Wall in Serving
+scenario: 'Your serving fleet uses `torch.compile` to optimize inference kernels. When deploying a model
+  update (same architecture, new weights), the first request after deployment takes 45 seconds because
+  the compiler recompiles all kernels from scratch. This violates your 5-second cold-start SLA. The engineering
+  team proposes three solutions: (A) cache compiled kernels and reuse across weight updates, (B) AOT-compile
+  during CI/CD and ship pre-compiled artifacts, (C) serve un-compiled for the first 10 seconds while compilation
+  happens in the background. Evaluate all three approaches and their tradeoffs.'
+details:
+  realistic_solution: '**Option A (Kernel caching)**: Works because compiled kernels depend on the computation
+    graph structure and input shapes, NOT on weight values. If the architecture is unchanged, all cached
+    kernels are valid. Tradeoff: requires a cache invalidation strategy (architecture changes must bust
+    the cache), and the cache must be distributed across the serving fleet (shared filesystem or object
+    store). Cold start: ~2s (cache load from S3) — meets SLA. Risk: stale cache after architecture change
+    causes silent correctness bugs. **Option B (AOT compilation in CI/CD)**: The most robust approach.
+    Compile the model with representative input shapes during the build pipeline, serialize the compiled
+    artifacts (TorchInductor''s `.so` files), and deploy them alongside the weights. Cold start: ~1s (load
+    pre-compiled .so + weights). Tradeoff: the CI/CD pipeline must know all input shapes in advance —
+    unexpected shapes at serving time trigger fallback to eager mode or JIT compilation. For LLM serving
+    with variable sequence lengths, this requires compiling for multiple shape buckets. Risk: CI/CD build
+    time increases by 5-10 minutes. **Option C (Background compilation)**: Serve the first requests in
+    eager mode (no compilation) while compiling in a background thread. Once compilation finishes, hot-swap
+    to compiled kernels. Cold start: ~0.5s (eager mode is fast to start). Tradeoff: the first 10-45 seconds
+    of traffic runs at 40-60% lower throughput (un-compiled), which may cause cascading latency if the
+    load balancer sends too many requests. Risk: thread-safety issues during the hot-swap if not carefully
+    implemented. **Recommendation**: Option B for production (most predictable), with Option C as a fallback
+    for unexpected shapes.'
+  common_mistake: '"Just increase the cold-start SLA to 60 seconds." This is a product cop-out; the technical
+    solutions have real tradeoffs worth analyzing.'
+  napkin_math: 'Model with 80 unique kernel shapes. JIT compilation: 80 × 0.5s = 40s cold start (violates
+    5s SLA). Option A (cache load from S3): 80 × 25ms = 2s (meets SLA). Option B (AOT, load .so from disk):
+    80 × 12ms = 1s (meets SLA). Option C (eager fallback): 0s cold start, but eager throughput = 60% of
+    compiled → at 1000 QPS, need 67% more GPUs for the first 40s = 0.75 extra GPU-minutes per deployment
+    × 100 deployments/day = 75 GPU-minutes/day ≈ $2.50/day.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The Napkin Math for Option C contains a minor inconsistency in calculating '0.75 extra GPU-minutes'
+  from '67% more GPUs for the first 40s'.
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- The Napkin Math for Option C contains a minor inconsistency in calculating '0.75 extra GPU-minutes'
+  from '67% more GPUs for the first 40s'.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

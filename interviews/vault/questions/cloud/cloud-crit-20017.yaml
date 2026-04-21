@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-crit-20017
+track: cloud
+level: L4
+zone: diagnosis
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: PagedAttention Block Size Tradeoff
+scenario: After switching from block_size=16 to block_size=1 in vLLM's PagedAttention on A100, you observe
+  that memory utilization improves from 92% to 99% but decode latency increases by 35%. Diagnose the root
+  cause of this latency regression.
+details:
+  realistic_solution: 'With block_size=1, each token''s KV is a separate allocation. For a 4096-context
+    request with 40 layers x 2 x 40 heads x 128 dim x 2B = 800KB per token, the block table has 4096 entries
+    pointing to scattered 800KB blocks. During attention, the GPU must gather K/V values from 4096 random
+    memory locations per head per layer. This creates non-coalesced memory accesses: instead of sequential
+    128B cache-line reads, each access fetches from a different page. L2 cache hit rate drops from ~70%
+    (contiguous) to ~15% (scattered). At block_size=16, there are only 256 blocks with 12.8MB each — large
+    enough for coalesced access patterns. Optimal block sizes balance fragmentation (smaller = less waste)
+    against access locality (larger = better coalescing): block_size=16-64 is the sweet spot.'
+  common_mistake: Blaming the block table lookup overhead. The real issue is that block_size=1 creates
+    thousands of tiny non-contiguous memory segments, destroying GPU memory access coalescing and L2 cache
+    locality.
+  napkin_math: 'Block_size=1: 4096 random accesses per head. Block_size=16: 256 sequential reads. L2 hit
+    rate: 15% vs 70%. Effective bandwidth at 15% hit: 2TB/s x 0.15 + (random penalty) ~ 0.8 TB/s vs 1.7
+    TB/s. Decode regression: 1.7/0.8 = 2.1x, but partially masked by compute = net 35%.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

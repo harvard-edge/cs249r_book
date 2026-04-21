@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-fill2-32060
+track: cloud
+level: L5
+zone: design
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: 'Expert Parallelism + Tensor Parallelism: Hybrid MoE Training'
+scenario: You train a 1.6T parameter MoE model (128 experts, top-2) on 256 MI300X GPUs. Each expert has
+  12.5B parameters (FP16 = 25 GB). A single MI300X (192 GB) can hold ~6 experts in memory with room for
+  activations. Design a parallelism strategy combining expert parallelism (EP), tensor parallelism (TP),
+  and data parallelism (DP).
+details:
+  realistic_solution: 'Strategy: (1) Group experts: place 4 experts per GPU (100 GB weights, leaving 92
+    GB for KV cache/activations). Need 128/4 = 32 GPUs for one full expert set. (2) Within each expert,
+    no TP needed (12.5B fits on one GPU easily). (3) DP = 256/32 = 8 data-parallel replicas. Configuration:
+    EP_groups = 32 GPUs each, DP = 8. Communication: All-to-All within each EP group of 32 GPUs for token
+    routing. AllReduce across 8 DP replicas for gradient sync. All-to-All for 32 GPUs with 256 tokens
+    × top-2 × 8192d × 2B = ~8 MB per MoE layer per GPU. With 8 nodes of 8 GPUs: place EP group across
+    4 nodes (inter-node traffic). Optimization: use Infinity Fabric (intra-node) for TP on shared attention
+    layers (TP=8) and InfiniBand for EP across nodes. This separates bandwidth-intensive TP from latency-tolerant
+    EP communication.'
+  common_mistake: Putting one expert per GPU (EP=128) and using the remaining 128 GPUs for DP. This under-utilizes
+    each GPU's 192 GB (only 25 GB used per expert) and creates massive All-to-All traffic across 128 GPUs.
+  napkin_math: '128 experts × 25 GB = 3.2 TB total model. 4 experts/GPU × 32 GPUs = one full copy. 256
+    GPUs / 32 = 8 DP replicas. All-to-All per MoE layer: 32 GPUs × 8 MB = 256 MB. 16 MoE layers × 2 directions:
+    8.2 GB. At 400 Gbps IB: 164ms. Shared attention TP=8 AllReduce: ~15ms intra-node.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- All-to-All per layer volume of 8 MB per GPU is stated without specifying the batch size, making it impossible
+  to fully verify.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

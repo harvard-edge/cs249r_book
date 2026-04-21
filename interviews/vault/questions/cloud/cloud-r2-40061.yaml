@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-r2-40061
+track: cloud
+level: L5
+zone: evaluation
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: RDMA Reliable Connection vs Unreliable Datagram
+scenario: 'InfiniBand offers two transport modes: Reliable Connection (RC) with guaranteed delivery and
+  ordering, and Unreliable Datagram (UD) with no delivery guarantees. NCCL uses both: RC for point-to-point
+  transfers and UD for some collective operations. Evaluate the tradeoffs for AllReduce on a 512-H100
+  cluster, considering QP scalability, failure handling, and throughput.'
+details:
+  realistic_solution: 'RC (Reliable Connection): (1) Guarantees in-order delivery and automatic retransmission.
+    (2) QP scaling: 512 GPUs × 511 peers × 8 rails = 2,087,424 QPs per cluster. Per GPU: 511 × 8 = 4,088
+    QPs × ~1KB = 4MB of HCA memory. Feasible on ConnectX-7 (256MB HCA memory). (3) Failure: if one QP
+    errors (e.g., remote GPU crash), only that QP is affected. (4) Throughput: 50 GB/s per QP (line rate).
+    UD (Unreliable Datagram): (1) No delivery guarantee — NCCL must handle retransmission in software.
+    (2) QP scaling: O(N) — one QP per GPU handles all peers via multicast. 512 × 8 = 4,096 QPs total.
+    (3) Failure: lost packets silently dropped. NCCL detects via timeout and retransmits. Higher software
+    complexity. (4) Throughput: same line rate but with software retransmission overhead. (5) Advantage:
+    supports multicast, enabling one-to-many broadcast with single send. For AllReduce on 512 H100s: Use
+    RC for reduce-scatter/all-gather (data integrity critical, QP count manageable). Use UD+multicast
+    for small broadcasts (parameter updates, control messages) where QP savings matter and occasional
+    retransmission is tolerable. NCCL v2.18+ uses this hybrid approach.'
+  common_mistake: Choosing RC for everything because 'reliable is always better.' RC requires O(N²) QP
+    resources (one QP per connection pair), which doesn't scale to thousands of GPUs. Each QP consumes
+    ~1KB of HCA memory, and QP state transitions are expensive.
+  napkin_math: 'RC QP memory: 512 GPUs × 4088 QPs × 1KB = 2GB across the cluster (4MB per GPU). UD QP
+    memory: 4096 × 1KB = 4MB across entire cluster. 500× less. But at 512 GPUs, 4MB per GPU is fine. At
+    16,384 GPUs: RC would need 131K QPs per GPU = 128MB — hitting HCA limits. UD scales to 16K+ easily.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

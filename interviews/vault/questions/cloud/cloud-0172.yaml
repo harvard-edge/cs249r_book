@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-0172
+track: cloud
+level: L5
+zone: diagnosis
+topic: batching-strategies
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: The Continuous Batching Paradox (cloud-0172)
+scenario: 'Your team just deployed a new LLM serving system using continuous batching on H100s. The goal
+  is to serve two traffic types: real-time, low-latency chatbot queries (short prompts) and large, offline
+  document summarization jobs (long prompts). After launch, you see average throughput has increased significantly,
+  but you get an alert that P99 latency for the chatbot has degraded by 500%. Your manager is confused:
+  ''I thought continuous batching was supposed to *solve* Head-of-Line blocking. How can throughput be
+  up, but latency for our most important users be so much worse?'' Justify the root cause of this non-linear
+  system degradation.'
+details:
+  realistic_solution: The system is experiencing scheduler-induced Head-of-Line Blocking, a more subtle
+    variant that continuous batching alone doesn't solve. The default scheduler is likely FIFO ('first-in,
+    first-out') to maximize hardware utilization. When a burst of long summarization jobs arrives, they
+    fill up the batch slots. Even with continuous batching, a new, short chatbot query is blocked until
+    one of the long jobs finishes its *entire*, multi-second prefill and generation cycle. The system's
+    throughput is high because the GPU is always busy with the long jobs, but the queue time for short,
+    latency-sensitive requests explodes. The fix is to implement a priority-based scheduler that reserves
+    a portion of the batch capacity for high-priority (e.g., short, interactive) requests, or to create
+    separate queues and even separate GPU pools for the different traffic classes.
+  common_mistake: Blaming the KV cache size. While KV cache is a constraint, it doesn't explain why short,
+    low-memory-footprint requests are the ones that suffer. Another common but incorrect answer is 'Python
+    overhead' or 'network latency', which are orders of magnitude too small to cause a 500% degradation.
+  napkin_math: 'Let''s model the system. A 70B model on an H100. A long prompt is 8k tokens, a short one
+    is 50. Prefill for an 8k prompt is compute-heavy: `2 * 70B * 8000 tokens ≈ 1.12 PetaFLOPs`. On an
+    H100 (989 TFLOPS), this prefill alone takes `1.12e15 / 989e12 ≈ 1.13 seconds`. If 16 such jobs arrive
+    and fill a batch, they will occupy the GPU for over a second just for prefill. A new short chatbot
+    query arriving during this time must wait in the queue for this entire duration, plus any decode time.
+    Its TTFT is now >1 second, a 500%+ degradation from a baseline of <200ms. The GPU is 100% utilized,
+    so throughput metrics look great, but the user experience for the chatbot is destroyed.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

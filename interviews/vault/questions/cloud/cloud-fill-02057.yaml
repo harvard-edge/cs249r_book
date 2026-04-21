@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-fill-02057
+track: cloud
+level: L4
+zone: design
+topic: rdma-transport
+competency_area: memory
+bloom_level: apply
+phase: both
+title: RDMA Read vs Write Semantics for KV Cache Transfer in LLM Disaggregation
+scenario: In a disaggregated LLM serving system, the prefill node (H100) must transfer KV cache (2GB for
+  a long context request) to the decode node (H100) via InfiniBand. Compare RDMA Read (decode node pulls)
+  vs RDMA Write (prefill node pushes) for this transfer and choose the better option.
+details:
+  realistic_solution: 'RDMA Write (push): prefill node completes KV cache → writes directly to decode
+    node''s pre-registered memory → signals completion via small RDMA Send. Requires: decode node pre-registers
+    KV cache buffer and communicates rkey to prefill. Benefit: one-sided, no decode CPU in hot path. RDMA
+    Read (pull): decode node pulls from prefill''s registered memory. Requires: prefill registers memory
+    and communicates rkey. Decode initiates when ready. Benefit: decode controls timing precisely. For
+    LLM disaggregation: RDMA Write preferred because prefill knows when KV cache is complete and can immediately
+    push; decode node allocates buffer upon request arrival. Latency: 2GB / 25GB/s (200Gbps IB) = 80ms.
+    CPU-path TCP: 80ms + kernel overhead ≈ 120ms. RDMA saves 40ms on KV cache transfer.'
+  common_mistake: Choosing RDMA Write without considering that the decode node must pre-allocate and register
+    the KV cache memory region before the transfer begins — adding synchronization overhead.
+  napkin_math: 'KV cache: 2GB at 200Gbps IB = 2GB/25GB/s=80ms transfer. Decode TTFT saved: 80ms (no KV
+    wait) - this is significant for 1-2s TTFT targets. RDMA Write setup: pre-register 2GB buffer at startup
+    (one-time 20ms cost). Per-request overhead: 1 ibv_post_send() call ≈ 1μs. 40ms savings per long-context
+    request vs TCP path.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
