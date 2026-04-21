@@ -84,8 +84,15 @@ export default function CommandPalette() {
         setOpen(o => !o);
       }
     };
+    // Programmatic open: the navbar search icon dispatches this event so the
+    // palette can be triggered by click without simulating a keystroke.
+    const onOpenEvent = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("staffml:open-palette", onOpenEvent);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("staffml:open-palette", onOpenEvent);
+    };
   }, []);
 
   // ─── Open: focus input, capture previously-focused element ──

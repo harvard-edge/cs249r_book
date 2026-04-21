@@ -125,9 +125,9 @@ const S = {
     // Bootstrap navbar default: 0.5rem top/bottom padding plus brand line
     // height → ~60 px total at desktop widths. Matches the measured height
     // of Quarto sites (60.5 px) so StaffML sits flush with ecosystem nav.
-    padding: '10px 16px',
+    padding: '8.5px 17px',  // matches Quarto measured `.navbar` padding
     fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    fontSize: 16,  // --bs-body-font-size: 1rem
+    fontSize: 17,  // --bs-body-font-size: 1.0625rem (Quarto measured 17 px)
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -142,7 +142,7 @@ const S = {
     gap: 8,
     textDecoration: 'none',
     color: BRAND_COLOR,  // Neutral gray, matches shared/_navbar.scss
-    fontSize: 20,  // --bs-navbar-brand-font-size: 1.25rem
+    fontSize: 21,  // --bs-navbar-brand-font-size: 1.25rem on 17 px root ≈ 21.25 px
     fontWeight: 500,  // Matches shared/_navbar.scss .navbar-brand
     whiteSpace: 'nowrap' as const,
     marginRight: 16,  // --bs-navbar-brand-margin-end: 1rem
@@ -152,8 +152,8 @@ const S = {
   navLink: {
     color: NAV_COLOR,
     textDecoration: 'none',
-    padding: '8px 8px',  // --bs-navbar-nav-link-padding-x: 0.5rem
-    fontSize: 16,
+    padding: '8.5px 12px',  // Quarto measured 8.5 × 12.75 px; round for integer pixels
+    fontSize: 17,
     fontWeight: 400,
     cursor: 'pointer',
     display: 'flex',
@@ -168,7 +168,7 @@ const S = {
     top: '100%',
     left: 0,
     zIndex: 1000,
-    minWidth: 240,
+    minWidth: 160,        // Bootstrap `.dropdown-menu` default (10rem), was over-wide at 240
     padding: '4px 0',
     backgroundColor: '#fff',
     border: '1px solid rgba(0,0,0,0.15)',
@@ -183,10 +183,10 @@ const S = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '6px 16px',
+    padding: '4px 16px',  // Bootstrap `.dropdown-item` padding is 0.25rem 1rem
     color: '#212529',
     textDecoration: 'none',
-    fontSize: 16,
+    fontSize: 14,         // Quarto dropdown items measured ~14 px; was 16 → visibly over-sized
     whiteSpace: 'nowrap' as const,
   },
   divider: {
@@ -204,8 +204,12 @@ export default function EcosystemBar() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
 
-  // Theme-aware colors (matches shared/_navbar.scss light/dark)
-  const bgColor = isDark ? '#212529' : '#fff';
+  // Theme-aware colors (matches shared/_navbar.scss light/dark).
+  // Light bg is Bootstrap's `--bs-tertiary-bg` (#f8f9fa) — Quarto navbars
+  // render against this off-white, with no bottom border. Using pure #fff
+  // here previously made the StaffML bar look flatter/brighter than the
+  // rest of the ecosystem.
+  const bgColor = isDark ? '#212529' : '#f8f9fa';
   const borderColor = isDark ? '#454d55' : '#dee2e6';
   const brandColor = isDark ? '#e6e6e6' : '#333';
   const navColor = isDark ? '#adb5bd' : '#6c757d';
@@ -292,7 +296,12 @@ export default function EcosystemBar() {
   return (
     <div ref={barRef} style={{
       position: 'sticky' as const, top: 0, zIndex: 60,
-      backgroundColor: bgColor, borderBottom: `1px solid ${borderColor}`,
+      backgroundColor: bgColor,
+      // Quarto navbars have no bottom border in light mode — the seam is
+      // provided by the bg-color contrast against the white page body.
+      // In dark mode keep a hairline so the nav doesn't bleed into the
+      // dark page background.
+      borderBottom: isDark ? `1px solid ${borderColor}` : 'none',
       transition: 'background-color 0.2s, border-color 0.2s',
     }}>
       <div style={{ ...S.nav, position: 'relative' as const, borderBottom: 'none' }}>
@@ -303,10 +312,12 @@ export default function EcosystemBar() {
             alt=""
             style={{ height: 28, width: 'auto', flexShrink: 0 }}
           />
-          <span
-            className="hidden nav-sm:inline"
-            style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}
-          >
+          {/* Title always shown — Quarto mobile bars still show "ML Systems"
+              (truncated), so hiding the span below `nav-sm` was worse than
+              the ecosystem. Parent `S.brand` has `overflow: 'hidden'` +
+              `whiteSpace: 'nowrap'`, so narrow viewports get an ellipsis
+              rather than a wrap. */}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             Machine Learning Systems
           </span>
         </a>
@@ -361,6 +372,16 @@ export default function EcosystemBar() {
               <i className={`bi ${isDark ? 'bi-sun' : 'bi-moon-stars-fill'}`} style={{ fontSize: 14 }} />
             </button>
             {RIGHT_MENUS.map(renderDropdown)}
+            {/* Search — opens the existing CommandPalette (Cmd+K).
+                Matches the search icon on Quarto navbars. */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('staffml:open-palette'))}
+              style={{ ...S.navLink, padding: '8px 10px', cursor: 'pointer' }}
+              aria-label="Search (Cmd+K)"
+              title="Search (⌘K)"
+            >
+              <i className="bi bi-search" style={{ fontSize: 14 }} />
+            </button>
           </div>
         </div>
 
