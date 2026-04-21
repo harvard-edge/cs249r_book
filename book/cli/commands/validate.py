@@ -134,6 +134,7 @@ class ValidateCommand:
             ("citations", "_run_citations"),
             ("inline", "_run_inline_refs"),
             ("self-ref", "_run_self_referential"),
+            ("capitalized", "_run_mitpress_capitalized_refs"),  # "chapter 12" lowercase in prose
         ],
         "labels": [
             ("duplicates", "_run_duplicate_labels"),
@@ -158,6 +159,64 @@ class ValidateCommand:
             ("flow", "_run_float_flow"),
             ("files", "_run_images"),
         ],
+        # ------------------------------------------------------------------
+        # Semantic check groups (MIGRATION: commit 1 of refactor/check-taxonomy).
+        # These groups classify checks by WHAT is validated, not by
+        # where-the-rule-came-from (e.g. `mitpress-` prefixed scopes move to
+        # their natural semantic home). The `rendering` group below remains
+        # registered during the migration so pre-commit entries that still
+        # reference the old scope path continue to work; it will be removed
+        # in commit 3 after `.pre-commit-config.yaml` is updated.
+        # ------------------------------------------------------------------
+        "markup": [
+            ("patterns", "_run_rendering"),       # low-level markup patterns (backticks, dollar signs, asterisks)
+            ("div-fences", "_run_div_fences"),    # ::: / :::: balance + form
+            ("dropcaps", "_run_dropcaps"),        # drop-cap compatibility
+        ],
+        "prose": [
+            ("contractions", "_run_contractions"),           # no "can't", "it's" in body prose
+            ("duplicate-words", "_run_duplicate_words"),     # consecutive dup words
+            ("unblended-prose", "_run_unblended_prose"),     # space after period
+            ("above-below", "_run_mitpress_above_below"),    # no "above"/"below" spatial refs
+            ("ascii", "_run_ascii"),                         # non-ASCII chars
+            ("acknowledgements", "_run_mitpress_acknowledgements"),  # American spelling
+        ],
+        "punctuation": [
+            ("emdash", "_run_mitpress_spaced_emdash"),        # word—word, no spaces
+            ("slash", "_run_mitpress_spaced_slash"),          # training/inference, no spaces
+            ("vs-period", "_run_mitpress_vs_period"),         # vs. not vs
+            ("eg-ie-comma", "_run_mitpress_eg_ie_comma"),     # comma after e.g./i.e.
+            ("hyphen-range", "_run_mitpress_hyphen_range"),   # en-dash for number ranges
+        ],
+        "numbers": [
+            ("unit-spacing", "_run_unit_spacing"),                          # 100 ms, not 100ms
+            ("binary-units", "_run_binary_units"),                          # GB/TB not GiB/TiB
+            ("percent-spacing", "_run_percent_spacing"),                    # no space before %
+            ("percent-in-captions", "_run_mitpress_percent_in_captions"),   # spell out in captions
+        ],
+        "math": [
+            ("times-spacing", "_run_times_spacing"),                 # space after $\times$
+            ("times-product-spacing", "_run_times_product_spacing"), # space before $\times$ after inline code
+        ],
+        "structure": [
+            ("heading-levels", "_run_heading_levels"),    # H1→H2→H3 hierarchy
+            ("parts", "_run_parts"),                       # part keys valid
+            ("purpose-unnumbered", "_run_purpose_unnumbered"),  # Purpose sections unnumbered
+        ],
+        "code": [
+            ("python-echo", "_run_python_echo"),           # echo: false on python blocks
+        ],
+        "tables": [
+            ("grid-tables", "_run_grid_tables"),           # prefer pipe tables
+            ("content", "_run_table_content"),             # bare pipes, fracs, HTML entities
+        ],
+        "index": [
+            ("placement", "_run_indexes"),                 # \index{} not inline with headings/callouts
+        ],
+
+        # DEPRECATED: `rendering` will be removed in commit 3 of this refactor.
+        # All scopes below now also live in their semantic-home group above.
+        # New pre-commit entries MUST use the new group names.
         "rendering": [
             ("patterns", "_run_rendering"),
             ("python-echo", "_run_python_echo"),
@@ -424,7 +483,16 @@ class ValidateCommand:
             "bib": "Bibliography hygiene — schema + canonical forms (§5)",
             "footnotes": "Placement, integrity, cross-chapter duplicates",
             "figures": "Captions, float flow, image files",
-            "rendering": "Patterns, indexes, dropcaps, headings, typos, tables, ASCII",
+            "markup": "Low-level markup (patterns, div-fences, dropcaps)",
+            "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
+            "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
+            "numbers": "Units + percent spacing, binary units, percent-in-captions",
+            "math": "LaTeX \\times spacing + product spacing",
+            "structure": "Heading levels, parts, Purpose-unnumbered",
+            "code": "Python code blocks (echo: false)",
+            "tables": "Grid tables → pipe, table content hygiene",
+            "index": "Index placement (\\index{} outside headings/callouts)",
+            "rendering": "DEPRECATED — use semantic groups above (markup, prose, punctuation, ...)",
             "images": "Image file formats, external URLs",
             "json": "JSON file syntax validation",
             "units": "Physics engine unit conversion tests",
