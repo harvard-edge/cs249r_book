@@ -13,6 +13,8 @@ import argparse
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -195,6 +197,8 @@ class ValidateCommand:
         "math": [
             ("times-spacing", "_run_times_spacing"),                 # space after $\times$
             ("times-product-spacing", "_run_times_product_spacing"), # space before $\times$ after inline code
+            ("attr-leaks", "_run_attr_latex_leaks"),                 # LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt — won't render or leaks to lightbox
+            ("render-audit", "_run_math_render_audit"),              # full HTML build + leak scan (slow; manual stage)
         ],
         "structure": [
             ("heading-levels", "_run_heading_levels"),    # H1→H2→H3 hierarchy
@@ -203,6 +207,7 @@ class ValidateCommand:
         ],
         "code": [
             ("python-echo", "_run_python_echo"),           # echo: false on python blocks
+            ("str-latex-leak", "_run_str_latex_leak"),     # *_str exports must not contain raw LaTeX (use md()/md_math())
         ],
         "tables": [
             ("grid-tables", "_run_grid_tables"),           # prefer pipe tables
@@ -294,6 +299,7 @@ class ValidateCommand:
         parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
         parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
         parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
+        parser.add_argument("--include-lightbox", action="store_true", default=False, help="math --scope attr-leaks: also surface fig-cap/tbl-cap math that leaks into HTML lightbox tooltips (warning, opt-in; ~70 pre-existing instances on dev)")
         parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
         parser.add_argument("--tables", action="store_true", help="labels: filter to tables")
         parser.add_argument("--sections", action="store_true", help="labels: filter to sections")
@@ -413,6 +419,8 @@ class ValidateCommand:
             elif method_name == "_run_inline_refs":
                 results.append(method(root, check_patterns=ns.check_patterns,
                                       check_scope=getattr(ns, 'check_scope', False)))
+            elif method_name == "_run_attr_latex_leaks":
+                results.append(method(root, include_lightbox=getattr(ns, 'include_lightbox', False)))
             elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
@@ -452,9 +460,9 @@ class ValidateCommand:
             "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
             "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
             "numbers": "Units + percent spacing, binary units, percent-in-captions",
-            "math": "LaTeX \\times spacing + product spacing",
+            "math": "\\times spacing, attribute-string LaTeX leaks, optional render audit",
             "structure": "Heading levels, parts, Purpose-unnumbered",
-            "code": "Python code blocks (echo: false)",
+            "code": "Python code blocks (echo: false, _str/_math export hygiene)",
             "tables": "Grid tables → pipe, table content hygiene",
             "index": "Index placement (\\index{} outside headings/callouts)",
             "images": "Image file formats, external URLs",
@@ -2984,6 +2992,375 @@ class ValidateCommand:
             name="times-product-spacing",
             description="Space around $\\times$ in product expressions",
             files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Math: LaTeX leaks inside attribute strings (titles + captions + alt text)
+    # ------------------------------------------------------------------
+    #
+    # WHY THIS EXISTS
+    #
+    # Quarto runs Pandoc's math parser only on document body prose. Attribute
+    # values — callout `title="..."`, `fig-cap`, `tbl-cap`, `lst-cap`,
+    # `fig-alt`, `tbl-alt` — are extracted as plain strings and reused by
+    # downstream consumers (HTML lightbox `<img title="...">` tooltip, EPUB
+    # bookmarks, screen readers, PDF outline). Any LaTeX inside them either
+    # renders as literal `\command` / `^{N}` / `$..$` or, in the lightbox
+    # case, leaks raw LaTeX into the hover tooltip. See the audit retrospective
+    # in `.claude/rules/book-prose.md` ("Anti-pattern: LaTeX inside attribute
+    # strings"). Fix by switching to Unicode (×, ³, α, β, ρ, ≤, ≥, →, ∞, …).
+    #
+    # FAILURE MODES CAUGHT
+    #   1. Callout `title="..."` containing $...$, \command, or ^{...}/_{N}
+    #      → ERROR (never renders correctly, in any output format)
+    #   2. fig-cap/tbl-cap/etc. with bare `^{N}` or `_{N}` outside `$...$`
+    #      → ERROR (LaTeX-only syntax; renders literally without delimiters)
+    #   3. fig-cap/tbl-cap with inline `$\command$` math fragments
+    #      → WARNING (caption renders fine, but lightbox tooltip leaks raw
+    #      LaTeX). Reserve $...$ for genuinely complex math; prefer Unicode
+    #      for short fragments like ρ, ≤, ×.
+
+    # Backslash-LaTeX commands commonly seen leaking. Kept conservative —
+    # adding new commands here is safe (more catches), but any addition that
+    # introduces false positives in legitimate prose should be reviewed.
+    _ATTR_LATEX_COMMANDS = (
+        r"times|frac|approx|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|"
+        r"iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|upsilon|phi|chi|psi|"
+        r"omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|"
+        r"sqrt|sum|int|cdot|leq|geq|neq|partial|nabla|infty|"
+        r"log|ln|exp|min|max|pm|mp|forall|exists|in|notin|to|gets|"  # codespell:ignore notin
+        r"mapsto|rightarrow|Rightarrow|prod|equiv|sim|propto|"
+        r"land|lor|neg|text|mathbf|mathit|mathcal|mathbb"
+    )
+    _ATTR_LATEX_CMD_RE = re.compile(rf"\\(?:{_ATTR_LATEX_COMMANDS})\b")
+    _ATTR_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$[^\s$][^$\n]*?(?<!\\)\$")
+    _ATTR_CARET_BRACE_RE = re.compile(r"(?<![A-Za-z0-9_])\^\{[^}\n]{1,40}\}")
+    _ATTR_UNDER_BRACE_RE = re.compile(r"(?<![A-Za-z0-9_])_\{[^}\n]{1,40}\}")
+
+    # Callout open fence with title= attribute (single line; multi-line attr
+    # values are rare in this codebase and intentionally out of scope here).
+    _CALLOUT_TITLE_RE = re.compile(
+        r"""^:::+\s*\{[^}]*\btitle\s*=\s*"([^"]*)"[^}]*\}\s*$"""
+    )
+    # YAML caption-like keys at top of a chunk options block or block YAML.
+    # Match e.g. `fig-cap: "..."`, `fig-cap: '...'`, `fig-cap: bare text`.
+    _YAML_CAP_KEYS = ("fig-cap", "tbl-cap", "lst-cap", "fig-alt", "tbl-alt")
+    _YAML_CAP_RE = re.compile(
+        r"""^(?P<indent>\s*)(?:\#\|\s*)?(?P<key>fig-cap|tbl-cap|lst-cap|fig-alt|tbl-alt)\s*:\s*(?P<value>.*?)\s*$"""
+    )
+    # Inline div attribute: `{#fig-x ... fig-cap="..." fig-alt="..."}` or
+    # similar single-line attribute blocks. Match any of the cap/alt keys.
+    _INLINE_CAP_RE = re.compile(
+        r"""\b(?P<key>fig-cap|tbl-cap|lst-cap|fig-alt|tbl-alt)\s*=\s*"(?P<value>[^"]*)\""""
+    )
+
+    @classmethod
+    def _strip_quotes(cls, raw: str) -> str:
+        s = raw.strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            return s[1:-1]
+        return s
+
+    @classmethod
+    def _strip_inline_math(cls, value: str) -> str:
+        """Remove `$...$` math spans so we can scan the *non-math* remainder
+        for bare `^{}`/`_{}` that should have been wrapped in dollars."""
+        return cls._ATTR_DOLLAR_MATH_RE.sub(" ", value)
+
+    def _scan_title_value(self, value: str) -> List[tuple]:
+        """Return list of (code, severity, message_suffix) for issues in a
+        callout `title=` value. Math NEVER renders inside title; flag any."""
+        out: list[tuple] = []
+        if self._ATTR_DOLLAR_MATH_RE.search(value):
+            out.append(("attr_title_math", "error",
+                        "callout title= contains $...$ — math is not parsed in attribute values; use Unicode (×, ³, α, β, ρ, …)"))
+        elif self._ATTR_LATEX_CMD_RE.search(value):
+            out.append(("attr_title_latex", "error",
+                        "callout title= contains a LaTeX command — markdown is not parsed in attribute values; use Unicode"))
+        if self._ATTR_CARET_BRACE_RE.search(value) or self._ATTR_UNDER_BRACE_RE.search(value):
+            out.append(("attr_title_brace", "error",
+                        "callout title= contains ^{...} or _{...} — use Unicode superscript/subscript (³, ₂, …)"))
+        return out
+
+    def _scan_caption_value(self, key: str, value: str, include_lightbox: bool = False) -> List[tuple]:
+        """Return list of (code, severity, message_suffix) for issues in a
+        fig-cap/tbl-cap/etc. value.
+
+        Math IS parsed inside the body of these captions, so `$...$` is
+        valid markup. Two failure modes:
+
+          - Bare `^{}/_{}` outside `$...$` is an error (LaTeX-only syntax;
+            won't render without delimiters).
+          - Inline `$...$` fragments render fine in the caption itself but
+            Quarto's lightbox plugin extracts the caption string for the
+            `<img title>` hover tooltip with markdown stripped, leaking raw
+            LaTeX. This is a hover-only HTML cosmetic artifact and surfaces
+            only when *include_lightbox=True* (opt-in via --include-lightbox).
+        """
+        out: list[tuple] = []
+        non_math = self._strip_inline_math(value)
+        if self._ATTR_CARET_BRACE_RE.search(non_math) or self._ATTR_UNDER_BRACE_RE.search(non_math):
+            out.append((f"{key.replace('-', '_')}_bare_brace", "error",
+                        f"{key} contains bare `^{{...}}` / `_{{...}}` outside `$...$` — wrap in `$...$` or use Unicode (³, ₂, …)"))
+        if include_lightbox and self._ATTR_DOLLAR_MATH_RE.search(value):
+            out.append((f"{key.replace('-', '_')}_lightbox_leak", "warning",
+                        f"{key} contains `$...$` math — the caption renders fine, but Quarto's lightbox copies this string into the `<img title>` tooltip with markdown stripped, leaking raw LaTeX. Prefer Unicode for short fragments."))
+        return out
+
+    def _run_attr_latex_leaks(self, root: Path, include_lightbox: bool = False) -> ValidationRunResult:
+        """LaTeX leakage inside Quarto attribute strings.
+
+        ``include_lightbox`` (default False) opts into surfacing the
+        warning class for fig-cap/tbl-cap math fragments that leak into
+        the HTML lightbox tooltip. Off by default so pre-commit only
+        blocks on true rendering errors.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            text = self._read_text(file)
+            lines = text.splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                # Track fenced code blocks so we don't scan code samples
+                # that legitimately contain `title="..."` or `fig-cap=...`.
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                # 1. Callout title= attribute
+                m = self._CALLOUT_TITLE_RE.match(line)
+                if m:
+                    value = m.group(1)
+                    for code, severity, message in self._scan_title_value(value):
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code=code,
+                            message=message,
+                            severity=severity,
+                            context=stripped[:160],
+                        ))
+
+                # 2. YAML-style caption / alt key (chunk options or block YAML)
+                ym = self._YAML_CAP_RE.match(line)
+                if ym and not stripped.startswith(":::") and not stripped.startswith("{"):
+                    key = ym.group("key")
+                    value = self._strip_quotes(ym.group("value"))
+                    if value:
+                        for code, severity, message in self._scan_caption_value(key, value, include_lightbox):
+                            issues.append(ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code=code,
+                                message=message,
+                                severity=severity,
+                                context=stripped[:160],
+                            ))
+
+                # 3. Inline div attribute: {... fig-cap="..." ...}
+                for im in self._INLINE_CAP_RE.finditer(line):
+                    key = im.group("key")
+                    value = im.group("value")
+                    for code, severity, message in self._scan_caption_value(key, value, include_lightbox):
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code=code,
+                            message=message,
+                            severity=severity,
+                            context=stripped[:160],
+                        ))
+
+        return ValidationRunResult(
+            name="attr-leaks",
+            description="LaTeX inside attribute strings (callout title=, fig-cap, tbl-cap, fig-alt, tbl-alt)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Code: LaTeX inside *_str Python exports (the original bug)
+    # ------------------------------------------------------------------
+    #
+    # WHY THIS EXISTS
+    #
+    # The `_str` suffix is the project's convention for "this Python value is
+    # plain text destined for an inline `{python}` substitution". Inline
+    # `{python}` substitutions happen AFTER Pandoc's math parser runs, so any
+    # raw LaTeX (`$...$`, `\\command`, `^{...}`) embedded in a `_str` export
+    # survives into the rendered output as literal text. The fix is either:
+    #   - Wrap the export in md_math() / md() — and rename it `_math` so the
+    #     suffix tells the next reader "this is a Markdown-wrapped LaTeX
+    #     object, not a plain string."
+    #   - Or compute and emit the value as plain text / Unicode.
+    # See `.claude/rules/book-prose.md` ("Anti-pattern: bare LaTeX inside a
+    # `_str` export").
+
+    # `_str` assignments inside Python code blocks. Capture the variable name
+    # so we can include it in the error message and skip `_math`/other names.
+    _STR_ASSIGN_RE = re.compile(
+        r"""^\s*(?P<lhs>[A-Za-z_][A-Za-z0-9_.]*_str)\s*=\s*(?P<rhs>[fFrR]{0,2}["'].*)$"""
+    )
+    # Common LaTeX commands likely to appear inside an f-string. Pre-compiled
+    # with the leading backslash already escaped for the Python source.
+    _STR_LATEX_CMD_RE = re.compile(rf"\\\\(?:{_ATTR_LATEX_COMMANDS})\b")
+    # `$...$` math span inside a Python string. Conservative on two axes:
+    #   1. Requires a non-space char immediately after the opening `$` to
+    #      avoid matching legitimate uses of `$` for currency in plain prose.
+    #   2. Excludes `$` immediately followed by `{` — that is f-string
+    #      substitution syntax for currency formatting (`f"${rate:.0f}"`),
+    #      which writes a literal `$` followed by the substituted value.
+    #      Math spans never have `${`-form openings.
+    _STR_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$(?!\{)[^\s$][^$\n]{0,80}?(?<!\\)\$")
+    # `^{...}` inside a Python string — LaTeX-only syntax, never legitimate
+    # in a plain `_str` value.
+    _STR_CARET_BRACE_RE = re.compile(r"\^\{[^}\n]{1,40}\}")
+    # Comment / docstring discriminator: skip lines that are obviously
+    # docstrings or comments (these don't affect rendering).
+    _PY_COMMENT_RE = re.compile(r"^\s*#")
+
+    def _run_str_latex_leak(self, root: Path) -> ValidationRunResult:
+        """`*_str` exports must be plain text — no embedded LaTeX."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start = re.compile(r"^```\{python\}")
+        block_end = re.compile(r"^```\s*$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_python = False
+            for idx, line in enumerate(lines, 1):
+                if block_start.match(line):
+                    in_python = True
+                    continue
+                if block_end.match(line):
+                    in_python = False
+                    continue
+                if not in_python:
+                    continue
+                if self._PY_COMMENT_RE.match(line):
+                    continue
+
+                m = self._STR_ASSIGN_RE.match(line)
+                if not m:
+                    continue
+                lhs = m.group("lhs")
+                rhs = m.group("rhs")
+
+                hits: list[tuple] = []
+                if self._STR_DOLLAR_MATH_RE.search(rhs):
+                    hits.append(("str_export_dollar_math",
+                                 f"`{lhs}` contains `$...$` math — `_str` exports must be plain text. "
+                                 f"Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)` (or `md(...)` for mixed prose+math)."))
+                if self._STR_LATEX_CMD_RE.search(rhs):
+                    hits.append(("str_export_latex_cmd",
+                                 f"`{lhs}` contains a LaTeX command (`\\\\times`, `\\\\frac`, `\\\\alpha`, …) — "
+                                 f"`_str` exports must be plain text. Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)`."))
+                if self._STR_CARET_BRACE_RE.search(rhs):
+                    hits.append(("str_export_caret_brace",
+                                 f"`{lhs}` contains `^{{...}}` / `_{{...}}` — `_str` exports must be plain text. "
+                                 f"Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)`, or emit Unicode (³, ₂, …)."))
+
+                for code, message in hits:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code=code,
+                        message=message,
+                        severity="error",
+                        context=line.strip()[:160],
+                    ))
+
+        return ValidationRunResult(
+            name="str-latex-leak",
+            description="*_str Python exports must not contain raw LaTeX (use md()/md_math())",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Math: full HTML render audit (delegates to tools/audit/audit_math_rendering.py)
+    # ------------------------------------------------------------------
+    #
+    # WHY THIS EXISTS
+    #
+    # The static `attr-leaks` and `str-latex-leak` checks catch the source-
+    # level patterns we know about. The render audit is the empirical fallback:
+    # it actually builds each chapter's HTML and scans the *rendered* output
+    # for any LaTeX that escaped MathJax — including failure modes we haven't
+    # written a static check for yet. It is also the source of truth for the
+    # lightbox-tooltip leak class.
+    #
+    # SLOW. Wired through `binder check math --scope render-audit` so it can
+    # be run interactively or in CI, and registered as a `manual`-stage hook
+    # in `.pre-commit-config.yaml` (do not let it block routine commits).
+
+    def _run_math_render_audit(self, root: Path) -> ValidationRunResult:
+        """Build each chapter's HTML and scan for unrendered LaTeX leakage.
+
+        Delegates to `tools/audit/audit_math_rendering.py`. This is slow
+        (~10 minutes for the full book) and is registered as a manual-stage
+        pre-commit hook; it is NOT run on every commit.
+        """
+        start = time.time()
+        script = root / "tools" / "audit" / "audit_math_rendering.py"
+        issues: List[ValidationIssue] = []
+        if not script.exists():
+            issues.append(ValidationIssue(
+                file=str(script.relative_to(root)) if script.is_absolute() else str(script),
+                line=0,
+                code="render_audit_missing",
+                message="Render-audit script not found — expected tools/audit/audit_math_rendering.py",
+                severity="error",
+                context="",
+            ))
+            return ValidationRunResult(
+                name="render-audit",
+                description="Full HTML build + leak scan (delegates to tools/audit/)",
+                files_checked=0,
+                issues=issues,
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        # The audit script writes audit-math-report.json; surface the summary
+        # line + nonzero exit as a single issue if there was leakage.
+        if proc.returncode != 0:
+            tail = (proc.stdout or "").strip().splitlines()
+            summary = next((line for line in reversed(tail)
+                            if "leaky" in line.lower() or "fail" in line.lower()),
+                           tail[-1] if tail else "render audit reported leaks")
+            issues.append(ValidationIssue(
+                file="audit-math-report.json",
+                line=0,
+                code="render_audit_leaks",
+                message=f"Render audit found leaks (exit {proc.returncode}): {summary}. "
+                        f"See audit-math-report.md for details.",
+                severity="error",
+                context="",
+            ))
+
+        return ValidationRunResult(
+            name="render-audit",
+            description="Full HTML build + leak scan (delegates to tools/audit/)",
+            files_checked=0,
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
