@@ -1,0 +1,68 @@
+schema_version: '1.0'
+id: cloud-fill-00712
+track: cloud
+level: L4
+zone: analyze
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Optimizing MoE Routing on NVIDIA H100 for Latency-Sensitive Inference
+scenario: Imagine you're deploying a large Mixture of Experts (MoE) model for a real-time, latency-sensitive
+  inference service on a cluster of NVIDIA H100 GPUs. Each H100 features 80 GB HBM3, 989 TFLOPs FP16 dense
+  compute, and 3.35 TB/s memory bandwidth, consuming 700W. Your MoE model has 64 experts, and each token
+  is routed to 2 experts. The challenge is to maintain extremely low inference latency while handling
+  fluctuating traffic patterns. You observe that while the H100s offer immense compute, the overall system
+  throughput is not scaling linearly with the number of experts or GPUs, and latency spikes occur under
+  moderate load. Analyze why this non-linear scaling and latency spiking might be occurring, specifically
+  considering MoE routing, expert parallelism, capacity factors, and the memory-FLOPs decoupling on the
+  H100 architecture.
+details:
+  realistic_solution: To mitigate this, implement a dynamic capacity factor mechanism that adapts to real-time
+    load, preventing expert drops during peak traffic while optimizing resource usage during off-peak
+    times. Employ expert parallelism strategies like 'expert-level data parallelism' or 'pipeline parallelism'
+    to distribute experts efficiently across H100 GPUs. For instance, co-locate frequently accessed expert
+    pairs on the same GPU or within the same NVLink domain to minimize inter-GPU communication. Utilize
+    H100's Transformer Engine for FP8/FP16 acceleration. For memory-bound operations, optimize kernel
+    fusion and data layouts. Consider a hierarchical routing strategy where a small, always-resident router
+    on each H100 quickly identifies a subset of potential experts, with a secondary, more global router
+    coordinating across nodes. Aggressively cache expert activations or sparse weights if memory allows,
+    leveraging the HBM3's 3.35 TB/s bandwidth for fast access.
+  common_mistake: A common mistake is to assume that raw TFLOPs will directly translate to MoE throughput,
+    overlooking the critical impact of MoE routing overheads and network latency for expert communication.
+    Teams often set capacity factors too low to save compute, leading to frequent 'expert drops' (tokens
+    not processed by selected experts due to saturation), or too high, underutilizing resources. Another
+    mistake is not accounting for the memory-FLOPs decoupling; even with high compute, if expert weights
+    (or activations for the active experts) exceed HBM capacity or if data movement dominates, the TFLOPs
+    become irrelevant for bottlenecked operations. For an H100 with 80GB HBM3, placing all 64 experts
+    might not be feasible on a single GPU, leading to offloading or inter-GPU communication, which introduces
+    significant overhead.
+  napkin_math: Consider the memory-FLOPs balance. An H100 has 80 GB HBM3 and 3.35 TB/s bandwidth. If an
+    expert's weights and activations require, say, 5 GB, then 16 experts could theoretically fit on a
+    single H100. However, if the routing mechanism needs to fetch expert weights dynamically from off-chip
+    memory or across the network, the 3.35 TB/s bandwidth becomes crucial. If a token involves 2 experts,
+    and each expert's weights need to be loaded, this could incur a delay of roughly `(5 GB * 2) / 3.35
+    TB/s = ~2.98 ms` for weights alone (ignoring network latency). If the computation for these 2 experts
+    takes less than 2.98 ms, then memory access, not FLOPs, is the bottleneck. The 989 TFLOPS FP16 dense
+    can perform `989 * 10^12 FP16 ops/s`. This highlights the memory-FLOPs decoupling; ensuring sufficient
+    data locality for experts active on an H100 is key to utilizing its compute potential, or else the
+    system will be waiting on memory or network I/O.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- H100 FP16 TFLOPS should be 989 TFLOPS according to hardware specs, not 495 TFLOPS.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

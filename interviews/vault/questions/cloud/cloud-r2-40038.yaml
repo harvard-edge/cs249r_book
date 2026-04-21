@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-r2-40038
+track: cloud
+level: L5
+zone: design
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Gradient Synchronization for ZeRO Stage 3
+scenario: ZeRO Stage 3 partitions model parameters, gradients, and optimizer states across GPUs. Unlike
+  standard data parallelism where each GPU holds a full copy, each GPU only holds 1/N of everything. This
+  means forward/backward passes require all-gather of parameters before each layer and reduce-scatter
+  of gradients after. Design the communication schedule for a 64-MI300X cluster training a 30B parameter
+  model with 60 Transformer layers.
+details:
+  realistic_solution: 'Model: 30B params = 60GB FP16. Per GPU (64 GPUs): 60GB/64 = 937.5MB of parameters,
+    gradients, and optimizer states (vs 60GB full copy). Communication per layer: Forward: all-gather
+    30B/60 layers = 500M params × 2 bytes = 1GB per layer. 60 all-gathers in forward. Backward: all-gather
+    same 1GB per layer (parameters needed again). 60 all-gathers in backward. Gradient reduce-scatter:
+    same 1GB per layer. 60 reduce-scatters in backward. Total communication: 3 × 60 × 2 × 63/64 × 1GB
+    / 50GB/s = 7,087ms without overlap. With prefetching overlap: pipeline all-gather for layer L+1 during
+    computation of layer L. Each all-gather: 2 × 63/64 × 1GB / 50GB/s = 39.4ms. Layer compute: ~5ms. Communication
+    is 7.9× slower — use all 8 NICs on MI300X (8 × 400Gbps): all-gather = 4.9ms ≈ compute (5ms), near-perfect
+    overlap.'
+  common_mistake: Thinking ZeRO-3 only does one AllReduce per iteration like standard data parallelism.
+    ZeRO-3 does per-layer all-gather and reduce-scatter, creating 2L communication events per iteration
+    (L all-gathers in forward, L reduce-scatters in backward) — trading peak memory for communication
+    volume.
+  napkin_math: 'Memory savings: 60GB (full copy) → 937.5MB (ZeRO-3) per GPU = 64× reduction. Communication
+    cost: ZeRO-3 requires 3 collectives per layer (all-gather for forward, all-gather for backward, reduce-scatter
+    for gradients): 3 × 60 layers × 1GB = 180GB per iteration (vs 60GB single AllReduce for standard data
+    parallel). 3× more communication volume but per-layer pipelining hides it behind compute if NIC bandwidth
+    ≥ compute intensity.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- ZeRO-3 requires 3 collectives per layer (all-gather for forward, all-gather for backward, reduce-scatter
+  for gradients), resulting in 180GB communication for a 60GB model, not 120GB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

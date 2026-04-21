@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-r2-43027
+track: cloud
+level: L5
+zone: design
+topic: storage-format-selection
+competency_area: data
+bloom_level: evaluate
+phase: both
+title: Storage Format Impact on Shuffle Performance
+scenario: Training a 70B LLM requires shuffling 2 trillion tokens across epochs for convergence. Your
+  storage format must support efficient shuffling without loading the entire dataset into memory. The
+  dataset is 4 TB (uint16 tokens). Compare chunk-based shuffling (WebDataset shards), index-based shuffling
+  (memory-mapped arrays with permutation indices), and streaming shuffle (reservoir sampling). Which minimizes
+  time-to-first-batch while maintaining statistical quality?
+details:
+  realistic_solution: 'Three approaches: (1) Shard shuffle (WebDataset): shuffle shard order, then shuffle
+    within each shard''s buffer. Quality: approximate — samples within a shard are always neighbors in
+    the original data. Fix by pre-shuffling shards once. Time-to-first-batch: open first shard + fill
+    shuffle buffer ≈ 2 seconds. (2) Index permutation (memmap): generate a random permutation of 2T indices,
+    access tokens by permuted index. Quality: perfect global shuffle. But random access to memmap is catastrophic
+    — each sample triggers a page fault at a random 4 KB page. 2T random 4 KB reads = no sequential I/O
+    benefit. Time-to-first-batch: instant (generate permutation, first read), but sustained throughput
+    collapses. (3) Streaming reservoir: read sequentially, maintain a reservoir of size R. Quality: depends
+    on R — R = 10M gives good local randomness. Time-to-first-batch: fill reservoir first = R samples
+    × read speed. Best hybrid: pre-shuffle the dataset once into shards, then shard-shuffle + buffer-shuffle
+    per epoch.'
+  common_mistake: 'Full dataset shuffle in memory: 4 TB doesn''t fit in RAM on any single machine. Even
+    distributed shuffle across 8 nodes (500 GB each) requires all-to-all communication that takes hours.'
+  napkin_math: 'Shard shuffle (10K shards × 400 MB): time-to-first-batch = 400 MB / 7 GB/s = 57ms + buffer
+    fill (10K samples × 4 KB = 40 MB) = 63ms. Throughput: 7 GB/s sustained. Index permutation: random
+    4 KB reads at 200K IOPS (NVMe) = 800 MB/s vs 7 GB/s sequential = 8.75× slower. Reservoir (R=10M):
+    fill time = 10M × 4 KB / 7 GB/s = 5.7 seconds. Throughput after fill: 7 GB/s. Winner: shard shuffle
+    — 63ms to first batch, full sequential throughput, acceptable randomness with pre-shuffled shards.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

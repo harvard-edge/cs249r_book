@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-sus-62037
+track: cloud
+level: L5
+zone: optimization
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: Gradient Accumulation for Sparse Embedding Training
+scenario: You are training a DLRM on 128 MI300X GPUs (192 GB each, 5.3 TB/s HBM). Gradient accumulation
+  is set to 16 steps. You observe that memory usage for sparse gradient tensors grows unboundedly during
+  accumulation, eventually OOMing at step 12. Diagnose the cause and fix it without reducing accumulation
+  steps or batch size.
+details:
+  realistic_solution: 'Sparse embedding gradients are indexed: each training sample touches a specific
+    subset of embedding rows. With 16-step accumulation, the accumulated sparse gradient contains indices
+    from 16 batches, each with batch_size × num_sparse_features unique rows. If batch_size=2048 and each
+    sample touches 500 sparse features, one step produces 2048 × 500 = 1M gradient entries. 16 steps:
+    16M entries × (index: 8 bytes + gradient: 64 dim × 4 bytes) = 16M × 264 bytes = 4.2 GB per GPU just
+    for sparse gradient accumulation. MI300X 192 GB: with 140 GB model shards and 4.2 GB sparse grads
+    × 16 accumulation = 67 GB → total 207 GB > 192 GB. Fix: (1) Use immediate sparse gradient application
+    (not accumulation): after each micro-step, immediately apply the sparse gradient update to the embedding
+    table (embedding_table[indices] += lr × grad). This keeps memory O(1 step) instead of O(N steps).
+    Dense gradients (MLP) still accumulate normally. (2) Alternatively: deduplicate indices within each
+    step and average gradients for repeated indices before accumulation.'
+  common_mistake: 'Thinking gradient accumulation for sparse tensors works like dense: accumulate for
+    N steps, then update. For sparse tensors, naive accumulation materializes all gradient indices from
+    all N steps into a single sparse tensor — the number of unique indices grows with N steps, consuming
+    O(N × batch_size × indices_per_sample) memory.'
+  napkin_math: 'Sparse grad memory per step: 2048 samples × 500 sparse features × (8 byte index + 256
+    byte grad) = 2048 × 500 × 264 = 270 MB per step. 16 steps: 4.3 GB. With model (140 GB shard) + activations
+    (estimate 20 GB) + optimizer states (280 GB for Adam on 140 GB shard) — already over 192 GB budget.
+    Apply-immediately: memory for sparse grads = 270 MB (1 step) — 16× reduction, frees 4 GB.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

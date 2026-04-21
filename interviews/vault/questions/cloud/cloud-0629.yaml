@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: cloud-0629
+track: cloud
+level: L5
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The Embedding Hotspot
+scenario: Your recommendation system has a 500 GB embedding table sharded across 32 A100 80 GB GPUs. During
+  a flash sale event, GPU 14 OOMs while all other GPUs sit at 40% memory utilization. The embedding table
+  hasn't changed size. What happened on GPU 14?
+details:
+  realistic_solution: 'The flash sale created a massive traffic spike for a small set of product IDs.
+    With hash-based sharding (`embedding_id % 32`), the hot product embeddings happen to cluster on GPU
+    14''s shard. During the sale, GPU 14 receives 50× more lookup requests than average, and each lookup''s
+    backward pass accumulates gradients for those hot entries. The gradient accumulation buffer for frequently
+    accessed entries grows because the optimizer step hasn''t run yet (it''s waiting for the AllReduce
+    to complete, which is waiting for all GPUs). Meanwhile, the forward pass continues allocating activation
+    memory for the flood of requests routed to GPU 14. The combination of gradient accumulation + activation
+    memory for the hot-shard traffic exceeds GPU 14''s 80 GB budget. The other 31 GPUs are fine because
+    their entries aren''t being accessed. Fix: (1) use consistent hashing with virtual nodes to spread
+    hot entries across multiple GPUs; (2) replicate the top-K hottest embeddings (identified from access
+    logs) on all GPUs; (3) implement a memory-aware request router that sheds load from GPUs approaching
+    their memory limit.'
+  common_mistake: '"GPU 14 has a hardware defect — swap it out" or "The sharding is uneven — rebalance
+    the table." The sharding is perfectly even by entry count, and the hardware is fine.'
+  napkin_math: '500 GB table / 32 GPUs = **15.6 GB/GPU** for embeddings. Remaining per-GPU budget: 80
+    - 15.6 = **64.4 GB**. Normal traffic: each GPU handles ~3% of lookups (roughly uniform). GPU 14 during
+    flash sale: handles 30% of all lookups (hot products hash to shard 14). If total batch = 65,536 lookups:
+    GPU 14 gets ~19,660 lookups. Each lookup''s gradient: 128 dims × 4 bytes (FP32 grad) = **512 bytes**.
+    Gradient buffer for 19,660 unique hot entries: $19660 \times 512 = $ **10 MB** — small. But the *activation
+    memory* for processing 19,660 lookups through the interaction network: ~**2 KB per lookup** × 19,660
+    = **38 MB** per micro-batch. With 100 micro-batches queued during the AllReduce stall: $100 \times
+    38\text{ MB} = $ **3.8 GB** of queued activations. The real killer: the optimizer''s gradient *history*
+    (Adam m, v) for hot entries gets updated every step, but the memory for cold entries is also reserved:
+    $250\text{ B params} \times 12\text{ bytes} / 32 = $ **93.75 GB** of optimizer state per GPU — far
+    exceeds 80 GB. The actual deployment must use CPU-offloaded optimizer state, and the OOM occurs when
+    the hot-entry gradient traffic exceeds the GPU↔CPU PCIe bandwidth budget.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-250
+  position: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

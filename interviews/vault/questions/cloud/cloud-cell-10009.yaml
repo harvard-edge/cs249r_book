@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-cell-10009
+track: cloud
+level: L5
+zone: realization
+topic: activation-memory
+competency_area: memory
+bloom_level: apply
+phase: training
+title: Realizing Activation Checkpointing in a ZeRO-3 + Tensor-Parallel Hybrid Configuration
+scenario: You are deploying a 65B model training job on 32× H100 (80 GB) using DeepSpeed ZeRO-3 with tensor
+  parallelism degree 4. Activation memory profiling shows 22 GB per GPU before checkpointing. ZeRO-3 shards
+  parameters and gradients across all 32 GPUs but does NOT shard activations — each tensor-parallel group
+  of 4 GPUs holds a full copy of the activation tensors for its pipeline stage. Explain what happens to
+  activation memory when you enable `deepspeed.checkpointing.checkpoint_activations=True` and whether
+  it interacts correctly with tensor parallelism.
+details:
+  realistic_solution: 'With TP=4, activations for each layer are already split: Q/K/V projections are
+    column-parallel (activation split across TP group), MLP is row-parallel. When `checkpoint_activations=True`,
+    DeepSpeed discards all intermediate activations between checkpoints and recomputes them during backward.
+    The TP communication (AllReduce for row-parallel layers) is re-executed during recompute. This is
+    correct but adds collective communication overhead. Memory savings: 22 GB → approximately 22/sqrt(checkpoint_layers)
+    in practice, or more precisely by the checkpoint granularity. Verify that `deepspeed.checkpointing.partition_activations=True`
+    is NOT set (it is experimental and can conflict with TP).'
+  common_mistake: Assuming ZeRO-3 activation checkpointing will shard activation tensors across the data-parallel
+    dimension. ZeRO-3 only shards parameters, gradients, and optimizer states — activations are local
+    to each GPU and are not sharded. Enabling checkpoint_activations in DeepSpeed reduces activation memory
+    by recomputing, but the recomputed activations during backward are still local to each GPU.
+  napkin_math: '22 GB per GPU pre-checkpointing (as stated in the scenario; ZeRO-3 does not shard activations).
+    With checkpoint every 4 layers (out of 80 total layers / 4 TP workers = 80 total layers): stored activations
+    = (80/4) × (activation_per_4_layers). If checkpoint_granularity=4 saves 4× memory, peak drops to 22/4
+    = 5.5 GB/GPU for activations. TP AllReduce recompute overhead: 2 × 4 × T_allreduce × (80/4) segments
+    ≈ 2 × 20 × 1 ms = 40 ms per backward (≈8% overhead at 500 ms/step).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Contradictory math and logic: ''22 GB / 32 GPUs; per-GPU activation = 22 GB''.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

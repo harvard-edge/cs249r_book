@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1659
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Debugging Block-wise Softmax for Long-Context Attention
+scenario: You are implementing a custom attention kernel for a 32,768 context window LLM on an NVIDIA
+  A100 (80GB HBM). To avoid materializing the 32k x 32k attention matrix in HBM, you partition the query
+  and key sequences into tiles of 128x128. However, after computing the localized softmax per block and
+  aggregating the results, your model's perplexity spikes and generates NaNs. Profiling shows incorrect
+  attention weights compared to standard PyTorch nn.functional.softmax. How do you diagnose and fix the
+  tile-based softmax computation to match exact attention?
+details:
+  realistic_solution: 'Implement Online Softmax. Maintain a running max (m_i) and sum (l_i) for each row
+    i in SRAM. For a new block j, update the global max: m_new = max(m_i, m_local). Rescale the running
+    sum: l_new = l_i * exp(m_i - m_new) + l_local * exp(m_local - m_new). Finally, rescale the accumulated
+    output matrix by the global l_new to ensure exact softmax equivalence without materializing the full
+    N x N matrix.'
+  common_mistake: Computing standard softmax independently per block, which fails to account for the global
+    denominator, or attempting to accumulate exponentials without shifting by a dynamically updated global
+    maximum, causing FP16 overflow (NaNs).
+  napkin_math: 'For seq_len N=32,768, a standard FP16 attention matrix takes N^2 * 2 bytes = 2.0 GB per
+    head (64 GB for 32 heads). Tiling into 128x128 blocks with online softmax requires only O(N) SRAM
+    footprint per head: tracking m_i and l_i vectors takes 32,768 * 4 bytes (FP32) * 2 = ~262 KB, fitting
+    easily within the A100''s hierarchy while reducing HBM reads/writes.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-287
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T00:06:26.718802'

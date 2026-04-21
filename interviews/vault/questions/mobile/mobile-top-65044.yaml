@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-top-65044
+track: mobile
+level: L4
+zone: optimization
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: 'On-Device LoRA Training: Gradient Checkpointing on Mobile'
+scenario: A mobile application wants to fine-tune a small 1B model on-device using LoRA for user personalization.
+  Training on a device with 8GB unified memory causes OOM errors at batch size 1, sequence length 128.
+  Diagnose and fix.
+details:
+  realistic_solution: 'Memory breakdown for 1B model LoRA training (r=4, Q+V only): (1) Model weights
+    FP16: 2GB. (2) LoRA adapter weights: ~0.78MB (negligible). (3) Optimizer states (Adam, only adapter
+    params): ~1.56MB (negligible). (4) Activations for backward: 12 layers * 128 * 2048 * 7 (stored tensors
+    per layer) * 2B = ~44MB. Not the issue. The real cause of OOM with 8GB available (OS reserves 2-3GB
+    on mobile = 5-6GB usable): likely ML runtime loads 2-3x model copies during JIT compilation (TorchScript
+    or CoreML compilation cache), plus gradient tape for all operators if base model requires_grad is
+    not False. Fix: (1) Explicitly set requires_grad=False for all base model parameters; (2) Use gradient
+    checkpointing for LoRA forward (torch.utils.checkpoint); (3) Use torch.compile with dynamic=True to
+    avoid recompilation; (4) Delete JIT compilation cache after first run.'
+  common_mistake: Immediately reducing sequence length or model size to fit in memory. For on-device LoRA
+    training, the dominant memory cost is often the ML runtime loading overhead and activation tape, not
+    the model weights. Gradient checkpointing can reduce activation memory by 80% at the cost of an extra
+    forward pass.
+  napkin_math: '1B model BF16: 2GB. LoRA adapter + optimizer: ~2MB total. Activations without grad on
+    base, with grad only on LoRA paths: 12 layers * 128 * 2048 * 2B per LoRA intermediate = 6MB. JIT compilation
+    overhead: PyTorch traces the model creating ~2-3x model size cache = 4-6GB. Total peak: 2 + 6MB +
+    5GB JIT = ~7GB. Causes OOM at 6GB usable. Fix: use torch.inference_mode() for base, only enable grad
+    for LoRA params. Peak drops to: 2 + 0.01 + 0.5 = 2.5GB — comfortably fits.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

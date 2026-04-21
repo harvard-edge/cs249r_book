@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-0114
+track: cloud
+level: L3
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: apply
+phase: both
+title: The Throughput Collapse
+scenario: You are managing an LLM serving endpoint that uses a 13B model on an H100 for document summarization.
+  Your goal is to maximize throughput (summaries per minute). You observe that as you increase the server's
+  batch size, throughput increases, but at a batch size of 64, P99 latency skyrockets and the effective
+  throughput starts to *decrease*. An engineer suggests the GPU is running out of VRAM. Using queueing
+  theory, demonstrate a more likely cause for this throughput collapse.
+details:
+  realistic_solution: This is a classic case of head-of-line blocking explained by queueing theory. Throughput
+    is the number of requests completed over time. As the batch size increases, the time to process one
+    batch (`T_batch`) also increases. A new request arriving just after a large batch has started must
+    wait in the queue for the entire `T_batch` to finish before it can even be processed. When the request
+    arrival rate (`λ`) approaches the batch service rate (`1/T_batch`), the queue length and wait times
+    grow exponentially. The P99 latency skyrockets because some requests get very unlucky, and the 'goodput'
+    (useful work) of the system collapses as it spends more time managing a massive queue.
+  common_mistake: Immediately assuming a hardware limit like VRAM capacity (OOM) or memory bandwidth has
+    been hit. While these are physical limits, a throughput collapse often happens before a hard OOM due
+    to queueing dynamics. Blaming VRAM doesn't explain why a *lower* batch size worked better.
+  napkin_math: Memory bandwidth bounds decode throughput. 13B weights = 26GB. H100 bandwidth = 3.35TB/s.
+    Max theoretical passes = 3.35TB / 26GB = 128 tokens/sec. With batch size 1, throughput is 128 tok/s.
+    With batch size 32, we still read 26GB once per step, generating 32 tokens in ~10ms (3.2k tok/s).
+    But eventually compute (989 TFLOPS) bottlenecks, and throughput flattens.
+  options:
+  - The GPU has run out of VRAM to store the KV caches for a batch of 64.
+  - The system is experiencing head-of-line blocking, where queue wait times explode as arrival rate nears
+    the batch service time.
+  - The H100's memory bandwidth (3.35 TB/s) is saturated, making larger batches less efficient.
+  - The CPU is bottlenecking on preparing batches, starving the GPU.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The napkin math focuses on memory-bound decode throughput and compute-bound prefill, but doesn't explicitly
+  calculate how queueing dynamics cause the effective throughput to decrease at large batch sizes, which
+  is central to the realistic solution's explanation of throughput collapse.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

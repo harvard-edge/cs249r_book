@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: tinyml-0643
+track: tinyml
+level: L6+
+zone: design
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: create
+phase: training
+title: The Keyword Spotting Pipeline
+scenario: Design the complete inference pipeline for an always-on keyword spotting system on a Cortex-M4
+  (100 MHz, 256 KB SRAM, no FPU). The microphone samples at 16 kHz. You need to detect the wake word 'Hey
+  Device' within 500 ms of it being spoken. Walk me through every stage — from raw audio samples to classification
+  output — and show me the memory budget.
+details:
+  realistic_solution: 'The pipeline must be streaming and integer-only: Raw audio at 16 kHz × 16-bit ×
+    1 second = 32 KB. But streaming with 30 ms frames only needs 960 bytes live — a 34× memory reduction.
+    The 512-point fixed-point FFT on Cortex-M4 takes ~0.18 ms via CMSIS-DSP.'
+  common_mistake: '"Collect 1 second of audio, compute an FFT, run the model." This approach buffers too
+    much audio (32 KB just for raw samples), uses floating-point FFT (no FPU), and doesn''t account for
+    the streaming nature of the problem.'
+  napkin_math: 'Raw audio at 16 kHz × 16-bit × 1 second = 32 KB. But streaming with 30 ms frames only
+    needs 960 bytes live — a 34× memory reduction. The 512-point fixed-point FFT on a Cortex-M4 at 168
+    MHz takes ~0.18 ms via CMSIS-DSP. 40 Mel filters on 256 frequency bins = 10,240 multiply-accumulates
+    = 0.06 ms. Total feature extraction per frame: ~0.3 ms. The CPU is idle ~99% of the time between frames.'
+  options:
+  - 'Collect 1 second of audio (32 KB), compute a single floating-point FFT, then feed the full spectrogram
+    to the model. Total pipeline: ~100ms with 32 KB SRAM for audio alone.'
+  - 'Stream 30ms frames (960 bytes each). Per frame: 512-point fixed-point FFT via CMSIS-DSP (0.3ms) then
+    40 Mel filterbank (0.1ms). Accumulate MFCC features over ~1 second into a 2D spectrogram (~4 KB).
+    Feed to INT8 DS-CNN (~0.5ms). Total: <1ms compute per 30ms frame (98% idle). Memory: 960B audio +
+    4 KB FFT scratch + 4 KB MFCC + 40 KB tensor arena + 60 KB model in flash. Fits in 256 KB SRAM with
+    headroom.'
+  - Use a raw time-domain 1D-CNN that operates directly on the 16-bit PCM samples, eliminating the need
+    for FFT and Mel filterbank extraction entirely.
+  - Buffer the full 500ms wake word duration (16 KB of audio) before processing, then run batch FFT and
+    inference in a single 50ms burst.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: tinyml-chain-024
+  position: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Assumes Cortex-M4 clock speed of 100MHz, violating the strict spec of 168MHz.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+classification_review: Flash's point is reasonable. RC-8 (Cost Optimization & TCO) doesn't fit a question
+  about designing a complete inference pipeline under tight memory/compute constraints. RC-8 is about
+  dollar costs. This is really RC-3 (Performance Optimization) or could be RC-2 (Technical Knowledge).
+  The content itself is good — the realistic_solution is slightly truncated ('CMSIS-') but the napkin_math
+  is solid.

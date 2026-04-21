@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: cloud-crit-20023
+track: cloud
+level: L5
+zone: design
+topic: flash-attention
+competency_area: optimization
+bloom_level: create
+phase: inference
+title: PagedAttention Copy-on-Write for Beam Search
+scenario: You run beam search with beam_width=4 on a 70B model (H100, 8 KV heads/GPU, 80 layers, head_dim=128).
+  Without copy-on-write, each beam duplicates the entire KV cache at every branch point. At context 2048
+  tokens, calculate the memory waste and explain how PagedAttention's CoW mechanism avoids it.
+details:
+  realistic_solution: 'KV per beam at 2048 tokens per GPU: 80 x 2 x 8 x 128 x 2048 x 2B = 640MB. 4 beams
+    naive: 4 x 640MB = 2.56GB/GPU. But beams share ~95% of tokens (diverging only at recent positions).
+    CoW: all 4 beams reference the same physical blocks via block table. When beam i generates a new token
+    into block j, only block j is copied (16 tokens x 80 x 2 x 8 x 128 x 2B = 5.12MB). Physical memory:
+    640MB (shared) + 4 x 5.12MB (diverged) = 660MB vs 2.56GB. Savings: 74%. This is exactly like Unix
+    fork() with CoW pages. At block_size=16, reference counts track sharing. When ref_count drops to 1,
+    the block becomes exclusively owned and in-place writable.'
+  common_mistake: Thinking beam search only creates copies at the final step. Each decode step can cause
+    beams to diverge, and without CoW, the system eagerly copies all shared KV blocks, consuming 4x memory
+    for mostly identical data.
+  napkin_math: 'Naive 4 beams: 4 x 640MB = 2.56GB. CoW: 640MB shared + 4 x 5MB diverged = 660MB. Savings:
+    74%. Analogy: Unix fork() CoW pages.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

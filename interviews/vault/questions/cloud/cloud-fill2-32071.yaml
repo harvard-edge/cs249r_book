@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-fill2-32071
+track: cloud
+level: L4
+zone: diagnosis
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'MoE Training Instability: Expert Collapse Diagnosis'
+scenario: During MoE training on 128 H100 GPUs, you notice that after 50K steps, your training loss suddenly
+  spikes and doesn't recover. Inspecting the router statistics, you find that expert 5 receives 0 tokens
+  and expert 2 receives 45% of all tokens. The remaining 55% is spread across the other 6 experts. What
+  happened and how do you recover?
+details:
+  realistic_solution: 'This is expert collapse — a runaway feedback loop: (1) expert 2''s weights become
+    slightly better → router sends more tokens → expert 2 gets better training signal → router sends even
+    more tokens → expert 5 gets zero tokens → expert 5''s weights don''t update → expert 5 becomes permanently
+    dead. The loss spike occurs when expert 2 becomes overloaded and starts dropping tokens (capacity
+    overflow), suddenly losing 45% of the batch''s MLP computation. Recovery strategy: (1) Roll back to
+    a checkpoint before collapse (monitor router entropy during training — when entropy drops below threshold,
+    save). (2) Reinitialize the dead expert: copy expert 2''s weights to expert 5 (with small noise perturbation),
+    then add noise to the router''s bias toward expert 5. (3) Increase α (load-balancing coefficient)
+    from 0.01 to 0.03-0.05 for a warmup period. (4) Add a Z-loss (penalizes large router logits) to prevent
+    any expert from dominating the softmax. (5) Use expert choice routing for the recovery phase. Prevention:
+    set α appropriately from the start, use Z-loss, monitor per-expert token counts with early-stopping
+    alerts.'
+  common_mistake: Simply restarting training from the same checkpoint with a higher load-balancing coefficient.
+    If expert collapse has already occurred, the router's weights are stuck — the dead expert's routing
+    scores are very negative and won't recover with standard gradient updates.
+  napkin_math: '8 experts, expert 2 at 45%, expert 5 at 0%. Router entropy: H = -Σ p_i log p_i. Uniform:
+    H = log(8) = 2.08 (natural log). Collapsed: p_other = (1-0.45)/6 = 0.0917 each. H ≈ -(0.45·ln(0.45)
+    + 6×0.0917·ln(0.0917)) ≈ 1.67 (natural log). Entropy drop of ~20% should trigger alert. Token drop
+    when expert 2 overflows at C=1.25: drops if >15.6%.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Entropy calculation is incorrect. H for 0.45 and 6x0.092 is ~1.67 (natural log), ~2.42 (log2), or ~0.73
+  (log10), not 1.55.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-crit-21029
+track: cloud
+level: L6+
+zone: mastery
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Model Parallelism Topology for Training
+scenario: Design the full parallelism strategy for training a DeepSeek-V3-scale model (671B total, 256
+  experts, top-8 routing, 37B active) on 2048 H100 GPUs across 256 nodes. Specify EP, TP, PP, and DP dimensions,
+  and justify each choice with bandwidth and memory constraints.
+details:
+  realistic_solution: 'Architecture: 61 layers, each with shared attention + MoE FFN. Shared attention:
+    ~37B params. Expert FFNs: 256 × ~2.5B each = 634B params. Strategy per layer type: (1) Attention layers:
+    TP=8 within a node (NVLink, each GPU holds 1/8 of attention weights). (2) MoE layers: EP=32 (32 GPUs,
+    8 experts per GPU). Place EP groups across 4 nodes to utilize NVLink within nodes. (3) Pipeline parallelism:
+    PP=8 (8 pipeline stages, ~8 layers each). (4) Data parallelism: DP = 2048 / (TP×PP) = 2048 / (8×8)
+    = 32 data-parallel replicas. Each DP replica: 64 GPUs across 8 nodes. EP group: within each DP replica,
+    32 GPUs handle expert dispatch (4 nodes). Memory per GPU: attention shard (~37B/8/8 stages = 578M
+    → 1.2 GB) + 8 experts (8 × 2.5B × 2B = 40 GB) + optimizer state (8 × 2.5B × 12B = 240 GB → need ZeRO-1
+    across DP=32 → 7.5 GB) + activations (~10 GB with checkpointing). Total: ~59 GB, fits in 80 GB. Communication:
+    EP all-to-all within 4 nodes uses mix of NVLink + IB. PP uses IB between stages. DP gradient sync
+    uses IB ring all-reduce.'
+  common_mistake: Applying standard 3D parallelism without accounting for MoE's unique communication pattern
+    (all-to-all instead of all-reduce for expert layers). The parallelism strategy must be different for
+    attention layers vs MoE layers.
+  napkin_math: '2048 GPUs = TP(8) × PP(8) × DP(32). Per-GPU memory: ~59 GB / 80 GB HBM. EP within DP group:
+    32 GPUs across 4 nodes. Intra-node EP: NVLink 900 GB/s. Inter-node EP: IB 400 Gb/s. Pipeline bubble:
+    1/PP = 12.5% with interleaved schedule ~6%.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

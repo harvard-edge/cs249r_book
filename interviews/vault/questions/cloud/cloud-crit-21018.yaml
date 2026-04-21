@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-crit-21018
+track: cloud
+level: L5
+zone: realization
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Checkpointing Overhead at Scale
+scenario: Your 671B-parameter MoE model trains on 2048 H100 GPUs with expert parallelism. You need to
+  checkpoint every 15 minutes for fault tolerance (Young-Daly optimal). Calculate the checkpoint size,
+  write time, and design a checkpointing strategy that does not stall training.
+details:
+  realistic_solution: 'Checkpoint size: 671B params × (2B weights + 12B optimizer) = 671B × 14B = 9.4
+    TB total, distributed across 2048 GPUs (~4.6 GB per GPU shard). Writing to parallel filesystem: At
+    100 GB/s aggregate write BW (typical GPFS/Lustre), full checkpoint: 9.4 TB / 100 GB/s = 94 seconds
+    — far too long for a 15-minute interval (10.4% overhead). Strategy: (1) Asynchronous checkpointing:
+    copy GPU memory to pinned CPU memory (PCIe Gen5: 4.6 GB / 64 GB/s = 72ms per GPU, negligible). Then
+    write from CPU to storage in the background while training continues. (2) Only checkpoint changed
+    experts: with routing, many experts may not have been updated recently — use dirty-bit tracking. (3)
+    Use NCCL-based collective checkpoint: each node writes its local shards to NVMe first (6.4 GB/s per
+    NVMe × 8 = 51.2 GB/s per node), then async upload to parallel FS. Local NVMe write: 4.6 GB × 256 GPUs/node_count
+    / 51.2 GB/s ≈ 23 seconds per node.'
+  common_mistake: Computing checkpoint size from only model weights. Optimizer state (Adam) adds 12 bytes
+    per parameter (FP32 master weights + momentum + variance), dwarfing the BF16 weight storage.
+  napkin_math: 'Weights: 671B × 2B = 1.34 TB. Optimizer: 671B × 12B = 8.05 TB. Total: 9.4 TB. Per-GPU
+    shard: 9.4 TB / 2048 = 4.6 GB. GPU→CPU copy: 72ms. CPU→NVMe: 4.6 GB / 6.4 GB/s = 0.72s. NVMe→PFS:
+    background. Training stall: <100ms with async.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

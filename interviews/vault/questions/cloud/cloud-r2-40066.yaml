@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-r2-40066
+track: cloud
+level: L4
+zone: optimization
+topic: rdma-transport
+competency_area: networking
+bloom_level: apply
+phase: both
+title: NIC-Level Traffic Shaping for RDMA Fairness
+scenario: On a multi-tenant 256-MI300X cluster, two training jobs share the same physical network. Job
+  A uses 128 GPUs for AllReduce and Job B uses 128 GPUs for pipeline-parallel training. Job A's bursty
+  AllReduce traffic starves Job B's latency-sensitive activation transfers. Design NIC-level traffic shaping
+  to ensure fairness without fabric-level changes.
+details:
+  realistic_solution: 'NIC-level traffic shaping on ConnectX-7 with MI300X: (1) Rate limiting: configure
+    per-QP rate limiters on Job A''s AllReduce QPs. Set max rate = 300Gbps per NIC (75% of 400Gbps), reserving
+    100Gbps for Job B. ConnectX-7 supports 128 rate-limited QPs. NCCL configuration: NCCL_IB_QPS_PER_CONNECTION=4,
+    each limited to 75Gbps. (2) Burst control: set maximum burst size to 32KB per QP using the HCA''s
+    token bucket shaper. This converts Job A''s large 256MB bursts into a smooth stream of 32KB chunks,
+    preventing instantaneous incast at switches. (3) Priority mapping: Job A uses SL0 (best effort), Job
+    B uses SL4 (high priority). Configure the HCA''s SL-to-VL mapping so SL4 maps to VL1 with guaranteed
+    minimum bandwidth of 100Gbps. (4) Implementation: mlnx_qos -i mlx5_0 --rate_limit 300000 (Mbps) for
+    Job A''s port. For per-QP shaping: use ibv_modify_qp_rate_limit() with rate=75000 Mbps, burst=32768
+    bytes. (5) Monitoring: use ConnectX-7 telemetry counters: tx_pause_duration (should decrease for Job
+    B''s ports) and tx_bytes_phy per SL.'
+  common_mistake: Applying traffic shaping at the switch level only. Switch-level QoS (WFQ, strict priority)
+    helps but doesn't prevent bursty traffic from entering the fabric. NIC-level shaping prevents congestion
+    from forming in the first place by smoothing traffic at the source.
+  napkin_math: 'Job A unshaped: 400Gbps bursts every 200ms during AllReduce → 400Gbps × 60ms burst = 3GB
+    instantaneous → switch buffer overflow. Job A shaped at 300Gbps with 32KB burst: max instantaneous
+    rate = 300Gbps, spread over 60ms = 2.25GB smoothly. Job B guaranteed: 100Gbps × always available.
+    Activation transfer: 8MB / (100Gbps/8) = 640μs — well within 2ms pipeline budget.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

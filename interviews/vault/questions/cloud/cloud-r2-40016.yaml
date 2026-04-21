@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-r2-40016
+track: cloud
+level: L4
+zone: optimization
+topic: congestion-control
+competency_area: networking
+bloom_level: apply
+phase: both
+title: NCCL NET_PLUGIN Congestion Tuning
+scenario: 'Your 256-H100 cluster''s AllReduce throughput dropped 30% after a NCCL version upgrade. Profiling
+  shows excessive retransmissions on the RoCE fabric. The new NCCL version changed default congestion
+  parameters: NCCL_IB_TIMEOUT from 18 to 14 and NCCL_IB_RETRY_CNT from 7 to 3. Explain the impact and
+  specify optimal values.'
+details:
+  realistic_solution: 'NCCL_IB_TIMEOUT specifies the local ACK timeout as 4.096μs × 2^timeout_value. Value
+    18 = 4.096μs × 2^18 = 1.07 seconds. Value 14 = 4.096μs × 2^14 = 67ms. In a congested 256-GPU cluster,
+    AllReduce tail latencies can reach 100-200ms due to PFC pauses and DCQCN rate reduction. With a 67ms
+    timeout, these legitimate delays trigger false retransmission timeouts, flooding the fabric with duplicate
+    packets and worsening congestion — a positive feedback loop. Optimal settings: NCCL_IB_TIMEOUT=22
+    (17.2 seconds — generous, since real failures are detected by the subnet manager), NCCL_IB_RETRY_CNT=7
+    (maximum retries before error). Also set NCCL_IB_QPS_PER_CONNECTION=4 to spread traffic across multiple
+    QPs, reducing per-QP congestion. And NCCL_ALGO=Ring for this cluster size since tree AllReduce at
+    256 GPUs creates more incast than ring.'
+  common_mistake: Not understanding the exponential nature of IB timeout values. NCCL_IB_TIMEOUT is a
+    power-of-2 multiplier on the base timeout (~4.096μs). Changing from 18 to 14 reduces the timeout by
+    16×, causing premature retransmission timeouts that are interpreted as packet loss.
+  napkin_math: 'Timeout=14: 4.096μs × 2^14 = 67ms. Timeout=18: 4.096μs × 2^18 = 1073ms. Timeout=22: 4.096μs
+    × 2^22 = 17,180ms. At 256 GPUs, AllReduce p99 latency ≈ 150ms. With timeout=14 (67ms), ~40% of iterations
+    trigger false timeouts. Each false timeout retransmits ~1MB of data across the fabric. 40% × 2000
+    iterations/min × 1MB = 800MB/min of wasted retransmission traffic.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

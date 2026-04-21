@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-0214
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The TensorRT Incompatibility
+scenario: Friday evening, the ops team updates the NVIDIA driver from 535.104 to 545.23 across your serving
+  fleet for a security patch. Monday morning, all TensorRT inference engines fail to load with `INVALID_CONFIG`
+  errors. The model files haven't changed. Rolling back the driver fixes it. How can a driver update break
+  a model file, and what's the correct deployment practice?
+details:
+  realistic_solution: 'TensorRT engines are *not* portable across driver versions. When you build a TensorRT
+    engine, the builder selects specific kernel implementations (called "tactics") from cuDNN and cuBLAS
+    based on the current GPU architecture *and* the installed library versions. These tactics are compiled
+    into the serialized engine file as binary GPU code (SASS). A driver update changes the cuDNN/cuBLAS
+    libraries bundled with the driver, which may deprecate or rename tactics that the engine references.
+    When the engine tries to load a tactic that no longer exists in the new driver''s library, it fails
+    with `INVALID_CONFIG`. This is by design — TensorRT trades portability for performance by baking in
+    hardware-specific optimizations. The correct practice: (1) pin the driver version in your container
+    image, not the host; (2) store TensorRT engines with metadata (driver version, CUDA version, GPU architecture)
+    and rebuild automatically when any component changes; (3) maintain a CI pipeline that rebuilds engines
+    on driver update and validates accuracy before fleet rollout.'
+  common_mistake: '"TensorRT models are hardware-independent — a driver update shouldn''t affect them"
+    or "Just rebuild the TensorRT engines on the new driver." The first is wrong; the second is the fix
+    but misses *why* and how to prevent recurrence.'
+  napkin_math: 'TensorRT engine build time for a 13B model: **15–45 minutes** (profiling thousands of
+    tactic combinations). Engine file size: **~28 GB** (2× the FP16 weights due to embedded tactic metadata
+    and workspace allocations). Rebuilding across a 100-GPU fleet: if engines are built per-GPU, that''s
+    100 × 30 min = **50 GPU-hours** of downtime. With a centralized build (one engine per GPU architecture,
+    copied to all): 30 min build + 5 min distribution = **35 minutes** total downtime. The Friday driver
+    update without engine rebuild caused **~60 hours** of serving downtime (Friday 6 PM to Monday 8 AM).
+    At $0.50/request and 1000 req/s: lost revenue = $0.50 × 1000 × 60 × 3600 = **$108M** — a catastrophic
+    incident from a "routine" update. Prevention: driver updates go through a staging environment that
+    automatically rebuilds TensorRT engines and runs accuracy validation before promoting to production.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

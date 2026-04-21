@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: global-0116
+track: global
+level: L6+
+zone: evaluation
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Diffusion Resolution Scaling Cliff
+scenario: You are upgrading a text-to-image diffusion model from generating 512x512 images to 1024x1024
+  images. The pixel count increases by 4x, and the theoretical FLOPs increase by ~4.5x. However, your
+  profiling on A100 GPUs shows that latency per denoising step increases by nearly 9x. Diagnose the architectural
+  bottleneck causing this super-linear scaling.
+details:
+  realistic_solution: The bottleneck lies in the self-attention layers within the diffusion UNet. When
+    resolution doubles (512 to 1024), the sequence length (N = H * W) of the flattened feature maps increases
+    by 4x. Standard self-attention has O(N^2) memory complexity for the attention matrix. Therefore, the
+    memory read/write traffic for the attention scores increases by 16x! This massive explosion in memory
+    traffic violently shifts the arithmetic intensity of the attention layers to the left. A workload
+    that was previously sitting comfortably near the compute-bound ridge point at 512x512 suddenly falls
+    off the cliff into the severely memory-bandwidth bound regime at 1024x1024. The 9x latency increase
+    is a blend of the 4x compute increase in convolutional layers and the 16x memory latency increase
+    in the attention layers.
+  common_mistake: Assuming latency scales strictly with FLOPs, or missing the quadratic sequence length
+    scaling of attention mechanisms in the UNet.
+  napkin_math: At 512x512, downsampled by 8 in latent space = 64x64 latent. Sequence length N = 4096.
+    Attention matrix size = 4096 * 4096 * 2 bytes ≈ 33 MB per head. At 1024x1024, latent is 128x128. Sequence
+    length N = 16384. Attention matrix size = 16384 * 16384 * 2 bytes ≈ 536 MB per head. Traffic increases
+    by 16x. If attention was 20% of the latency at 512x512 (e.g., 20ms out of 100ms) and convolutions
+    were 80% (80ms). New conv time = 80 * 4 = 320ms. New attention time = 20 * 16 = 320ms (assuming bandwidth
+    bound). Total latency = 640ms. 640 / 100 = 6.4x increase. With HBM thrashing, this easily hits 9x.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 15
+chains:
+- id: global-chain-032
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- diffusion
+- vision
+- roofline
+- scaling

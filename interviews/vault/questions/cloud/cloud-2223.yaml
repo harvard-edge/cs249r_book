@@ -1,0 +1,70 @@
+schema_version: '1.0'
+id: cloud-2223
+track: cloud
+level: L6+
+zone: design
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: The Liquid-Cooled Scheduling Frontier
+scenario: Your company is deploying next-generation B200 GPUs (1,000W TDP each) alongside the existing
+  H100 fleet (700W TDP). The new B200 racks require direct-to-chip liquid cooling, but only 30% of your
+  datacenter floor has liquid cooling infrastructure (the rest is legacy air-cooled). You have 500 B200s
+  (liquid-cooled zone) and 2,000 H100s (air-cooled zone). A critical 1,000-GPU LLM pre-training job needs
+  the fastest possible time-to-completion. The B200s are 2x faster per GPU for training. Design the scheduling
+  and placement strategy. Can you use both GPU types in a single training job? What are the constraints?
+details:
+  realistic_solution: 'You cannot naively mix GPU types in synchronous training. Three strategies, evaluated
+    by time-to-completion: **Option 1 — B200-only (500 GPUs)**: Use all 500 B200s. Each B200 is 2x faster
+    than H100, so effective throughput = 500 × 2 = 1,000 H100-equivalent. Time = T_base. **Option 2 —
+    H100-only (1,000 GPUs)**: Use 1,000 H100s. More GPUs but slower each. Throughput = 1,000 H100-equivalent,
+    but communication overhead increases with more nodes. Time ≈ T_base × 1.15 (15% communication overhead
+    from 2x nodes). **Option 3 — Heterogeneous with async**: Use B200s for the primary training job (fast
+    iterations). Run H100s on a separate replica with asynchronous gradient exchange (DiLoCo-style). B200s
+    do 500 inner steps, H100s do 500 inner steps, then exchange outer gradients every N steps. This requires
+    algorithmic changes but utilizes both fleets. **Best option**: Option 1 (500 B200s) is simplest and
+    fastest. The 500 B200s match 1,000 H100-equivalent throughput with half the communication overhead
+    (fewer nodes). The cooling constraint is a hard physical boundary — schedule all B200 jobs in the
+    liquid-cooled zone, use H100 fleet for inference/evaluation. Consider: the scheduler must track cooling
+    zone as a resource dimension alongside GPU type, count, and network topology.'
+  common_mistake: Mixing B200 and H100 GPUs in a single data-parallel training job. Heterogeneous GPU
+    types in synchronous data parallelism create a straggler problem — every iteration runs at the speed
+    of the slowest GPU. The B200s would idle 50% of the time waiting for H100s.
+  napkin_math: 'Training throughput: B200 = 2x H100 per GPU. 500 B200s: 500 × 2 = 1,000 H100-eq FLOPS.
+    Communication: 500 GPUs / 8 per node = 63 nodes. Ring AllReduce for 70B model (140 GB gradients):
+    140 GB / 400 Gbps IB × 2 × 62/63 ≈ 5.5 seconds. 1,000 H100s: 1,000 / 8 = 125 nodes. AllReduce: 140
+    GB / 400 Gbps × 2 × 124/125 ≈ 5.5 seconds (same bandwidth, but more nodes = more synchronization points).
+    Compute per step: B200 at 500 GPUs ≈ 3.5 seconds. H100 at 1000 GPUs ≈ 3.5 seconds. Total per step:
+    B200 fleet = 3.5 + 5.5 = 9.0 sec. H100 fleet = 3.5 + 5.5 + ~1.5 sec sync overhead = 10.5 sec. B200
+    fleet is ~15% faster with half the GPUs.'
+  options:
+  - Mix both GPU types in a single data-parallel training job; the AllReduce naturally averages out the
+    speed difference because faster GPUs contribute more gradient updates per unit time
+  - Use all 2,500 GPUs in a single training job with the B200s handling compute stages and H100s handling
+    communication stages; heterogeneous pipeline parallelism is standard practice
+  - 'Do not mix B200 and H100 GPUs in a single training job — the 2x speed difference means the faster
+    B200s idle waiting for H100s at every synchronization point (AllReduce), wasting half their potential.
+    Instead: run two separate jobs or use the 500 B200s (1,000 H100-equivalent) as the training fleet
+    and the H100s for inference/evaluation. Alternatively, use pipeline parallelism with load-balanced
+    stage assignment where B200 stages handle 2x the layers.'
+  - Convert all B200 GPUs to match H100 clock speeds via GPU firmware throttling, then run a standard
+    homogeneous training job across all 2,500 GPUs for maximum scale
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

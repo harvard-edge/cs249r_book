@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-1792
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Diagnosing OOM in Reverse Mode Differentiation
+scenario: Your team is fine-tuning a 7B parameter LLM on a single 80GB A100 GPU. The forward pass completes
+  successfully, with `nvidia-smi` showing ~20GB of VRAM utilized. However, the system throws an Out-Of-Memory
+  (OOM) error the exact moment `loss.backward()` is invoked. Diagnose the root cause of this massive memory
+  spike during reverse mode differentiation and propose an architectural solution to fit training into
+  the 80GB budget without reducing the batch size.
+details:
+  realistic_solution: Identify that the OOM is caused by the activation memory footprint required for
+    reverse-mode AD. Implement gradient checkpointing (activation recomputation) to trade compute for
+    memory, selectively discarding activations during the forward pass and recomputing them during the
+    backward pass.
+  common_mistake: Candidates often assume the OOM is due to gradient allocation alone (14GB for 7B params)
+    or optimizer states, failing to diagnose that reverse-mode AD requires caching massive intermediate
+    activation tensors from the forward pass to compute the chain rule.
+  napkin_math: 7B params in BF16 = 14GB weights. Gradients = 14GB. Optimizer states (FP32 master weights
+    + momentum + variance, allocated lazily) = 3 * 7B * 4 bytes = 84GB. Intermediate activations for a
+    typical batch can easily exceed 40GB because AD caches every layer's output. Even before Adam states
+    are fully allocated, weights + gradients + activations = 14 + 14 + 40 = 68GB. If batch size is larger,
+    activations push memory >80GB, causing OOM. Furthermore, full training requires 14 + 14 + 84 + 40
+    = 152GB > 80GB capacity. Gradient checkpointing reduces activation memory to O(√N), though offloading
+    is still needed for optimizer states.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-338
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T00:44:05.188007'

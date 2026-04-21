@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: edge-cell-13261
+track: edge
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: Diagnose Decode Latency Regression from KV Cache Format on Hailo-8
+scenario: A 3B transformer on Hailo-8 shows 8ms/token during the first 32 decode steps, then degrades
+  to 22ms/token for steps 33-128. The KV cache is stored in row-major format [seq][layer][head][dim].
+  The Hailo-8 DMA controller accesses the KV cache sequentially by layer during attention computation.
+  Diagnose why latency degrades at step 33 and propose a layout fix.
+details:
+  realistic_solution: '[seq][layer][head][dim] layout: at step 33, KV cache contains 33 entries. DMA reads
+    layer 0, head 0 across all 33 seq positions: stride = layer×head×dim = 32×8×64×2B = 32,768B apart.
+    For seq>32: the 33rd entry falls on a new LPDDR5 row (8KB row boundary at 32×256B=8192B for this dim).
+    LPDDR5 row activation adds 10ns per miss × 8 layers × 8 heads = 640ns overhead per attention step.
+    Cumulative: 32+ tokens triggers row crossing in tight inner loop. Fix: transpose to [layer][head][seq][dim]
+    so sequential reads are contiguous in memory. DMA reads 33 seq positions sequentially = contiguous
+    → single LPDDR5 row activation per read, not 33.'
+  common_mistake: Attributing the degradation to longer attention computation (O(n²) scaling); at step
+    33 vs step 32 the compute increase is negligible; the issue is cache line aliasing in the DMA access
+    pattern.
+  napkin_math: 'KV access per decode step: read all past tokens for each head. At 32 tokens: 32×64×2B=4KB
+    per head — fits in single LPDDR5 row (8KB). At 33 tokens: 4.1KB → row boundary crossing at token 32.
+    LPDDR5 row switch: 10ns overhead. For 8L×8H=64 heads: 64×10ns=640ns extra per step. Over 128-32=96
+    steps: 640ns×96=61.4μs total — small, but DMA setup overhead per row adds ~5μs/step. Fixed layout:
+    single row access per head → no degradation.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,64 @@
+schema_version: '1.0'
+id: mobile-exp2-anal-0288
+track: mobile
+level: L3
+zone: analyze
+topic: monitoring-observability
+competency_area: reliability
+bloom_level: analyze
+phase: inference
+title: Tensor G3 LLM Straggler Latency Analysis
+scenario: Your production health dashboard for an on-device Gemini Nano feature running on the Google
+  Tensor G3 shows intermittent latency stragglers. The system normally processes tokens at ~35ms, leveraging
+  the on-device TPU (7.5 TOPS). However, telemetry alerts indicate that during certain user flows, token
+  generation latency spikes to over 120ms per token, despite the 12 GB LPDDR5X memory not being fully
+  utilized by capacity (only 5 GB in use system-wide). Analyze why this performance degradation occurs
+  and explain the system behavior using the provided hardware specifications.
+details:
+  realistic_solution: The root cause of the stragglers is memory bandwidth contention, not a compute limitation
+    or memory capacity exhaustion. Even with 7.5 TOPS available on the TPU, generating each token requires
+    streaming the entire model's weights from the 12 GB LPDDR5X memory. When concurrent hardware blocks
+    (like the ISP for camera processing or GPU for rendering) heavily access the memory controller, the
+    available bandwidth for the TPU drops significantly. This stalls the TPU as it waits for weights,
+    causing the observed 3x-4x latency spikes.
+  common_mistake: Candidates often assume the issue is related to memory capacity exhaustion (OOM), TPU
+    compute bottlenecks, or immediate thermal throttling. They fail to recognize that autoregressive LLM
+    inference is fundamentally memory-bandwidth bound and miss how concurrent system processes contend
+    for the shared LPDDR5X memory bus.
+  napkin_math: 'Assume the Gemini Nano model is 1.8B parameters quantized to 8-bit (1.8 GB total size).
+
+    Compute time per token: (2 * 1.8B MACs) / 7.5 TOPS = 3.6B MACs * 2 ops/MAC / 7.5e12 ops/s = 7.2B ops
+    / 7.5 TOPS = ~0.96 ms (Compute is not the bottleneck).
+
+    Assume LPDDR5X peak bandwidth is ~51.2 GB/s.
+
+    Baseline memory-bound latency: 1.8 GB / 51.2 GB/s = ~35 ms per token (matches normal telemetry).
+
+    Under contention, if background tasks consume 36.2 GB/s of bandwidth, only 15 GB/s remains for the
+    TPU.
+
+    Straggler latency: 1.8 GB / 15 GB/s = 120 ms per token.
+
+    This confirms the 120ms+ telemetry spikes are mathematically consistent with bandwidth starvation
+    on the Tensor G3.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Unit confusion between MACs and Operations. The calculation '(2 * 1.8B MACs) / 7.5 TOPS = ~0.48 ms'
+  treats MACs as standard operations. 2 * 1.8B MACs is 3.6B MACs, which equates to 7.2B Operations. 7.2B
+  Operations / 7.5 TOPS = 0.96 ms, not 0.48 ms.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

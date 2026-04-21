@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: global-0086
+track: global
+level: L6+
+zone: design
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Multi-tenant LoRA Serving Architecture
+scenario: 'A B2B SaaS platform hosts 5,000 custom fine-tuned LoRA adapters over a base Llama-3 70B model.
+  Peak traffic is 10,000 QPS with a heavily skewed Zipfian distribution: 10 tenants drive 80% of the traffic,
+  while the remaining 4,990 generate sporadic requests. The strict SLA requires Time-to-First-Token (TTFT)
+  < 200ms. How do you design the inference architecture to minimize GPU cost while guaranteeing SLA across
+  all tenants?'
+details:
+  realistic_solution: 'Design a Multi-LoRA serving architecture (e.g., S-LoRA/vLLM). Keep a single instance
+    of the base Llama-3 70B model loaded across an 8x80GB A100 GPU cluster. Implement a two-tier model
+    routing and memory management strategy: dynamically swap LoRA adapters from host CPU RAM into GPU
+    VRAM over PCIe on demand. Use stateful routing at the API gateway to pin requests from the top 10
+    "hot" tenants to specific GPU workers where their adapters are kept resident in VRAM. For the "cold"
+    4,990 tenants, fetch adapters asynchronously from CPU RAM to VRAM. Implement continuous batching at
+    the base model level, using custom CUDA kernels (like Punica) to apply different LoRA weights to different
+    requests within the same batch without padding.'
+  common_mistake: Deploying dedicated GPU endpoints for each tenant, leading to massive GPU idle time
+    and fragmentation, or fetching LoRAs from S3 directly on the critical path, violating the 200ms TTFT
+    SLA.
+  napkin_math: Base model (70B, FP16) = ~140GB. Cluster VRAM (8x80GB) = 640GB. Remaining VRAM = 500GB
+    (shared for KV cache and LoRAs). Rank-16 LoRA = ~300MB. Max resident LoRAs = 500GB / 300MB = ~1,666.
+    Since 5,000 > 1,666, we must swap. PCIe Gen4x16 bandwidth = 32 GB/s. Fetching a 300MB cold LoRA takes
+    300MB / 32 GB/s = ~9.4ms. 9.4ms swap + ~50ms prefill compute is ~59.4ms, well within the 200ms TTFT
+    SLA.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: global-chain-053
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-exp-diag-0031
+track: edge
+level: L4
+zone: diagnosis
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Hailo-8 Model Thrashing with mmap Weight Loading
+scenario: We are deploying a sequential multi-model pipeline (Detection, Pose, Re-ID) on an edge gateway
+  equipped with a Hailo-8 accelerator (26 TOPS INT8, 2.5W). To conserve host RAM, we implemented memory-mapped
+  weight loading (mmap) from the local eMMC for the three 15MB models. During load testing, inference
+  runs perfectly for a single model in isolation, but the full pipeline experiences severe stuttering
+  and the effective compute drops to less than 1 TOPS. Given that the Hailo-8 is a dataflow accelerator
+  with no local DRAM and streams directly from host memory, diagnose the root cause of this performance
+  collapse.
+details:
+  realistic_solution: The root cause is host OS page faulting stalling the DMA stream. Because the Hailo-8
+    has no local DRAM, it relies entirely on host memory to stream weights and activations. Using 'mmap'
+    lazily maps the weights; when the pipeline switches models, the accelerator's memory requests trigger
+    major page faults. The host CPU must halt the stream and fetch the weights from the slow eMMC into
+    RAM. The solution is to pin the weights in host RAM using 'mlock' or 'MAP_POPULATE', or to process
+    larger batches per model to amortize the disk I/O latency.
+  common_mistake: Candidates often suspect PCIe bandwidth saturation, Hailo-8 hardware context-switching
+    overhead, or thermal throttling due to the 2.5W power envelope, missing the critical interaction between
+    OS-level mmap lazy-loading and the accelerator's memory architecture.
+  napkin_math: 'Hailo-8 peak compute: 26 TOPS. A 15MB INT8 model requires ~15 GOPs per inference, taking
+    ~0.57 ms to compute (15 / 26000 seconds). Total compute for 3 models = ~1.7 ms per frame. Local eMMC
+    read speed: ~150 MB/s. Loading 15MB of evicted weights via page faults takes ~100 ms (15MB / 150MB/s).
+    For a 3-model pipeline, we spend 300 ms loading weights from disk and 1.7 ms computing. Total frame
+    latency = 301.7 ms (~3.3 FPS). Effective accelerator utilization = 1.7ms / 301.7ms = 0.56%, meaning
+    the 26 TOPS accelerator effectively operates at ~0.14 TOPS due to I/O starvation.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Truncation error: 15 / 26000 is 0.5769 ms, but text truncates to 0.57 ms.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
