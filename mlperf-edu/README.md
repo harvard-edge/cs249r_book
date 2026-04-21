@@ -1,3 +1,38 @@
+<!-- MLPERF-EDU-STATUS:START -->
+<div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+
+<tr><td align="center" bgcolor="#fff4e5">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h2>🚧 Under construction</h2>
+<p align="center">This tree is <b>not</b> polished end-to-end yet: APIs, CLI flags, workload manifests, and documentation are still being wired for classroom use. <b>Do not rely on it for production benchmarking</b>—expect breaking changes until we publish a stable “1.0” teaching release.</p>
+
+</td></tr>
+</table>
+
+</td></tr>
+
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="18" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early work (2026)</h3>
+<p align="center">MLPerf EDU is being developed in public alongside the <b>2026</b> MLSysBook ecosystem. Harness scripts, compliance checks, and teaching notes will keep moving as we align workloads with the core curriculum.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests (especially if something in this README is wrong or outdated).</p>
+
+</td></tr>
+</table>
+
+</td></tr>
+
+</table>
+</div>
+<!-- MLPERF-EDU-STATUS:END -->
+
 # MLPerf EDU 🎓
 
 **A 16-workload pedagogical ML systems benchmark suite aligned with [MLCommons MLPerf](https://mlcommons.org/benchmarks/).**
@@ -7,26 +42,6 @@ MLPerf EDU brings industry-standard ML benchmarking to the classroom. Every mode
 📄 **Paper**: See [`paper/paper.tex`](paper/paper.tex) — "MLPerf EDU: Bridging Industry Benchmarking and ML Systems Education"
 
 ---
-
-<!-- EARLY-RELEASE-CALLOUT:START -->
-<div align="center">
-<table border="0" cellspacing="0" cellpadding="0" width="92%">
-<tr><td align="center" bgcolor="#f6f8fa">
-
-<table border="0" cellspacing="0" cellpadding="20" width="100%">
-<tr><td align="center">
-
-<h3>📌 Early release (2026)</h3>
-<p align="center">MLPerf EDU ships alongside the <b>2026</b> MLSysBook ecosystem. Workloads, harness scripts, compliance checks, and teaching notes are <b>actively iterated</b> as we align classroom benchmarks with the core curriculum.</p>
-<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
-
-</td></tr>
-</table>
-
-</td></tr>
-</table>
-</div>
-<!-- EARLY-RELEASE-CALLOUT:END -->
 
 ## Quick Start
 
@@ -54,8 +69,17 @@ python scripts/compliance_checker.py \
 
 ## Benchmark Suite (16 Workloads)
 
-> Numbers below are kept in sync with `workloads.yaml` (the single source of truth).
-> If you are updating a workload, update the YAML; this table is regenerated from it.
+<div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+<table border="0" cellspacing="0" cellpadding="14" width="100%">
+<tr><td align="center">
+<p align="center"><b>Source of truth</b> — Row counts and targets stay in sync with <code>workloads.yaml</code>. When you change a workload, update the YAML; this table is regenerated from it.</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</div>
 
 | Division | Task | Model | Params | Dataset | Quality Target |
 |----------|------|-------|--------|---------|----------------|

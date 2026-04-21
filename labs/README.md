@@ -1,4 +1,4 @@
-<!-- DEV-BANNER-START -->
+<!-- EARLY-RELEASE-CALLOUT:START -->
 <div align="center">
 <table border="0" cellspacing="0" cellpadding="0" width="92%">
 <tr><td align="center" bgcolor="#f6f8fa">
@@ -21,7 +21,7 @@
 </td></tr>
 </table>
 </div>
-<!-- DEV-BANNER-END -->
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 <div align="center">
   <h1>Co-Labs</h1>
