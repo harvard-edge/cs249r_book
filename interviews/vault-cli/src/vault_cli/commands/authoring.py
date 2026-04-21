@@ -135,7 +135,7 @@ def register(app: typer.Typer) -> None:
         Runs ``git pull --rebase`` on the registry first to reduce collision
         rate, per §3.3 concurrency contract.
         """
-        classification = Classification(track=track, level=level, zone=zone)
+        # v1.0: classification lives in YAML, filesystem uses track only.
         topic_slug = _slug(topic)
         h = _short_hash(title)
 

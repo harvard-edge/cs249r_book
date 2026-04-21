@@ -25,7 +25,7 @@ from rich.console import Console
 from rich.table import Table
 
 from vault_cli.exit_codes import ExitCode
-from vault_cli.loader import LoadedQuestion, iter_question_files, load_all
+from vault_cli.loader import LoadedQuestion, load_all
 from vault_cli.models import Question
 from vault_cli.yaml_io import load_file
 
@@ -41,7 +41,7 @@ for _c in _ENUMS_CANDIDATES:
             sys.path.insert(0, str(_c))
         break
 
-from enums import ZONE_LEVEL_AFFINITY  # noqa: E402  type: ignore[import-not-found]
+from enums import ZONE_LEVEL_AFFINITY  # noqa: E402, I001  # type: ignore[import-not-found]
 
 
 # ─── Severity ───────────────────────────────────────────────────────────────

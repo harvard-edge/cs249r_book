@@ -31,7 +31,7 @@ for _candidate in _REPO_ROOT_CANDIDATES:
             sys.path.insert(0, str(_candidate))
         break
 
-from enums import (  # noqa: E402  type: ignore[import-not-found]
+from enums import (  # noqa: E402, I001  # type: ignore[import-not-found]
     VALID_BLOOM_LEVELS,
     VALID_HUMAN_REVIEW_STATUSES,
     VALID_LEVELS,
