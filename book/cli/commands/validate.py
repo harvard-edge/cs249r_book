@@ -160,13 +160,11 @@ class ValidateCommand:
             ("files", "_run_images"),
         ],
         # ------------------------------------------------------------------
-        # Semantic check groups (MIGRATION: commit 1 of refactor/check-taxonomy).
-        # These groups classify checks by WHAT is validated, not by
-        # where-the-rule-came-from (e.g. `mitpress-` prefixed scopes move to
-        # their natural semantic home). The `rendering` group below remains
-        # registered during the migration so pre-commit entries that still
-        # reference the old scope path continue to work; it will be removed
-        # in commit 3 after `.pre-commit-config.yaml` is updated.
+        # Semantic check groups: classify checks by WHAT is validated
+        # (markup patterns, prose style, punctuation, numbers, math, etc.),
+        # not by where-the-rule-came-from. A rule's provenance belongs in
+        # a comment, not a command name — hence no `mitpress-` prefix on
+        # scopes. See .claude/rules/book-prose.md for style provenance.
         # ------------------------------------------------------------------
         "markup": [
             ("patterns", "_run_rendering"),       # low-level markup patterns (backticks, dollar signs, asterisks)
@@ -214,39 +212,6 @@ class ValidateCommand:
             ("placement", "_run_indexes"),                 # \index{} not inline with headings/callouts
         ],
 
-        # DEPRECATED: `rendering` will be removed in commit 3 of this refactor.
-        # All scopes below now also live in their semantic-home group above.
-        # New pre-commit entries MUST use the new group names.
-        "rendering": [
-            ("patterns", "_run_rendering"),
-            ("python-echo", "_run_python_echo"),
-            ("indexes", "_run_indexes"),
-            ("dropcaps", "_run_dropcaps"),
-            ("parts", "_run_parts"),
-            ("heading-levels", "_run_heading_levels"),
-            ("duplicate-words", "_run_duplicate_words"),
-            ("grid-tables", "_run_grid_tables"),
-            ("tables", "_run_table_content"),
-            ("ascii", "_run_ascii"),
-            ("percent-spacing", "_run_percent_spacing"),
-            ("unit-spacing", "_run_unit_spacing"),
-            ("binary-units", "_run_binary_units"),
-            ("contractions", "_run_contractions"),
-            ("unblended-prose", "_run_unblended_prose"),
-            ("times-spacing", "_run_times_spacing"),
-            ("times-product-spacing", "_run_times_product_spacing"),
-            ("purpose-unnumbered", "_run_purpose_unnumbered"),
-            ("div-fences", "_run_div_fences"),
-            ("mitpress-percent-in-captions", "_run_mitpress_percent_in_captions"),
-            ("mitpress-spaced-emdash", "_run_mitpress_spaced_emdash"),
-            ("mitpress-spaced-slash", "_run_mitpress_spaced_slash"),
-            ("mitpress-vs-period", "_run_mitpress_vs_period"),
-            ("mitpress-eg-ie-comma", "_run_mitpress_eg_ie_comma"),
-            ("mitpress-acknowledgements", "_run_mitpress_acknowledgements"),
-            ("mitpress-capitalized-refs", "_run_mitpress_capitalized_refs"),
-            ("mitpress-above-below", "_run_mitpress_above_below"),
-            ("mitpress-hyphen-range", "_run_mitpress_hyphen_range"),
-        ],
         "images": [
             ("formats", "_run_image_formats"),
             ("external", "_run_external_images"),
@@ -492,7 +457,6 @@ class ValidateCommand:
             "code": "Python code blocks (echo: false)",
             "tables": "Grid tables → pipe, table content hygiene",
             "index": "Index placement (\\index{} outside headings/callouts)",
-            "rendering": "DEPRECATED — use semantic groups above (markup, prose, punctuation, ...)",
             "images": "Image file formats, external URLs",
             "json": "JSON file syntax validation",
             "units": "Physics engine unit conversion tests",
