@@ -20,7 +20,25 @@
 
 </div>
 
-> **Early release (2026)** — StaffML shipped with the **2026** MLSysBook refresh. The vault, apps, and question flows are **actively iterated** as we tune for real interviews—expect meaningful updates to content, UX, and scoring. Share feedback via [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or PRs.
+<!-- EARLY-RELEASE-CALLOUT:START -->
+<div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">StaffML shipped with the <b>2026</b> MLSysBook refresh. The vault, web apps, and question flows are <b>actively iterated</b> as we tune for real interviews—expect meaningful updates to content, UX, and scoring.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+
+</td></tr>
+</table>
+
+</td></tr>
+</table>
+</div>
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
 

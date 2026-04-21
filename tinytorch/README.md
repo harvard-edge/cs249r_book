@@ -19,9 +19,25 @@
 
 ---
 
-> **Early release (2026)** — TinyTorch is **live and usable**; it shipped with the **2026** MLSysBook refresh and we expect **steady iteration**—modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
->
-> 📅 **Classroom roadmap**: Summer/Fall 2026 · **Right now**: [Help shape TinyTorch](#-help-shape-tinytorch)
+<!-- EARLY-RELEASE-CALLOUT:START -->
+<div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">TinyTorch is <b>live and usable</b>. It shipped with the <b>2026</b> MLSysBook refresh and we expect <b>steady iteration</b>—modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.</p>
+<p align="center"><b>Classroom roadmap</b> — Summer/Fall 2026 &nbsp;|&nbsp; <b>Right now</b> — <a href="#-help-shape-tinytorch">Help shape TinyTorch</a></p>
+
+</td></tr>
+</table>
+
+</td></tr>
+</table>
+</div>
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
 

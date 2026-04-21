@@ -1,13 +1,25 @@
 <!-- DEV-BANNER-START -->
 <div align="center">
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
 
-> **Early release (2026)** — These decks ship with the **2026** MLSysBook refresh. Slides, figures, and speaker notes are **actively iterated** as the textbook evolves. Teaching feedback and errata are welcome via [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues).
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
 
-<p>
+<h3>📌 Early release (2026)</h3>
+<p align="center">These Beamer decks ship with the <b>2026</b> MLSysBook refresh. Slides, figures, and speaker notes are <b>actively iterated</b> as the textbook evolves.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> (teaching notes, errata, and requests).</p>
+<p align="center">
 <a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
+&nbsp;
 <a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
 </p>
 
+</td></tr>
+</table>
+
+</td></tr>
+</table>
 </div>
 <!-- DEV-BANNER-END -->
 

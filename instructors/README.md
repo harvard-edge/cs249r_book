@@ -1,9 +1,18 @@
 <div align="center">
   <h1>🗺️ The Blueprint — Instructor Site</h1>
-  <blockquote>
-    <b>Early release (2026)</b><br>
-    This instructor site shipped with the <b>2026</b> MLSysBook refresh and is <b>actively iterated</b>: syllabi, rubrics, layouts, and diagrams (including SVGs) will keep improving as we teach from it. Share feedback via <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or PRs.
-  </blockquote>
+  <!-- EARLY-RELEASE-CALLOUT:START -->
+  <table border="0" cellspacing="0" cellpadding="0" width="92%">
+  <tr><td align="center" bgcolor="#f6f8fa">
+  <table border="0" cellspacing="0" cellpadding="20" width="100%">
+  <tr><td align="center">
+  <h3>📌 Early release (2026)</h3>
+  <p align="center">This instructor site shipped with the <b>2026</b> MLSysBook refresh and is <b>actively iterated</b>: syllabi, rubrics, layouts, and diagrams (including SVGs) will keep improving as we teach from it.</p>
+  <p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+  </td></tr>
+  </table>
+  </td></tr>
+  </table>
+  <!-- EARLY-RELEASE-CALLOUT:END -->
 </div>
 
 ---
