@@ -158,14 +158,18 @@ snapshot_violations() {
 PRE_REND="${PER_FIX_LOG}.pre-rend"
 PRE_REFS="${PER_FIX_LOG}.pre-refs"
 PRE_MITPRESS="${PER_FIX_LOG}.pre-mitpress"
-[ -n "${CHAPTER_QMD}" ] && snapshot_violations "${PRE_REND}" rendering --path "${CHAPTER_QMD}"
+# Post-refactor: the old `rendering` umbrella group was dissolved into semantic
+# groups (markup, prose, punctuation, numbers, math, structure, code, tables,
+# index). `check all` is the broadest equivalent and catches everything the old
+# `rendering` call did plus more.
+[ -n "${CHAPTER_QMD}" ] && snapshot_violations "${PRE_REND}" all --path "${CHAPTER_QMD}"
 if grep -E -q '^\+.*@[a-zA-Z]' "${PATCH_FILE}" || grep -E -q '^\+.*\\cite' "${PATCH_FILE}"; then
   TOUCHED_REFS=1
   [ -n "${CHAPTER_QMD}" ] && snapshot_violations "${PRE_REFS}" refs --path "${CHAPTER_QMD}"
 else
   TOUCHED_REFS=0
 fi
-[ -n "${CHAPTER_QMD}" ] && snapshot_violations "${PRE_MITPRESS}" rendering --scope mitpress-vs-period --path "${CHAPTER_QMD}"
+[ -n "${CHAPTER_QMD}" ] && snapshot_violations "${PRE_MITPRESS}" punctuation --scope vs-period --path "${CHAPTER_QMD}"
 
 # 6) Apply patch
 if ! git apply "${PATCH_FILE}" >>"${PER_FIX_LOG}" 2>&1; then
@@ -190,23 +194,33 @@ post_check_or_revert() {
     reject_to_suggested "new_${label}_violations:${pre_n}->${post_n}"
   fi
 }
-post_check_or_revert rendering "${PRE_REND}" rendering --path "${CHAPTER_QMD}"
+post_check_or_revert all "${PRE_REND}" all --path "${CHAPTER_QMD}"
 [ "${TOUCHED_REFS}" -eq 1 ] && post_check_or_revert refs "${PRE_REFS}" refs --path "${CHAPTER_QMD}"
 
-# 8) MIT Press scope checks
-for scope in mitpress-vs-period mitpress-percent-in-captions mitpress-spaced-emdash \
-             mitpress-eg-ie-comma mitpress-capitalized-refs mitpress-above-below \
-             mitpress-hyphen-range mitpress-acknowledgements; do
-  PRE="${PER_FIX_LOG}.pre-${scope}"
-  POST="${PER_FIX_LOG}.post-${scope}"
+# 8) Style-specific scope checks (post-refactor: scopes live in semantic groups,
+# no longer under `rendering --scope mitpress-*`).
+#   group:scope pairs — one per style rule that was previously mitpress-*
+for pair in \
+    "punctuation:vs-period" \
+    "numbers:percent-in-captions" \
+    "punctuation:emdash" \
+    "punctuation:eg-ie-comma" \
+    "refs:capitalized" \
+    "prose:above-below" \
+    "punctuation:hyphen-range" \
+    "prose:acknowledgements"; do
+  group="${pair%%:*}"
+  scope="${pair#*:}"
+  PRE="${PER_FIX_LOG}.pre-${group}-${scope}"
+  POST="${PER_FIX_LOG}.post-${group}-${scope}"
   [ -n "${CHAPTER_QMD}" ] || continue
-  snapshot_violations "${PRE}" rendering --scope "${scope}" --path "${CHAPTER_QMD}" 2>/dev/null
-  snapshot_violations "${POST}" rendering --scope "${scope}" --path "${CHAPTER_QMD}" 2>/dev/null
+  snapshot_violations "${PRE}" "${group}" --scope "${scope}" --path "${CHAPTER_QMD}" 2>/dev/null
+  snapshot_violations "${POST}" "${group}" --scope "${scope}" --path "${CHAPTER_QMD}" 2>/dev/null
   pre_n="$(cat "${PRE}" 2>/dev/null || echo 0)"
   post_n="$(cat "${POST}" 2>/dev/null || echo 0)"
   if [ "${post_n}" -gt "${pre_n}" ]; then
     revert_patch
-    reject_to_suggested "new_${scope}_violations:${pre_n}->${post_n}"
+    reject_to_suggested "new_${group}_${scope}_violations:${pre_n}->${post_n}"
   fi
 done
 
