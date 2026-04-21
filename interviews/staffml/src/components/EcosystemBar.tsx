@@ -372,6 +372,16 @@ export default function EcosystemBar() {
               <i className={`bi ${isDark ? 'bi-sun' : 'bi-moon-stars-fill'}`} style={{ fontSize: 14 }} />
             </button>
             {RIGHT_MENUS.map(renderDropdown)}
+            {/* Search — opens the existing CommandPalette (Cmd+K).
+                Matches the search icon on Quarto navbars. */}
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('staffml:open-palette'))}
+              style={{ ...S.navLink, padding: '8px 10px', cursor: 'pointer' }}
+              aria-label="Search (Cmd+K)"
+              title="Search (⌘K)"
+            >
+              <i className="bi bi-search" style={{ fontSize: 14 }} />
+            </button>
           </div>
         </div>
 
