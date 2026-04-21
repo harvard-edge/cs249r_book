@@ -1,0 +1,1 @@
+import{i as p}from"./_baseFor-DKD1r8uL.js";var u="Expected a function";function c(o,t){if(typeof o!="function"||t!=null&&typeof t!="function")throw TypeError(u);var e=function(){var a=arguments,n=t?t.apply(this,a):a[0],r=e.cache;if(r.has(n))return r.get(n);var f=o.apply(this,a);return e.cache=r.set(n,f)||r,f};return e.cache=new(c.Cache||p),e}c.Cache=p;var h=c;export{h as t};

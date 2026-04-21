@@ -1,0 +1,1 @@
+import{t as s}from"./requests-DIwGYs0l.js";import{t as r}from"./DeferredRequestRegistry-C2V-hXrK.js";const o=new r("secrets-result",async(t,e)=>{await s().listSecretKeys({requestId:t,...e})});export{o as t};

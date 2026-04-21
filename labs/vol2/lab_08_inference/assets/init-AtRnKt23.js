@@ -1,0 +1,1 @@
+function a(t,e){switch(arguments.length){case 0:break;case 1:this.range(t);break;default:this.range(e).domain(t);break}return this}function n(t,e){switch(arguments.length){case 0:break;case 1:typeof t=="function"?this.interpolator(t):this.range(t);break;default:this.domain(t),typeof e=="function"?this.interpolator(e):this.range(e);break}return this}export{a as n,n as t};

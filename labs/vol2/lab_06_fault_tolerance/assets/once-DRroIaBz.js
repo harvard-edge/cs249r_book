@@ -1,0 +1,1 @@
+import{o as a}from"./arrays-DYDL-3-i.js";function f(i){let n,t=!1;return function(...r){return t||(t=!0,n=i.apply(this,r)),n}}function c(i){let n,t,r,e=!1;return function(...o){if(t===void 0||!a(o,t)){try{n=i.apply(this,o),e=!1,r=void 0}catch(u){e=!0,r=u}t=o}if(e)throw r;return n}}export{f as n,c as t};
