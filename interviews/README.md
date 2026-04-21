@@ -20,6 +20,8 @@
 
 </div>
 
+> **Early release (2026)** — StaffML shipped with the **2026** MLSysBook refresh. The vault, apps, and question flows are **actively iterated** as we tune for real interviews—expect meaningful updates to content, UX, and scoring. Share feedback via [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or PRs.
+
 ---
 
 StaffML is a free, open-source interview prep platform for ML systems engineers. Browse a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track. Built by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi), Harvard University.

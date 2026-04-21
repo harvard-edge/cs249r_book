@@ -1,8 +1,8 @@
 <div align="center">
   <h1>🗺️ The Blueprint — Instructor Site</h1>
   <blockquote>
-    <b>Status: Under Active Development</b><br>
-    This site is being actively built and refined. Content, structure, and styling may change frequently. SVG diagrams are placeholder quality and will be professionally refined before launch.
+    <b>Early release (2026)</b><br>
+    This instructor site shipped with the <b>2026</b> MLSysBook refresh and is <b>actively iterated</b>: syllabi, rubrics, layouts, and diagrams (including SVGs) will keep improving as we teach from it. Share feedback via <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or PRs.
   </blockquote>
 </div>
 
