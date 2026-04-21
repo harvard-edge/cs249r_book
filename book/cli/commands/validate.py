@@ -176,6 +176,7 @@ class ValidateCommand:
             ("div-fences", "_run_div_fences"),
             ("mitpress-percent-in-captions", "_run_mitpress_percent_in_captions"),
             ("mitpress-spaced-emdash", "_run_mitpress_spaced_emdash"),
+            ("mitpress-spaced-slash", "_run_mitpress_spaced_slash"),
             ("mitpress-vs-period", "_run_mitpress_vs_period"),
             ("mitpress-eg-ie-comma", "_run_mitpress_eg_ie_comma"),
             ("mitpress-acknowledgements", "_run_mitpress_acknowledgements"),
@@ -3117,6 +3118,46 @@ class ValidateCommand:
         return ValidationRunResult(
             name="mitpress-spaced-emdash",
             description="No spaced em dashes in prose — use word—word (MIT Press §1)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_spaced_slash(self, root: Path) -> ValidationRunResult:
+        """Flag spaced slashes (word / word) in prose — should be closed (word/word)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        spaced_slash = re.compile(r"[a-zA-Z0-9]\s+/\s+[a-zA-Z0-9]")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("#|") or stripped.startswith("# "):
+                    continue
+                for m in spaced_slash.finditer(line):
+                    context = line[max(0, m.start() - 5) : min(len(line), m.end() + 15)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_spaced_slash",
+                            message="Close up slash: word/word not word / word (§1)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-spaced-slash",
+            description="No spaced slashes in prose — use word/word (MIT Press §1)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

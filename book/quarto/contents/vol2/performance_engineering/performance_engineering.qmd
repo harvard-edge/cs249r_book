@@ -626,7 +626,7 @@ Paged attention and KV cache quantization interact multiplicatively. Paged atten
 
 Modern LLM serving systems decompose each request into two distinct phases with fundamentally different performance characteristics. The distinction between these phases drives system architecture and optimization strategy.
 
-The **prefill phase** processes the entire input prompt in parallel. If the prompt contains $P$ tokens, the prefill phase executes a single forward pass over all $P$ tokens simultaneously. The GEMM operations have shape [$P$, $d$]$\times$ [$d$, $d$], making the batch dimension equal to $P$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024 / 2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
+The **prefill phase** processes the entire input prompt in parallel. If the prompt contains $P$ tokens, the prefill phase executes a single forward pass over all $P$ tokens simultaneously. The GEMM operations have shape [$P$, $d$]$\times$ [$d$, $d$], making the batch dimension equal to $P$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024/2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
 
 The **decode phase** generates output tokens one at a time, autoregressively. Each step has a batch dimension of 1 (for a single request) or the number of concurrent requests (for batched serving). At batch size 1, decode is deeply memory-bound as analyzed in @sec-performance-engineering-workload-placement.
 
@@ -857,7 +857,7 @@ A concrete numerical example clarifies the memory savings. Consider one attentio
 
 The na\"ive algorithm computes $S = QK^T$, a matrix of shape $8192 \times 8192$. In FP16, this score matrix occupies $8192 \times 8192 \times 2 = 128$ MB per head. After applying softmax, the result $P = \text{softmax}(S)$ is also $128$ MB. Computing $PV$ requires reading $P$ again. In total, the na\"ive algorithm reads $Q$, $K$, $V$ from HBM (6 MB), writes $S$ (128 MB), reads $S$ for softmax (128 MB), writes $P$ (128 MB), reads $P$ for the final multiply (128 MB), and writes $O$ (2 MB). The total HBM traffic is approximately 520 MB per head, dominated by the quadratic intermediates.
 
-FlashAttention processes the computation in tiles of size $B_r \times B_c$ (typically $128\times128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192 / 128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
+FlashAttention processes the computation in tiles of size $B_r \times B_c$ (typically $128\times128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
 
 FlashAttention-2 (Dao, 2023) further optimizes the algorithm for modern GPU architectures by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy on GPUs with many streaming multiprocessors. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
@@ -1127,15 +1127,15 @@ class KVCacheAnalysis:
 
 - Weights: 35 GB/GPU
 - Available for KV cache: $80 - 35 =$ `{python} KVCacheAnalysis.avail_fp16_gb_str` GB/GPU
-- KV cache per request: `{python} KVCacheAnalysis.kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_fp16_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_fp16_str` requests
+- KV cache per request: `{python} KVCacheAnalysis.kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/4:.1f}"` GB/GPU
+- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_fp16_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_fp16_str` requests
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
 - Weights: 35 GB $\times$ (4/16) = `{python} KVCacheAnalysis.weight_int4_gb_str` GB/GPU (INT4)
 - Available for KV cache: $80 -$ `{python} KVCacheAnalysis.weight_int4_gb_str` $=$ `{python} KVCacheAnalysis.avail_int8_gb_str` GB/GPU
-- KV cache per request (INT8): `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2 / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_int8_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2 / 4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_int8_str` requests
+- KV cache per request (INT8): `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/2/4:.1f}"` GB/GPU
+- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_int8_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/2/4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_int8_str` requests
 
 **The Systems Insight**: Precision engineering changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} KVCacheAnalysis.batch_ratio_str`$\times$ or more.
 
