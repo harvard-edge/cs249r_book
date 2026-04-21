@@ -1,21 +1,12 @@
-"""Legacy-JSON exporter.
+"""Legacy-JSON exporter (v1.0-aware).
 
-Regenerates the `corpus.json` artifact in the pre-migration shape that the
-existing Next.js ``corpus.ts`` expects (field set + array-of-items layout).
-Driven from the YAML source so ``vault build --legacy-json`` produces a
-deterministic, byte-stable JSON that can be CI-diffed against the committed
-``interviews/staffml/src/data/corpus.json``.
+Regenerates the ``corpus.json`` artifact in the shape the Next.js frontend
+expects (field set + array-of-items). Driven from the v1.0 YAML source,
+producing a deterministic, byte-stable JSON.
 
-This closes ARCHITECTURE.md §11.1's "corpus.json becomes a generated
-artifact" contract without requiring Phase-4 cutover: the live site keeps
-reading the bundled JSON; we just prove it's reproducible from YAML.
-
-Maps to legacy fields that the new schema dropped:
-    competency_area  ← topic → area (resolved via topics.json)
-    bloom_level      ← zone → bloom (rollup mapping, same as export-paper)
-    scope            ← track        (1:1)
-    chain_positions  ← chain        (reshape {id, position} → {id: position - 1})
-    chain_ids        ← [chain.id] if chain else None
+v1.0 source of truth: classification is on the YAML body. The `scope`
+field (dead in GUI) is no longer emitted. `chain_ids` and `chain_positions`
+are rebuilt from the plural `chains: [{id, position}]` YAML list.
 """
 
 from __future__ import annotations
@@ -27,79 +18,64 @@ from typing import Any
 from vault_cli.loader import LoadedQuestion
 from vault_cli.policy import filter_questions, load_policy
 
-# ── Topic → competency-area mapping (from topics.json) ─────────
-# topics.json has 87 entries, each with an "area" field that maps to
-# one of 13 canonical competency areas (memory, compute, architecture, …).
-_TOPIC_TO_AREA: dict[str, str] = {}
 
-
-def _load_topic_area_map(vault_dir: Path) -> dict[str, str]:
-    """Load topic→area mapping from the StaffML topics.json file."""
-    if _TOPIC_TO_AREA:
-        return _TOPIC_TO_AREA
-    topics_path = (vault_dir / ".." / "staffml" / "src" / "data" / "topics.json").resolve()
-    if topics_path.exists():
-        data = json.loads(topics_path.read_text(encoding="utf-8"))
-        items = data if isinstance(data, list) else data.get("topics", [])
-        for t in items:
-            _TOPIC_TO_AREA[t["id"]] = t["area"]
-    return _TOPIC_TO_AREA
-
-
-# Zone → Bloom level mapping (mirrors export-paper).
-_ZONE_TO_BLOOM = {
-    "recall":        "remember",
-    "fluency":       "understand",
-    "implement":     "apply",
-    "specification": "apply",
-    "analyze":       "analyze",
-    "diagnosis":     "analyze",
-    "design":        "create",
-    "evaluation":    "evaluate",
-}
-
-
-def _adapt(lq: LoadedQuestion, area_map: dict[str, str]) -> dict[str, Any]:
+def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
     """YAML question → legacy-JSON item in the shape corpus.ts expects."""
     q = lq.question
-    c = lq.classification
 
     legacy: dict[str, Any] = {
         "id": q.id,
         "title": q.title,
         "topic": q.topic,
-        "competency_area": area_map.get(q.topic, q.topic),
-        "scope": c.track.value,                         # legacy alias
-        "track": c.track.value,
-        "level": c.level.value.upper(),                 # legacy used "L1" uppercase
-        "zone": c.zone.value,
-        "bloom_level": _ZONE_TO_BLOOM.get(c.zone.value, "remember"),
+        "competency_area": q.competency_area,
+        "track": q.track,
+        "level": q.level,
+        "zone": q.zone,
+        "bloom_level": q.bloom_level or "",
         "scenario": q.scenario,
-        "status": q.status.value,
+        "status": q.status,
     }
+    if q.phase:
+        legacy["phase"] = q.phase
 
-    # Chain — legacy used dict-valued chain_positions keyed by chain_id.
-    if q.chain is not None:
-        legacy["chain_ids"] = [q.chain.id]
-        # Legacy was 0-indexed; new schema is 1-indexed. Undo the +1 so
-        # legacy consumers see the same numbers they did pre-migration.
-        legacy["chain_positions"] = {q.chain.id: q.chain.position - 1}
-    else:
-        legacy["chain_ids"] = []
-        legacy["chain_positions"] = {}
+    # Chain — legacy shape: chain_ids (list) + chain_positions (dict).
+    # v1.0 schema already carries multi-chain membership natively.
+    chain_ids: list[str] = []
+    chain_positions: dict[str, int] = {}
+    for c in q.chains or []:
+        chain_ids.append(c.id)
+        chain_positions[c.id] = c.position
+    if chain_ids:
+        legacy["chain_ids"] = chain_ids
+        legacy["chain_positions"] = chain_positions
 
-    # Details — preserve common_mistake + realistic_solution + napkin_math +
-    # deep_dive_{title,url} as flat keys on `details`.
+    # Details.
     details: dict[str, Any] = {
         "common_mistake": q.details.common_mistake or "",
         "realistic_solution": q.details.realistic_solution,
     }
     if q.details.napkin_math:
         details["napkin_math"] = q.details.napkin_math
-    if q.details.deep_dive:
-        details["deep_dive_title"] = q.details.deep_dive.title
-        details["deep_dive_url"] = q.details.deep_dive.url
+    if q.details.options is not None:
+        details["options"] = q.details.options
+        details["correct_index"] = q.details.correct_index
+    if q.details.resources:
+        details["resources"] = [
+            {"name": r.name, "url": r.url} for r in q.details.resources
+        ]
     legacy["details"] = details
+
+    # Surface validation lineage so the site can display trust badges.
+    if q.validated is not None:
+        legacy["validated"] = q.validated
+    if q.math_verified is not None:
+        legacy["math_verified"] = q.math_verified
+    if q.human_reviewed and q.human_reviewed.status != "not-reviewed":
+        legacy["human_reviewed"] = {
+            "status": q.human_reviewed.status,
+            "by": q.human_reviewed.by,
+            "date": str(q.human_reviewed.date) if q.human_reviewed.date else None,
+        }
 
     return legacy
 
@@ -111,12 +87,7 @@ def emit_legacy_corpus(
     *,
     publish_only: bool = True,
 ) -> dict[str, Any]:
-    """Emit legacy-shape corpus.json from YAML source.
-
-    ``publish_only=True`` (default) filters through release-policy.yaml so
-    the emitted file matches what would ship to production (9,199 published).
-    Set False to dump everything including drafts + deprecated.
-    """
+    """Emit legacy-shape corpus.json from YAML source."""
     if publish_only:
         policy = load_policy(vault_dir / "release-policy.yaml")
         published_dicts = filter_questions(
@@ -128,12 +99,9 @@ def emit_legacy_corpus(
     else:
         items = loaded
 
-    # Sort by id for byte-stable output across runs.
     items_sorted = sorted(items, key=lambda lq: lq.id)
-    area_map = _load_topic_area_map(vault_dir)
-    legacy_items = [_adapt(lq, area_map) for lq in items_sorted]
+    legacy_items = [_adapt(lq) for lq in items_sorted]
 
-    # Canonical JSON: sort_keys recursively, LF, UTF-8.
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         json.dumps(legacy_items, sort_keys=True, ensure_ascii=False, indent=2) + "\n",

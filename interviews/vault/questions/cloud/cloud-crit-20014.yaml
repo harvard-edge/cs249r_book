@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-crit-20014
+track: cloud
+level: L5
+zone: realization
+topic: flash-attention
+competency_area: optimization
+bloom_level: create
+phase: inference
+title: KV Cache Quantization with PagedAttention
+scenario: You serve a 70B model on 4x H100 with PagedAttention. Current setup uses FP16 KV cache, supporting
+  200 concurrent requests at avg 4096 tokens. Product wants 500 concurrent requests. Design a KV cache
+  quantization strategy using FP8 or INT4 and analyze the quality-capacity tradeoff.
+details:
+  realistic_solution: 'Current KV per request per GPU: 80 layers x 2 x 16 heads x 128 dim x 4096 x 2B
+    / 4 GPUs = 2.56GB. 200 requests = 512GB/4 = 128GB > 80GB? Recalculate with GQA: 8 KV heads/GPU. KV
+    = 80 x 2 x 8 x 128 x 4096 x 2B / 4 = 640MB/req/GPU. 200 x 640MB = 128GB > 80GB. Actual with model:
+    (80-35)GB / 640MB = 70 requests/GPU = 280 total. FP8 KV: halves to 320MB/req/GPU, yielding 140/GPU
+    = 560 total — exceeds target. Quality impact: FP8 KV shows <0.5% perplexity regression on most benchmarks.
+    INT4 with group quantization (group=128) reduces to 160MB but shows 1-2% degradation on long-context
+    tasks due to accumulated quantization error in deep layers.'
+  common_mistake: Quantizing KV cache to INT4 without per-channel scaling, which destroys attention score
+    distribution. KV quantization is more sensitive than weight quantization because attention scores
+    are computed as dot products of K and Q.
+  napkin_math: 'FP16 KV: 640MB/req/GPU. FP8: 320MB. INT4-g128: 160MB. Budget: 45GB/GPU. FP16: 70 req/GPU.
+    FP8: 140. INT4: 281. Target 500/4 = 125/GPU — FP8 suffices.'
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+deletion_reason: Math error unfixable
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: ERROR
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- With Tensor Parallelism, all concurrent requests consume KV cache on all GPUs. A target of 500 requests
+  requires 500 * 320MB = 160GB per GPU in FP8, vastly exceeding the 45GB budget. FP8 only allows 140 total
+  concurrent requests.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

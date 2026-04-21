@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-0715
+track: cloud
+level: L5
+zone: optimization
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: The Async SGD Staleness Problem
+scenario: To avoid synchronization barriers, your team switches from synchronous to asynchronous SGD for
+  a 13B model on 64 A100 GPUs. After 24 hours, the loss curve is 15% higher than the synchronous baseline
+  at the same number of tokens processed. The team blames 'async is just worse.' Is that the full story,
+  and can you quantify the staleness?
+details:
+  realistic_solution: 'In async SGD with 64 workers, when worker $i$ reads the parameter server''s weights,
+    computes a gradient, and pushes it back, other workers have updated the parameters ~63 times in between
+    (one update per worker). Average staleness $\tau \approx N - 1 = 63$ steps. This means each gradient
+    update is computed on parameters that are 63 steps out of date — it''s pushing the model in a direction
+    that was correct 63 steps ago but may be wrong now. Mitigation: (1) **Bounded staleness** — reject
+    gradients older than $\tau_{max}$ (e.g., 16 steps). (2) **Staleness-weighted updates** — scale the
+    learning rate by $1/\tau$: $\theta \leftarrow \theta - (\eta/\tau) \cdot g$. (3) **Local SGD** — each
+    worker does $H$ local steps, then averages parameters globally every $H$ steps, reducing staleness
+    to $H$ instead of $N$.'
+  common_mistake: '"Asynchronous SGD doesn''t converge as well — switch back to synchronous." This is
+    an oversimplification. Async SGD''s problem is quantifiable: gradient staleness. The gradient a worker
+    computes is based on parameters that are $\tau$ steps old, where $\tau$ is the staleness. The fix
+    isn''t abandoning async — it''s bounding and compensating for staleness.'
+  napkin_math: '64 workers, step time = 500 ms. Synchronous: all 64 wait → 1 update / 500 ms = 2 updates/s.
+    Async: each worker pushes independently → 64 updates / 500 ms = 128 updates/s. But each update has
+    staleness $\tau \approx 63$. Effective learning rate: $\eta_{\text{eff}} = \eta / \sqrt{\tau} \approx
+    \eta / 8$ (empirical scaling). So async processes 64× more updates but each is ~8× less effective
+    → net ~8× more throughput, but convergence per token is worse. **Local SGD with $H=8$:** staleness
+    = 8, sync every 4 seconds. Effective LR reduction: $1/\sqrt{8} \approx 0.35$, but 8× fewer sync events.
+    Sweet spot between sync and full async.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-084
+  position: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: WARN
+validation_issues_pro:
+- The Napkin Math section is incomplete, cutting off before the end of the explanation.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

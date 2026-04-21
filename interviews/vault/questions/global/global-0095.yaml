@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: global-0095
+track: global
+level: L4
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: both
+title: FP8 Gradient Casting Overflow Crisis
+scenario: You are migrating a 70B parameter LLM fine-tuning pipeline from FP16 to FP8 on H100 GPUs to
+  double throughput to 4,000 tokens/sec/GPU. The forward pass works perfectly, but during the backward
+  pass in QAT, the loss immediately spikes to NaN after 15 steps. The gradient norms are roughly ~800.0
+  before the crash. What caused this catastrophic failure?
+details:
+  realistic_solution: 'The root cause is a mismatch in FP8 encoding formats. FP8 has two standard formats:
+    E4M3 (4 exponent bits, 3 mantissa bits) and E5M2 (5 exponent bits, 2 mantissa bits). You used E4M3
+    for both the forward and backward passes. E4M3 provides higher precision (needed for activations/weights)
+    but has a maximum representable value of 448. When gradients hit ~800.0, E4M3 overflows, producing
+    NaNs. The fix is to use E4M3 for the forward pass (activations and weights) and E5M2 for the backward
+    pass (gradients), as E5M2 sacrifices precision for a much larger dynamic range (max value 57,344),
+    comfortably accommodating the gradient norms.'
+  common_mistake: Assuming FP8 has uniform dynamic range and attributing the NaN to a learning rate that
+    is too high for quantized training.
+  napkin_math: In FP8 (E4M3), max value is (1 + 6/8) * 2^(15-7) = 1.75 * 256 = 448. A gradient of 800
+    exceeds this, causing NaN on H100. FP8 E5M2 max value is (1 + 3/4) * 2^(31-15) = 1.75 * 65536 = 114,688.
+    Wait, E5M2 exponent bias is 15. Max exp is 30. 30-15=15. 2^15 = 32768. 1.75 * 32768 = 57,344. Gradient
+    800 fits in E5M2. Use E5M2 for backward pass gradients to prevent overflow.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: global-chain-030
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: WARN
+validation_issues_pro:
+- The napkin math formula for the E5M2 max value, `2^(31-15)`, appears to contain a typo, as the max exponent
+  field for 5 bits is 30, not 31.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

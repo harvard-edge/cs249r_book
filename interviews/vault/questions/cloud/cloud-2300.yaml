@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: cloud-2300
+track: cloud
+level: L5
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Hopper FP8 MoE Latency Regression
+scenario: You are serving an 8x7B Mixture of Experts (MoE) LLM on an 8x H100 node. To increase throughput,
+  you convert the model from FP16 to FP8 to leverage the Hopper Transformer Engine. Instead of the expected
+  speedup, P99 Time-Per-Output-Token (TPOT) degrades from 45ms to 62ms. Nsight Systems profiling shows
+  GPU utilization dropped, and the time spent in MoE routing and GEMM kernels significantly increased.
+details:
+  realistic_solution: 'The root cause is a failure in Hardware-Compiler-Algorithm co-design regarding
+    MoE routing and FP8 Tensor Core alignment. In an MoE model, tokens are dynamically routed to experts.
+    This often results in highly skewed, small token counts per expert (e.g., Expert 1 gets 3 tokens,
+    Expert 2 gets 45). Hopper FP8 Tensor Cores require strict memory alignment (multiples of 16 or 32)
+    to achieve peak throughput. Unaligned GEMMs fall back to slower execution paths. Furthermore, FP8
+    requires calculating dynamic scaling factors (amax), which adds a reduction kernel before the GEMM.
+    For tiny, unaligned matrices (like 3 tokens), the overhead of launching the amax reduction kernel
+    plus the unaligned FP8 GEMM completely dominates the actual math execution, making the system heavily
+    kernel-launch and memory-bound. The fix requires co-design: 1) Algorithm: Implement expert capacity
+    factors or token dropping to enforce fixed, balanced batch sizes per expert. 2) Compiler/Mapping:
+    Pad the routed token tensors to multiples of 16 to ensure FP8 Tensor Core alignment, and fuse the
+    amax calculation into the routing kernel.'
+  common_mistake: Assuming FP8 compute is inherently slower due to downcasting overhead, and reverting
+    to FP16 instead of investigating the kernel execution profile.
+  napkin_math: 'FP16 GEMM for 3 tokens: ~3us kernel time. FP8 for 3 tokens: Amax kernel launch (4us) +
+    Unaligned FP8 GEMM launch (4us) = 8us minimum overhead, completely negating the 2x theoretical math
+    speedup. Across 32 layers * 8 experts = 256 expert calls per token. 256 * 5us extra overhead = ~1.2ms
+    extra overhead per token just in kernel launches, heavily exacerbating latency when scaling up concurrency.'
+  options:
+  - Speculative decoding generates multiple candidate sequences (beams) in parallel and selects the highest-scoring
+    one; it is equivalent to beam search with a faster selection mechanism
+  - Speculative decoding improves quality by generating more diverse token candidates; the speed improvement
+    is a side effect of the better token selection, not the primary goal
+  - 'Speculative decoding uses a small draft model to generate K candidate tokens autoregressively, then
+    the large target model verifies all K tokens in a single parallel forward pass. If the draft model''s
+    acceptance rate is α, expected tokens per target forward pass = 1/(1-α). For α=0.8 and K=5: expected
+    accepted = 4 tokens + 1 corrected = 5 tokens per target pass. Speedup ≈ K×α = 4x if draft model overhead
+    is negligible. Critical insight: verification is parallel (compute-bound prefill), not sequential
+    (memory-bound decode).'
+  - Speculative decoding requires the draft model to be a quantized version of the target model (e.g.,
+    INT4); using a different model architecture as the draft is not possible because the token distributions
+    would be incompatible
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

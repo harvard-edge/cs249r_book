@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-sus-62026
+track: cloud
+level: L4
+zone: design
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: TB-Scale Embedding Table Sharding
+scenario: You have 50 embedding tables with sizes ranging from 1 GB to 2 TB (total 20 TB). You must shard
+  them across 128 A100 GPUs (80 GB each), with 10 TB fitting in GPU HBM across the cluster. The remaining
+  10 TB must live in CPU DRAM. Design the sharding strategy to minimize P99 lookup latency. What determines
+  which tables go to GPU vs CPU?
+details:
+  realistic_solution: 'Partition tables by access frequency × embedding dimension (i.e., bandwidth demand
+    per second). Hot tables — those accessed in every request or with high lookup frequency — belong on
+    GPU HBM for low-latency access (A100 HBM: 2 TB/s). Cold tables (accessed in <10% of requests) go to
+    CPU DRAM (DDR5: ~50 GB/s aggregate across CPUs). For tables that exceed single-GPU capacity: row-wise
+    sharding (each GPU holds a contiguous range of rows) minimizes cross-GPU communication for any single
+    lookup. For small hot tables that fit in GPU HBM: replicate on all GPUs to eliminate all-to-all communication
+    for those lookups. Final strategy: (1) Sort tables by QPS × row_size_bytes. (2) Place top tables on
+    GPU until 80% of cluster HBM is used (10 TB × 0.8 = 8 TB). (3) Remaining on CPU DRAM with prefetch
+    pipeline. (4) Replicate tables < 100 MB on all 128 GPUs if they appear in every request.'
+  common_mistake: Sharding by table size alone — putting large tables on CPU and small tables on GPU.
+    The correct criterion is access frequency (hot tables) and lookup-to-size ratio (tables with high
+    QPS per byte).
+  napkin_math: '128 A100s × 80 GB = 10.24 TB HBM. Reserve 20% for activations/gradients: 8.2 TB usable
+    for embeddings. If top-10 hot tables sum to 8 TB: fit on GPU. CPU DRAM: 128 nodes × 512 GB = 65 TB
+    capacity (ample). CPU lookup latency: ~100 μs (DRAM latency + memory bus). GPU lookup latency: ~5
+    μs (HBM access + CUDA kernel). For P99 < 10 ms serving, CPU lookups must be pipelined to hide latency:
+    start CPU lookups asynchronously while GPU handles dense pathway.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

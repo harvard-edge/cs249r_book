@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-r2-42062
+track: cloud
+level: L6+
+zone: realization
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: create
+phase: both
+title: Persistent Kernels for Continuous Batching
+scenario: Traditional CUDA kernels launch, execute, and exit for each batch. For continuous batching inference
+  on MI300X, you want a persistent kernel that stays resident on all 304 CUs, processing new requests
+  as they arrive without kernel launch overhead. Design the persistent kernel architecture, including
+  work distribution, synchronization, and how you handle variable batch sizes without wasting CU cycles.
+details:
+  realistic_solution: 'Architecture: (1) Launch one persistent kernel with 304 blocks (one per CU). Kernel
+    enters an infinite loop, checking a work queue in pinned host memory via unified memory. (2) Work
+    queue: circular buffer in PCIe BAR1-mapped memory. Host enqueues {request_id, input_ptr, output_ptr,
+    seq_len}. Device polls with `__threadfence_system()` for coherency. (3) Dynamic work distribution:
+    each CU atomically increments a consumer index, grabs work items. Variable batch: CU 0-63 process
+    batch slot 0 (a 64-CU matmul), CU 64-127 process batch slot 1, etc. If only 2 requests: only 128 CUs
+    active, others spin-wait (acceptable overhead at 200ns per poll). (4) Synchronization: use `cooperative_groups::grid_group::sync()`
+    for AllReduce across CUs (needed for LayerNorm). (5) MI300X advantage: Infinity Fabric allows CUs
+    on different XCDs to synchronize via shared HBM atomics at <200ns. Benefits: eliminates kernel launch
+    latency (5-10μs per kernel × 6 kernels = 30-60μs per token). At 5ms/token decode, saves 1.2%.'
+  common_mistake: Implementing a persistent kernel with global memory polling (spin-loop on a flag). This
+    wastes memory bandwidth and creates contention. Use device-side enqueue or cooperative groups with
+    grid-level synchronization.
+  napkin_math: 'Kernel launch overhead: 5-10μs × 6 kernels per transformer block × 80 blocks = 2.4-4.8ms
+    per forward pass. Persistent kernel: 0 launch overhead. Savings: 4.8ms / 80ms decode = 6% throughput
+    improvement. Poll overhead: 304 CUs × 200ns = 60.8μs per poll cycle. At 1000 poll/s between requests:
+    60.8ms wasted = 6% of GPU time when idle. Break-even: persistent kernel wins when >100 req/s (queue
+    rarely empty).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

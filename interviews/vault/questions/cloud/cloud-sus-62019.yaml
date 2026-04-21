@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-sus-62019
+track: cloud
+level: L4
+zone: diagnosis
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Prefill Throughput Saturation Diagnosis
+scenario: Your prefill pool of 4 H100s is processing at 150k tokens/s aggregate, but expected throughput
+  is 400k tokens/s (4 × 100k tok/s per GPU). Profiling shows GPU compute utilization at 35% and PCIe transfer
+  utilization at 90%. All requests have sequence lengths of 512 tokens. Diagnose the bottleneck and fix
+  it.
+details:
+  realistic_solution: 'PCIe at 90% utilization is the bottleneck. At 512-token sequences with FP16 tokens
+    (embedding dim=8192 for a large model), input activations per request = 512 × 8192 × 2 bytes = 8.4
+    MB. At 150k tok/s, input transfer rate = 150e3/512 × 8.4 MB = 4.4 GB/s — not enough to saturate PCIe.
+    The bottleneck is likely KV-cache output transfer to CPU pinned memory (pre-transfer staging before
+    InfiniBand send). At 150k tokens/s output with 384 MB per 4096-token sequence: for 512-token sequences,
+    KV = 384/8 = 48 MB. At 300 completions/s: 300 × 48 MB = 14.4 GB/s — close to PCIe 4.0 x16 limit of
+    32 GB/s but not over. Re-examine: are weight tensors being reloaded from CPU? Suspect the model doesn''t
+    fit in 80 GB H100 and is paging weights over PCIe. 80 GB < model_size means PCIe is streaming weights.
+    Fix: use tensor-parallel across all 4 H100s (total 320 GB) so weights fit in HBM, eliminating PCIe
+    weight paging.'
+  common_mistake: Tuning batch size to fix compute utilization — the real bottleneck is PCIe, and increasing
+    batch size only increases PCIe pressure further if inputs are being transferred per-batch.
+  napkin_math: 'If model is 175B FP16 = 350 GB > 4 × 80 GB = 320 GB. Cannot fit in TP=4. Must page. Paging
+    rate: each forward pass needs all 350 GB of weights. At 150k tok/s and 512 tok/sequence: 293 forward
+    passes/s × 350 GB = 102 TB/s of weight reads needed. H100 HBM: 3.35 TB/s × 4 = 13.4 TB/s. PCIe: 32
+    GB/s — 3000× bottleneck if paging over PCIe. Diagnosis confirmed. Solution: use FP8 quantization (175
+    GB, fits in 320 GB TP=4) or model parallelism with NVLink.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

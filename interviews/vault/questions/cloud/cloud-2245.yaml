@@ -1,0 +1,67 @@
+schema_version: '1.0'
+id: cloud-2245
+track: cloud
+level: L4
+zone: evaluation
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: analyze
+phase: training
+title: Bootstrapping a Quality Classifier for Trillion-Token Corpora
+scenario: 'You are building the data pipeline for a 3 trillion token LLM pre-training corpus. The raw
+  crawl is 15 trillion tokens. You need to filter to high-quality text, but you have no labeled quality
+  dataset. Your plan: train a fastText classifier on ''Wikipedia + curated books = positive, random web
+  = negative'' and score every document. A senior researcher warns this approach has a critical systematic
+  bias. What is the bias, and how do you build a more robust quality scoring pipeline at this scale?'
+details:
+  realistic_solution: 'The bias is domain-quality conflation. The classifier will assign high scores to
+    encyclopedic text and low scores to high-quality but non-encyclopedic text (e.g., technical forums,
+    literary fiction, scientific papers, code documentation). This systematically removes diverse high-quality
+    content, reducing the corpus''s domain coverage. A robust pipeline: (1) Multi-signal quality scoring:
+    combine a classifier score with heuristic signals — perplexity from a small language model, text statistics
+    (sentence length, vocabulary richness, repetition ratio, symbol-to-word ratio), and URL reputation
+    scores. (2) Stratified sampling for human annotation: sample 10K documents from each quality quartile
+    × domain cluster, have 3 annotators label quality, measure inter-annotator agreement (Krippendorff''s
+    alpha > 0.7). (3) Iterative refinement: train a better classifier on the human labels, re-score, re-sample
+    for annotation. (4) Diversity constraint: after quality filtering, ensure domain distribution entropy
+    remains above a threshold — if filtering removes >80% of any domain, investigate.'
+  common_mistake: '"Wikipedia is high quality, so using it as the positive class is correct." This confuses
+    domain with quality. Wikipedia has a specific style (encyclopedic, formal, citation-heavy) that is
+    not representative of all high-quality text. The classifier learns ''Wikipedia-like'' rather than
+    ''high-quality.'''
+  napkin_math: '15T tokens at 4 bytes/token = 60 TB raw. FastText inference: ~1M documents/sec on a 32-core
+    machine. At 500 tokens/document: 30B documents. Time: 30B / 1M = 30,000 seconds = 8.3 hours on 1 machine,
+    or ~5 minutes on a 100-node cluster. The classifier itself is cheap — the bias it introduces costs
+    months of wasted pre-training compute. A 3T token pre-training run on 2,000 H100s at $3/GPU-hour costs
+    ~$2M. If biased filtering degrades the model by even 2% on downstream tasks, the data pipeline cost
+    savings are irrelevant.'
+  options:
+  - Scaling efficiency is determined solely by the batch size per GPU; as long as each GPU has enough
+    data to keep Tensor Cores busy, communication overhead is automatically zero
+  - Communication cannot overlap with computation on NVIDIA GPUs because the GPU has a single execution
+    engine; AllReduce and GEMM operations must execute sequentially
+  - The scaling efficiency ceiling is 1/N for N GPUs because each GPU must wait for all other N-1 GPUs
+    to complete their communication; this is an inherent limit of synchronous training
+  - 'The communication-computation overlap ratio determines scaling efficiency. For a transformer layer:
+    compute time per layer ≈ 24Bsh²/FLOPS (forward+backward). Communication per AllReduce: 4hs² bytes
+    for tensor parallelism (two AllReduce per layer). Overlap is possible because different micro-batches
+    can overlap their communication with computation. The key metric is: comm_time/compute_time < 1 means
+    communication is fully hideable.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

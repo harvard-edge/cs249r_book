@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2370
+track: cloud
+level: L6+
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: RDMA vs RPC for Disaggregated KV-Cache
+scenario: To scale a 70B LLM, you implement Disaggregated Serving, separating Prefill nodes from Decode
+  nodes. A Prefill node generates a 15 GB KV-cache for a massive prompt and must transfer it to the Decode
+  node over a 400 Gbps network. You are evaluating standard gRPC over TCP/IP versus GPUDirect RDMA over
+  RoCEv2. Evaluate the tradeoffs in latency, CPU utilization, and system complexity.
+details:
+  realistic_solution: "Using standard gRPC over TCP/IP, the 15 GB KV-cache must be copied from GPU memory\
+    \ to CPU memory via PCIe, processed by the kernel TCP stack (involving context switches and memory\
+    \ copies into socket buffers), transmitted over the NIC, and then undergo the reverse process on the\
+    \ Decode node. The CPU memory bandwidth and PCIe bus become severe bottlenecks. Even with a 400 Gbps\
+    \ (50 GB/s) NIC, TCP overhead typically limits single-flow throughput to ~10-15 GB/s, taking >1 second,\
+    \ and burning multiple CPU cores.\n\nGPUDirect RDMA bypasses the CPU and OS kernel entirely. The NIC\
+    \ reads directly from the Prefill GPU's VRAM via PCIe and writes directly to the Decode GPU's VRAM.\
+    \ This allows the transfer to operate near line rate (e.g., 45 GB/s after overhead). \n\nThe Tradeoff:\
+    \ RDMA reduces the transfer time of a 15 GB cache from ~1.2s to ~330ms and drops CPU utilization to\
+    \ near zero, heavily optimizing Time-to-First-Token (TTFT) in disaggregated architectures. However,\
+    \ RoCEv2 RDMA requires a lossless network fabric (PFC tuning), strict memory pinning (which limits\
+    \ dynamic memory allocation for the KV-cache pool), and complex security/isolation mechanisms in a\
+    \ multi-tenant environment, as memory is directly exposed to the network."
+  common_mistake: Focusing only on the theoretical 400 Gbps bandwidth and concluding both take the same
+    time, ignoring the CPU memory bandwidth bottleneck and kernel overhead of TCP/IP.
+  napkin_math: '15 GB transfer. TCP/IP bottlenecked by CPU/PCIe overhead: ~12 GB/s = 15 / 12 = 1.25 seconds.
+    RDMA over 400 Gbps (50 GB/s raw, ~45 GB/s effective): 15 / 45 = 0.33 seconds. RDMA saves ~920ms on
+    TTFT.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 15
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

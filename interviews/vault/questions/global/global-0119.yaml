@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: global-0119
+track: global
+level: L6+
+zone: design
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: create
+phase: training
+title: SRAM Tiling for Custom Attention
+scenario: You are writing a custom fused CUDA kernel for a novel sliding-window attention mechanism used
+  in DNA sequence modeling (seq_len=131,072). The naive PyTorch implementation achieves only 5% Model
+  Flops Utilization (MFU) because it is entirely memory-bandwidth bound. Architect the memory access pattern
+  utilizing registers, SRAM (Shared Memory), and HBM to maximize arithmetic intensity.
+details:
+  realistic_solution: The architecture must implement hardware-aware block tiling (similar to FlashAttention).
+    The intermediate N x N attention matrix (Q*K^T) is too large to materialize in HBM, let alone SRAM.
+    We must tile the computation into blocks that fit entirely within the SM's shared memory (SRAM). Load
+    a block of K and V into SRAM. Then, stream blocks of Q from HBM to SRAM, compute the partial attention
+    scores, update the running maximum and denominator for the softmax (using the online safe softmax
+    trick), multiply by V, and accumulate the result in registers. Finally, write the output block back
+    to HBM. This reduces HBM accesses from O(N^2) to O(N).
+  common_mistake: Attempting to load entire rows of the attention matrix into shared memory, which exceeds
+    the strict physical limits of SRAM per Streaming Multiprocessor (SM).
+  napkin_math: 'Naive intermediate QK^T size: 131,072 * 131,072 * 2 bytes (FP16) = ~34.3 GB per head.
+    Reading/writing this to HBM at 2 TB/s (A100 spec) takes 34.3 / 2000 * 2 = 0.0343 seconds (34.3 ms)
+    per layer. While 34.3 ms sounds small, over 96 layers this becomes ~3.3 seconds per token just for
+    memory transfers, yielding terrible MFU. An A100 has 164 KB of shared memory per SM. We can choose
+    a block size of 128x128. Block of K (128x128x2 bytes = 32 KB) and V (32 KB) fit comfortably in the
+    164 KB SRAM, leaving room for Q blocks and intermediate register spills, keeping all O(N^2) operations
+    on-chip.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: global-chain-042
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Napkin math uses 3 TB/s for HBM bandwidth but references an A100, which is specified as 2 TB/s.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

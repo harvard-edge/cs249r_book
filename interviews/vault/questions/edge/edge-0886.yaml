@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: edge-0886
+track: edge
+level: L6+
+zone: diagnosis
+topic: speculative-decoding
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Speculative Decoding KV Cache Leak
+scenario: An on-device translation app uses speculative decoding (draft length K=4). While translating
+  a 1-hour offline lecture, the app crashes with an OOM exception after 10 minutes (exhausting the 6GB
+  KV cache budget). Standard auto-regressive decoding works fine for the full hour without crashing.
+details:
+  realistic_solution: The root cause is a logical memory leak in how the PagedAttention block table handles
+    rejected speculative tokens. During speculative decoding, the draft model generates K=4 tokens, and
+    their KV caches are allocated in the memory pool so the target model can verify them. If 2 tokens
+    are accepted and 2 are rejected, the generation pointer rolls back. However, if the system fails to
+    eagerly free or overwrite the KV cache allocations for the rejected tokens in the block table, those
+    slots remain marked as 'used'. Over millions of generated tokens, these rejected 'ghost' tokens accumulate,
+    bloating the KV cache until it hits the 6GB ceiling. The fix is to explicitly release the block table
+    indices corresponding to rejected tokens at the end of every verification step.
+  common_mistake: Assuming the draft model's weights are slowly leaking memory over time due to a PyTorch
+    memory management bug.
+  napkin_math: 'Translation speed: 10 steps/sec. K=4. Acceptance rate: 1.5 tokens/step. Rejected: 2.5
+    tokens/step. Leaked tokens per second = 10 * 2.5 = 25 tokens/sec. Over 10 minutes = 15,000 leaked
+    tokens. If 1 token KV = 512KB (32 layers × 4096 dim × 2 (K,V) × 2 bytes FP16 = 524,288 bytes ≈ 512KB),
+    15,000 * 512KB = ~7.5GB leaked memory, exceeding the 6GB OOM threshold well before 10 minutes.'
+  options:
+  - The OOM is caused by memory fragmentation in the Python runtime; running garbage collection before
+    inference will prevent it.
+  - Assuming the draft model's weights are slowly leaking memory over time due to a PyTorch memory management
+    bug.
+  - Automatic restart on failure is dangerous for safety-critical systems; manual intervention should
+    always be required.
+  - The root cause is a logical memory leak in how the PagedAttention block table handles rejected speculative
+    tokens. During speculative decoding, the draft model generates K=4 tokens, and their KV caches are
+    allocated in the memory pool so the target model can verify them.
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- KV token size calculation is incorrect. 32 layers * 4096 dim * 2 (K,V) * 2 bytes (FP16) = 524,288 bytes
+  (~512KB), not 400KB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

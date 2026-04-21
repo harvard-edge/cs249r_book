@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0515
+track: cloud
+level: L4
+zone: evaluation
+topic: mlops-lifecycle
+competency_area: data
+bloom_level: analyze
+phase: both
+title: The Backpressure Cascade
+scenario: Your real-time ML pipeline ingests clickstream events from Kafka (50,000 events/sec), enriches
+  them with user features from Redis, runs a fraud scoring model, and writes results to a downstream Kafka
+  topic. During a flash sale, event rate spikes to 200,000/sec. Within 90 seconds, the fraud model's latency
+  jumps from 5ms to 800ms, even though GPU utilization is only 40%. What is happening, and how do you
+  prevent it?
+details:
+  realistic_solution: 'This is a **backpressure cascade**. The bottleneck is the Redis feature lookup,
+    not the GPU. At 50k/sec, each Redis lookup takes ~1ms (well within budget). At 200k/sec, the Redis
+    cluster hits its throughput ceiling (~150k ops/sec on a 3-node cluster), and lookup latency spikes
+    to 50-100ms. Events queue up in the enrichment stage''s in-memory buffer. The buffer grows until it
+    triggers GC pauses in the JVM/Python runtime, which stalls the Kafka consumer. Kafka''s consumer group
+    rebalances because the consumer appears dead (no heartbeat during GC). Rebalancing causes all consumers
+    in the group to pause for 30-60 seconds, creating a massive backlog. When consumers resume, they replay
+    the backlog, overwhelming Redis again — a feedback loop. The GPU sits idle because it never receives
+    batches to score. The fix: (1) implement backpressure signaling — when the enrichment queue exceeds
+    a threshold, shed load by sampling events (score every 4th event during spikes), (2) add a circuit
+    breaker on Redis lookups (fall back to cached features after 10ms timeout), (3) use Kafka''s `max.poll.records`
+    to cap batch sizes and prevent consumer timeout.'
+  common_mistake: '"The GPU is the bottleneck — scale up the inference cluster." GPU utilization is 40%,
+    so the GPU is not the problem.'
+  napkin_math: 'Normal: 50k events/sec × 1ms Redis = 50 concurrent Redis connections (fine for 3-node
+    cluster). Spike: 200k/sec × 1ms = 200 concurrent connections → Redis saturates at 150k, queue builds
+    at 50k/sec. In 30 seconds: 1.5M events queued × ~200 bytes each = 300 MB in-memory buffer → JVM GC
+    pause. Consumer heartbeat timeout = 10s → rebalance takes 45s → 200k × 45 = 9M event backlog. Recovery
+    time at 150k/sec drain rate: 9M / 150k = 60 seconds of catch-up, during which new events continue
+    arriving.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

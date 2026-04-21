@@ -42,23 +42,22 @@ def fast_tier(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFa
         if n > 1:
             failures.append(_fail("fast", "unique-id", qid=qid, message=f"ID appears {n} times"))
 
-    # Check #4: path components lowercase
-    # Check #5: path components enum-valid — already enforced by paths.classification_from_path
-    #           (raises ValueError for non-enum values), so here just double-check lowercase.
+    # Check #4: path components lowercase. v1.0: only the track dir is
+    # meaningful in the path; the filename itself carries the id.
     root = vault_questions_root(vault_dir)
     for lq in loaded:
         rel = lq.path.relative_to(root)
-        for component in rel.parts[:3]:
-            if not is_lowercase(component):
-                failures.append(
-                    _fail(
-                        "fast",
-                        "path-lowercase",
-                        qid=lq.id,
-                        path=lq.path,
-                        message=f"path component {component!r} is not lowercase",
-                    )
+        track_component = rel.parts[0] if rel.parts else ""
+        if not is_lowercase(track_component):
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-lowercase",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=f"track directory {track_component!r} is not lowercase",
                 )
+            )
 
     return failures
 
@@ -98,55 +97,42 @@ def structural_tier(
                 )
 
     # #12: every chain.id exists in chains.yaml
-    # #13: chain positions form contiguous [1..N]
+    # #13: chain positions are non-negative and unique within a chain.
+    # v1.0 uses plural `chains: [{id, position}]` — a question can belong to
+    # multiple chains (~101 questions do).
     known_chains = _load_yaml_set(vault_dir, "chains.yaml", "chains")
     chain_members: dict[str, list[int]] = {}
     for lq in loaded:
-        c = lq.question.chain
-        if c is None:
-            continue
-        if known_chains and c.id not in known_chains:
-            failures.append(
-                _fail(
-                    "structural",
-                    "chain-ref-exists",
-                    qid=lq.id,
-                    path=lq.path,
-                    message=f"chain {c.id!r} not found in chains.yaml",
+        for c in lq.question.chains or []:
+            if known_chains and c.id not in known_chains:
+                failures.append(
+                    _fail(
+                        "structural",
+                        "chain-ref-exists",
+                        qid=lq.id,
+                        path=lq.path,
+                        message=f"chain {c.id!r} not found in chains.yaml",
+                    )
                 )
-            )
-        chain_members.setdefault(c.id, []).append(c.position)
+            chain_members.setdefault(c.id, []).append(c.position)
     for chain_id, positions in chain_members.items():
-        positions.sort()
-        expected = list(range(1, len(positions) + 1))
-        if positions != expected:
-            failures.append(
-                _fail(
-                    "structural",
-                    "chain-positions-contiguous",
-                    qid=None,
-                    message=f"chain {chain_id!r} positions {positions} not contiguous {expected}",
+        seen_positions = set()
+        for p in positions:
+            if p in seen_positions:
+                failures.append(
+                    _fail(
+                        "structural",
+                        "chain-position-duplicate",
+                        qid=None,
+                        message=f"chain {chain_id!r} has duplicate position {p}",
+                    )
                 )
-            )
+            seen_positions.add(p)
 
-    # #18: provenance metadata consistency. Only LLM provenances require
-    # generation_meta — `imported` content doesn't have model/prompt
-    # attribution and shouldn't carry fake meta. `human` never requires it.
-    _LLM_PROVENANCES = {"llm-draft", "llm-then-human-edited"}
-    for lq in loaded:
-        if (
-            lq.question.provenance.value in _LLM_PROVENANCES
-            and lq.question.generation_meta is None
-        ):
-            failures.append(
-                _fail(
-                    "structural",
-                    "provenance-meta",
-                    qid=lq.id,
-                    path=lq.path,
-                    message=f"provenance={lq.question.provenance.value!r} requires generation_meta",
-                )
-            )
+    # #18: provenance metadata consistency. Author-facing metadata lives in
+    # `authors` (free-form list) rather than the old generation_meta block,
+    # which was never populated on the imported corpus. Post-v1.0 we let
+    # human review flow through human_reviewed instead.
 
     # #14: taxonomy prerequisite graph is a DAG (B.8).
     failures.extend(_check_taxonomy_dag(vault_dir))
@@ -236,7 +222,9 @@ def _check_applicability(
         return []
     out: list[InvariantFailure] = []
     for lq in loaded:
-        if (lq.classification.track.value.lower(), lq.question.topic.lower()) in excluded:
+        track = lq.question.track.lower()
+        topic = lq.question.topic.lower()
+        if (track, topic) in excluded:
             out.append(
                 _fail(
                     "structural",
@@ -244,7 +232,7 @@ def _check_applicability(
                     qid=lq.id,
                     path=lq.path,
                     message=(
-                        f"({lq.classification.track.value!r}, {lq.question.topic!r}) "
+                        f"({lq.question.track!r}, {lq.question.topic!r}) "
                         "is in the excluded-cells set per applicable_cells.json"
                     ),
                 )

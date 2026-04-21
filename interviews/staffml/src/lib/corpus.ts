@@ -1,16 +1,26 @@
 import corpusData from '../data/corpus.json';
 
+/**
+ * Question shape matching vault schema v1.0 (interviews/vault/CHANGELOG.md).
+ *
+ * The bundled `corpus.json` is still the pre-v1.0 shape (it was frozen
+ * before the v1.0 migration). The TypeScript interface here is already
+ * v1.0-aligned so the next corpus regeneration (`vault build --legacy-json`)
+ * drops in cleanly. Extra fields on the data (e.g. legacy `scope`) are
+ * silently ignored because we cast through `unknown`.
+ */
 export interface Question {
   id: string;
   track: string;
-  scope?: string;
   level: string;
   title: string;
   topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones
   competency_area: string;  // one of 13 canonical areas
   bloom_level?: string;     // remember | understand | apply | analyze | evaluate | create
+  phase?: string;           // training | inference | both
   scenario: string;
+  status?: string;          // draft | published | flagged | archived | deleted
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
   details: {
@@ -20,6 +30,18 @@ export interface Question {
     resources?: Resource[];
     options?: string[];
     correct_index?: number;
+  };
+
+  // ── Trust signals (optional; surfaced when YAMLs are regenerated) ──
+  /** LLM validation pass (Gemini). */
+  validated?: boolean;
+  /** Second-pass LLM math check. */
+  math_verified?: boolean;
+  /** Human verification, distinct from LLM stamps. */
+  human_reviewed?: {
+    status: string;         // not-reviewed | verified | flagged | needs-rework
+    by?: string | null;
+    date?: string | null;
   };
 }
 

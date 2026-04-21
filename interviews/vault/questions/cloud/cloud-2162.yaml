@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: cloud-2162
+track: cloud
+level: L6+
+zone: mastery
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: create
+phase: training
+title: The 10K-GPU Training Instability
+scenario: You are leading pre-training of a 405B model on 16,384 H100 GPUs. At step 80K (out of 300K total),
+  the training loss suddenly diverges. You roll back to the step-79K checkpoint and resume, but the divergence
+  happens again at approximately the same step. This is not a hardware failure (the cluster is healthy).
+  Design a systematic approach to diagnose and recover from this reproducible training instability.
+details:
+  realistic_solution: 'This is a loss landscape instability at a specific training phase — the model has
+    entered a sharp region of the loss landscape. Systematic diagnosis: (1) **Characterize the instability**:
+    log per-layer gradient norms, activation norms, and attention entropy around step 78K-82K. Look for
+    which layers spike first — typically attention logits or embedding norms. (2) **Data investigation**:
+    extract the exact data batches at steps 79K-81K. Check for distribution shifts in the data curriculum
+    that coincide with the spike. (3) **Targeted interventions** (in order of disruption): (a) Reduce
+    LR by 10-30% starting at step 78K and re-warmup, (b) Apply z-loss regularization to attention logits
+    (forces logits to stay near zero, preventing the exponential blowup), (c) Increase gradient clipping
+    threshold monitoring — if gradient norms are growing exponentially, add per-layer adaptive clipping,
+    (d) Nuclear option: shrink batch size temporarily to increase gradient noise, which can help escape
+    sharp minima. (4) **Prevention for future runs**: implement automatic loss spike detection with rollback-and-reduce-LR
+    policy, use QK-norm (normalize query and key vectors) to prevent attention entropy collapse.'
+  common_mistake: Simply reducing the learning rate globally or skipping the offending data batch. Both
+    are band-aids that may mask deeper issues and cost significant compute.
+  napkin_math: '16,384 GPUs × $3/hr = $49K/hour | Rollback from step 80K to 79K = 1,000 steps lost | At
+    ~12s/step = 12,000s = 3.3 hours = $164K wasted per rollback | If it takes 3 rollbacks to diagnose:
+    ~$500K wasted | z-loss overhead: <1% compute cost, prevents most instabilities | ROI of loss spike
+    detection: saves $500K+ per avoided incident'
+  options:
+  - Set the router temperature to 0 (argmax routing) for maximum specialization; load imbalance is handled
+    by the framework's automatic work-stealing between GPUs
+  - Use random routing with equal probability to all experts, which provides perfect load balance; the
+    feed-forward layers will learn to compensate for the random assignment
+  - 'The router softmax temperature controls expert specialization vs. load balance: low temperature increases
+    expert specialization but causes load imbalance (some experts get 10x more tokens), while high temperature
+    distributes load evenly but reduces model quality; use auxiliary load-balancing loss with coefficient
+    ~0.01 plus capacity factor of 1.25 to cap per-expert tokens'
+  - Increase the number of experts from 8 to 64 so that load imbalance becomes negligible by the law of
+    large numbers; more experts always improves both quality and throughput
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

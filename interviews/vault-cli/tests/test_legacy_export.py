@@ -1,4 +1,4 @@
-"""Tests for the legacy-JSON exporter (§11.1 migration contract)."""
+"""Tests for the legacy-JSON exporter (v1.0)."""
 
 from __future__ import annotations
 
@@ -10,30 +10,31 @@ from vault_cli.loader import LoadedQuestion
 from vault_cli.models import (
     ChainRef,
     Details,
-    Level,
-    Provenance,
     Question,
-    Status,
-    Track,
-    Zone,
 )
-from vault_cli.paths import Classification
 
 
-def _make_lq(id: str, chain: ChainRef | None = None) -> LoadedQuestion:
+def _make_lq(
+    id: str,
+    chains: list[ChainRef] | None = None,
+    topic: str = "kv-cache-management",
+    competency_area: str = "memory",
+) -> LoadedQuestion:
     return LoadedQuestion(
         question=Question(
             id=id,
+            track="cloud",
+            level="L4",
+            zone="diagnosis",
+            topic=topic,
+            competency_area=competency_area,
+            bloom_level="analyze",
             title=f"T-{id}",
-            topic="kv-cache-management",
-            status=Status.published,
-            provenance=Provenance.human,
-            chain=chain,
-            scenario="plaintext scenario.",
+            scenario="plaintext scenario that is long enough to be useful.",
             details=Details(realistic_solution="answer."),
-        ),
-        classification=Classification(
-            track=Track.cloud, level=Level.l4, zone=Zone.diagnosis
+            status="published",
+            provenance="human",
+            chains=chains,
         ),
         path=Path(f"/tmp/{id}.yaml"),
     )
@@ -49,31 +50,32 @@ def test_legacy_shape_matches_site_interface(tmp_path: Path) -> None:
     data = json.loads(out.read_text())
     assert len(data) == 2
     required = {
-        "id", "track", "scope", "level", "title", "topic",
+        "id", "track", "level", "title", "topic",
         "zone", "competency_area", "bloom_level", "scenario",
-        "chain_ids", "chain_positions", "details",
+        "details",
     }
     for item in data:
         assert required.issubset(item.keys()), f"missing: {required - item.keys()}"
+    # v1.0: dropped legacy `scope` field.
+    for item in data:
+        assert "scope" not in item, "scope was retired in v1.0"
 
 
-def test_chain_positions_legacy_shape(tmp_path: Path) -> None:
-    """Legacy corpus.json used chain_positions as a {chain_id: 0-indexed} dict.
-    Our new schema is 1-indexed; adapter must undo the +1."""
+def test_chain_positions_plural_preserved(tmp_path: Path) -> None:
+    """v1.0 schema uses plural chains and preserves position verbatim."""
     policy = tmp_path / "release-policy.yaml"
     policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
     out = tmp_path / "corpus.json"
-    chained = _make_lq("c", chain=ChainRef(id="my-chain", position=3))
+    chained = _make_lq("c", chains=[ChainRef(id="my-chain", position=3)])
     emit_legacy_corpus(tmp_path, [chained], out)
     data = json.loads(out.read_text())
     assert data[0]["chain_ids"] == ["my-chain"]
-    # New schema position=3 → legacy {chain_id: 2} (0-indexed).
-    assert data[0]["chain_positions"] == {"my-chain": 2}
+    assert data[0]["chain_positions"] == {"my-chain": 3}
 
 
 def test_emitter_deterministic(tmp_path: Path) -> None:
     """Byte-stable output across repeat invocations — required for the CI
-    equivalence check (§11.1)."""
+    equivalence check."""
     policy = tmp_path / "release-policy.yaml"
     policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
     out1 = tmp_path / "corpus1.json"
@@ -85,47 +87,39 @@ def test_emitter_deterministic(tmp_path: Path) -> None:
     assert out1.read_bytes() == out2.read_bytes()
 
 
-def test_competency_area_resolves_to_canonical_area(tmp_path: Path) -> None:
-    """competency_area must resolve to the canonical 13-area grouping from
-    topics.json, NOT be a copy of the topic slug."""
-    # Set up the topics.json in the expected relative path.
-    topics_dir = tmp_path / "staffml" / "src" / "data"
-    topics_dir.mkdir(parents=True)
-    topics_data = [{"id": "kv-cache-management", "area": "memory"}]
-    (topics_dir / "topics.json").write_text(json.dumps(topics_data))
-
-    # vault_dir is tmp_path/vault so ../staffml resolves correctly.
-    vault_dir = tmp_path / "vault"
-    vault_dir.mkdir()
-    policy = vault_dir / "release-policy.yaml"
-    policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
-
-    # Clear the module-level cache so our test topics.json is loaded.
-    import vault_cli.legacy_export as _mod
-    _mod._TOPIC_TO_AREA.clear()
-
-    out = tmp_path / "corpus.json"
-    emit_legacy_corpus(vault_dir, [_make_lq("a")], out)
-    data = json.loads(out.read_text())
-    assert data[0]["topic"] == "kv-cache-management"
-    assert data[0]["competency_area"] == "memory"
-    assert data[0]["scope"] == data[0]["track"]
-
-    # Clean up cache for other tests.
-    _mod._TOPIC_TO_AREA.clear()
-
-
-def test_competency_area_falls_back_to_topic(tmp_path: Path) -> None:
-    """When topics.json is absent, competency_area falls back to topic slug."""
-    import vault_cli.legacy_export as _mod
-    _mod._TOPIC_TO_AREA.clear()
-
+def test_competency_area_preserved(tmp_path: Path) -> None:
+    """competency_area is now a YAML field on the question; the exporter
+    passes it through verbatim (no more topic→area lookup)."""
     policy = tmp_path / "release-policy.yaml"
     policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
     out = tmp_path / "corpus.json"
-    emit_legacy_corpus(tmp_path, [_make_lq("a")], out)
+    emit_legacy_corpus(
+        tmp_path,
+        [_make_lq("a", topic="kv-cache-management", competency_area="memory")],
+        out,
+    )
     data = json.loads(out.read_text())
-    # No topics.json → fallback to topic slug.
-    assert data[0]["competency_area"] == data[0]["topic"]
+    assert data[0]["topic"] == "kv-cache-management"
+    assert data[0]["competency_area"] == "memory"
 
-    _mod._TOPIC_TO_AREA.clear()
+
+def test_multi_chain_membership(tmp_path: Path) -> None:
+    """v1.0 fix: a question belonging to multiple chains must surface all of
+    them in chain_ids/chain_positions — v0.1 silently dropped all but one."""
+    policy = tmp_path / "release-policy.yaml"
+    policy.write_text("policy_version: 1\ninclude: {status: [published], require_validated: false}\n")
+    out = tmp_path / "corpus.json"
+    q = _make_lq(
+        "multi",
+        chains=[
+            ChainRef(id="chain-a", position=1),
+            ChainRef(id="chain-b", position=0),
+            ChainRef(id="chain-c", position=2),
+        ],
+    )
+    emit_legacy_corpus(tmp_path, [q], out)
+    data = json.loads(out.read_text())
+    assert set(data[0]["chain_ids"]) == {"chain-a", "chain-b", "chain-c"}
+    assert data[0]["chain_positions"] == {
+        "chain-a": 1, "chain-b": 0, "chain-c": 2,
+    }

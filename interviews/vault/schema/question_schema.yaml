@@ -1,12 +1,18 @@
 id: https://staffml.mlsysbook.ai/schema/question
 name: staffml_question
-title: StaffML Question Schema
+title: StaffML Question Schema (v1.0)
 description: |
-  LinkML schema for the StaffML per-question YAML format. Sole schema source
-  of truth — Pydantic models, SQL DDL, and TypeScript types are codegen'd from
-  this. See ARCHITECTURE.md §3.3 and schema/EVOLUTION.md.
-license: MIT
-version: 0.1.0
+  LinkML schema for the StaffML per-question YAML format. This is the sole
+  source of truth for the vault's data model. Pydantic models, SQL DDL, and
+  TypeScript types are derived from this file.
+
+  v1.0 (2026-04-21): rebased on the paper's 4-axis taxonomy. Track, level,
+  zone, topic, competency_area, bloom_level, and phase are now self-contained
+  YAML fields. The filesystem encodes only `track` for navigability.
+
+  See ARCHITECTURE.md §3.3 and CHANGELOG.md.
+license: CC-BY-NC-4.0
+version: 1.0.0
 
 prefixes:
   linkml: https://w3id.org/linkml/
@@ -20,42 +26,71 @@ imports:
 enums:
 
   Track:
-    description: Deployment environment the question targets.
+    description: Deployment regime the question targets (paper §4 "Tracks").
     permissible_values:
-      cloud: {}
+      tinyml: {}
       edge: {}
       mobile: {}
-      tinyml: {}
+      cloud: {}
       global: {}
 
   Level:
-    description: Competency level (L1 recall → L6 synthesis).
+    description: |
+      Cognitive depth mapped to Bloom's taxonomy (paper §3.2). L1 = Remember
+      through L6+ = Create. L6+ denotes Staff+ mastery-level synthesis.
     permissible_values:
-      l1: {}
-      l2: {}
-      l3: {}
-      l4: {}
-      l5: {}
-      l6: {}
+      L1: {}
+      L2: {}
+      L3: {}
+      L4: {}
+      L5: {}
+      L6+: {}
 
   Zone:
-    description: Ikigai-style cognitive zone.
+    description: |
+      Ikigai-style cognitive zone. 4 pure + 6 compound + 1 mastery = 11 zones
+      (paper §3 "The StaffML Competency Model"). Zone-level affinity table in
+      paper Table 2.
     permissible_values:
-      recall: {}
-      fluency: {}
-      implement: {}
-      specification: {}
+      recall: {description: "Single skill: Bloom Remember"}
+      analyze: {description: "Single skill: Bloom Analyze"}
+      design: {description: "Single skill: Bloom Create"}
+      implement: {description: "Single skill: execute/apply"}
+      fluency: {description: "Compound: recall + quantify"}
+      diagnosis: {description: "Compound: recall + analyze"}
+      specification: {description: "Compound: recall + design"}
+      optimization: {description: "Compound: analyze + quantify"}
+      evaluation: {description: "Compound: analyze + design"}
+      realization: {description: "Compound: design + quantify"}
+      mastery: {description: "All four skills: Staff+ synthesis"}
+
+  BloomLevel:
+    description: |
+      Bloom's taxonomy (2001 revision). Note: 'synthesize' from the original
+      1956 taxonomy is subsumed by 'create' in the revision.
+    permissible_values:
+      remember: {}
+      understand: {}
+      apply: {}
       analyze: {}
-      diagnosis: {}
-      design: {}
-      evaluation: {}
+      evaluate: {}
+      create: {}
+
+  Phase:
+    description: ML lifecycle phase the question addresses.
+    permissible_values:
+      training: {}
+      inference: {}
+      both: {}
 
   Status:
     description: Publication state.
     permissible_values:
-      draft: {}
-      published: {}
-      deprecated: {}
+      draft:     {description: "Authored but not yet ready for users"}
+      published: {description: "Live in the corpus"}
+      flagged:   {description: "Under review; surface to authors not users"}
+      archived:  {description: "Retired but content preserved for history"}
+      deleted:   {description: "Soft-deleted; paired with deletion_reason"}
 
   Provenance:
     description: Authorship provenance (closed enum — see REVIEWS.md H-5).
@@ -65,10 +100,20 @@ enums:
       llm-then-human-edited: {}
       imported: {}
 
+  HumanReviewStatus:
+    description: |
+      Human verification state, independent of LLM validation stamps.
+      A question can be LLM-validated but not human-reviewed, or vice versa.
+    permissible_values:
+      not-reviewed: {description: "No human has reviewed this question"}
+      verified: {description: "Human reviewer confirmed content, math, and classification"}
+      flagged: {description: "Human reviewer identified issues needing attention"}
+      needs-rework: {description: "Human reviewer recommends regeneration"}
+
 classes:
 
   ChainRef:
-    description: Structured chain reference. Replaces v1's "<id>@<pos>" compact form.
+    description: Structured chain reference with position.
     attributes:
       id:
         range: string
@@ -77,33 +122,12 @@ classes:
       position:
         range: integer
         required: true
-        minimum_value: 1
-        description: 1-indexed position within the chain.
-
-  GenerationMeta:
-    description: LLM-generation metadata. Required iff provenance != human.
-    attributes:
-      model:
-        range: string
-        description: Must exist in schema/models.yaml registry.
-      prompt_hash:
-        range: string
-        description: SHA-256 hex referencing vault/generation-log/<date>/<hash>.txt.
-      prompt_cost_usd:
-        range: float
-        minimum_value: 0.0
-      human_reviewed_at:
-        range: datetime
-        description: Required before exemplar-pool eligibility (REVIEWS.md C-6).
+        minimum_value: 0
+        description: Position within the chain (0-indexed per current corpus data).
 
   Resource:
     description: |
-      Author-curated external reference attached to a question. Replaces the
-      singular DeepDive model: questions may now carry zero, one, or many
-      resources. The `name` is author-written prose (e.g. "arXiv: Attention
-      Is All You Need") so consumers render a labeled link without
-      hostname-based classification. Book links are re-introduced
-      per-question via this mechanism when book URLs stabilize.
+      Author-curated external reference attached to a question.
     attributes:
       name:
         range: string
@@ -113,72 +137,158 @@ classes:
         range: uri
         required: true
         pattern: "^https://.*"
-        description: Scheme must be https (REVIEWS.md H-6). Rejects javascript:, data:, http:.
+        description: Scheme must be https. Rejects javascript:, data:, http:.
+
+  HumanReview:
+    description: |
+      Human verification lineage. Populated when a human reviewer examines
+      the question. Distinct from validation_* (LLM) and math_* (LLM-math)
+      stamps.
+    attributes:
+      status:
+        range: HumanReviewStatus
+        required: true
+      by:
+        range: string
+        description: Reviewer identifier (email or git handle).
+      date:
+        range: date
+      notes:
+        range: string
+        description: Free-form reviewer notes.
 
   Details:
     description: Rich-text body of the question.
     attributes:
-      common_mistake:
-        range: string
-        description: Restricted-Markdown + KaTeX.
       realistic_solution:
         range: string
         required: true
         description: Restricted-Markdown + KaTeX. Canonical answer.
+      common_mistake:
+        range: string
+        description: Restricted-Markdown + KaTeX.
       napkin_math:
         range: string
+      options:
+        range: string
+        multivalued: true
+        description: MCQ options (exactly 4 when present).
+      correct_index:
+        range: integer
+        minimum_value: 0
+        maximum_value: 3
+        description: Required iff options is present.
       resources:
         range: Resource
         multivalued: true
-        description: |
-          Optional list of external references (papers, docs, blog posts,
-          book sections) chosen by the author. Order is display order.
-          Empty or omitted when the question has no curated references.
 
   Question:
-    description: A single StaffML interview question.
+    description: A single StaffML interview question (schema v1.0).
     attributes:
+      # --- identity ---
       schema_version:
-        range: integer
+        range: string
         required: true
-        equals_expression: "1"
+        equals_string: "1.0"
       id:
         range: string
         identifier: true
         required: true
-        description: Immutable, URL-safe. See §3.3 for format rules.
+        description: "Immutable, URL-safe. Format: <track>-<N> or <track>-<suffix>-<N>."
+      # --- 4-axis classification (paper §3) ---
+      track:
+        range: Track
+        required: true
+      level:
+        range: Level
+        required: true
+      zone:
+        range: Zone
+        required: true
+      topic:
+        range: string
+        required: true
+        description: Must exist in taxonomy.yaml (87 curated topics as of v1.0).
+      competency_area:
+        range: string
+        required: true
+        description: One of 13 canonical areas from taxonomy.yaml.
+      bloom_level:
+        range: BloomLevel
+      phase:
+        range: Phase
+      # --- content ---
       title:
         range: string
         required: true
         description: Plaintext, ≤120 chars.
-      topic:
-        range: string
-        required: true
-        description: Must exist in taxonomy.yaml.
-      chain:
-        range: ChainRef
-      status:
-        range: Status
-        required: true
-      created_at:
-        range: datetime
-      last_modified:
-        range: datetime
-      provenance:
-        range: Provenance
-        required: true
-      generation_meta:
-        range: GenerationMeta
-      authors:
-        range: string
-        multivalued: true
       scenario:
         range: string
         required: true
-        description: "Plaintext only. No HTML, no javascript: URLs."
+        description: Plaintext only. No HTML. ≥30 chars.
       details:
         range: Details
         required: true
+      # --- workflow ---
+      status:
+        range: Status
+        required: true
+      provenance:
+        range: Provenance
+        required: true
+      requires_explanation:
+        range: boolean
+      expected_time_minutes:
+        range: integer
+        minimum_value: 0
+      deletion_reason:
+        range: string
+      # --- chain membership (plural — fixes v0.1 singular-chain data loss) ---
+      chains:
+        range: ChainRef
+        multivalued: true
+      # --- LLM validation lineage ---
+      validated:
+        range: boolean
+      validation_status:
+        range: string
+      validation_date:
+        range: date
+      validation_model:
+        range: string
+      validation_issues:
+        range: string
+        multivalued: true
+      validation_status_pro:
+        range: string
+      validation_issues_pro:
+        range: string
+        multivalued: true
+      # --- math validation (separate LLM pass) ---
+      math_verified:
+        range: boolean
+      math_status:
+        range: string
+      math_date:
+        range: date
+      math_model:
+        range: string
+      math_issues:
+        range: string
+        multivalued: true
+      # --- human review (new in v1.0) ---
+      human_reviewed:
+        range: HumanReview
+      # --- Pro-model review notes (31 questions with substantive feedback) ---
+      classification_review:
+        range: string
+      # --- tags + temporal ---
       tags:
         range: string
         multivalued: true
+      created_at:
+        range: datetime
+      updated_at:
+        range: datetime
+      last_modified:
+        range: date

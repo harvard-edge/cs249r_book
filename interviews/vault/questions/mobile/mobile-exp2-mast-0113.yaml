@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: mobile-exp2-mast-0113
+track: mobile
+level: L6+
+zone: mastery
+topic: memory-pressure-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: On-Device Fine-Tuning Memory Orchestration
+scenario: You are designing a background on-device fine-tuning pipeline for a 2B parameter text model
+  using the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3) with a shared 12 GB LPDDR5X memory pool. The Android
+  Low Memory Killer daemon (LMKd) guarantees eviction if your background service exceeds a strict 2.0
+  GB footprint. The base model is quantized to 4-bit, but memory fragmentation and activation memory during
+  backprop constantly trigger OOMs. Synthesize an architecture that coordinates Hexagon DSP memory mapping,
+  gradient accumulation, and OS-aware allocation to maintain the footprint under 2.0 GB while achieving
+  an effective batch size of 32.
+details:
+  realistic_solution: Implement a custom memory allocator that pre-allocates a single contiguous 1.9 GB
+    dmabuf buffer shared between the CPU and Hexagon NPU to eliminate fragmentation. Map the 1 GB 4-bit
+    base weights directly into this buffer. For training, use gradient accumulation with a micro-batch
+    size of 4, storing the 32-bit gradients and optimizer states in a fixed memory arena, while aggressively
+    discarding intermediate activations using gradient checkpointing at the transformer block level.
+  common_mistake: Candidates often propose standard mobile training loops without accounting for the unified
+    memory architecture, failing to use pinned memory (dmabuf/ION), which leads to page faults and severe
+    memory fragmentation. They also typically try to process the entire batch of 32 at once, ignoring
+    the strict 2.0 GB OS limit, guaranteeing LMK eviction before the first forward pass completes.
+  napkin_math: Base 2B model in INT4 = 1.0 GB. Buffer limit = 1.9 GB (leaves 100MB safety margin below
+    the 2.0 GB LMK limit). LoRA adapter weights (Rank 8) + AdamW states = ~50 MB. Fixed Hexagon NPU workspace
+    = 100 MB. Remaining for activations = 750 MB. A micro-batch of 4 with sequence length 512 requires
+    ~150 MB of activation memory when using gradient checkpointing. By accumulating gradients over 8 steps
+    (4 micro-batch * 8 steps = 32 effective batch size), the peak memory is 1.0 GB (weights) + 50 MB (states)
+    + 100 MB (workspace) + 150 MB (activations) = 1.30 GB, safely avoiding LMK eviction.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

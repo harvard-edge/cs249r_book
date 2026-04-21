@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-crit-21054
+track: cloud
+level: L5
+zone: realization
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: KV-Cache Pool Sizing for Throughput Optimization
+scenario: You are configuring a vLLM deployment of Llama 3 70B on 4×A100-80GB (TP=4). Model weights take
+  35 GB per GPU (70B BF16 / 4). You must decide how much of the remaining 45 GB per GPU to allocate to
+  the KV-cache pool vs other uses (activations, CUDA workspace, OS). Calculate the optimal KV pool size
+  and its throughput implications.
+details:
+  realistic_solution: 'Per GPU: 80 GB total - 35 GB weights = 45 GB available. Memory breakdown: (1) Activation
+    memory during prefill: for batch=1 prefill of 4K tokens, activations ≈ 2 GB per GPU (TP=4 splits activations).
+    (2) CUDA workspace: ~2 GB for cuBLAS handles, Triton kernel buffers. (3) OS/driver overhead: ~1 GB.
+    (4) Safety margin: ~2 GB (for memory spikes during prefix caching). Available for KV pool: 45 - 2
+    - 2 - 1 - 2 = 38 GB per GPU, 152 GB total across 4 GPUs. KV per token (TP=4, Llama 3 70B with 8 KV
+    heads): KV heads are split across TP ranks → 2 KV heads per GPU × 128 dim × 2 (K+V) × 2B × 80 layers
+    = 80 KB per token per GPU. Max tokens in pool: 38 GB / 80 KB = 475,000 tokens per GPU. At average
+    2K context: 475,000/2000 = 237 concurrent requests per GPU. At 8K context: 59 concurrent requests.
+    Throughput: with batch=237 during decode, the model is compute-bound (large batch matmuls) → high
+    GPU utilization ~70%. Setting --gpu-memory-utilization=0.92 in vLLM achieves this balance.'
+  common_mistake: Allocating all remaining memory to KV-cache. CUDA kernels need workspace memory for
+    intermediate computations, and over-allocating to KV-cache causes CUDA OOM during kernel execution.
+  napkin_math: 'Per GPU: 38 GB for KV. KV per token per GPU (TP=4): 80 KB. Capacity: 38 GB / 80 KB = 475K
+    tokens. At 2K avg context: 237 concurrent requests. vLLM config: --gpu-memory-utilization 0.92 (allocates
+    73.6 GB of 80 GB, leaving 6.4 GB buffer).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

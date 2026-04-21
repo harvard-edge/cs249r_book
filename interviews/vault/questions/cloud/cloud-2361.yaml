@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-2361
+track: cloud
+level: L5
+zone: diagnosis
+topic: congestion-control
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Root Causing RDMA DCQCN Slow Start
+scenario: Inference latency for a 70B model split across 2 nodes (Tensor Parallelism over RDMA) averages
+  45ms per token. The 400Gbps RoCEv2 link shows less than 10% utilization. Network diagnostics confirm
+  zero packet drops and zero PFC pause frames. Synthetic microbenchmarks easily hit 380Gbps.
+details:
+  realistic_solution: The root cause is the misconfiguration of the DCQCN congestion control algorithm,
+    specifically the slow start and recovery parameters. Tensor Parallelism generates very short, bursty
+    AllReduce traffic (e.g., 10MB per layer). If minor microbursts cause the switch to mark packets with
+    ECN (Explicit Congestion Notification), DCQCN throttles the transmission rate. Because the default
+    recovery timer and `rate_increase` parameters are tuned for long-lived bulk flows, the rate ramps
+    back up too slowly. The short TP burst finishes before the flow can recover to 400Gbps, leading to
+    chronic under-utilization. The solution is to aggressively tune DCQCN parameters for bursty workloads
+    (decrease the recovery timer, increase the step size) or switch to a latency-optimized protocol like
+    Swift.
+  common_mistake: Assuming the network switch is faulty and requesting a hardware replacement, or increasing
+    MTU without diagnosing the algorithm.
+  napkin_math: 10MB activation tensor. At full 400Gbps (50 GB/s), transfer takes 10MB / 50 GB/s = 0.2ms.
+    If throttled to 1 Gbps (125 MB/s) by ECN and slow recovery, transfer takes 10MB / 125 MB/s = 80ms.
+    Averaged over many layers, this throttling perfectly explains the massive jump to 45ms latency per
+    token despite zero packet drops.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

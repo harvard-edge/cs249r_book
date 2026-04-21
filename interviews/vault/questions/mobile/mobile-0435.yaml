@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: mobile-0435
+track: mobile
+level: L3
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: 'The Smart Reply Latency Puzzle: NAS vs. MoE'
+scenario: You're an ML systems engineer on a mobile AI team building an on-device 'smart reply' feature.
+  The model must have a P99 latency under 20ms. To handle diverse conversation styles, one proposal is
+  a small Mixture-of-Experts (MoE) model with 4 experts, where only the top 1 expert is activated per
+  input. An alternative is a single, dense model discovered via Neural Architecture Search (NAS) for your
+  target mobile SoC. Your profiler shows that while the MoE model has 75% fewer active parameters per
+  inference, its total latency is 25ms, exceeding the budget. The NAS model, despite having more active
+  parameters, meets the 20ms budget. Diagnose why the theoretically-efficient MoE model is slower in practice
+  on mobile hardware.
+details:
+  realistic_solution: The MoE model's latency budget is being spent on systems overhead, not useful computation.
+    The core problem is the dynamic, data-dependent control flow. First, the gating network must run.
+    Second, the CPU must interpret the gate's output. Third, the system must then dynamically load the
+    weights for the chosen expert from main memory (LPDDR5) into the NPU's much faster local SRAM. This
+    break in the execution pipeline, the CPU-NPU synchronization, and the latency of fetching a non-contiguous
+    memory block for the expert weights add significant overhead. A NAS-discovered model is a single,
+    monolithic graph. Its weights and instructions can be loaded once, allowing the NPU to execute it
+    from start to finish without interruption, maximizing hardware utilization and hiding memory latency.
+  common_mistake: Attributing the latency to the raw FLOPs of the expert, the app's binary size, or assuming
+    a bug where all experts are running. The key issue is not the arithmetic cost but the systems overhead
+    of implementing the MoE's dynamic routing on a mobile hardware architecture.
+  napkin_math: 'MoE overhead: Gate network ~0.5ms + CPU dispatch ~0.5ms + expert weight load from DRAM.
+    Expert = 75% of model params. If model = 50M params INT8, expert = 12.5M = 12.5MB. LPDDR5 bandwidth
+    ~51GB/s, load = 12.5MB/51GB/s = 0.24ms. But cache-miss + dispatch overhead adds ~5-10ms. Total ~25ms.
+    NAS dense model: single contiguous graph, all weights prefetched, zero dispatch overhead => 20ms.'
+  options:
+  - The MoE model's total parameter count is too large, exceeding the device's RAM capacity.
+  - The gating network is too computationally expensive and is the primary bottleneck.
+  - A bug is causing all 4 experts to run for every inference instead of just one.
+  - The latency overhead comes from dynamic control flow and the time taken to load the selected expert's
+    weights from main memory into the NPU.
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: WARN
+validation_issues_pro:
+- The 'Napkin Math' section is titled 'Let's model the latency breakdown' but is empty, leaving the explanation
+  purely qualitative.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

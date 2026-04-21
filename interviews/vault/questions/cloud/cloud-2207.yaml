@@ -1,0 +1,70 @@
+schema_version: '1.0'
+id: cloud-2207
+track: cloud
+level: L6+
+zone: design
+topic: compound-ai-systems
+competency_area: optimization
+bloom_level: create
+phase: both
+title: Designing a Benchmark Suite for LLM Inference
+scenario: MLPerf's current LLM inference benchmark uses GPT-J 6B and Llama2-70B with fixed prompt/output
+  lengths. Your VP asks you to design a next-generation benchmark suite that better reflects real-world
+  LLM serving workloads. What fundamental limitations does the current benchmark have, and how would you
+  design a suite that tests the dimensions that actually matter for production LLM deployment? Specify
+  the workload characteristics, metrics, and compliance rules.
+details:
+  realistic_solution: 'The current benchmark''s fundamental limitations: (1) Fixed prompt/output lengths
+    ignore the bimodal nature of real traffic (short chat + long-context RAG/summarization). (2) No mixed-workload
+    scenario: production systems serve heterogeneous requests simultaneously. (3) TTFT and TPOT are measured
+    in isolation, but users experience them jointly (a 50ms TTFT with 100ms TPOT feels different than
+    500ms TTFT with 20ms TPOT). (4) No cost metric: systems optimized for raw throughput may be 3x more
+    expensive per token. The next-gen suite design: (a) Workload generator with realistic distributions:
+    prompt lengths from Zipf distribution (mode=200 tokens, tail to 128K), output lengths correlated with
+    prompt type, Poisson arrival process with diurnal burstiness (5x peak-to-trough). (b) Four scenarios
+    that mirror real deployment: Interactive Chat (P99 TTFT < 200ms, P95 TPOT < 30ms), Batch Processing
+    (maximize throughput, no latency SLA), Long-Context RAG (128K input, 1K output, test KV-cache efficiency),
+    Mixed-Priority (simultaneous interactive + batch, test scheduling fairness). (c) Metrics: throughput
+    (tokens/sec), SLA attainment rate (% requests meeting all SLOs), cost-efficiency (tokens/sec/$), energy-efficiency
+    (tokens/joule). (d) Compliance: reference workload traces published (like SPECweb), accuracy must
+    match reference within 1% perplexity on held-out set, power measured at the wall per MLPerf Power
+    methodology, system must run for 30 minutes minimum to capture thermal steady state.'
+  common_mistake: Simply adding more models (Mixtral, Gemma, etc.) to the existing framework. This increases
+    coverage but doesn't fix the fundamental design limitations.
+  napkin_math: 'Workload characterization from production traces: 60% of requests are short chat (mean
+    150 input, 100 output tokens), 25% are RAG (mean 4K input, 500 output), 10% are summarization (mean
+    32K input, 2K output), 5% are long-context (mean 100K+ input, 1K output). The 5% long-context requests
+    consume 80% of GPU memory (KV-cache) and 60% of compute — a benchmark testing only mean-length requests
+    would miss the dominant resource consumer.'
+  options:
+  - Use pure data parallelism across all 2,048 GPUs since each expert is small (~8B parameters, ~16 GB);
+    every GPU holds all 128 experts and routes tokens locally without any cross-GPU communication
+  - Use pipeline parallelism with 128 stages (one per expert); tokens flow through experts sequentially,
+    eliminating the need for all-to-all communication at the cost of pipeline bubble overhead
+  - Convert the MoE model to a dense model by merging all expert weights into a single averaged expert;
+    this eliminates routing communication entirely and simplifies the parallelism to standard 3D
+  - 'The optimal parallelism strategy for a 1T parameter MoE model on 2,048 GPUs: Expert parallelism (EP)
+    distributes the 128 experts across GPUs (2 experts per GPU), combined with TP=8 within nodes for the
+    attention layers, and DP=32 for data parallelism. The critical bottleneck is the all-to-all communication
+    for token routing to experts — this transfers tokens across the entire cluster at each MoE layer.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: cloud-chain-460
+  position: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
