@@ -51,11 +51,23 @@ let chartInstances = {
 };
 
 
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function showVerificationModal(shadowRoot, verificationResult, fileName) {
     // Create verification modal
     const verificationModal = document.createElement('div');
     verificationModal.className = 'verification-modal fixed inset-0 z-60 overflow-y-auto';
     
+    const safeFileName = escapeHtml(fileName);
+    const safeReason = escapeHtml(verificationResult.reason ?? '');
+    const safeDetails = escapeHtml(verificationResult.details ?? '');
     const statusColor = verificationResult.isValid ? 'green' : 'red';
     const statusIcon = verificationResult.isValid ? 
         '<svg class="w-16 h-16 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' :
@@ -88,16 +100,16 @@ function showVerificationModal(shadowRoot, verificationResult, fileName) {
                     </h4>
                     
                     <p class="text-sm text-gray-600 mb-4">
-                        <strong>File:</strong> ${fileName}
+                        <strong>File:</strong> ${safeFileName}
                     </p>
                     
                     <div class="bg-gray-50 rounded-lg p-4 mb-4 text-left">
                         <h5 class="font-medium text-gray-900 mb-2">Reason:</h5>
-                        <p class="text-sm text-gray-700 mb-3">${verificationResult.reason}</p>
+                        <p class="text-sm text-gray-700 mb-3">${safeReason}</p>
                         
                         <h5 class="font-medium text-gray-900 mb-2">Details:</h5>
                         <p class="text-sm text-gray-600 font-mono bg-white p-2 rounded border">
-                            ${verificationResult.details}
+                            ${safeDetails}
                         </p>
                         
                         ${verificationResult.timestamp ? `

@@ -183,21 +183,26 @@ function createQuizComponent(quizTitles, shadowRoot) {
     </div>
     <div id="callout-3" class="callout-3-contents callout-collapse collapse show">
       <div class="callout-body-container callout-body">
-        <ul>
-          ${quizTitles
-            .filter(title => !title.toLowerCase().includes('null resources'))
-            .map((title, index) => {
-              const match = title.match(/^(\d+\.\d+)\s+\1\s+(.+)$/);
-              if (match) {
-                return `<li><a href="#" class="quiz-link" data-index="${index}">${match[1]} ${match[2]}</a></li>`;
-              }
-              return `<li><a href="#" class="quiz-link" data-index="${index}">${title}</a></li>`;
-            })
-            .join('')}
-        </ul>
+        <ul class="quiz-links-list"></ul>
       </div>
     </div>
   `;
+
+  const quizList = component.querySelector('.quiz-links-list');
+  quizTitles
+    .filter(title => !title.toLowerCase().includes('null resources'))
+    .forEach((title, index) => {
+      const match = title.match(/^(\d+\.\d+)\s+\1\s+(.+)$/);
+      const displayTitle = match ? `${match[1]} ${match[2]}` : title;
+      const li = document.createElement('li');
+      const link = document.createElement('a');
+      link.setAttribute('href', '#');
+      link.className = 'quiz-link';
+      link.setAttribute('data-index', String(index));
+      link.textContent = displayTitle;
+      li.appendChild(link);
+      quizList.appendChild(li);
+    });
 
   component.querySelectorAll('.quiz-link').forEach((link) => {
     link.addEventListener('click', (event) => {

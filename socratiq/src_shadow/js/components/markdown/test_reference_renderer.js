@@ -1,6 +1,6 @@
 // test_reference_renderer.js - Test file for reference rendering system
 
-import { processReferences, parseReferences } from './reference_renderer.js';
+import { processReferences } from './reference_renderer.js';
 
 /**
  * Test the reference parsing functionality
@@ -18,21 +18,24 @@ Here's some more content with multiple references[^ref-1] in the same paragraph.
 [^ref-2]: (id=p-1757047226193-lv53eb2n8) Data poisoning can be avoided by cleaning data, which involves identifying and removing or correcting noisy, incomplete, or inconsistent data points.
   `;
   
-  const result = parseReferences(testMarkdown);
+  const testHTML = `
+<p>This is a test paragraph with a reference[^ref-1] and another reference[^ref-2].</p>
+<p>Here's some more content with multiple references[^ref-1] in the same paragraph.</p>
+  `;
+  const result = processReferences(testMarkdown, testHTML);
   
-  console.log('References found:', result.references);
-  console.log('Definitions found:', Object.keys(result.definitions));
+  console.log('Processed HTML:', result);
   
-  // Expected: references = ['ref-1', 'ref-2']
-  // Expected: definitions = { 'ref-1': '...', 'ref-2': '...' }
-  
-  if (result.references.length === 2 && result.references.includes('ref-1') && result.references.includes('ref-2')) {
+  // Expected: ref-1 appears at least twice, ref-2 appears once
+  const ref1Matches = result.match(/ref-link-ref-1/g) || [];
+  const ref2Matches = result.match(/ref-link-ref-2/g) || [];
+  if (ref1Matches.length >= 2 && ref2Matches.length >= 1) {
     console.log('✅ Reference parsing test passed');
   } else {
     console.log('❌ Reference parsing test failed');
   }
   
-  if (result.definitions['ref-1'] && result.definitions['ref-2']) {
+  if (result.includes('reference-pill') && result.includes('ref-link-ref-1') && result.includes('ref-link-ref-2')) {
     console.log('✅ Definition parsing test passed');
   } else {
     console.log('❌ Definition parsing test failed');

@@ -39,7 +39,7 @@ export function small_highlight_menu(shadowRoot) {
   document.addEventListener("touchend", function (event) {
     clearTimeout(touchTimer);
 
-    if (!menu.contains(event.target) && !menu.classList.contains === "hidden") {
+    if (!menu.contains(event.target) && !menu.classList.contains("hidden")) {
       // menu.classList.add("hidden");
       close_menu(shadowEle);
     }

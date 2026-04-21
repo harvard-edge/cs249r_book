@@ -171,7 +171,7 @@ export class SettingsManager {
     this.settings.checkboxes[id] = isChecked;
     this.saveSettings(); // Save settings to local storage
 
-    if (id === "Show answers") {
+    if (id === "show-answers") {
       this.dispatchAndUpdate(id, isChecked);
     } else {
       this.dispatchAndUpdate_settings(id, isChecked);
@@ -197,7 +197,7 @@ export class SettingsManager {
       }
     });
 
-    const showAnswers = this.settings.checkboxes["Show answers"];
+    const showAnswers = this.settings.checkboxes["show-answers"];
     const useBlooms = this.settings.checkboxes["Apply-blooms-taxonomy"];
 
     const answersDescription = '';
@@ -211,7 +211,7 @@ export class SettingsManager {
     const llm_model = this.settings.selectedDropdownValue;
 
     // Check the checkbox for showing answers
-    const show_progress = this.settings.checkboxes["Show chain of thought"];
+    const show_progress = this.settings.checkboxes["show-chain-of-thought"];
 
     return { 
       llm_model: llm_model, 
