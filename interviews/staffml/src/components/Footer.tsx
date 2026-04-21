@@ -3,12 +3,11 @@ import { ECOSYSTEM_BASE } from "../lib/env";
 /**
  * Page-end footer with a stable cross-link back to the ML Systems textbook.
  *
- * Per-question book links are deferred until mlsysbook.ai URLs stabilize (see
- * interviews/vault/BOOK_LINKING_PLAN.md). In the meantime the site-level
- * cross-link to the book homepage — which cannot 404 — gives every StaffML
- * page a closing funnel back to the textbook. The top-of-page EcosystemBar
- * covers discovery; this footer covers intent (the user finished reading
- * and wants to learn more).
+ * Per-question book links are deferred until mlsysbook.ai URLs stabilize. In
+ * the meantime the site-level cross-link to the book homepage — which cannot
+ * 404 — gives every StaffML page a closing funnel back to the textbook. The
+ * top-of-page EcosystemBar covers discovery; this footer covers intent (the
+ * user finished reading and wants to learn more).
  *
  * Intentionally minimal: one attribution row, low contrast, no dropdowns.
  */

@@ -1501,14 +1501,4 @@ Autonomous execution is complete when:
 
 ---
 
-## 21. Kickoff Prompt (copy-paste into new session)
-
-The exact text the user pastes to launch the next session is maintained in a separate file for ease of copying:
-
-**`interviews/vault/KICKOFF.md`**
-
-Keep that file in sync with this architecture doc. When the plan changes in a way that alters the kickoff instructions, update both.
-
----
-
 **End of architecture document.**
