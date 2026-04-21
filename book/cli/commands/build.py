@@ -980,12 +980,14 @@ class BuildCommand:
         for line in lines:
             stripped = line.strip()
 
-            if stripped.startswith('#') and '.qmd' in line:
-                # Uncomment .qmd lines: preserve leading whitespace
+            if (stripped.startswith('#') and '.qmd' in line and
+                    (stripped.startswith('# - ') or stripped.startswith('#- '))):
+                # Uncomment a previously-commented chapter list item.
+                # The `# - ` / `#- ` prefix guard distinguishes list items
+                # from prose comments that merely mention `.qmd` (which
+                # must be left alone, otherwise we'd produce invalid YAML).
                 indent = len(line) - len(line.lstrip())
-                # Strip the comment prefix from the stripped content
                 uncommented = stripped.lstrip('#').lstrip()
-                # Ensure it starts with '- ' (YAML list item)
                 if not uncommented.startswith('-'):
                     uncommented = '- ' + uncommented
                 reset_lines.append(' ' * indent + uncommented)
@@ -1181,8 +1183,15 @@ class BuildCommand:
                             modified_lines.append(uncommented)
                         else:
                             modified_lines.append(part_line)
-                    elif '.qmd' in part_line:
-                        # This is a chapter file - check if it should be included
+                    elif '.qmd' in part_line and (
+                        part_stripped.startswith('- ')
+                        or part_stripped.startswith('# - ')
+                        or part_stripped.startswith('#- ')
+                    ):
+                        # Chapter file entry - guard against comment lines
+                        # that merely mention `.qmd` in their text (which
+                        # would otherwise be silently uncommented and break
+                        # YAML).
                         should_include = False
 
                         # Check against always_include files
@@ -1239,8 +1248,14 @@ class BuildCommand:
                 # Skip ahead since we've processed this whole part
                 i = j - 1
 
-            elif '.qmd' in line:
-                # This is a standalone .qmd file (not in a part)
+            elif '.qmd' in line and (
+                stripped.startswith('- ')
+                or stripped.startswith('# - ')
+                or stripped.startswith('#- ')
+            ):
+                # Standalone .qmd entry (not in a part). The list-item
+                # guard prevents prose comments that mention `.qmd` from
+                # being treated as chapter entries.
                 should_include = False
 
                 # Check against always_include files
@@ -1417,8 +1432,15 @@ class BuildCommand:
                             modified_lines.append(uncommented)
                         else:
                             modified_lines.append(part_line)
-                    elif '.qmd' in part_line:
-                        # This is a chapter file - check if it should be included
+                    elif '.qmd' in part_line and (
+                        part_stripped.startswith('- ')
+                        or part_stripped.startswith('# - ')
+                        or part_stripped.startswith('#- ')
+                    ):
+                        # Chapter file entry - guard against comment lines
+                        # that merely mention `.qmd` in their text (which
+                        # would otherwise be silently uncommented and break
+                        # YAML).
                         should_include = False
 
                         # Check against always_include files
@@ -1475,8 +1497,14 @@ class BuildCommand:
                 # Skip ahead since we've processed this whole part
                 i = j - 1
 
-            elif '.qmd' in line:
-                # This is a standalone .qmd file (not in a part)
+            elif '.qmd' in line and (
+                stripped.startswith('- ')
+                or stripped.startswith('# - ')
+                or stripped.startswith('#- ')
+            ):
+                # Standalone .qmd entry (not in a part). The list-item
+                # guard prevents prose comments that mention `.qmd` from
+                # being treated as chapter entries.
                 should_include = False
 
                 # Check against always_include files
