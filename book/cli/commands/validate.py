@@ -142,6 +142,10 @@ class ValidateCommand:
         ],
         "headers": [
             ("ids", "_run_headers"),
+            ("case", "_run_heading_case"),
+        ],
+        "bib": [
+            ("hygiene", "_run_bib_hygiene"),
         ],
         "footnotes": [
             ("placement", "_run_footnote_placement"),
@@ -416,7 +420,8 @@ class ValidateCommand:
         descriptions = {
             "refs": "References, citations, inline Python, self-ref",
             "labels": "Duplicate labels, orphans, fig-label underscores",
-            "headers": "Section header IDs ({#sec-...})",
+            "headers": "Section header IDs ({#sec-...}), H1-H5 case policy (MIT Press §10.3.1)",
+            "bib": "Bibliography hygiene — schema + canonical forms (§5)",
             "footnotes": "Placement, integrity, cross-chapter duplicates",
             "figures": "Captions, float flow, image files",
             "rendering": "Patterns, indexes, dropcaps, headings, typos, tables, ASCII",
@@ -4222,6 +4227,52 @@ class ValidateCommand:
         if not qmd_files:
             return ValidationRunResult(name="grid-tables", issues=[])
         return self._delegate_script(script, ["--check"] + qmd_files, "grid-tables")
+
+    def _run_heading_case(self, root: Path) -> ValidationRunResult:
+        """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
+
+        Delegates to `book/tools/audit/heading_fix.py check`, which encodes
+        the ten sentence-case exceptions (acronyms, hyphenated-acronym
+        compounds, digit-letter models, single-letter labels, slash acronyms,
+        CamelCase product names, lowercase API names, math spans, named
+        laws, legislation) and compound proper nouns. Running in `check`
+        mode is idempotent on a compliant tree — zero changes proposed,
+        zero output. On a regression, the script prints the offending
+        line(s) and the expected sentence-case form, exits non-zero.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "heading_fix.py"
+        )
+        qmd_files = [str(f) for f in sorted(root.rglob("*.qmd"))]
+        if not qmd_files:
+            return ValidationRunResult(
+                name="heading-case", description="heading-case",
+                files_checked=0, issues=[], elapsed_ms=0,
+            )
+        return self._delegate_script(script, ["check"] + qmd_files, "heading-case")
+
+    def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
+        """Validate .bib files against §5 Bibliography Hygiene schema.
+
+        Delegates to `book/tools/bib_lint.py --check`, which enforces the
+        canonical schema: required fields per entry type, canonical field
+        order, quoting style, author-list rules, journal spell-out,
+        publisher canonical forms. Violations against the pre-existing
+        baseline (`book/tools/bib_lint_baseline.json`) are grandfathered;
+        only NEW violations block.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "bib_lint.py"
+        )
+        bib_files = [str(f) for f in sorted(root.rglob("*.bib"))]
+        if not bib_files:
+            return ValidationRunResult(
+                name="bib-hygiene", description="bib-hygiene",
+                files_checked=0, issues=[], elapsed_ms=0,
+            )
+        return self._delegate_script(script, ["--check"] + bib_files, "bib-hygiene")
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
         """Validate image file formats using Pillow."""
