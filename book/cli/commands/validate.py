@@ -3035,9 +3035,44 @@ class ValidateCommand:
         r"land|lor|neg|text|mathbf|mathit|mathcal|mathbb"
     )
     _ATTR_LATEX_CMD_RE = re.compile(rf"\\(?:{_ATTR_LATEX_COMMANDS})\b")
-    _ATTR_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$[^\s$][^$\n]*?(?<!\\)\$")
+    # Candidate `$...$` span. We post-filter the captured inner content with
+    # _looks_like_math() to reject currency false positives like
+    # `$500 outweighs ... ($100)` where two unescaped `$` digit-prefixes
+    # bracket a sentence that is not math at all.
+    _ATTR_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$([^\s$][^$\n]*?)(?<!\\)\$")
     _ATTR_CARET_BRACE_RE = re.compile(r"(?<![A-Za-z0-9_])\^\{[^}\n]{1,40}\}")
     _ATTR_UNDER_BRACE_RE = re.compile(r"(?<![A-Za-z0-9_])_\{[^}\n]{1,40}\}")
+
+    @classmethod
+    def _looks_like_math(cls, content: str) -> bool:
+        """True iff a `$...$` span's inner content is plausibly math.
+
+        Distinguishes real math from unescaped-currency false positives like
+        `$500 outweighs ... ($100)`. Heuristic:
+
+          - Anything with a backslash command, `^{...}` superscript, or
+            `_{...}` subscript is math.
+          - A span whose first character is a digit AND that contains no
+            LaTeX-y signals (backslash / ^ / _) is treated as currency
+            (false positive: `$500 outweighs ... ($100)` matches the
+            outer regex but is two adjacent dollar-prefixed amounts).
+          - Otherwise (single symbols like `$B$`, equations like `$T=0.5$`,
+            short mixes like `$y < 0$`) — math.
+        """
+        if not content:
+            return False
+        if "\\" in content or "^{" in content or "_{" in content:
+            return True
+        if content[0].isdigit():
+            return False
+        return True
+
+    @classmethod
+    def _has_attr_math(cls, value: str) -> bool:
+        """True iff *value* contains a `$...$` math span (after currency
+        false-positive filtering)."""
+        return any(cls._looks_like_math(m.group(1))
+                   for m in cls._ATTR_DOLLAR_MATH_RE.finditer(value))
 
     # Callout open fence with title= attribute (single line; multi-line attr
     # values are rare in this codebase and intentionally out of scope here).
@@ -3066,14 +3101,21 @@ class ValidateCommand:
     @classmethod
     def _strip_inline_math(cls, value: str) -> str:
         """Remove `$...$` math spans so we can scan the *non-math* remainder
-        for bare `^{}`/`_{}` that should have been wrapped in dollars."""
-        return cls._ATTR_DOLLAR_MATH_RE.sub(" ", value)
+        for bare `^{}`/`_{}` that should have been wrapped in dollars.
+
+        Only strips spans that pass the math heuristic — currency false
+        positives (`$500 ... $100`) are left in place because they're
+        not math zones we want to ignore for the bare-brace scan.
+        """
+        def _sub(m: re.Match) -> str:
+            return " " if cls._looks_like_math(m.group(1)) else m.group(0)
+        return cls._ATTR_DOLLAR_MATH_RE.sub(_sub, value)
 
     def _scan_title_value(self, value: str) -> List[tuple]:
         """Return list of (code, severity, message_suffix) for issues in a
         callout `title=` value. Math NEVER renders inside title; flag any."""
         out: list[tuple] = []
-        if self._ATTR_DOLLAR_MATH_RE.search(value):
+        if self._has_attr_math(value):
             out.append(("attr_title_math", "error",
                         "callout title= contains $...$ — math is not parsed in attribute values; use Unicode (×, ³, α, β, ρ, …)"))
         elif self._ATTR_LATEX_CMD_RE.search(value):
@@ -3084,27 +3126,37 @@ class ValidateCommand:
                         "callout title= contains ^{...} or _{...} — use Unicode superscript/subscript (³, ₂, …)"))
         return out
 
+    # Lightbox tooltip leak applies to fig-cap only — Quarto's lightbox is
+    # image-specific. Listing captions (lst-cap), table captions (tbl-cap),
+    # and alt text (fig-alt/tbl-alt) do not get a lightbox tooltip and so
+    # cannot leak through that channel. Math in those caps still renders
+    # correctly; warning about a non-existent leak there is just noise.
+    _LIGHTBOX_AFFECTED_KEYS = frozenset({"fig-cap"})
+
     def _scan_caption_value(self, key: str, value: str, include_lightbox: bool = False) -> List[tuple]:
         """Return list of (code, severity, message_suffix) for issues in a
-        fig-cap/tbl-cap/etc. value.
+        fig-cap/tbl-cap/lst-cap/fig-alt/tbl-alt value.
 
         Math IS parsed inside the body of these captions, so `$...$` is
         valid markup. Two failure modes:
 
           - Bare `^{}/_{}` outside `$...$` is an error (LaTeX-only syntax;
-            won't render without delimiters).
-          - Inline `$...$` fragments render fine in the caption itself but
-            Quarto's lightbox plugin extracts the caption string for the
-            `<img title>` hover tooltip with markdown stripped, leaking raw
-            LaTeX. This is a hover-only HTML cosmetic artifact and surfaces
-            only when *include_lightbox=True* (opt-in via --include-lightbox).
+            won't render without delimiters). Applies to all caption-like
+            attribute keys.
+          - Inline `$...$` math in fig-cap renders fine in the caption
+            itself but Quarto's lightbox plugin extracts the caption string
+            for the `<img title>` hover tooltip with markdown stripped,
+            leaking raw LaTeX. Hover-only HTML cosmetic artifact; surfaces
+            only when *include_lightbox=True* (opt-in) and only for
+            fig-cap (other keys don't drive a lightbox).
         """
         out: list[tuple] = []
         non_math = self._strip_inline_math(value)
         if self._ATTR_CARET_BRACE_RE.search(non_math) or self._ATTR_UNDER_BRACE_RE.search(non_math):
             out.append((f"{key.replace('-', '_')}_bare_brace", "error",
                         f"{key} contains bare `^{{...}}` / `_{{...}}` outside `$...$` — wrap in `$...$` or use Unicode (³, ₂, …)"))
-        if include_lightbox and self._ATTR_DOLLAR_MATH_RE.search(value):
+        if (include_lightbox and key in self._LIGHTBOX_AFFECTED_KEYS
+                and self._has_attr_math(value)):
             out.append((f"{key.replace('-', '_')}_lightbox_leak", "warning",
                         f"{key} contains `$...$` math — the caption renders fine, but Quarto's lightbox copies this string into the `<img title>` tooltip with markdown stripped, leaking raw LaTeX. Prefer Unicode for short fragments."))
         return out
