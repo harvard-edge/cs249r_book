@@ -253,7 +253,7 @@ model.fit(X, y)  # Magic happens
   <tbody>
     <tr>
       <td><b>Students</b></td>
-      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="site/getting-started.md">Getting Started</a></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="quarto/getting-started.qmd">Getting Started</a></td>
     </tr>
     <tr>
       <td><b>Instructors</b></td>
