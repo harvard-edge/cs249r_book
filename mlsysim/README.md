@@ -255,6 +255,6 @@ Thanks to these wonderful people for helping improve MLSys·im!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for code, doc, ideas, or bug
 ```

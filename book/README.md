@@ -244,7 +244,7 @@ cd book
 
 ## Directory Structure
 
-```
+```text
 book/
 ├── quarto/              # Book source (Quarto markdown)
 │   ├── contents/        # Chapter content
@@ -498,7 +498,7 @@ Thanks to these wonderful people who helped improve the book!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for doc, review, translation, or design
 ```
 

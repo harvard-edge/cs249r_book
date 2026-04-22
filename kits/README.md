@@ -279,7 +279,7 @@ Thanks to these wonderful people who helped improve the hardware kits!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for tool, test, video, or doc
 ```
 

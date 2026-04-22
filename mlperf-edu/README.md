@@ -86,7 +86,7 @@ All models are pure PyTorch. All training times measured on Apple M1 MPS. Total 
 
 ## Project Structure
 
-```
+```text
 mlperf-edu/
 ├── paper/                      # Publication source (LaTeX)
 │   ├── paper.tex               # Main paper

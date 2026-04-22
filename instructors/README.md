@@ -119,6 +119,6 @@ Thanks to these wonderful people who have helped build the Instructor Site!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for code, design, doc in instructors
 ```

@@ -270,7 +270,7 @@ model.fit(X, y)  # Magic happens
 
 ## Repository Structure
 
-```
+```text
 TinyTorch/
 ├── src/                        # 💻 Python source files (developers/contributors edit here)
 │   ├── 01_tensor/              # Module 01: Tensor operations from scratch
@@ -421,7 +421,7 @@ Thanks to these wonderful people who helped improve TinyTorch!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for bug, code, doc, or ideas
 ```
 

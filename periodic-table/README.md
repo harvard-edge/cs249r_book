@@ -31,7 +31,7 @@ Thanks to everyone who helps improve this artifact!
 
 **Recognize a contributor:** Comment on an issue or PR in this area:
 
-```
+```text
 @all-contributors please add @username for code, doc, ideas, or bug in periodic-table
 ```
 

@@ -48,7 +48,7 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
 
 Each chapter is **self-contained**. All images live in `<chapter>/images/`. The only shared assets are the Beamer theme and logos.
 
-```
+```text
 slides/
 ├── assets/
 │   ├── beamerthememlsys.sty    # Beamer theme (Crimson)
@@ -96,7 +96,7 @@ Thanks to these wonderful people who have helped build the slide decks!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for code, design, doc in slides
 ```
 

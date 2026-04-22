@@ -317,7 +317,7 @@ Thanks to these wonderful people who helped build the labs!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for code, tutorial, test, or doc
 ```
 
