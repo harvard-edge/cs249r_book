@@ -66,8 +66,11 @@ on:
         description: "Link check status (success/failure)"
         value: ${{ jobs.check-links.outputs.status }}
       broken-links-count:
-        description: "Number of broken links found"
+        description: "Number of broken links found (integer; '0' on clean run)"
         value: ${{ jobs.check-links.outputs.broken-count }}
+      broken-links-sample:
+        description: "First few broken URLs (newline-separated, capped) for quick triage"
+        value: ${{ jobs.check-links.outputs.broken-sample }}
 
   workflow_dispatch:
     inputs:
@@ -106,6 +109,7 @@ jobs:
     outputs:
       status: ${{ steps.link-summary.outputs.status }}
       broken-count: ${{ steps.link-summary.outputs.broken-count }}
+      broken-sample: ${{ steps.link-summary.outputs.broken-sample }}
 
     steps:
       - uses: actions/checkout@v6
@@ -130,6 +134,12 @@ jobs:
           # now skipped by default and you must opt in with --include-mail.
           # Default (skip) is what we want for link rot.
           args: --verbose --no-progress --max-concurrency ${{ inputs.max_concurrency }} --accept ${{ inputs.accept_status }} ${{ steps.resolve-ignore.outputs.ignore_arg }} ${{ inputs.path_pattern }}
+          # Force the action's exit code to reflect link health. We then
+          # absorb the failure with `continue-on-error: true` below so the
+          # summary step can run and decide what to do with it.
+          fail: true
+          # Stable output path for the summary parser below.
+          output: ./lychee/out.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Always continue so we can produce a summary; the summary step fails
@@ -140,16 +150,53 @@ jobs:
         id: link-summary
         if: always()
         run: |
+          set -uo pipefail
+
+          # ---- Determine status from the lychee step outcome ----
+          # `fail: true` (set above) makes the action exit non-zero when any
+          # broken link is found, which surfaces here as outcome=failure even
+          # though `continue-on-error: true` keeps the job green.
           if [ "${{ steps.lychee.outcome }}" = "success" ]; then
             STATUS="success"
-            BROKEN_COUNT="0"
           else
             STATUS="failure"
-            BROKEN_COUNT="unknown"
+          fi
+
+          # ---- Parse the lychee markdown report for an exact count ----
+          # The action writes a report to ./lychee/out.md by default. The
+          # "Errors per input" section lists each broken URL on its own line
+          # like:  * [ERROR] https://example.com/foo (404 Not Found)
+          # We count those for an honest broken_count, and grab the first
+          # 10 URLs as a triage sample for the issue body.
+          REPORT="./lychee/out.md"
+          BROKEN_COUNT=0
+          BROKEN_SAMPLE=""
+          if [ -f "$REPORT" ]; then
+            # Lines starting with "* [" are per-link error entries in
+            # lychee's markdown output. Be tolerant of leading whitespace.
+            BROKEN_COUNT=$(grep -cE '^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\]' "$REPORT" || true)
+            # Pull the URL (second whitespace-separated field after the
+            # status code bracket) for the first 10 entries.
+            BROKEN_SAMPLE=$(grep -hE '^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\]' "$REPORT" \
+              | head -n 10 \
+              | sed -E 's/^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\][[:space:]]+([^[:space:]]+).*/\1/' \
+              || true)
+          fi
+
+          # If lychee said failure but we couldn't parse a count (e.g. report
+          # missing), surface "?" so downstream knows it's broken-but-unknown.
+          if [ "$STATUS" = "failure" ] && [ "$BROKEN_COUNT" = "0" ]; then
+            BROKEN_COUNT="?"
           fi
 
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
           echo "broken-count=$BROKEN_COUNT" >> "$GITHUB_OUTPUT"
+          # Multi-line output requires the heredoc form.
+          {
+            echo "broken-sample<<__EOF_SAMPLE__"
+            echo "$BROKEN_SAMPLE"
+            echo "__EOF_SAMPLE__"
+          } >> "$GITHUB_OUTPUT"
 
           {
             echo "## 🔗 Link Check"
@@ -159,6 +206,17 @@ jobs:
             echo "- **Accept statuses**: ${{ inputs.accept_status }}"
             echo "- **Status**: $STATUS"
             echo "- **Broken**: $BROKEN_COUNT"
+            if [ -n "$BROKEN_SAMPLE" ]; then
+              echo ""
+              echo "<details><summary>First broken URLs</summary>"
+              echo ""
+              while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                echo "- $url"
+              done <<< "$BROKEN_SAMPLE"
+              echo ""
+              echo "</details>"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           if [ "$STATUS" = "failure" ] && [ "${{ inputs.fail_on_broken }}" = "true" ]; then
