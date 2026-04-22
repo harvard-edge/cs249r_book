@@ -308,9 +308,9 @@ initSlideViewer('05_dataloader', '../assets/slides/05_dataloader.pdf');
 ```
 ## Overview
 
-Training a neural network on 50,000 images presents an immediate systems challenge: you cannot load all data into memory simultaneously, and even if you could, processing one sample at a time wastes GPU parallelism. The DataLoader solves this by transforming raw datasets into batches that feed efficiently into training loops.
+A naive training loop reaches into a 50,000-image dataset, picks one sample, computes a gradient, and repeats. It works. It also wastes the GPU and gets the math wrong: gradients computed on a sorted sequence of samples are not the gradients you intended. Every framework solves this with the same abstraction — a DataLoader sitting between storage and computation, turning raw samples into shuffled, contiguous batches.
 
-In this module, you'll build the data pipeline infrastructure that sits between storage and computation. Your implementation will provide a clean abstraction that handles batching, shuffling, and memory-efficient iteration, working identically whether processing 1,000 samples or 1 million. By the end, you'll understand why data loading is often the hidden bottleneck in training pipelines.
+In this module you build that abstraction. A `Dataset` says how to find sample `i`. A `DataLoader` decides how many samples to group, in what order, and when to load them. The result is a single iterator that works identically on 1,000 tensors in RAM or 100 GB of JPEGs on disk — and that you will reuse, unchanged, in every later module that trains a model.
 
 ## Learning Objectives
 
@@ -398,9 +398,11 @@ TensorDataset(*tensors)
 Wraps one or more tensors into a dataset where samples are tuples of aligned tensor slices.
 
 **Constructor Arguments:**
+
 - `*tensors`: Variable number of Tensor objects, all with same first dimension
 
 **Behavior:**
+
 - All tensors must have identical length in dimension 0 (sample dimension)
 - Returns tuple `(tensor1[idx], tensor2[idx], ...)` for each sample
 
@@ -413,6 +415,7 @@ DataLoader(dataset, batch_size, shuffle=False)
 Wraps a dataset to provide batched iteration with optional shuffling.
 
 **Constructor Arguments:**
+
 - `dataset`: Dataset instance to load from
 - `batch_size`: Number of samples per batch
 - `shuffle`: Whether to randomize sample order each iteration
@@ -436,15 +439,18 @@ Compose(transforms)
 Transform classes for data augmentation during training. Applied to individual samples before batching.
 
 **RandomHorizontalFlip:**
+
 - `p`: Probability of flipping (0.0 to 1.0)
 - Flips images horizontally along width axis with given probability
 
 **RandomCrop:**
+
 - `size`: Target crop size (int for square, tuple for (H, W))
 - `padding`: Pixels to pad on each side before cropping
 - Standard augmentation for CIFAR-10: pads to 40×40, crops back to 32×32
 
 **Compose:**
+
 - `transforms`: List of transform callables to apply sequentially
 - Chains multiple transforms into a pipeline
 
@@ -475,9 +481,9 @@ class Dataset(ABC):
         pass
 ```
 
-The `@abstractmethod` decorator forces any subclass to implement these methods. Attempting `Dataset()` raises `TypeError` because the abstract methods haven't been implemented. This pattern ensures every dataset provides the minimum interface that DataLoader requires.
+The `@abstractmethod` decorator forces every subclass to implement both methods. Calling `Dataset()` raises `TypeError`, which is what you want — there is no useful default.
 
-The systems insight: by defining a minimal interface, you enable composition. A caching layer can wrap any Dataset, a subset can slice any Dataset, and a concatenation can merge multiple Datasets, all without knowing the underlying storage mechanism.
+A minimal interface is also a composable one. A caching wrapper, a subset slicer, and a concatenation of two datasets all satisfy `__len__` and `__getitem__`, so they all plug into the same DataLoader without knowing or caring how the underlying samples are stored.
 
 ### Batching Mechanics
 
@@ -538,25 +544,11 @@ def __iter__(self) -> Iterator:
         yield self._collate_batch(batch)
 ```
 
-```{python}
-#| echo: false
-#| output: false
+The key insight: `random.shuffle(indices)` permutes a list of integers, not the underlying data. For 50,000 samples, that's 400 KB of indices instead of potentially gigabytes of images. The samples never move; only the access order changes.
 
+A fresh shuffle each epoch means sample 42 and sample 1337 land in the same batch in epoch 1 but different batches in epoch 2. That decorrelation is what makes mini-batch SGD an unbiased estimator of the full-dataset gradient — without it, the model can fit the *order* of the data instead of the data itself.
 
-# Shuffling: index memory for 50K samples (SI — illustrative)
-shuffle_50k_bytes = 50_000 * 8
-shuffle_50k_kb = f"{shuffle_50k_bytes // 1000:,} KB"
-
-# Shuffling: index memory for 1M samples (SI — illustrative)
-shuffle_1m_bytes = 1_000_000 * 8
-shuffle_1m_mb = f"{shuffle_1m_bytes // 10**6} MB"
-```
-
-The key insight: `random.shuffle(indices)` randomizes a list of integers, not actual data. For 50,000 samples, this shuffles 50,000 integers (`{python} shuffle_50k_kb`) instead of 50,000 images (potentially gigabytes). The actual data stays in place; only the access order changes.
-
-Each epoch generates a fresh shuffle, so the same samples appear in different batches. If sample 42 and sample 1337 were in the same batch in epoch 1, they're likely in different batches in epoch 2. This decorrelation is essential for generalization.
-
-The memory cost of shuffling is `8 bytes × dataset_size`. For 1 million samples, that's `{python} shuffle_1m_mb`, negligible compared to the actual data. The time cost is O(n) for generating and shuffling indices, which happens once per epoch, not per batch.
+The total cost is `8 bytes × dataset_size`. One million samples costs 8 MB to shuffle, paid once per epoch. The shuffle itself is `O(n)` time, also paid once per epoch — never per batch.
 
 ### Iterator Protocol and Generator Pattern
 
@@ -583,13 +575,11 @@ def __iter__(self) -> Iterator:
         yield self._collate_batch(batch)
 ```
 
-Each time the loop needs the next batch, Python calls `next()` on the generator, which executes `__iter__` until the next `yield` statement. The generator pauses at yield, returns the batch, then resumes when next() is called again. This is a generator function, not a regular function that returns an iterator object.
+Each `next()` call resumes the generator, runs until the next `yield`, hands back a batch, and pauses there. The function's local state — `indices`, `i`, the loop variable — survives between yields, so no batch state leaks back into the caller and no caller state leaks forward into the next batch.
 
-This lazy evaluation is crucial for memory efficiency. At any moment, only the current batch exists in memory. The previous batch has been freed (assuming the training code doesn't hold references), and future batches haven't been created yet.
+That laziness is the whole memory argument. At any instant, only the current batch is alive: the previous one is unreachable, the next one does not yet exist. Iterating 1,000 batches of 32 images costs the memory of 32 images, not 32,000 — a 1,000× reduction for a one-line change in API design.
 
-Consider iterating through 1,000 batches of 32 images each. If you pre-generated all batches, you'd need memory for 32,000 images simultaneously. With the generator protocol, you only need memory for 32 images at a time, a 1,000× reduction.
-
-The generator also enables infinite datasets. If your dataset generates samples on-demand (synthetic data), the generator can yield batches forever without running out. The training loop controls when to stop, not the dataset.
+The same protocol also makes infinite datasets free. A synthetic-data `__getitem__` can return a sample for any integer index, and the generator will happily yield batches forever. The *training loop* decides when to stop; the dataset never has to know.
 
 ### Memory-Efficient Loading
 
@@ -614,9 +604,9 @@ class ImageDataset(Dataset):
         return Tensor(image), Tensor(self.labels[idx])
 ```
 
-When DataLoader calls `dataset[idx]`, the image is loaded from disk at that moment, not at dataset creation time. After the batch is processed, the image memory is freed. A 100 GB dataset can be trained on a machine with 8 GB RAM because only one batch worth of images exists in memory at a time.
+When DataLoader calls `dataset[idx]`, the image is loaded *at that moment*, not at construction. Once the batch is consumed, the references go out of scope and the memory is reclaimed. That is why a 100 GB dataset can train on an 8 GB machine — only one batch lives in memory at a time.
 
-This is why Dataset separates length from access. The dataset knows it has 50,000 images without loading them. Only when `__getitem__` is called does actual loading happen. DataLoader orchestrates these calls to load exactly the data needed for the current batch.
+This is the payoff for separating length from access. The dataset can announce that it holds 50,000 images without holding them; the DataLoader pulls exactly the indices it needs for the current batch and nothing more. Storage size and working-set size become independent.
 
 ## Common Errors
 
@@ -727,7 +717,7 @@ for epoch in range(num_epochs):
         optimizer.step()
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 from torch.utils.data import TensorDataset, DataLoader
 
@@ -754,11 +744,7 @@ for epoch in range(num_epochs):
 ```
 :::
 
-Walking through the differences:
-
-- **Lines 1-6 (Dataset Creation)**: Identical. Both frameworks use TensorDataset to wrap tensors with the same interface.
-- **Lines 8-12 (DataLoader Creation)**: PyTorch adds `num_workers` for parallel data loading. With `num_workers=4`, four processes load batches in parallel, overlapping data loading with GPU computation. Your implementation is single-process.
-- **Lines 14-20 (Training Loop)**: Completely identical. The iterator protocol means both frameworks use the same `for batch in loader` syntax.
+There is exactly one substantive difference: PyTorch accepts `num_workers=4`, which spawns four worker processes that load batches in parallel and hand them back through a queue. Dataset construction and the training loop are byte-for-byte identical because they have to be — the iterator protocol is the contract, not a particular implementation of it.
 
 :::{.callout-tip title="What's Identical"}
 
@@ -767,28 +753,13 @@ The Dataset abstraction, DataLoader interface, and batching semantics are identi
 
 ### Why DataLoaders Matter at Scale
 
-```{python}
-#| echo: false
-#| output: false
+To see why this infrastructure earns its keep, look at production-scale training:
 
+- **ImageNet training**: 1.2M images at 224×224×3 = **600 GB** uncompressed
+- **Batch memory**: `batch_size=256` × 150 KB per JPEG ≈ **38 MB per batch**
+- **I/O throughput**: Reading 38 MB from SSD at 500 MB/s ≈ **76 ms per batch** of disk I/O alone
 
-# Scale section: batch memory (SI units — illustrative values)
-scale_batch_bytes = 256 * 150_000  # 256 images × 150 KB (SI) per image
-scale_batch_mb = scale_batch_bytes / 10**6
-scale_batch_mb = f"{scale_batch_mb:.0f} MB"
-
-# Scale section: I/O throughput (use rounded MB value to match illustrative style)
-scale_io_time_ms = int(scale_batch_mb) / 500 * 1000  # 38 MB / 500 MB/s
-scale_io_ms = f"{scale_io_time_ms:.0f} ms"
-```
-
-To appreciate why data loading infrastructure matters, consider the scale of production training:
-
-- **ImageNet training**: 1.2 million images at 224×224×3 pixels = **600 GB** of uncompressed data
-- **Batch memory**: batch_size=256 with 150 KB per image = **`{python} scale_batch_mb`** per batch
-- **I/O throughput**: Loading from SSD at 500 MB/s = **`{python} scale_io_ms` per batch** just for disk reads
-
-Without proper batching and prefetching, data loading would dominate training time. A forward and backward pass might take 50 ms, but loading the data takes `{python} scale_io_ms`. The GPU sits idle 60% of the time waiting for data.
+A forward+backward pass on the same batch takes about 50 ms on a modern GPU. Without overlap, the GPU is idle more than half of every step waiting for bytes that have not arrived yet.
 
 Production solutions:
 
@@ -800,92 +771,41 @@ Your DataLoader provides the interface that enables these optimizations. Add `nu
 
 ## Check Your Understanding
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Memory Calculation — CIFAR-10 batch
-q1_image_bytes = 32 * 32 * 3 * 4
-q1_image_kb = q1_image_bytes / 1024
-q1_batch_bytes = 128 * q1_image_bytes
-q1_batch_kb = q1_batch_bytes / 1024
-q1_batch_mb = q1_batch_bytes / 1024**2
-q1_image_bytes = f"{q1_image_bytes:,}"
-q1_image_kb = f"{q1_image_kb:.0f} KB"
-q1_batch_kb = f"{q1_batch_kb:,.0f} KB"
-q1_batch_mb = f"{q1_batch_mb:.1f} MB"
-
-# Q2: Throughput Analysis
-q2_data_ms = 45
-q2_total_ms = 120
-q2_pct = q2_data_ms / q2_total_ms * 100
-q2_compute_ms = 30 + 35 + 10
-q2_speedup = q2_total_ms / q2_compute_ms
-q2_pct = f"{q2_pct:.1f}%"
-q2_compute_ms = f"{q2_compute_ms}"
-q2_speedup = f"{q2_speedup:.1f}"
-
-# Q3: Shuffle Memory Overhead (SI units — illustrative)
-q3_num_samples = 10_000_000
-q3_index_bytes = q3_num_samples * 8
-q3_index_mb = q3_index_bytes / 10**6
-q3_dataset_bytes = q3_num_samples * 10_000  # 10 KB per sample (SI)
-q3_dataset_gb = q3_dataset_bytes / 10**9
-q3_overhead_pct = q3_index_bytes / q3_dataset_bytes * 100
-q3_index_mb = f"{q3_index_mb:.0f} MB"
-q3_dataset_gb = f"{q3_dataset_gb:.0f} GB"
-q3_overhead_pct = f"{q3_overhead_pct:.2f}%"
-
-# Q5: Collation Cost (binary units for KB/MB)
-q5_sample_bytes = 3 * 224 * 224 * 4
-q5_sample_kb = q5_sample_bytes / 1024
-q5_batch_bytes = 128 * q5_sample_bytes
-q5_batch_kb = q5_batch_bytes / 1024
-q5_batch_mb = q5_batch_bytes / 1024**2
-# Copy time: use rounded binary MB / SI bandwidth for ~3.7 ms (matches text)
-q5_copy_time_ms = q5_batch_mb / (20 * 1000) * 1000
-q5_sample_bytes = f"{q5_sample_bytes:,}"
-q5_sample_kb = f"{q5_sample_kb:.0f} KB"
-q5_batch_kb = f"{q5_batch_kb:,.0f} KB"
-q5_batch_mb = f"{q5_batch_mb:.1f} MB"
-q5_copy_ms = f"~{q5_copy_time_ms:.1f} milliseconds"
-```
-
-Test your understanding with these systems thinking questions. Focus on quantitative analysis and performance trade-offs.
+Five quantitative questions. Work them out before opening the answers — back-of-envelope estimation is the systems skill the rest of the book leans on.
 
 **Q1: Memory Calculation**
 
-You're training on CIFAR-10 with 50,000 RGB images (32×32×3 pixels, float32). What's the memory usage for batch_size=128?
+You're training on CIFAR-10 with 50,000 RGB images (32×32×3 pixels, float32). What's the memory usage for `batch_size=128`?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Each image: 32 × 32 × 3 × 4 bytes = `{python} q1_image_bytes` bytes ≈ `{python} q1_image_kb`
+Each image: 32 × 32 × 3 × 4 bytes = 12,288 bytes ≈ 12 KB.
 
-Batch of 128 images: 128 × `{python} q1_image_kb` = **`{python} q1_batch_kb` ≈ `{python} q1_batch_mb`**
+Batch of 128 images: 128 × 12 KB = **1,536 KB ≈ 1.5 MB**.
 
-This is the minimum memory just for the input batch. Add activations, gradients, and model parameters, and peak memory might be 50-100× higher. But the **batch size directly controls the baseline memory consumption**.
+That is the floor — input bytes only. Add activations, gradients, and parameters and peak memory typically lands 50–100× higher. The takeaway: **batch size sets the baseline, and everything else scales from it**.
 :::
 
 **Q2: Throughput Analysis**
 
 Your training reports these timings per batch:
-- Data loading: 45ms
-- Forward pass: 30ms
-- Backward pass: 35ms
-- Optimizer step: 10ms
 
-Total: 120ms per batch. Where's the bottleneck? How much faster could training be if you eliminated data loading overhead?
+- Data loading: 45 ms
+- Forward pass: 30 ms
+- Backward pass: 35 ms
+- Optimizer step: 10 ms
+
+Total: 120 ms per batch. Where's the bottleneck? How much faster could training be if you eliminated data loading overhead?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Data loading takes 45ms out of 120ms = **`{python} q2_pct` of total time**.
+Data loading takes 45 ms out of 120 ms = **37.5% of total time**.
 
-If data loading were instant (via prefetching or caching), total time would be 30+35+10 = **`{python} q2_compute_ms`ms per batch**.
+If data loading were free (perfect prefetching, hot cache), total time drops to 30+35+10 = **75 ms per batch**.
 
-Speedup: 120ms → `{python} q2_compute_ms`ms = **`{python} q2_speedup`× faster training** just by fixing data loading!
+Speedup: 120 ms → 75 ms = **1.6× faster training** from a single fix.
 
-This shows why production systems use prefetching with `num_workers`: while the GPU computes batch N, the CPU loads batch N+1. Data loading and computation overlap, hiding the I/O latency.
+This is why production systems prefetch with `num_workers`: the CPU loads batch N+1 while the GPU computes batch N, and the I/O wall-time disappears under the compute.
 :::
 
 **Q3: Shuffle Memory Overhead**
@@ -894,11 +814,11 @@ You're training on a dataset with 10 million samples. How much extra memory does
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Shuffling requires storing the index array: 10,000,000 indices × 8 bytes = **`{python} q3_index_mb`**
+Index array: 10,000,000 × 8 bytes = **80 MB**.
 
-This is the complete overhead. The actual data isn't copied or moved, only the index array is shuffled.
+That is the entire overhead. The samples themselves never move.
 
-For comparison, if each sample is 10 KB, the full dataset is `{python} q3_dataset_gb` GB. Shuffling adds `{python} q3_index_mb` to randomize access to `{python} q3_dataset_gb` GB of data, **`{python} q3_overhead_pct` overhead**. This is why index-based shuffling scales to massive datasets.
+If each sample is 10 KB, the dataset is 100 GB. Shuffling 100 GB of data costs 80 MB of indices — **0.08% overhead**. This is why every production loader shuffles indices, never bytes.
 :::
 
 **Q4: Batch Size Trade-offs**
@@ -929,17 +849,17 @@ Which would you choose for a research experiment where accuracy is critical? Whi
 
 **Q5: Collation Cost**
 
-Your DataLoader collates batches using `np.stack()`. For batch_size=128 with samples of shape (3, 224, 224), how much data is copied during collation?
+Your DataLoader collates batches using `np.stack()`. For `batch_size=128` with samples of shape `(3, 224, 224)`, how much data is copied during collation?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Each sample: 3 × 224 × 224 × 4 bytes = `{python} q5_sample_bytes` bytes ≈ `{python} q5_sample_kb`
+Each sample: 3 × 224 × 224 × 4 bytes = 602,112 bytes ≈ 588 KB.
 
-Batch of 128 samples: 128 × `{python} q5_sample_kb` = **`{python} q5_batch_kb` ≈ `{python} q5_batch_mb`**
+Batch of 128 samples: 128 × 588 KB = **75,264 KB ≈ 73.5 MB**.
 
-`np.stack()` allocates a new array of this size and copies all 128 samples into contiguous memory. On a modern CPU with 20 GB/s memory bandwidth, this copy takes approximately **`{python} q5_copy_ms`**.
+`np.stack()` allocates a new contiguous buffer of that size and copies all 128 samples into it. At a memory bandwidth of 20 GB/s, the copy takes **~3.7 milliseconds**.
 
-This is why larger batch sizes can have higher absolute collation costs (more data to copy), but the per-sample overhead decreases because you're copying 128 samples in one operation instead of processing 128 tiny batches separately.
+Larger batches pay a higher *absolute* collation cost (more bytes to move) but a lower *per-sample* cost — one big copy beats 128 small ones because the memory subsystem is happiest moving long, contiguous runs.
 :::
 
 ## Further Reading
@@ -963,16 +883,18 @@ For students who want to understand the academic foundations and engineering dec
 
 :::{.callout-note title="Coming Up: Module 06 - Autograd"}
 
-Implement automatic differentiation that computes gradients through computation graphs. Your DataLoader will feed batches to models, and autograd will enable learning from those batches.
+You can now move data through a model. You cannot yet learn from it — every batch leaves the network as a loss number with no gradient attached. Module 06 fixes that by building automatic differentiation: every tensor remembers the operations that produced it, and `loss.backward()` walks the resulting graph to assign a gradient to every parameter the loader's batch touched.
+
+DataLoader and autograd compose directly: the iterator you just built becomes the input edge of every computation graph in the rest of the book.
 :::
 
-**Preview - How Your DataLoader Gets Used in Future Modules:**
+**Where this DataLoader shows up next:**
 
-| Module | What It Does | Your DataLoader In Action |
-|--------|--------------|--------------------------|
-| **06: Autograd** | Automatic differentiation | Tensors from DataLoader flow through computation graphs |
-| **08: Training** | Complete training loops | `for batch in loader:` orchestrates the full training process |
-| **09: Convolutions** | Convolutional layers for images | `for images, labels in loader:` feed batches to CNNs |
+| Module | What it does | Your DataLoader in action |
+|--------|--------------|---------------------------|
+| **06: Autograd** | Reverse-mode differentiation | Each batch tensor becomes a leaf of the computation graph |
+| **08: Training** | End-to-end training loops | `for batch in loader:` is the outer loop of every example |
+| **09: Convolutions** | Convolutional layers | The same iterator now feeds 4-D image batches to CNNs |
 
 ## Get Started
 

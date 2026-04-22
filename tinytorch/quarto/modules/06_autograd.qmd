@@ -5,14 +5,15 @@
 
 **FOUNDATION TIER** | Difficulty: ●●●○ | Time: 6-8 hours | Prerequisites: 01-05
 
-**Prerequisites: Modules 01-05** means you need:
-- Tensor operations (matmul, broadcasting, reductions)
-- Activation functions (understanding non-linearity)
-- Neural network layers (what gradients flow through)
-- Loss functions (the "why" behind gradients)
-- DataLoader for efficient batch processing
+You need to be fluent with everything from Modules 01–05:
 
-If you can compute a forward pass through a neural network manually and understand why we need to minimize loss, you're ready.
+- Tensor operations (matmul, broadcasting, reductions)
+- Activation functions (the source of non-linearity)
+- Neural network layers (what gradients will flow through)
+- Loss functions (the scalar gradients flow back from)
+- DataLoader for batched iteration
+
+If you can hand-compute a forward pass through a small network and explain why we minimize loss, you're ready.
 :::
 
 ```{=html}
@@ -315,11 +316,11 @@ initSlideViewer('06_autograd', '../assets/slides/06_autograd.pdf');
 ```
 ## Overview
 
-Autograd is the gradient engine that makes neural networks learn. Every modern deep learning framework—PyTorch, TensorFlow, JAX—has automatic differentiation at its core. Without autograd, training a neural network would require deriving and coding gradients by hand for every parameter in every layer. For a network with millions of parameters, this is impossible.
+A neural network learns by nudging every parameter in the direction that lowers the loss. To find that direction you need a gradient — one number per parameter. A modern model has billions of parameters, so deriving those gradients by hand is not just tedious, it is impossible. Every framework you have ever used — PyTorch, TensorFlow, JAX — solves this with the same trick: automatic differentiation.
 
-In this module, you'll build reverse-mode automatic differentiation from scratch. Your autograd system will track computation graphs during the forward pass, then flow gradients backward through every operation using the chain rule. By the end, calling `loss.backward()` will automatically compute gradients for every parameter in your network, just like PyTorch.
+In this module you build reverse-mode autograd from scratch. The forward pass records each operation into a small graph; `loss.backward()` walks that graph in reverse, applying the chain rule one operation at a time. When you finish, calling `loss.backward()` on your tensors does the same thing it does in PyTorch — and you will know exactly why.
 
-This is the most conceptually challenging module in the Foundation tier, but it unlocks everything that follows: optimizers, training loops, and the ability to learn from data.
+This is the conceptually hardest module in the Foundation tier. It is also the one that unlocks everything that follows: optimizers, training loops, and any model that learns from data.
 
 ## Learning Objectives
 
@@ -422,18 +423,16 @@ This section covers the fundamental ideas behind automatic differentiation. Unde
 
 ### Computation Graphs
 
-A computation graph is a directed acyclic graph (DAG) where nodes represent tensors and edges represent operations. When you write `y = x * 3 + 1`, you're implicitly building a graph with three nodes (x, intermediate result, y) and two operations (multiply, add).
+A computation graph is a directed acyclic graph (DAG): nodes are tensors, edges are the operations that produced them. When you write `y = x * 3 + 1`, you build a graph with three tensor nodes (`x`, `temp`, `y`) and two operation edges (multiply, add). You don't see this graph because autograd builds it for you, silently, as a side effect of running the forward pass.
 
-Autograd systems build these graphs during the forward pass by recording each operation. Every tensor created by an operation stores a reference to the function that created it. This reference is the key to gradient flow: when you call `backward()`, the system traverses the graph in reverse, applying the chain rule at each node.
-
-Here's how a simple computation builds a graph:
+The construction trick is small but powerful: every tensor produced by an operation stores a reference to the operation that produced it. That reference — `_grad_fn` in your implementation, `grad_fn` in PyTorch — is the entire graph. To traverse the graph backward you just follow `_grad_fn` pointers until you reach the leaves.
 
 ```
 Forward Pass:  x → [Mul(*3)] → temp → [Add(+1)] → y
 Backward Pass: grad_x ← [MulBackward] ← grad_temp ← [AddBackward] ← grad_y
 ```
 
-Each operation stores its inputs because backward pass needs them to compute gradients. For multiplication `z = a * b`, the gradient with respect to `a` is `grad_z * b`, so we must save `b` during forward pass. This is the core memory trade-off in autograd: storing intermediate values uses memory, but enables fast backward passes.
+Each backward node also has to remember the *values* it will need later. For `z = a * b`, the gradient with respect to `a` is `grad_z * b` — so the multiply operation must hold on to `b` from the forward pass. This is the central memory trade-off of autograd: every saved tensor is bytes you cannot reclaim until backward runs, but those saved tensors are exactly what makes the backward pass cheap.
 
 Your implementation tracks graphs with the `_grad_fn` attribute:
 
@@ -462,9 +461,9 @@ This simple pattern enables arbitrarily complex computation graphs.
 
 ### The Chain Rule
 
-The chain rule is the mathematical foundation of backpropagation. For composite functions, the derivative of the output with respect to any input equals the product of derivatives along the path connecting them.
+Backpropagation is the chain rule, applied one node at a time. For a composite function `z = f(g(x))`, the chain rule says `dz/dx = (dz/dg) * (dg/dx)`. Reverse-mode autograd flips this on its head: instead of multiplying derivatives left-to-right, you walk the graph backward and multiply right-to-left, so every intermediate gradient is computed exactly once and reused everywhere it is needed downstream.
 
-Mathematically, if `z = f(g(x))`, then `dz/dx = (dz/dg) * (dg/dx)`. In computation graphs with multiple paths, gradients from all paths accumulate. This is gradient accumulation, and it's why shared parameters (like embedding tables used multiple times) correctly receive gradients from all their uses.
+When the graph has multiple paths from a parameter to the loss, the gradients along each path **add**. This is why a shared embedding table — used a hundred times in a transformer — ends up with the sum of contributions from all hundred uses. You get this for free; the recursion described below visits every path naturally.
 
 Consider this computation: `loss = (x * W + b)²`
 
@@ -477,7 +476,7 @@ Backward chain rule:
   ∂loss/∂x  = ∂loss/∂z1 * W     (multiplication backward)
 ```
 
-Each backward function multiplies the incoming gradient by the local derivative. Here's how your MulBackward implements this:
+Each backward function does exactly one thing: multiply the incoming gradient by its own local derivative. It knows nothing about the rest of the graph — and it doesn't need to. Here's how `MulBackward` implements this:
 
 ```python
 class MulBackward(Function):
@@ -503,11 +502,11 @@ class MulBackward(Function):
         return grad_a, grad_b
 ```
 
-The elegance is that each operation only knows its own derivative. The chain rule connects them all. NumPy's vectorized operations handle all element-wise computations efficiently without explicit loops.
+Each operation knows only its own derivative; the chain rule does the connecting. NumPy handles the element-wise math in optimized C, so no explicit loops are needed.
 
 ### Backward Pass Implementation
 
-The backward pass traverses the computation graph in reverse topological order, computing gradients for each tensor. Your `backward()` method implements this as a recursive tree walk:
+The backward pass walks the computation graph in reverse, computing gradients for every tensor it visits. Your `backward()` method does this as a recursive tree walk — short enough to read in one sitting, but enough to support arbitrarily deep networks:
 
 ```python
 def backward(self, gradient=None):
@@ -536,15 +535,13 @@ def backward(self, gradient=None):
                 tensor.backward(grad)  # Recursive call
 ```
 
-The recursion naturally handles arbitrarily deep networks. For a 100-layer network, calling `loss.backward()` triggers 100 recursive calls, one per layer, flowing gradients from output to input. Note that while the graph traversal uses recursion, the gradient computations within each `apply()` method use vectorized NumPy operations for efficiency.
+For a 100-layer network, `loss.backward()` triggers 100 recursive calls — one per layer — flowing gradients from output to input. The traversal is recursive Python; the math inside each `apply()` is vectorized NumPy. That split is why the system stays both readable and fast.
 
-The `gradient` parameter deserves attention. For scalar losses (the typical case), you call `loss.backward()` without arguments, and the method initializes the gradient to 1.0. This makes sense: `∂loss/∂loss = 1`. For non-scalar tensors, you must provide the gradient from the next layer explicitly.
+The `gradient` argument deserves a closer look. For scalar losses (the typical case) you call `loss.backward()` with no arguments and the method seeds the gradient to 1.0 — because `∂loss/∂loss = 1`. For non-scalar outputs you must pass the upstream gradient explicitly; there is no canonical scalar to seed from, and silently picking one would hide bugs.
 
 ### Gradient Accumulation
 
-Gradient accumulation is both a feature and a potential bug. When you call `backward()` multiple times on the same tensor, gradients add together. This is intentional: it enables mini-batch gradient descent and gradient checkpointing.
-
-Consider processing a large batch in smaller chunks to fit in memory:
+Gradient accumulation is the same feature seen from two sides. Call `backward()` twice on the same tensor and the gradients add — by design. That's what lets you split a batch that doesn't fit in memory into chunks, run them sequentially, and end up with the same gradient as if you'd processed them all at once:
 
 ```python
 # Large batch (doesn't fit in memory)
@@ -557,9 +554,9 @@ optimizer.step()
 model.zero_grad()  # Reset for next iteration
 ```
 
-Without gradient accumulation, you'd need to store all mini-batch gradients and sum them manually. With accumulation, the autograd system handles it automatically.
+Without this behavior you'd have to store every mini-batch gradient and sum them yourself. With it, the autograd system does the bookkeeping.
 
-But accumulation becomes a bug if you forget to call `zero_grad()` between iterations:
+The flip side: accumulation becomes a silent bug the moment you forget to call `zero_grad()` between iterations.
 
 ```python
 # WRONG: Gradients accumulate across iterations
@@ -601,52 +598,20 @@ Consider a simple linear layer: `y = x @ W + b`
 - grad_W (same shape as W)
 - grad_b (same shape as b)
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Memory Management: linear layer with batch=32, input=512, output=768
-mem_x_bytes = 32 * 512 * 4
-mem_x_kb = mem_x_bytes / 1024
-mem_x_bytes = f"{mem_x_bytes:,}"
-mem_x_kb = f"{mem_x_kb:,.0f}"
-
-mem_W_bytes = 512 * 768 * 4
-mem_W_kb = mem_W_bytes / 1024
-mem_W_bytes = f"{mem_W_bytes:,}"
-mem_W_kb = f"{mem_W_kb:,.0f}"
-
-mem_grad_x_kb = mem_x_kb
-mem_grad_x_bytes = f"{mem_x_bytes:,}"
-mem_grad_x_kb = f"{mem_grad_x_kb:,.0f}"
-
-mem_grad_W_kb = mem_W_kb
-mem_grad_W_bytes = f"{mem_W_bytes:,}"
-mem_grad_W_kb = f"{mem_grad_W_kb:,.0f}"
-
-mem_grad_b_bytes = 768 * 4
-mem_grad_b_kb = mem_grad_b_bytes / 1024
-mem_grad_b_bytes = f"{mem_grad_b_bytes:,}"
-mem_grad_b_kb = f"{mem_grad_b_kb:,.0f}"
-
-mem_total_bytes = mem_x_bytes + mem_W_bytes + mem_x_bytes + mem_W_bytes + mem_grad_b_bytes
-mem_total_mb = mem_total_bytes / 1024**2
-mem_total_mb = f"{mem_total_mb:.1f}"
-```
-
 For a batch of 32 samples through a (512, 768) linear layer, the memory breakdown is:
 
+```text
 Forward storage:
-  x: 32 × 512 × 4 bytes = `{python} mem_x_kb` KB
-  W: 512 × 768 × 4 bytes = `{python} mem_W_kb` KB
+  x:       32 × 512 × 4 bytes =     64 KB
+  W:      512 × 768 × 4 bytes =  1,536 KB
 
 Backward storage:
-  grad_x: 32 × 512 × 4 bytes = `{python} mem_grad_x_kb` KB
-  grad_W: 512 × 768 × 4 bytes = `{python} mem_grad_W_kb` KB
-  grad_b: 768 × 4 bytes = `{python} mem_grad_b_kb` KB
+  grad_x:  32 × 512 × 4 bytes =     64 KB
+  grad_W: 512 × 768 × 4 bytes =  1,536 KB
+  grad_b:       768 × 4 bytes =      3 KB
 
-Total: ~`{python} mem_total_mb` MB for one layer (2× parameter size + activation size)
+Total: ~3.1 MB for one layer (2× parameter size + activation size)
+```
 
 Multiply by network depth and you see why memory limits batch size. A 100-layer transformer stores 100× the activations, which can easily exceed GPU memory.
 
@@ -723,7 +688,7 @@ print(f"x.grad: {x.grad}")  # ∂loss/∂x
 print(f"W.grad: {W.grad}")  # ∂loss/∂W
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 
@@ -758,13 +723,13 @@ Computation graph construction, chain rule implementation, and gradient accumula
 
 ### Why Autograd Matters at Scale
 
-To appreciate why automatic differentiation is essential, consider the scale of modern networks:
+The case for automating differentiation is overwhelming the moment you look at the numbers:
 
-- **GPT-3**: 175 billion parameters = **175,000,000,000 gradients** to compute per training step
-- **Training time**: Each backward pass takes roughly **2× forward pass time** (gradients require 2 matmuls per forward matmul)
-- **Memory**: Storing computation graphs for a transformer can require **10× model size** in GPU memory
+- **GPT-3**: 175 billion parameters — that's 175,000,000,000 gradients per training step.
+- **Training cost**: each backward pass takes roughly 2× the forward pass time (two matmuls instead of one per linear layer).
+- **Memory**: storing the computation graph for a transformer can require ~10× the model's parameter footprint.
 
-Manual gradient derivation becomes impossible at this scale. Even for a 3-layer MLP with 1 million parameters, manually coding gradients would take weeks and inevitably contain bugs. Autograd makes training tractable by automating the most error-prone part of deep learning.
+Hand-deriving gradients does not scale to any of this. Even a 3-layer MLP with a million parameters would take weeks to differentiate manually and would still contain bugs at the end. Autograd makes training tractable by automating the most error-prone part of deep learning — and it's the single biggest reason the field moves as fast as it does.
 
 ## Check Your Understanding
 
@@ -774,50 +739,19 @@ Test yourself with these systems thinking questions. They're designed to build i
 
 A 5-layer MLP processes a batch of 64 samples. Each layer stores its input activation for backward pass. Layer dimensions are: 784 → 512 → 256 → 128 → 10. How much memory (in MB) is used to store activations for one batch?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Computation Graph Memory — 5-layer MLP, batch=64, float32 (4 bytes)
-q1_l1_bytes = 64 * 784 * 4
-q1_l1_kb = q1_l1_bytes / 1024
-q1_l1_kb = f"{q1_l1_kb:,.0f}"
-
-q1_l2_bytes = 64 * 512 * 4
-q1_l2_kb = q1_l2_bytes / 1024
-q1_l2_kb = f"{q1_l2_kb:,.0f}"
-
-q1_l3_bytes = 64 * 256 * 4
-q1_l3_kb = q1_l3_bytes / 1024
-q1_l3_kb = f"{q1_l3_kb:,.0f}"
-
-q1_l4_bytes = 64 * 128 * 4
-q1_l4_kb = q1_l4_bytes / 1024
-q1_l4_kb = f"{q1_l4_kb:,.0f}"
-
-q1_l5_bytes = 64 * 10 * 4
-q1_l5_kb = q1_l5_bytes / 1024
-q1_l5_kb = f"{q1_l5_kb:.1f}"
-
-q1_total_bytes = q1_l1_bytes + q1_l2_bytes + q1_l3_bytes + q1_l4_bytes + q1_l5_bytes
-q1_total_kb = q1_total_bytes / 1024
-q1_total_mb = q1_total_bytes / 1024**2
-q1_total_kb = f"{q1_total_kb:.1f}"
-q1_total_mb = f"{q1_total_mb:.2f}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-Layer 1 input: 64 × 784 × 4 bytes = `{python} q1_l1_kb` KB
-Layer 2 input: 64 × 512 × 4 bytes = `{python} q1_l2_kb` KB
-Layer 3 input: 64 × 256 × 4 bytes = `{python} q1_l3_kb` KB
-Layer 4 input: 64 × 128 × 4 bytes = `{python} q1_l4_kb` KB
-Layer 5 input: 64 × 10 × 4 bytes = `{python} q1_l5_kb` KB
+```text
+Layer 1 input: 64 × 784 × 4 bytes = 196 KB
+Layer 2 input: 64 × 512 × 4 bytes = 128 KB
+Layer 3 input: 64 × 256 × 4 bytes =  64 KB
+Layer 4 input: 64 × 128 × 4 bytes =  32 KB
+Layer 5 input: 64 ×  10 × 4 bytes = 2.5 KB
+```
 
-**Total: ~`{python} q1_total_kb` KB = `{python} q1_total_mb` MB**
+**Total: ~422 KB ≈ 0.41 MB**
 
-This is per forward pass! A 100-layer transformer would store 100× this amount, which is why gradient checkpointing trades compute for memory by recomputing activations during backward pass.
+That is per forward pass through a tiny MLP. A 100-layer transformer stores roughly 100× this — and with much wider layers — which is why gradient checkpointing trades compute for memory by recomputing activations during backward pass.
 :::
 
 **Q2: Backward Pass Complexity**
@@ -841,70 +775,39 @@ This is why training (forward + backward) takes roughly 3× inference time. GPU 
 
 You have 16GB GPU memory and a model with 1B parameters (float32). How much memory is available for activations and gradients during training?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q3: Gradient Accumulation Memory — 1B params, float32
-# Using decimal GB (1 GB = 10^9 bytes) for clean round numbers
-q3_params = 1_000_000_000
-q3_model_gb = q3_params * 4 / 10**9
-q3_grad_gb = q3_params * 4 / 10**9
-q3_opt_gb = q3_params * 8 / 10**9
-q3_total_gb = q3_model_gb + q3_grad_gb + q3_opt_gb
-
-q3_model_gb = f"{q3_model_gb:.0f}"
-q3_grad_gb = f"{q3_grad_gb:.0f}"
-q3_opt_gb = f"{q3_opt_gb:.0f}"
-q3_total_gb = f"{q3_total_gb:.0f}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-Model parameters: 1B × 4 bytes = `{python} q3_model_gb` GB
-Gradients: 1B × 4 bytes = `{python} q3_grad_gb` GB
-Optimizer state (Adam): 1B × 8 bytes = `{python} q3_opt_gb` GB (momentum + variance)
+```text
+Model parameters:        1B × 4 bytes =  4 GB
+Gradients:               1B × 4 bytes =  4 GB
+Optimizer state (Adam):  1B × 8 bytes =  8 GB   (momentum + variance)
+```
 
-**Total framework overhead: `{python} q3_total_gb` GB**
+**Total framework overhead: 16 GB**
 
-**Available for activations: 0 GB** - you've already exceeded memory!
+**Available for activations: 0 GB** — you've already exceeded memory before storing a single activation.
 
-This is why large models use gradient accumulation across multiple forward passes before updating parameters, or gradient checkpointing to reduce activation memory. The "2× parameter size" rule (parameters + gradients) is a minimum; optimizers add more overhead.
+This is why large models reach for gradient accumulation across multiple forward passes before updating parameters, or gradient checkpointing to shrink activation memory. The "2× parameter size" rule (params + grads) is a floor, not a ceiling — optimizers like Adam add more on top.
 :::
 
 **Q4: requires_grad Performance**
 
 A typical training batch has: 32 images (input), 10M parameter tensors (weights), 50 intermediate activation tensors. If requires_grad defaults to True for all tensors, how many tensors unnecessarily track gradients?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q4: requires_grad Performance — batch of 32 images, 3×224×224, float32
-q4_per_image = 3 * 224 * 224
-q4_batch_values = 32 * q4_per_image
-q4_batch_bytes = q4_batch_values * 4
-q4_batch_mb = q4_batch_bytes / 1024**2
-
-q4_batch_values = f"{q4_batch_values / 1e6:.1f}M"
-q4_batch_bytes = f"{q4_batch_bytes:,}"
-q4_batch_mb = f"{q4_batch_mb:.1f}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-Tensors that NEED gradients:
-- Parameters: 10M tensors ✓
+Tensors that **need** gradients:
 
-Tensors that DON'T need gradients:
-- Input images: 32 tensors (no gradient needed for data)
-- Intermediate activations: 50 tensors (needed for backward but not updated)
+- Parameters: 10M tensors
 
-**32 input tensors unnecessarily track gradients** if requires_grad defaults to True.
+Tensors that **don't** need gradients:
 
-This is why PyTorch defaults requires_grad=False for new tensors and requires explicit opt-in for parameters. For a batch of 32 images with 3×224×224 pixels each, tracking gradients wastes `{python} q4_batch_values` values × 4 bytes = `{python} q4_batch_mb` MB for the batch!
+- Input images: 32 tensors (data is not learned)
+- Intermediate activations: 50 tensors (needed for backward, but not updated)
+
+**32 input tensors would unnecessarily track gradients** if `requires_grad` defaulted to True.
+
+This is why PyTorch defaults `requires_grad=False` for new tensors and forces an explicit opt-in for parameters. For a batch of 32 images of shape 3×224×224, accidentally tracking gradients on the inputs wastes 4.8M float32 values × 4 bytes = ~18.4 MB per batch — for nothing.
 :::
 
 **Q5: Graph Retention**
@@ -947,12 +850,14 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 07 - Optimizers"}
+You can now compute a gradient for every parameter in any network you build. That gradient tells you which way is downhill — but it does not tell you how big a step to take, or how to dampen oscillations, or how to adapt the step size per-parameter. That is the optimizer's job.
 
-Implement SGD, Adam, and other optimization algorithms that use your autograd gradients to update parameters and train neural networks. You'll complete the training loop and make your networks learn from data.
+:::{.callout-note title="Coming Up: Module 07 — Optimizers"}
+
+You'll implement SGD, momentum, and Adam: the rules that turn the `param.grad` tensors produced by `backward()` into actual parameter updates. With autograd plus an optimizer, you have the entire machinery a training loop needs.
 :::
 
-**Preview - How Your Autograd Gets Used in Future Modules:**
+**Preview — how your autograd gets used in the modules that follow:**
 
 | Module | What It Does | Your Autograd In Action |
 |--------|--------------|------------------------|

@@ -6,6 +6,7 @@
 **FOUNDATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-06
 
 **Prerequisites: Modules 01-06** means you need:
+
 - Tensor operations and parameter storage
 - DataLoader for efficient batch processing
 - Understanding of forward/backward passes (autograd)
@@ -314,11 +315,9 @@ initSlideViewer('07_optimizers', '../assets/slides/07_optimizers.pdf');
 ```
 ## Overview
 
-Optimizers are the engines that drive neural network learning. After your autograd system computes gradients that point uphill toward higher loss, optimizers use those gradients to move parameters downhill toward lower loss. Think of optimization as hiking in dense fog where you can only feel the slope under your feet but can't see where you're going. Different optimizers represent different hiking strategies, from simple gradient descent to sophisticated algorithms that adapt their step size for each parameter.
+You have gradients. Now what? An optimizer is the rule that turns a gradient into a parameter update — the difference between a model that converges in an afternoon and one that diverges on the first batch. Picture optimization as hiking in fog: you can feel the slope under your feet but cannot see the valley. Each optimizer is a different strategy for choosing your next step.
 
-In this module, you'll build three production-grade optimizers: SGD with momentum (the foundation algorithm), Adam with adaptive learning rates (the workhorse of modern deep learning), and AdamW with decoupled weight decay (the state-of-the-art for transformers). These optimizers differ dramatically in memory usage, convergence speed, and numerical behavior.
-
-By the end, you'll understand not just how optimizers work but also the systems trade-offs between them: SGD uses 2x parameter memory while Adam uses 3x, but Adam often converges in fewer steps.
+You'll build three: SGD with momentum (the foundation), Adam with adaptive per-parameter learning rates (the modern workhorse), and AdamW with decoupled weight decay (the default for transformers). They differ in memory cost, convergence speed, and how forgiving they are when you guess the learning rate wrong — and that last point matters more than most practitioners admit.
 
 ## Learning Objectives
 
@@ -373,7 +372,7 @@ To keep this module focused, you will **not** implement:
 
 ## API Reference
 
-This section provides a quick reference for the Optimizer classes you'll build. Use this as your guide while implementing and debugging.
+The signatures your implementations must satisfy. Keep this open while you build.
 
 ### Optimizer Base Class
 
@@ -452,7 +451,7 @@ Adam with decoupled weight decay regularization.
 
 ## Core Concepts
 
-This section covers the fundamental ideas you need to understand optimization deeply. These concepts apply across all ML frameworks and will serve you throughout your career in machine learning systems.
+Four ideas carry the rest of this chapter: the descent rule itself, why momentum exists, why Adam adapts per-parameter, and why the learning rate dwarfs every other knob.
 
 ### Gradient Descent Fundamentals
 
@@ -515,9 +514,9 @@ The momentum buffer is initialized lazily (only when first needed) to save memor
 
 ### Adam and Adaptive Learning Rates
 
-Adam solves a fundamental problem: different parameters often need different learning rates. Consider a neural network with embedding weights ranging from -0.01 to 0.01 and output weights ranging from -10 to 10. A learning rate that works well for embeddings might cause output weights to explode, while a rate that's safe for output weights makes embeddings learn too slowly.
+Different parameters want different learning rates. An embedding weight that lives in [-0.01, 0.01] and an output weight that lives in [-10, 10] cannot share a step size — one rate is too small for the embedding, too large for the output. SGD ignores this. Adam fixes it.
 
-Adam addresses this by maintaining two statistics for each parameter: a first moment m (exponential moving average of gradients) and a second moment v (exponential moving average of squared gradients). The ratio m/√v gives an adaptive step size: parameters with large gradients get smaller effective learning rates, while parameters with small gradients get larger effective rates.
+Adam keeps two running averages per parameter: a first moment `m` (mean of gradients) and a second moment `v` (mean of squared gradients). Updating with `m / √v` gives an automatic per-parameter step size — parameters with consistently large gradients take smaller steps; parameters with small or noisy gradients take larger ones.
 
 The algorithm tracks: **m = β₁ * m_prev + (1-β₁) * grad** and **v = β₂ * v_prev + (1-β₂) * grad²**. Then it corrects for initialization bias (m and v start at zero) and updates: **param = param - lr * m̂ / (√v̂ + ε)**, where m̂ and v̂ are bias-corrected moments.
 
@@ -565,11 +564,9 @@ The bias correction terms (1 - β^t) are crucial in the first few steps. Without
 
 ### AdamW and Decoupled Weight Decay
 
-AdamW fixes a subtle but important bug in Adam's weight decay implementation. In standard Adam, weight decay is added to the gradient before adaptive scaling: **grad = grad + λ * param**, then proceed with normal Adam. This seems reasonable but creates a problem: the weight decay effect gets scaled by the adaptive learning rate mechanism, making regularization inconsistent across parameters.
+AdamW fixes a real bug in Adam. Standard Adam folds weight decay into the gradient — `grad = grad + λ * param` — and then runs the adaptive update. The decay term then gets divided by `√v` along with everything else, so parameters with large gradients receive *less* regularization and parameters with small gradients receive *more*. That is the opposite of what you want.
 
-Parameters with large gradients get small adaptive learning rates, which also makes their weight decay small. Parameters with small gradients get large adaptive learning rates, which amplifies their weight decay. This is backwards: we want consistent regularization regardless of gradient magnitudes.
-
-AdamW decouples weight decay from the gradient by applying it directly to parameters after the gradient update: first update using pure gradients with Adam's adaptive mechanism, then separately shrink parameters by a fixed proportion. This ensures regularization strength is consistent across all parameters.
+AdamW decouples the two: take the normal Adam step using the raw gradient, then separately shrink each parameter by a fixed fraction `lr * weight_decay`. Regularization strength is now constant across the network, independent of gradient magnitude. This is why every modern transformer trains with AdamW, not Adam.
 
 Here's how your AdamW implementation achieves decoupling:
 
@@ -596,13 +593,11 @@ Notice that weight decay appears only at the end, multiplying parameters by (1 -
 
 ### Learning Rate Selection
 
-Learning rate is the single most important hyperparameter in optimization. Too large, and parameters oscillate or diverge. Too small, and training takes forever or gets stuck in poor local minima. The optimal learning rate depends on the optimizer, network architecture, dataset, and batch size.
+The learning rate is the most important hyperparameter you will ever set. Too large and parameters oscillate or diverge; too small and training stalls or settles into a bad minimum. No optimizer choice — not Adam, not AdamW — rescues a badly chosen learning rate.
 
-For SGD, learning rates typically range from 0.001 to 0.1. SGD is very sensitive to learning rate choice and often requires careful tuning or learning rate schedules. Momentum helps but doesn't eliminate the sensitivity.
+SGD typically lives in `0.001` to `0.1` and is unforgiving: get it wrong by 10x and training breaks. Momentum smooths the ride but does not change the sensitivity. Adam and AdamW default to `0.001` and tolerate roughly an order of magnitude in either direction, which is a large part of why they are popular. Transformers are the exception — they want `1e-4` to `3e-4` with a warmup that ramps the rate from zero over the first few thousand steps.
 
-For Adam and AdamW, the default learning rate of 0.001 works well across many problems. The adaptive mechanism provides some robustness to learning rate choice. However, transformers often use smaller rates (0.0001 to 0.0003) with warmup periods where the rate gradually increases from zero.
-
-The relationship between learning rate and batch size matters for distributed training. Larger batches provide less noisy gradients, allowing larger learning rates. A common heuristic is to scale learning rate linearly with batch size: if you double the batch size from 32 to 64, double the learning rate from 0.001 to 0.002.
+Batch size couples to learning rate. Larger batches produce less noisy gradients and can absorb larger steps. The standard heuristic — scale the learning rate linearly with batch size — works up to a few thousand samples per batch and breaks beyond that, which is why large-scale training has its own literature.
 
 ## Production Context
 
@@ -620,7 +615,7 @@ Your TinyTorch optimizers and PyTorch's `torch.optim` share the same algorithmic
 
 ### Code Comparison
 
-The following comparison shows how optimizer usage looks nearly identical in TinyTorch and PyTorch. This similarity is intentional: by learning TinyTorch's patterns, you're simultaneously learning production PyTorch patterns.
+Optimizer usage in TinyTorch and PyTorch is nearly identical — by design. The patterns you learn here are the patterns you use in production.
 
 ::: {.panel-tabset}
 ## Your TinyTorch
@@ -637,7 +632,7 @@ optimizer.step()  # Update parameters
 optimizer.zero_grad()  # Clear gradients
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch.optim as optim
 
@@ -667,107 +662,17 @@ The optimizer API, update algorithms, and memory patterns are identical. When yo
 
 ### Why Optimizers Matter at Scale
 
-```{python}
-#| echo: false
-#| output: false
+Optimizer choice is a memory decision before it is a math decision. Three concrete data points:
 
+- **Large language models (175B parameters)**: Adam's optimizer state alone consumes **1.27 TB** (3x the 651.9 GB of parameters), forcing multi-GPU state sharding (e.g., DeepSpeed ZeRO).
+- **Transformer training**: AdamW with `weight_decay=0.01` is the default, typically improving generalization over plain Adam by 2-5% accuracy.
+- **Convergence speed**: Adam reaches target loss in roughly 30-50% fewer steps than SGD on vision and language tasks, paying back its higher per-step cost in wall-clock time.
 
-# 175B-parameter model: optimizer state with Adam
-scale_params = 175_000_000_000
-scale_bytes_per_param = 4
-scale_param_bytes = scale_params * scale_bytes_per_param
-scale_param_gb = scale_param_bytes / 1024**3
-scale_state_bytes = 2 * scale_param_bytes  # 2 Adam buffers (m, v)
-scale_state_tb = scale_state_bytes / 1024**4
-scale_multiplier = 3  # params + 2 state buffers
-
-scale_param_gb = f"{scale_param_gb:.1f} GB"
-scale_state_tb = f"{scale_state_tb:.2f} TB"
-scale_multiplier = f"{scale_multiplier}x"
-```
-
-To appreciate optimizer importance, consider production training scenarios:
-
-- **Large language models (175B parameters)**: Optimizer state alone consumes **`{python} scale_state_tb`** with Adam (`{python} scale_multiplier` x `{python} scale_param_gb` parameters), requiring multi-GPU state sharding
-- **Transformer training**: AdamW with weight_decay=0.01 is standard, improving generalization over plain Adam by 2-5% accuracy
-- **Convergence speed**: Adam typically converges in **30-50% fewer steps** than SGD on vision and language tasks, saving hours of GPU time despite higher memory cost
-
-The optimizer choice directly impacts training feasibility. For models that barely fit in memory with SGD, switching to Adam might require distributed training or gradient checkpointing to handle the 1.5x memory increase.
+When a model barely fits in memory with SGD, switching to Adam (1.5x more state) can be the line between "trains on one GPU" and "needs sharding."
 
 ## Check Your Understanding
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Memory calculation for 10B-parameter model (float32)
-q1_params = 10_000_000_000
-q1_bytes_per_param = 4
-q1_param_bytes = q1_params * q1_bytes_per_param
-q1_param_gb = q1_param_bytes / 1024**3
-
-q1_adam_state_gb = 2 * q1_param_gb       # 2 buffers (m, v)
-q1_total_adam_gb = q1_param_gb + q1_adam_state_gb
-
-q1_sgd_state_gb = q1_param_gb            # 1 buffer (velocity)
-q1_total_sgd_gb = q1_param_gb + q1_sgd_state_gb
-
-q1_diff_gb = q1_total_adam_gb - q1_total_sgd_gb
-
-q1_param_gb = f"{q1_param_gb:.2f} GB"
-q1_adam_state_gb = f"{q1_adam_state_gb:.2f} GB"
-q1_total_adam_gb = f"{q1_total_adam_gb:.2f} GB"
-q1_sgd_state_gb = f"{q1_sgd_state_gb:.2f} GB"
-q1_total_sgd_gb = f"{q1_total_sgd_gb:.2f} GB"
-q1_diff_gb = f"{q1_diff_gb:.2f} GB"
-```
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q2: Convergence trade-off
-q2_adam_steps = 100_000
-q2_adam_overhead = 1.2
-q2_sgd_steps = 200_000
-q2_sgd_overhead = 1.0
-
-q2_adam_time = q2_adam_steps * q2_adam_overhead
-q2_sgd_time = q2_sgd_steps * q2_sgd_overhead
-q2_speedup = q2_sgd_time / q2_adam_time
-
-q2_adam_time = f"{q2_adam_time:,.0f}"
-q2_sgd_time = f"{q2_sgd_time:,.0f}"
-q2_speedup = f"{q2_speedup:.2f}x"
-```
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q3: Bias correction impact
-q3_beta1 = 0.9
-
-q3_corr_step1 = 1 - q3_beta1 ** 1
-q3_corr_step10 = 1 - q3_beta1 ** 10
-q3_corr_step100 = 1 - q3_beta1 ** 100
-
-q3_mult_step1 = 1 / q3_corr_step1
-q3_mult_step10 = 1 / q3_corr_step10
-q3_mult_step100 = 1 / q3_corr_step100
-
-q3_corr_step1 = f"{q3_corr_step1:.1f}"
-q3_corr_step10 = f"{q3_corr_step10:.3f}"
-q3_corr_step100 = f"{q3_corr_step100:.4f}"
-q3_mult_step1 = f"{q3_mult_step1:.0f}x"
-q3_mult_step10 = f"{q3_mult_step10:.2f}x"
-q3_mult_step100 = f"{q3_mult_step100:.1f}x"
-```
-
-Test yourself with these systems thinking questions designed to build intuition for optimization trade-offs in production ML.
+Five questions. Try each one yourself before opening the answer — the math is small but the intuitions are the ones you will use in production.
 
 **Q1: Memory Calculation**
 
@@ -775,15 +680,15 @@ A language model has 10 billion float32 parameters. Using Adam optimizer, how mu
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Parameters:** 10B x 4 bytes = **`{python} q1_param_gb`**
+**Parameters:** 10B × 4 bytes = **37.25 GB**
 
-**Adam state:** 2 buffers (m, v) = 2 x `{python} q1_param_gb` = **`{python} q1_adam_state_gb`**
-**Total with Adam:** `{python} q1_param_gb` (params) + `{python} q1_adam_state_gb` (state) = **`{python} q1_total_adam_gb`**
+**Adam state:** 2 buffers (m, v) = 2 × 37.25 GB = **74.51 GB**
+**Total with Adam:** 37.25 GB (params) + 74.51 GB (state) = **111.76 GB**
 
-**SGD with momentum:** 1 buffer (velocity) = **`{python} q1_sgd_state_gb`**
-**Total with SGD:** `{python} q1_param_gb` (params) + `{python} q1_sgd_state_gb` (state) = **`{python} q1_total_sgd_gb`**
+**SGD with momentum:** 1 buffer (velocity) = **37.25 GB**
+**Total with SGD:** 37.25 GB (params) + 37.25 GB (state) = **74.51 GB**
 
-**Difference:** Adam uses **`{python} q1_diff_gb` more** than SGD (50% increase). This might force you to use fewer GPUs or implement optimizer state sharding.
+**Difference:** Adam uses **37.25 GB more** than SGD (50% increase). On 80 GB H100s that is the difference between fitting on one GPU and needing two — or implementing optimizer state sharding.
 :::
 
 **Q2: Convergence Trade-off**
@@ -792,29 +697,29 @@ If Adam converges in 100,000 steps and SGD needs 200,000 steps, but Adam's per-s
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Adam:** 100,000 steps x 1.2 = **`{python} q2_adam_time` time units**
-**SGD:** 200,000 steps x 1.0 = **`{python} q2_sgd_time` time units**
+**Adam:** 100,000 steps × 1.2 = **120,000 time units**
+**SGD:** 200,000 steps × 1.0 = **200,000 time units**
 
-**Adam finishes `{python} q2_speedup` faster** despite higher per-step cost. The convergence advantage (2x fewer steps) outweighs the computational overhead (1.2x slower steps).
+**Adam finishes 1.67x faster** despite the slower per-step cost. The 2x reduction in steps outweighs the 1.2x per-step overhead.
 
-This illustrates why Adam is popular despite higher memory and compute: wall-clock time to convergence often matters more than per-step efficiency.
+This is why Adam wins in practice: wall-clock time to convergence is what users pay for, not per-step efficiency.
 :::
 
 **Q3: Bias Correction Impact**
 
-In Adam, bias correction divides first moment by (1 - β₁^t). At step 1 with β₁=0.9, this correction factor is `{python} q3_corr_step1`. At step 10, it's `{python} q3_corr_step10`. How does this affect early vs late training?
+In Adam, bias correction divides the first moment by `(1 - β₁^t)`. At step 1 with `β₁=0.9`, the correction factor is `0.1`. At step 10, it is `0.651`. How does this affect early vs late training?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Step 1:** Divide by `{python} q3_corr_step1` = multiply by **`{python} q3_mult_step1`** (huge correction)
-**Step 10:** Divide by `{python} q3_corr_step10` = multiply by **`{python} q3_mult_step10`** (moderate correction)
-**Step 100:** Divide by `{python} q3_corr_step100` ≈ multiply by **`{python} q3_mult_step100`** (negligible correction)
+**Step 1:** divide by `0.1` = multiply by **10x** (huge correction)
+**Step 10:** divide by `0.651` = multiply by **1.54x** (moderate correction)
+**Step 100:** divide by `0.99997` ≈ multiply by **1.0x** (negligible correction)
 
-**Early training:** Large corrections amplify small moment estimates to reasonable magnitudes, enabling effective learning from the first step.
+**Early training:** Large corrections inflate the still-tiny moment estimates up to a sensible magnitude, so the optimizer can take meaningful steps from the very first iteration.
 
-**Late training:** Corrections approach 1.0 and have minimal effect, so the algorithm uses raw moment estimates.
+**Late training:** Corrections converge to 1.0 and silently disappear; Adam runs on raw moments.
 
-**Without correction:** First moment m starts at 0, making initial steps tiny (learning rate effectively 0.1x intended). Training would be very slow initially.
+**Without correction:** `m` starts at zero, so the first updates are roughly 10x smaller than intended — training crawls until the running averages catch up.
 :::
 
 **Q4: Weight Decay Comparison**
@@ -877,7 +782,7 @@ For students who want to understand the academic foundations and mathematical un
 
 :::{.callout-note title="Coming Up: Module 08 - Training"}
 
-Combine optimizers with training loops to actually train neural networks. You'll implement learning rate scheduling, checkpointing, and the complete training/validation workflow that makes everything work together.
+You have an optimizer that takes one step. Module 08 wraps it in the loop that takes a million: epochs, validation, checkpointing, learning rate schedules, and early stopping. The question it answers is the one this chapter raised but did not solve — *how do you actually drive a model to convergence without babysitting it?*
 :::
 
 **Preview - How Your Optimizers Get Used in Future Modules:**
