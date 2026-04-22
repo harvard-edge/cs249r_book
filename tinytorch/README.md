@@ -253,7 +253,7 @@ model.fit(X, y)  # Magic happens
   <tbody>
     <tr>
       <td><b>Students</b></td>
-      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="site/getting-started.md">Getting Started</a></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="quarto/getting-started.qmd">Getting Started</a></td>
     </tr>
     <tr>
       <td><b>Instructors</b></td>
@@ -304,12 +304,14 @@ TinyTorch/
 │   │   └── tensor.py           # Your implementation
 │   └── ...                     # (20 module directories)
 │
-├── site/                       # 🌐 Course website & documentation (Jupyter Book)
-│   ├── intro.md                # Landing page
-│   ├── _toc.yml                # Site navigation (links to modules)
-│   ├── _config.yml             # HTML website configuration
-│   ├── chapters/               # Course content chapters
-│   └── modules/                # Module documentation
+├── quarto/                     # 🌐 Course website & documentation (Quarto)
+│   ├── index.qmd               # Landing page
+│   ├── _quarto.yml             # Site navigation & configuration
+│   ├── install.sh              # One-line installer (served at mlsysbook.ai/tinytorch/install.sh)
+│   ├── modules/                # Module chapter QMDs
+│   ├── milestones/             # Milestone chapter QMDs
+│   ├── tito/                   # tito CLI reference
+│   └── community/              # Community / about pages
 │
 ├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
 │   ├── 01_1958_perceptron/     # Rosenblatt's first trainable network

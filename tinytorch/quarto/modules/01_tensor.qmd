@@ -6,6 +6,7 @@
 **FOUNDATION TIER** | Difficulty: ●○○○ | Time: 4-6 hours | Prerequisites: None
 
 **Prerequisites: None** means exactly that. This module assumes:
+
 - Basic Python (lists, classes, methods)
 - Basic math (matrix multiplication from linear algebra)
 - No machine learning background required
@@ -313,9 +314,9 @@ initSlideViewer('01_tensor', '../assets/slides/01_tensor.pdf');
 ```
 ## Overview
 
-The Tensor class is the foundational data structure of machine learning. Every neural network, from recognizing handwritten digits to translating languages, operates on tensors. These networks process millions of numbers per second, and tensors are the data structure that makes this possible. In this module, you'll build N-dimensional arrays from scratch, gaining deep insight into how PyTorch works under the hood.
+Every neural network you have ever used — image classifiers, language models, self-driving perception stacks — is, at runtime, a sequence of operations on one data structure: the tensor. Get the tensor right and the rest of the framework practically writes itself. Get it wrong and every layer above leaks confusion.
 
-By the end, your tensor will support arithmetic, broadcasting, matrix multiplication, and shape manipulation - exactly like `torch.Tensor`.
+In this module you build that data structure from scratch. By the end, your `Tensor` supports arithmetic, broadcasting, matrix multiplication, and shape manipulation — the same surface area you would call on `torch.Tensor`, backed by NumPy instead of CUDA.
 
 ## Learning Objectives
 
@@ -329,7 +330,7 @@ By the end, your tensor will support arithmetic, broadcasting, matrix multiplica
 
 ## What You'll Build
 
-::: {#fig-01_tensor-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Tensor Class Architecture**: The internal components and operations of the TinyTorch Tensor class." fig-alt="Flowchart showing properties, arithmetic, matrix ops, shape ops, and reductions as components of the Tensor class."}
+::: {#fig-01_tensor-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Tensor Class Architecture**: One class packages data, shape metadata, and every operation the rest of TinyTorch will lean on." fig-alt="Flowchart showing properties, arithmetic, matrix ops, shape ops, and reductions as components of the Tensor class."}
 
 ![](../assets/images/diagrams/01_tensor-diag-1.svg)
 
@@ -417,13 +418,13 @@ Reduction operations collapse one or more dimensions by aggregating values. The 
 
 ## Core Concepts
 
-This section covers the fundamental ideas you need to understand tensors deeply. These concepts apply to every ML framework, not just TinyTorch, so mastering them here will serve you throughout your career.
+Five ideas drive every line of code in this module: dimensionality, broadcasting, views vs. copies, matrix multiplication, and reduction along an axis. They are not TinyTorch-specific. Internalize them here and you will recognize them in PyTorch, JAX, NumPy, and every framework you touch afterwards.
 
 ### Tensor Dimensionality
 
-Tensors generalize the familiar concepts you already know. A scalar is just a single number, like a temperature reading of 72.5 degrees. Stack scalars into a list and you get a vector, like a series of temperature measurements throughout the day. Arrange vectors into rows and you get a matrix, like a spreadsheet where each row is a different day's measurements. Keep stacking and you reach 3D and 4D tensors that can represent video frames or collections of images.
+Tensors generalize the shapes you already know. A scalar is a single number — a temperature reading of 72.5 degrees. Stack scalars into a list and you get a vector — a day's worth of readings. Stack vectors and you get a matrix — a spreadsheet of readings across many days. Keep stacking and you reach 3D and 4D tensors that hold video frames, batches of images, or sequences of token embeddings.
 
-The beauty of the Tensor abstraction is that your single class handles all of these cases. The same code that adds two scalars can add two 4D tensors, thanks to broadcasting.
+One class handles all of these cases. The same code path that adds two scalars adds two 4D tensors, because broadcasting (next section) makes shape compatibility a runtime concern, not a compile-time one.
 
 | Rank | Name | Shape | Concrete Example |
 |------|------|-------|------------------|
@@ -439,18 +440,18 @@ When you add a vector to a matrix, the shapes don't match. Should this fail? In 
 
 Consider adding a bias vector `[10, 20, 30]` to every row of a matrix. Without broadcasting, you'd need to manually tile the vector into a matrix first, wasting memory. With broadcasting, the operation just works, and the framework handles alignment internally.
 
-Here's how your `__add__` implementation handles this elegantly:
+Here is what `__add__` looks like once broadcasting does the work for you:
 
 ```python
 def __add__(self, other):
     """Add two tensors element-wise with broadcasting support."""
     if isinstance(other, Tensor):
-        return Tensor(self.data + other.data)  # NumPy handles broadcasting!
+        return Tensor(self.data + other.data)  # NumPy handles broadcasting
     else:
-        return Tensor(self.data + other)  # Scalar broadcast
+        return Tensor(self.data + other)       # Scalar broadcast
 ```
 
-The elegance is that NumPy's broadcasting rules apply automatically when you write `self.data + other.data`. NumPy aligns the shapes from right to left and expands dimensions where needed, all without copying data.
+There is no shape logic in this method. NumPy aligns the operand shapes from right to left, expands dimensions where one side is 1, and refuses the operation otherwise. You inherit that contract for free.
 
 
 
@@ -471,21 +472,7 @@ The rules are simpler than they look. Compare shapes from right to left. At each
 | `(3, 4)` | `(3,)` | Error | ✗ (3 ≠ 4) |
 | `(2, 3, 4)` | `(3, 4)` | `(2, 3, 4)` | ✓ |
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Broadcasting memory comparison
-broadcast_full_elements = 32 * 512 * 768
-broadcast_full_bytes = broadcast_full_elements * 4
-broadcast_vec_bytes = 768 * 4
-bcast_mb = f"{broadcast_full_bytes / 1024**2:.0f} MB"
-bcast_elements = f"{broadcast_full_elements / 1e6:.1f} million"
-bcast_vec_kb = f"{broadcast_vec_bytes / 1024:.0f} KB"
-```
-
-The memory savings are dramatic. Adding a `(768,)` vector to a `(32, 512, 768)` tensor would require copying the vector 32×512 times without broadcasting, allocating `{python} bcast_mb` of redundant data (`{python} bcast_elements` float32 numbers). With broadcasting, you store just the original `{python} bcast_vec_kb` vector.
+The memory savings are not academic. Adding a `(768,)` vector to a `(32, 512, 768)` tensor would, without broadcasting, require tiling the vector 32×512 times — **48 MB** of redundant data, about **12.6 million** float32 numbers. With broadcasting, you store the original **3 KB** vector and read it through expanded indices.
 
 ### Views vs. Copies
 
@@ -595,11 +582,19 @@ def reshape(self, *shape):
 
 The `-1` syntax is particularly useful: it tells NumPy to infer one dimension automatically. When flattening a batch of images, `x.reshape(batch_size, -1)` lets NumPy calculate the feature dimension.
 
+While these mathematical abstractions are powerful, they mask the physical reality of how data is stored and accessed. Understanding the gap between mathematical shape and physical memory layout is what separates a machine learning practitioner from a systems engineer.
+
+:::{.callout-warning title="💾 Systems Implication: Contiguous Memory & Strides"}
+To the math, `reshape` or `transpose` just change dimensions. To the hardware, they manipulate *strides*. A tensor's data is stored as a flat, 1D contiguous block of bytes in RAM. A `reshape` is an O(1) metadata update—the underlying memory is completely untouched.
+
+However, `transpose` introduces a systems trap. By swapping dimensions, you swap strides. The memory is no longer sequentially aligned with the new shape. If you iterate over a transposed tensor, the processor jumps back and forth across RAM, destroying spatial locality and causing massive **cache misses**. This is why systems engineers call `.contiguous()` after a transpose—trading a one-time O(n) memory copy to restore sequential alignment and keep the cache fed.
+:::
+
 ### Computational Complexity
 
-Not all tensor operations are equal. Element-wise operations like addition visit each element once: O(n) time where n is the total number of elements. Reductions like sum also visit each element once. But matrix multiplication is fundamentally different.
+As we saw with the explicit loops in our matrix multiplication implementation, not all tensor operations are equal. Element-wise operations like addition visit each element exactly once, resulting in O(n) time complexity where n is the total number of elements. Reductions like `sum` also visit each element once. But matrix multiplication is fundamentally different.
 
-Multiplying two n×n matrices requires n³ operations: for each of the n² output elements, you compute a dot product of n values. This cubic scaling is why a 2000×2000 matmul takes 8x longer than a 1000×1000 matmul, not 4x. In neural networks, matrix multiplications consume over 90% of compute time. This is precisely why GPUs exist for ML: a modern GPU has thousands of cores that can compute thousands of dot products simultaneously, turning an 800ms CPU operation into an 8ms GPU operation.
+Multiplying two n×n matrices requires n³ operations: for each of the n² output elements, you compute a dot product of n values. This cubic scaling is why a 2000×2000 matmul takes 8x longer than a 1000×1000 matmul, not 4x. In neural networks, matrix multiplications consume over 90% of compute time. This computational density is precisely why GPUs exist for ML: a modern GPU has thousands of cores that can compute thousands of dot products simultaneously, turning an 800ms CPU operation into an 8ms GPU operation.
 
 | Operation | Complexity | Notes |
 |-----------|------------|-------|
@@ -651,17 +646,21 @@ This is the same architecture used by PyTorch and TensorFlow, just with differen
 
 ### Module Integration
 
-Your Tensor is the foundation for everything that follows in TinyTorch. Every subsequent module builds on the work you do here.
+Your `Tensor` is the only data structure the rest of TinyTorch carries around. Every subsequent module either operates on tensors, returns tensors, or stores tensors as state.
 
 ```
-Module 01: Tensor (THIS MODULE)
-    ↓ provides foundation
-    All other modules build on this
+Module 01: Tensor          ← you are here
+    ├─→ Module 02: Activations    (element-wise functions on tensors)
+    ├─→ Module 03: Layers         (parameters stored as tensors)
+    ├─→ Module 06: Autograd       (gradients tracked alongside tensors)
+    └─→ Module 08: Training       (every step reads and writes tensors)
 ```
+
+Bugs you ship from this module surface as confusing failures three modules later. The investment in clean shape handling, consistent dtypes, and correct broadcasting pays off through the entire stack.
 
 ## Common Errors & Debugging
 
-These are the errors you'll encounter most often when working with tensors. Understanding why they happen will save you hours of debugging, both in this module and throughout your ML career.
+Five errors account for almost every confused half-hour you will spend in this module. Read them now so you recognize them when they appear, instead of debugging them blind.
 
 ### Shape Mismatch in matmul
 
@@ -711,7 +710,7 @@ Your arithmetic methods need to handle both Tensor and scalar operands. When som
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch Tensor and PyTorch's `torch.Tensor` share the same conceptual design. The differences are in implementation: PyTorch uses a C++ backend for speed, supports GPUs for massive parallelism, and implements thousands of specialized operations. But the Python API, broadcasting rules, and shape semantics are identical.
+Your `Tensor` and PyTorch's `torch.Tensor` share the same conceptual design. The differences are in the engine room: PyTorch swaps NumPy for a C++ runtime, runs on CUDA, Metal, or ROCm, and exposes thousands of specialized kernels. The Python-facing API, the broadcasting rules, and the shape semantics are the same.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -735,7 +734,7 @@ z = x.matmul(w)
 loss = z.mean()
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 
@@ -761,48 +760,17 @@ Broadcasting rules, shape semantics, and API design patterns. When you debug PyT
 
 ### Why Tensors Matter at Scale
 
-```{python}
-#| echo: false
-#| output: false
+The class you are building looks small. The systems built on it do not. Three numbers set the scale:
 
-# LLM parameter storage (fp16 = 2 bytes per param)
-llm_params = 175_000_000_000
-llm_bytes = llm_params * 2
-llm_gb = f"{llm_bytes / 1024**3:.0f} GB"
+- **Large language models** — A 175B-parameter model stored in fp16 is **326 GB** of tensor data. That is one model, one copy, before optimizer state.
+- **Image batches** — A batch of 128 RGB images at 224×224 in float32 is **73.5 MB**. A training run streams thousands of these per minute.
+- **Self-driving perception** — Multi-camera pipelines run tensor ops at **36 FPS**, so each frame's millions of operations have to finish in 28 ms.
 
-# Batch of images (float32)
-batch_128_bytes = 128 * 3 * 224 * 224 * 4
-batch128_mb = f"{batch_128_bytes / 1024**2:.1f} MB"
-```
-
-To appreciate why tensor operations matter, consider the scale of modern ML systems:
-
-- **Large language models**: 175 billion numbers stored as tensors = **`{python} llm_gb`** (like storing 70,000 full-resolution photos)
-- **Image processing**: A batch of 128 images = **`{python} batch128_mb`** of tensor data
-- **Self-driving cars**: Process tensor operations at **36 FPS** across multiple cameras (each frame = millions of operations in 28 milliseconds)
-
-A single matrix multiplication can consume **90% of computation time** in neural networks. Understanding tensor operations isn't just academic; it's essential for building and debugging real ML systems.
+A single matrix multiply can absorb 90% of training time. Every micro-optimization in a real framework — contiguous strides, fused kernels, view-vs-copy decisions — exists because the `Tensor` you are about to write multiplies its mistakes by billions.
 
 ## Check Your Understanding
 
-```{python}
-#| echo: false
-#| output: false
-
-# Q1: Batch memory
-q1_bytes = 32 * 3 * 224 * 224 * 4
-q1_bytes = f"{q1_bytes:,}"
-q1_mb = f"{q1_bytes / 1024**2:.1f} MB"
-
-# Q2: Broadcasting
-q2_full_bytes = 32 * 512 * 768 * 4
-q2_vec_bytes = 768 * 4
-q2_full_mb = f"{q2_full_bytes / 1024**2:.1f} MB"
-q2_vec_kb = f"{q2_vec_bytes / 1024:.0f} KB"
-q2_savings_mb = f"~{q2_full_bytes / 1024**2:.0f} MB"
-```
-
-Test yourself with these systems thinking questions. They're designed to build intuition for the performance characteristics you'll encounter in production ML.
+These are systems-thinking questions, not trivia. If you can answer them quickly in your head, you have the intuition you need before moving on.
 
 **Q1: Memory Calculation**
 
@@ -810,9 +778,9 @@ A batch of 32 RGB images (224×224 pixels) stored as float32. How much memory?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-32 × 3 × 224 × 224 × 4 = **`{python} q1_bytes` bytes ≈ `{python} q1_mb`**
+32 × 3 × 224 × 224 × 4 = **19,267,584 bytes ≈ 18.4 MB**
 
-This is why batch size matters - double the batch, double the memory!
+Double the batch, double the memory — which is why batch size is the first knob people turn when training runs out of GPU memory.
 :::
 
 **Q2: Broadcasting Savings**
@@ -821,11 +789,11 @@ Adding a vector `(768,)` to a 3D tensor `(32, 512, 768)`. How much memory does b
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Without broadcasting: 32 × 512 × 768 × 4 = **`{python} q2_full_mb`**
+Without broadcasting: 32 × 512 × 768 × 4 = **48.0 MB**
 
-With broadcasting: 768 × 4 = **`{python} q2_vec_kb`**
+With broadcasting: 768 × 4 = **3 KB**
 
-Savings: **`{python} q2_savings_mb` per operation** - this adds up across hundreds of operations in a neural network!
+Savings: **~48 MB per operation**. A transformer layer performs hundreds of broadcasts per forward pass; the cost of getting this wrong scales with the model.
 :::
 
 **Q3: Matmul Scaling**
@@ -865,24 +833,33 @@ You reshape a 1GB tensor, then modify one element in the reshaped version. What 
 **Addition (copy)**: The original tensor is NOT modified. `x + 0` creates a new tensor with freshly allocated memory. The values are identical but stored in different locations.
 
 This distinction matters enormously for:
-- **Memory**: Views use 0 extra bytes; copies use n extra bytes
-- **Performance**: Views are O(1); copies are O(n)
-- **Correctness**: Unexpected mutations through views are a common source of bugs
+
+- **Memory** — Views use 0 extra bytes; copies use n extra bytes.
+- **Performance** — Views are O(1); copies are O(n).
+- **Correctness** — Unexpected mutations through views are a common source of bugs.
 :::
+
+## What's Next?
+
+You now have the universal carrier of every value the rest of the framework will ever compute. A `Tensor` holds the data, knows its shape, and supports the arithmetic that linear algebra and eventually backpropagation depend on.
+
+The next module is **Module 02 — Activations**. It answers a single question: *given a tensor of pre-activations, how do you apply a non-linearity element-wise — and why is that the one operation that lets a deep network represent anything beyond a glorified linear regression?* You will implement ReLU, Sigmoid, Tanh, and Softmax on top of the `Tensor` you just built, treating each one as a pure function from tensor to tensor. Everything works because `__add__`, `__mul__`, broadcasting, and shape preservation are already in place. That is the dividend of getting Module 01 right.
 
 ## Further Reading
 
-For students who want to understand the academic foundations and mathematical underpinnings of tensor operations:
+The abstractions we rely on today—broadcasting, memory views, and hardware-accelerated matrix multiplication—were not developed overnight. They are the culmination of decades of research bridging mathematics and computer architecture. For students who want to trace the evolution of these ideas from early linear algebra libraries to modern tensor frameworks, the following literature is essential.
 
 ### Seminal Papers
 
-- **NumPy: Array Programming** - Harris et al. (2020). The definitive reference for NumPy, which underlies your Tensor implementation. Explains broadcasting, views, and the design philosophy. [Nature](https://doi.org/10.1038/s41586-020-2649-2)
+- **NumPy: Array Programming** - Harris et al. (2020). The definitive reference for NumPy, which underlies your Tensor implementation. Explains broadcasting, views, and the design philosophy. **Systems Implication:** Standardized memory layouts (strides) and contiguous blocks allowed C-level operations to bypass the slow Python interpreter, maximizing memory bandwidth. [Nature](https://doi.org/10.1038/s41586-020-2649-2)
 
-- **BLAS (Basic Linear Algebra Subprograms)** - Lawson et al. (1979). The foundation of all high-performance matrix operations. Your `np.matmul` ultimately calls BLAS routines optimized over 40+ years. Understanding BLAS levels (1, 2, 3) explains why matmul is special. [ACM TOMS](https://doi.org/10.1145/355841.355847)
+- **BLAS (Basic Linear Algebra Subprograms)** - Lawson et al. (1979). The foundation of all high-performance matrix operations. Your `np.matmul` ultimately calls BLAS routines optimized over 40+ years. Understanding BLAS levels (1, 2, 3) explains why matmul is special. **Systems Implication:** Defined the memory hierarchy abstractions (registers, L1/L2 cache, RAM) allowing matrix multiplication to be tiled for optimal cache reuse, fundamentally defining modern dense compute limits. [ACM TOMS](https://doi.org/10.1145/355841.355847)
 
-- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
+- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques. **Systems Implication:** Reverse-mode AD required materializing the intermediate forward pass tensors in memory, making memory capacity a primary bottleneck for deep learning before checkpointing techniques were developed. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
 
 ### Additional Resources
 
 - **Textbook**: "Deep Learning" by Goodfellow, Bengio, and Courville - Chapter 2 covers linear algebra foundations including tensor operations
+- **Documentation**: [PyTorch Tensor Tutorial](https://pytorch.org/tutorials/beginner/basics/tensorqs_tutorial.html) - See how production frameworks implement similar concepts
+ter 2 covers linear algebra foundations including tensor operations
 - **Documentation**: [PyTorch Tensor Tutorial](https://pytorch.org/tutorials/beginner/basics/tensorqs_tutorial.html) - See how production frameworks implement similar concepts
