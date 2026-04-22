@@ -87,3 +87,68 @@ MLSP.roundRect = function(ctx, x, y, w, h, r) {
   ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
 };
+
+/* ============================================================
+   Juice module — shared visual feedback primitives.
+   Pop ring on score events, screen flash on catastrophes,
+   ease curves for tween work. Each game wires these in via
+   four lines: pop on success, flash on milestone, tickJuice
+   in the frame loop, drawJuice at the end of draw().
+   ============================================================ */
+MLSP.easeOutCubic = function(t) { return 1 - Math.pow(1 - t, 3); };
+MLSP.easeOutBack  = function(t) { var c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+
+MLSP.pop = function(state, x, y, color, opts) {
+  opts = opts || {};
+  state.pops = state.pops || [];
+  state.pops.push({
+    x: x, y: y, color: color,
+    age: 0, maxAge: opts.ms || 360,
+    radius: opts.r || 16
+  });
+};
+
+MLSP.flash = function(state, color, ms) {
+  state.flash = { color: color, age: 0, maxAge: ms || 220 };
+};
+
+MLSP.tickJuice = function(state, dt) {
+  if (state.pops) {
+    for (var i = 0; i < state.pops.length; i++) state.pops[i].age += dt;
+    state.pops = state.pops.filter(function(p){ return p.age < p.maxAge; });
+  }
+  if (state.flash) {
+    state.flash.age += dt;
+    if (state.flash.age >= state.flash.maxAge) state.flash = null;
+  }
+};
+
+MLSP.drawJuice = function(ctx, state, W, H) {
+  if (state.pops) {
+    for (var i = 0; i < state.pops.length; i++) {
+      var p = state.pops[i];
+      var t = p.age / p.maxAge;
+      var eased = MLSP.easeOutBack(t);
+      ctx.globalAlpha = 1 - MLSP.easeOutCubic(t);
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2.2 * (1 - t);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius * eased, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (state.flash) {
+    ctx.fillStyle = state.flash.color;
+    ctx.globalAlpha = (1 - state.flash.age / state.flash.maxAge) * 0.40;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+};
+
+/* Days since launch — gives shareables a Wordle-style daily number */
+MLSP.dayNumber = function() {
+  var launch = new Date("2026-04-22T00:00:00Z");
+  var now = new Date();
+  return Math.max(1, Math.floor((now - launch) / (1000 * 60 * 60 * 24)) + 1);
+};
