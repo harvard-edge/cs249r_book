@@ -6,12 +6,13 @@
 **OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 4-6 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you should have:
+
 - Built the complete foundation (Tensor through Training)
 - Implemented profiling tools to measure memory usage
 - Understanding of neural network parameters and forward passes
 - Familiarity with memory calculations and optimization trade-offs
 
-If you can profile a model's memory usage and understand the cost of FP32 storage, you're ready.
+If you can profile a model's memory usage and explain the cost of FP32 storage, you're ready.
 :::
 
 ```{=html}
@@ -314,42 +315,21 @@ initSlideViewer('15_quantization', '../assets/slides/15_quantization.pdf');
 ```
 ## Overview
 
-```{python}
-#| echo: false
-#| output: false
+Models have outgrown the devices that need to run them. BERT-base weighs 420 MB, GPT-2 weighs 5.6 GB, and GPT-3 weighs 652 GB — yet a phone has 4–8 GB of RAM total, shared across every app. Every parameter spends 4 bytes on FP32 precision when 8 bits would suffice. Quantization closes that gap: map FP32 weights to INT8 and a model shrinks 4× with typically less than 1% accuracy loss.
 
+In this module you build the INT8 quantization pipeline end-to-end: the core quantize/dequantize functions, a `QuantizedLinear` layer that wraps a trained `Linear`, calibration that fits scale and zero-point to real activation distributions, and a model-level pass that converts every Linear in a `Sequential` in place. By the end, you can take a 400 MB checkpoint and ship a 100 MB version that still works.
 
-# Model sizes in FP32 (4 bytes per parameter)
-bert_params = 110_000_000
-gpt2_params = 1_500_000_000
-gpt3_params = 175_000_000_000
-bert_mb = bert_params * 4 / 1024**2
-gpt2_gb = gpt2_params * 4 / 1024**3
-gpt3_gb = gpt3_params * 4 / 1024**3
-bert_mb = f"{bert_mb:.0f} MB"
-gpt2_gb = f"{gpt2_gb:.1f} GB"
-gpt3_gb = f"{gpt3_gb:.0f} GB"
-
-# Quantized BERT (INT8 = 1 byte per param)
-bert_int8_mb = bert_params * 1 / 1024**2
-bert_int8_mb = f"{bert_int8_mb:.0f} MB"
-```
-
-Modern neural networks face a memory wall problem. A BERT model requires `{python} bert_mb`, GPT-2 needs `{python} gpt2_gb`, and GPT-3 demands `{python} gpt3_gb`, yet mobile devices have only 4-8 GB of RAM. The culprit? Every parameter uses 4 bytes of FP32 precision, representing values with 32-bit accuracy when 8 bits often suffice. Quantization solves this by converting FP32 weights to INT8, achieving 4× memory reduction with less than 1% accuracy loss.
-
-In this module, you'll build a production-quality INT8 quantization system. You'll implement the core quantization algorithm, create quantized layer classes, and develop calibration techniques that optimize quantization parameters for minimal accuracy degradation. By the end, you'll compress entire neural networks from hundreds of megabytes to a fraction of their original size, enabling deployment on memory-constrained devices.
-
-This isn't just academic compression. Your implementation uses the same symmetric quantization approach deployed in TensorFlow Lite, PyTorch Mobile, and ONNX Runtime, making models small enough to run on phones, IoT devices, and edge hardware without cloud connectivity.
+The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONNX Runtime use to fit models on phones, IoT boards, and edge hardware without ever touching the cloud.
 
 ## Learning Objectives
 
 :::{.callout-tip title="By completing this module, you will:"}
 
-- **Implement** INT8 quantization with symmetric scaling and zero-point calculation for 4× memory reduction
-- **Master** calibration techniques that optimize quantization parameters using sample data distributions
-- **Understand** quantization error propagation and accuracy preservation strategies in compressed models
-- **Connect** your implementation to production frameworks like TensorFlow Lite and PyTorch quantization APIs
-- **Analyze** memory-accuracy trade-offs across different quantization strategies and model architectures
+- **Implement** asymmetric INT8 quantization: scale, zero-point, and the quantize/dequantize round trip for 4× memory reduction.
+- **Build** calibration that fits scale and zero-point to a real activation distribution from sample inputs.
+- **Reason** about quantization error: where it comes from, how it bounds (±scale/2), and why neural networks tolerate it.
+- **Connect** your implementation to TensorFlow Lite, PyTorch Mobile, and ONNX Runtime — same math, different kernels.
+- **Quantify** the memory–accuracy trade-off across model sizes and quantization choices.
 :::
 
 ## What You'll Build
@@ -387,14 +367,14 @@ To keep this module focused, you will **not** implement:
 
 - Per-channel quantization (PyTorch supports this for finer-grained precision)
 - Mixed precision strategies (keeping sensitive layers in FP16/FP32)
-- Quantization-aware training (Module 16: Compression covers this)
-- INT8 GEMM kernels (production uses specialized hardware instructions like VNNI)
+- Quantization-aware training (Module 16: Compression introduces this)
+- INT8 GEMM kernels (production uses hardware instructions like AVX-512 VNNI)
 
-**You are building symmetric INT8 quantization.** Advanced quantization schemes come in production frameworks.
+**You are building per-tensor asymmetric INT8 quantization.** That is enough to compress a real model 4×; the rest is sharper precision and faster kernels.
 
 ## API Reference
 
-This section provides a quick reference for the quantization functions and classes you'll build. Use this as your guide while implementing and debugging.
+These are the signatures you have to satisfy. Keep this section open in a side pane while you implement — it's the contract the tests check against.
 
 ### Core Functions
 
@@ -439,15 +419,15 @@ Object-oriented interface wrapping the standalone quantization functions. Provid
 
 ## Core Concepts
 
-This section covers the fundamental ideas behind quantization. Understanding these concepts will help you implement efficient model compression and debug quantization errors.
+Three ideas do all the work in this module: how much precision you actually need (range), how to map FP32 to INT8 without wasting it (scale and zero-point), and how to pick those parameters from real data (calibration). Get these right and the implementation almost writes itself.
 
 ### Precision and Range
 
-Neural networks use FP32 (32-bit floating point) by default, which can represent approximately 4.3 billion unique values across a vast range from 10⁻³⁸ to 10³⁸. This precision is overkill for most inference tasks. Research shows that neural network weights typically cluster in a narrow range like [-3, 3] after training, and networks are naturally robust to small perturbations due to their continuous optimization.
+FP32 represents about 4.3 billion distinct values across a range from 10⁻³⁸ to 10³⁸. For inference, that's spectacular overkill: trained weights almost always cluster in a tight band like [−3, 3], and the network's accuracy depends on patterns in those weights, not on the 23rd bit of mantissa. Small perturbations get absorbed.
 
-INT8 quantization maps this continuous FP32 range to just 256 discrete values (from -128 to 127). The key insight is that we can preserve model accuracy by carefully choosing how to map these 256 levels across the actual range of values in each tensor. A tensor with values in [-0.5, 0.5] needs different quantization parameters than one with values in [-10, 10].
+INT8 collapses that continuous range to 256 discrete levels (−128 to 127). The whole game is *which* 256. A tensor whose values live in [−0.5, 0.5] should not be quantized with the same step size as one whose values live in [−10, 10] — the first wastes precision, the second loses everything. Quantization is a per-tensor decision about where to spend resolution.
 
-Consider the storage implications. A single FP32 parameter requires 4 bytes, while INT8 uses 1 byte. For a model with 100 million parameters, this is the difference between `{python} q4_fp32_mb` (FP32) and `{python} q4_int8_mb` (INT8). The 4× compression ratio is consistent across all model sizes because we're always reducing from 32 bits to 8 bits per value.
+The storage math is unforgiving. One FP32 parameter is 4 bytes; one INT8 parameter is 1 byte. A 100M-parameter model is the difference between 381 MB (FP32) and 95 MB (INT8). The 4× ratio is fixed because the bit-width ratio is fixed: 32 down to 8.
 
 ### Quantization Schemes
 
@@ -504,7 +484,7 @@ The formula `(quantized - zero_point) × scale` inverts the quantization mapping
 
 ### Post-Training Quantization
 
-Post-training quantization converts a pre-trained FP32 model to INT8 without retraining. This is the approach your implementation uses. The QuantizedLinear class wraps existing Linear layers, quantizing their weights and optionally their inputs:
+Post-training quantization (PTQ) takes a *trained* FP32 model and quantizes it after the fact — no gradient updates, no extra epochs, no labels required. That's the approach you build here. (The alternative, *quantization-aware training*, simulates quantization noise during the training loop so the model learns to be robust to it; you'll see that in Module 16.) `QuantizedLinear` wraps an existing `Linear` and quantizes its weights immediately, deferring activation quantization until calibration:
 
 ```python
 class QuantizedLinear:
@@ -530,7 +510,7 @@ class QuantizedLinear:
         self.input_zero_point = None
 ```
 
-The forward pass dequantizes weights on-the-fly, performs FP32 matrix multiplication, and returns FP32 outputs. This educational approach makes the code simple to understand, though production implementations use INT8 GEMM (general matrix multiply) operations for speed:
+During inference, the forward pass dequantizes weights on-the-fly, performs the standard FP32 matrix multiplication, and returns FP32 outputs. While this educational approach clarifies the math, production implementations keep the data in 8-bit format entirely, leveraging specialized INT8 GEMM (general matrix multiply) hardware instructions for maximum speed:
 
 ```python
 def forward(self, x: Tensor) -> Tensor:
@@ -551,7 +531,7 @@ def forward(self, x: Tensor) -> Tensor:
 
 ### Calibration Strategy
 
-Calibration is the process of finding optimal quantization parameters by analyzing sample data. Without calibration, generic quantization parameters may waste precision or clip important values. The calibration method in QuantizedLinear runs sample inputs through the layer and collects statistics:
+Weights are easy: their values are fixed, so you can compute scale and zero-point from the tensor itself. Activations are not — their range depends on what data flows through the network. Calibration solves this by running a small batch of representative inputs through the layer and recording the activation distribution, then fitting scale and zero-point to *that*:
 
 ```python
 def calibrate(self, sample_inputs: List[Tensor]):
@@ -582,7 +562,7 @@ Calibration typically requires 100-1000 representative samples. Too few samples 
 
 ### Your Implementation vs. PyTorch
 
-Your quantization system implements the core algorithms used in production frameworks. The main differences are in scale (production supports many quantization schemes) and performance (production uses INT8 hardware instructions).
+Your quantizer implements the same arithmetic PyTorch ships in production. The differences are at the edges: production supports more *schemes* (per-channel, INT4, mixed precision) and runs on dedicated *kernels* (FBGEMM, QNNPACK) that exploit INT8 hardware instructions you didn't build. The math in the middle is identical.
 
 | Feature | Your Implementation | PyTorch Quantization |
 |---------|---------------------|----------------------|
@@ -617,7 +597,7 @@ quantize_model(model, calibration_data)
 output = model.forward(x)  # 4× less memory!
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 import torch.quantization as quantization
@@ -656,71 +636,20 @@ The core quantization mathematics: scale calculation, zero-point mapping, INT8 r
 
 ### Why Quantization Matters at Scale
 
-To appreciate why quantization is critical for production ML, consider these deployment scenarios:
+The 4× number sounds modest until you put it next to the device it has to fit on:
 
-- **Mobile AI**: Modern smartphones have 8 GB+ RAM shared across all apps. A quantized BERT (110 MB) fits comfortably; FP32 version (440 MB) causes memory pressure and swapping.
-- **Mobile AI**: iPhone has 6 GB RAM shared across all apps. A quantized BERT (`{python} bert_int8_mb`) fits comfortably; FP32 version (`{python} bert_mb`) causes memory pressure and swapping.
-- **Edge computing**: IoT devices often have 512 MB RAM. Quantization enables on-device inference for privacy-sensitive applications (medical devices, security cameras).
-- **Data centers**: Serving 1000 requests/second requires multiple model replicas. With 4× memory reduction, you fit 4× more models per GPU, reducing serving costs by 75%.
-- **Battery life**: INT8 operations consume 2-4× less energy than FP32 on mobile processors. Quantized models drain battery slower, improving user experience.
+:::{.callout-warning title="💾 Systems Implication: Escaping the Memory Wall via Reduced Precision"}
+As neural networks scale, they inevitably hit the **memory wall** of the Roofline model. Generating tokens autoregressively is inherently memory-bound because the system must constantly stream gigabytes of weight matrices from HBM to the processing cores for every single token. **Quantization is the ultimate systems hack to bypass this wall.** By compressing FP32 weights down to INT8, we instantly cut the memory footprint and the required memory bandwidth by 4×. Furthermore, modern architectures leverage specific **SIMD** (Single Instruction, Multiple Data) instructions—like AVX-512 VNNI or specialized Tensor Cores—to process these packed 8-bit integers natively. This means we are not just saving RAM; we are quadrupling our cache capacity, slashing the power consumption of data movement, and forcing a memory-bound workload significantly closer to the compute-bound ceiling.
+:::
+
+- **Mobile AI**: Modern smartphones have limited RAM shared across all apps. A quantized BERT (`{python} bert_int8_mb`) fits comfortably; the FP32 version (`{python} bert_mb`) causes severe memory pressure and OS-level cache eviction.
+- **Edge computing**: IoT devices often have 512 MB RAM. Quantization enables on-device inference for privacy-sensitive applications (medical devices, security cameras) by fitting massive computational graphs into tiny SRAM footprints.
+- **Data centers**: Serving 1000 requests/second requires multiple model replicas. With 4× memory reduction, you fit 4× more models per GPU, reducing hardware serving costs by 75% and massively improving aggregate throughput.
+- **Battery life**: Moving data is vastly more expensive than computing it. INT8 memory transfers and operations consume fractions of the energy required for FP32 equivalents, extending battery life and reducing thermal throttling.
 
 ## Check Your Understanding
 
-```{python}
-#| echo: false
-#| output: false
-import math
-
-# Q1: 3-layer network parameter counting
-q1_l1 = 784 * 256 + 256
-q1_l2 = 256 * 128 + 128
-q1_l3 = 128 * 10 + 10
-q1_total = q1_l1 + q1_l2 + q1_l3
-q1_fp32_bytes = q1_total * 4
-q1_int8_bytes = q1_total * 1
-q1_savings = q1_fp32_bytes - q1_int8_bytes
-q1_l1 = f"{q1_l1:,}"
-q1_l2 = f"{q1_l2:,}"
-q1_l3 = f"{q1_l3:,}"
-q1_total = f"{q1_total:,}"
-q1_fp32_bytes = f"{q1_fp32_bytes:,}"
-q1_fp32_mb = f"{q1_fp32_bytes / 1024**2:.2f} MB"
-q1_int8_bytes = f"{q1_int8_bytes:,}"
-q1_int8_mb = f"{q1_int8_bytes / 1024**2:.2f} MB"
-q1_savings_mb = f"{q1_savings / 1024**2:.2f} MB"
-
-# Q2: Quantization error and SNR
-q2_range = 1.0
-q2_levels = 255
-q2_scale = q2_range / q2_levels
-q2_max_error = q2_scale / 2
-q2_snr = 20 * math.log10(q2_range / q2_scale)
-q2_scale = f"{q2_scale:.6f}"
-q2_max_error = f"±{q2_max_error:.6f}"
-q2_snr = f"{q2_snr:.0f} dB"
-
-# Q4: Loading time
-q4_fp32_mb = 100_000_000 * 4 / 1024**2
-q4_int8_mb = 100_000_000 * 1 / 1024**2
-q4_bandwidth = 500  # MB/s
-q4_fp32_time = q4_fp32_mb / q4_bandwidth
-q4_int8_time = q4_int8_mb / q4_bandwidth
-q4_fp32_mb = f"{q4_fp32_mb:.0f} MB"
-q4_int8_mb = f"{q4_int8_mb:.0f} MB"
-q4_fp32_time = f"{q4_fp32_time:.1f} seconds"
-q4_int8_time = f"{q4_int8_time:.2f} seconds"
-q4_time_saved = f"{q4_fp32_time - q4_int8_time:.1f}s"
-
-# Q5: SIMD register capacity
-simd_bits = 512
-fp32_per_reg = simd_bits // 32
-int8_per_reg = simd_bits // 8
-q5_fp32 = f"{fp32_per_reg}"
-q5_int8 = f"{int8_per_reg}"
-q5_ratio = f"{int8_per_reg // fp32_per_reg}×"
-```
-
-Test your quantization knowledge with these systems thinking questions. They're designed to build intuition for memory, precision, and performance trade-offs.
+Five questions to lock in the trade-offs — memory, precision, calibration, I/O, and hardware. Work them out on paper before unfolding the answers.
 
 **Q1: Memory Calculation**
 
@@ -729,17 +658,19 @@ A neural network has three Linear layers: 784→256, 256→128, 128→10. How mu
 :::{.callout-note collapse="true" title="Answer"}
 
 **Parameter count:**
-- Layer 1: (784 × 256) + 256 = `{python} q1_l1`
-- Layer 2: (256 × 128) + 128 = `{python} q1_l2`
-- Layer 3: (128 × 10) + 10 = `{python} q1_l3`
-- **Total: `{python} q1_total` parameters**
+
+- Layer 1: (784 × 256) + 256 = 200,960
+- Layer 2: (256 × 128) + 128 = 32,896
+- Layer 3: (128 × 10) + 10 = 1,290
+- **Total: 235,146 parameters**
 
 **Memory usage:**
-- FP32: `{python} q1_total` × 4 bytes = **`{python} q1_fp32_bytes` bytes ≈ `{python} q1_fp32_mb`**
-- INT8: `{python} q1_total` × 1 byte = **`{python} q1_int8_bytes` bytes ≈ `{python} q1_int8_mb`**
-- **Savings: `{python} q1_savings_mb` (75% reduction, 4× compression)**
 
-This shows why quantization matters: even small models benefit significantly.
+- FP32: 235,146 × 4 bytes = **940,584 bytes ≈ 0.90 MB**
+- INT8: 235,146 × 1 byte = **235,146 bytes ≈ 0.22 MB**
+- **Savings: 0.67 MB (75% reduction, 4× compression)**
+
+The ratio is identical for a model 1000× larger — that's the point.
 :::
 
 **Q2: Quantization Error Bound**
@@ -749,17 +680,19 @@ For FP32 weights uniformly distributed in [-0.5, 0.5], what is the maximum quant
 :::{.callout-note collapse="true" title="Answer"}
 
 **Quantization error:**
-- Range: 0.5 - (-0.5) = 1.0
-- Scale: 1.0 / 255 = **`{python} q2_scale`**
-- Max error: scale / 2 = **`{python} q2_max_error`** (half step size)
+
+- Range: 0.5 − (−0.5) = 1.0
+- Scale: 1.0 / 255 = **0.003922**
+- Max error: scale / 2 = **±0.001961** (half a step)
 
 **Signal-to-noise ratio:**
-- SNR = 20 × log₁₀(signal_range / quantization_step)
-- SNR = 20 × log₁₀(1.0 / `{python} q2_scale`)
-- SNR = 20 × log₁₀(255)
-- SNR ≈ **`{python} q2_snr`**
 
-This is sufficient for neural networks (typical requirement: >40 dB). The 8-bit quantization provides approximately 6 dB per bit, matching the theoretical limit.
+- SNR = 20 × log₁₀(signal_range / quantization_step)
+- SNR = 20 × log₁₀(1.0 / 0.003922)
+- SNR = 20 × log₁₀(255)
+- SNR ≈ **48 dB**
+
+Neural networks typically need >40 dB, so INT8 has comfortable headroom. The rule of thumb — 6 dB per bit — comes straight out of this calculation: every extra bit doubles the number of levels, and 20·log₁₀(2) ≈ 6 dB.
 :::
 
 **Q3: Calibration Strategy**
@@ -768,20 +701,22 @@ You're quantizing a model for deployment. You have 100,000 calibration samples a
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Recommended: 100-1000 samples** (typically 500)
+**Recommended: 100–1000 samples** (typically 500).
 
 **Reasoning:**
-- **Too few (<100)**: Risk missing outliers, suboptimal scale/zero-point
-- **Too many (>1000)**: Diminishing returns, calibration time wasted
-- **Sweet spot (100-1000)**: Captures distribution, fast calibration
+
+- **Too few (<100)**: risks missing outliers, producing a scale that clips real activations.
+- **Too many (>1000)**: diminishing returns; you're recomputing the same min/max.
+- **Sweet spot (100–1000)**: captures the distribution and finishes in seconds.
 
 **Trade-off analysis:**
-- 10 samples: Fast (1 second), but might miss distribution tails → poor accuracy
-- 100 samples: Medium (5 seconds), good representation → 98% accuracy
-- 1000 samples: Slow (30 seconds), comprehensive → 98.5% accuracy
-- 10000 samples: Very slow (5 minutes), overkill → 98.6% accuracy
 
-**Conclusion**: Calibration accuracy plateaus around 100-1000 samples. Use more only if accuracy is critical (medical, autonomous vehicles).
+- 10 samples: ~1 s, may miss distribution tails → noticeable accuracy drop
+- 100 samples: ~5 s, good representation → 98% accuracy
+- 1000 samples: ~30 s, comprehensive → 98.5% accuracy
+- 10000 samples: ~5 min, overkill → 98.6% accuracy
+
+**Conclusion**: accuracy plateaus around 100–1000 samples. Spend more only when the cost of an error is huge (medical, autonomous vehicles).
 :::
 
 **Q4: Memory Bandwidth Impact**
@@ -791,18 +726,20 @@ A model has 100M parameters. Loading from SSD to RAM at 500 MB/s, how long does 
 :::{.callout-note collapse="true" title="Answer"}
 
 **Loading time:**
-- FP32 size: 100M × 4 bytes = `{python} q4_fp32_mb`
-- INT8 size: 100M × 1 byte = `{python} q4_int8_mb`
-- FP32 load time: `{python} q4_fp32_mb` / 500 MB/s = **`{python} q4_fp32_time`**
-- INT8 load time: `{python} q4_int8_mb` / 500 MB/s = **`{python} q4_int8_time`**
+
+- FP32 size: 100M × 4 bytes = 381 MB
+- INT8 size: 100M × 1 byte = 95 MB
+- FP32 load time: 381 MB / 500 MB/s = **0.8 seconds**
+- INT8 load time: 95 MB / 500 MB/s = **0.19 seconds**
 - **Speedup: 4× faster loading**
 
 **User experience impact:**
-- Mobile app launch: `{python} q4_fp32_time` → `{python} q4_int8_time` (**`{python} q4_time_saved` faster startup**)
-- Cloud inference: `{python} q4_fp32_time` latency → `{python} q4_int8_time` latency (**4× better throughput**)
-- Model updates: `{python} q4_fp32_mb` download → `{python} q4_int8_mb` download (**75% less data usage**)
 
-**Key insight**: Quantization reduces not just RAM usage, but also disk I/O, network transfer, and cold-start latency. The 4× reduction applies to all memory movement operations.
+- Mobile app launch: 0.8 seconds → 0.19 seconds (**0.6s faster startup**)
+- Cloud inference: 0.8 seconds cold-start latency → 0.19 seconds (**4× better cold-start throughput**)
+- Model updates: 381 MB download → 95 MB download (**75% less data over the wire**)
+
+**Key insight**: the 4× number isn't just about RAM. It applies to disk reads, network transfers, and cold-start latency — every place a byte has to move.
 :::
 
 **Q5: Hardware Acceleration**
@@ -812,23 +749,25 @@ Modern CPUs have AVX-512 VNNI instructions that can perform INT8 matrix multiply
 :::{.callout-note collapse="true" title="Answer"}
 
 **SIMD capacity:**
-- 512-bit register with FP32: 512 / 32 = **`{python} q5_fp32` values**
-- 512-bit register with INT8: 512 / 8 = **`{python} q5_int8` values**
-- **Theoretical speedup: `{python} q5_int8`/`{python} q5_fp32` = `{python} q5_ratio`**
 
-**Why actual speedup is 2-3× (not 4×):**
+- 512-bit register with FP32: 512 / 32 = **16 values**
+- 512-bit register with INT8: 512 / 8 = **64 values**
+- **Theoretical speedup: 64 / 16 = 4×**
 
-1. **Dequantization overhead**: Converting INT8 → FP32 for activations takes time
-2. **Memory bandwidth bottleneck**: INT8 ops are so fast, memory can't feed data fast enough
-3. **Mixed precision**: Activations often stay FP32, only weights quantized
-4. **Non-compute operations**: Batch norm, softmax, etc. remain FP32 (can't quantize easily)
+**Why actual speedup is 2–3× (not 4×):**
+
+1. **Dequantization overhead**: converting INT8 → FP32 for activations costs cycles.
+2. **Memory bandwidth ceiling**: INT8 ops are so fast that DRAM can't feed them.
+3. **Mixed precision**: activations often stay FP32; only weights are quantized.
+4. **Non-GEMM ops**: batch norm, softmax, and friends stay FP32.
 
 **Real-world speedup breakdown:**
-- Compute-bound workloads (large matmuls): **3-4× speedup**
-- Memory-bound workloads (small layers): **1.5-2× speedup**
-- Typical mixed models: **2-3× average speedup**
 
-**Key insight**: INT8 quantization shines when matrix multiplications dominate (transformers, large MLPs). For convolutional layers with small kernels, memory bandwidth limits speedup.
+- Compute-bound (large matmuls): **3–4× speedup**
+- Memory-bound (small layers): **1.5–2× speedup**
+- Typical mixed models: **2–3× average speedup**
+
+**Key insight**: INT8 wins biggest when matrix multiplications dominate (transformers, large MLPs). For convolutions with tiny kernels, memory bandwidth caps the gains long before compute does.
 :::
 
 ## Further Reading
@@ -853,24 +792,34 @@ For students who want to understand the academic foundations and production impl
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 16 - Compression"}
+You just made every weight 4× smaller. The next question is the obvious one: do you need every weight at all? Quantization shrinks values; compression deletes them.
 
-Implement model pruning and weight compression techniques. You'll build structured pruning that removes entire neurons and channels, achieving 2-10× speedup by reducing computation, not just memory.
+:::{.callout-note title="Coming Up: Module 16 — Compression"}
+
+Module 16 builds **pruning** — first unstructured (zero out individual weights below a threshold) and then structured (remove whole neurons and channels). Pruning attacks a different axis from quantization: it reduces the *count* of operations, not the *cost* of each one. Composed with what you just built, the two techniques multiply: a pruned-then-quantized model is roughly 16× smaller than the FP32 original, and noticeably faster too.
 :::
 
-**Preview - How Quantization Combines with Future Techniques:**
+**How quantization composes with what comes next:**
 
-| Module | What It Does | Quantization In Action |
-|--------|--------------|------------------------|
-| **16: Compression** | Prune unnecessary weights | `quantize_model(pruned_model)` → 16× total compression |
-| **17: Acceleration** | Optimize kernel fusion | `accelerate(quantized_model)` → 8× faster inference |
-| **20: Capstone** | Deploy optimized models | Full pipeline: prune → quantize → accelerate → deploy |
+| Module | What it adds | The stack so far |
+|--------|--------------|------------------|
+| **16: Compression** | Pruning removes redundant weights | `quantize_model(pruned_model)` → ~16× compression |
+| **17: Acceleration** | Kernel fusion eliminates memory traffic | `accelerate(quantized_model)` → ~8× faster inference |
+| **20: Capstone** | Deploy the full optimized pipeline | prune → quantize → accelerate → deploy |
 
 ## Get Started
 
 :::{.callout-tip title="Interactive Options"}
 
 - **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
+:::
+
+:::{.callout-warning title="Save Your Progress"}
+
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+:::
+tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
 :::
 

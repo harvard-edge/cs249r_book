@@ -200,7 +200,7 @@ export default function ContributePage() {
           </p>
           <div className="flex items-center gap-3 justify-center flex-wrap">
             <a
-              href={buildContributeUrl()}
+              href={buildContributeUrl(exportAsGitHubBody())}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-textPrimary text-background font-bold rounded-lg hover:opacity-90 transition-all text-sm"

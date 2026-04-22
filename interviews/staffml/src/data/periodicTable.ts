@@ -211,8 +211,6 @@ export const compounds: CompoundSection[] = [
     items: [
       { name: "Knowledge Distillation", formula: [{ kind: "sym", sym: "Tp", sub: "teacher" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Dv" }, { kind: "op", text: " ← " }, { kind: "sym", sym: "Tp", sub: "student" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Gd" }] },
       { name: "Systolic Array (TPU Core)", formula: [{ kind: "op", text: "[" }, { kind: "sym", sym: "Ma" }, { kind: "op", text: " ↔ " }, { kind: "sym", sym: "Ic" }, { kind: "op", text: "]ᴺ" }] },
-      { name: "Knowledge Distillation", formula: [{ kind: "sym", sym: "Tp", sub: "teacher" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Dv" }, { kind: "op", text: " ← " }, { kind: "sym", sym: "Tp", sub: "student" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Gd" }] },
-      { name: "Systolic Array (TPU Core)", formula: [{ kind: "op", text: "[" }, { kind: "sym", sym: "Ma" }, { kind: "op", text: " ↔ " }, { kind: "sym", sym: "Ic" }, { kind: "op", text: "]ᴺ" }] },
       { name: "Flash Attention", formula: [{ kind: "sym", sym: "At" }, { kind: "op", text: " → (" }, { kind: "sym", sym: "Ti" }, { kind: "op", text: " ∥ " }, { kind: "sym", sym: "Fs" }, { kind: "op", text: ")" }] },
       { name: "LoRA", formula: [{ kind: "sym", sym: "Pm" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Fc" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Dd" }] },
       { name: "Adam Optimizer", formula: [{ kind: "sym", sym: "Gd" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Os" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Sc" }, { kind: "op", text: " → " }, { kind: "sym", sym: "Pm" }] },
