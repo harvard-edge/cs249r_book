@@ -407,14 +407,31 @@ export async function getQuestionFullDetail(id: string): Promise<Question | unde
       signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return summary;
-    const full = await res.json() as Question & {
+    // Worker returns a DENORMALIZED row (flat fields straight from the D1
+    // questions table) — common_mistake / realistic_solution / napkin_math
+    // live at the top level, NOT under `details`. Re-nest to match the
+    // site's Question shape before returning, otherwise callers get
+    // `current.details.napkin_math` → TypeError on an undefined details.
+    const full = await res.json() as {
       scenario?: string;
-      details?: Question["details"];
+      common_mistake?: string;
+      realistic_solution?: string;
+      napkin_math?: string;
+      details?: Question["details"];   // future-proof if worker changes
+    };
+    const workerDetails = full.details ?? {
+      common_mistake: full.common_mistake ?? "",
+      realistic_solution: full.realistic_solution ?? "",
+      napkin_math: full.napkin_math ?? "",
     };
     const merged: Question = {
       ...summary,
-      scenario: full.scenario,
-      details: full.details,
+      scenario: full.scenario ?? summary.scenario,
+      details: {
+        // Preserve MCQ options/correct_index that came in the summary.
+        ...summary.details,
+        ...workerDetails,
+      },
     };
     _detailsCache.set(id, merged);
     return merged;
