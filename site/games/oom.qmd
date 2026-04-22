@@ -1,15 +1,17 @@
 ---
 title: "OOM"
 subtitle: "Pack tensors into HBM before you crash."
-description: "A browser mini-game from MLSys Playground. Tensor-Tetris in your GPU's high-bandwidth memory. Stack activations, gradients, optimizer states, and KV cache without overflowing."
+description: "A browser mini-game from MLSysBook Playground. Tensor-Tetris in your GPU's high-bandwidth memory. Pack parameters, activations, gradients, and optimizer states without overflowing — and feel why activations are the citizen that breaks you."
 page-layout: article
 format:
   html:
     include-in-header:
       - text: |
           <link rel="stylesheet" href="/assets/games/common.css">
-          <script src="/assets/games/common.js" defer></script>
-          <script src="/assets/games/oom.js" defer></script>
+          <script type="module">
+            import "/assets/games/runtime.mjs";
+            import "/assets/games/oom.mjs";
+          </script>
 ---
 
 ```{=html}
@@ -24,40 +26,74 @@ format:
 <div id="mlsp-aha-slot"></div>
 
 <script>
-(function mountOom(){
-  function boot() {
-    if (!window.MLSP || !MLSP.games || !MLSP.games.oom) return setTimeout(boot, 30);
+(function bootOom(){
+  function tryBoot() {
+    if (!window.MLSP || !MLSP.games || !MLSP.games.oom) return setTimeout(tryBoot, 30);
     var canvas = document.getElementById("mlsp-canvas");
     var $score = document.getElementById("mlsp-score");
     var ahaSlot = document.getElementById("mlsp-aha-slot");
-    var api = MLSP.games.oom(canvas, {
+    var pendingResult = null;
+    var resolvedApi = null;
+
+    Promise.resolve(MLSP.games.oom(canvas, {
       onScoreChange: function(s) { $score.textContent = s.score; },
-      onGameOver: function() {
-        MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText);
+      onGameOver: function(result) {
+        if (resolvedApi) attachAha(resolvedApi, result);
+        else pendingResult = result;
       },
       onRetry: function() { window.location.reload(); }
+    })).then(function(api) {
+      resolvedApi = api;
+      if (pendingResult) attachAha(api, pendingResult);
     });
+
+    function attachAha(api, result) {
+      MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText, api.ahaLink);
+      var card = ahaSlot.querySelector(".mlsp-aha-card");
+      if (card && api.buildShareText) {
+        var share = document.createElement("button");
+        share.type = "button";
+        share.textContent = "📋 Copy share text";
+        share.style.cssText = "margin-top:0.75rem;background:#a31f34;color:#fff;border:none;padding:0.4rem 0.85rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;";
+        share.addEventListener("click", function() {
+          var txt = api.buildShareText(result);
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(txt).then(function(){
+              share.textContent = "✓ Copied!";
+              setTimeout(function(){ share.textContent = "📋 Copy share text"; }, 1800);
+            });
+          }
+        });
+        card.appendChild(share);
+      }
+    }
   }
-  boot();
+  tryBoot();
 })();
 </script>
 ```
 
 ## How it works
 
-Tetris, but with tensor blocks. Each falling block represents a real GPU memory citizen:
+Tetris, but with tensor blocks. Each falling block represents one of the four canonical training-memory citizens, *sized roughly to its real footprint*:
 
-- **Activations** (blue, wide) — outputs of forward-pass layers, kept around for backward
-- **Gradients** (red, narrow) — what backward computes
-- **Optimizer states** (orange, square) — Adam keeps moments per parameter, ~2× model size
-- **KV cache** (green, tall) — attention's growing memory hog during inference
+- **Parameters** (purple, 3 cells) — the model weights themselves. Spawn once, anchor the bottom of HBM, never freed during training.
+- **Activations** (blue, 6 cells) — the **largest** and most frequent: forward-pass outputs that backward needs. Two variants spawn often.
+- **Gradients** (red, 1 cell) — small but plentiful: one per parameter, written during backward, consumed by `step()`.
+- **Optimizer states** (orange, 6 cells) — Adam keeps an fp32 master + first moment + second moment per parameter, so ~6× weight bytes. Big and persistent.
 
-Pack them into the HBM box without the stack reaching the top. Complete a full row and that memory frees up — same way real allocators reclaim contiguous space.
+Pack them into the HBM box without the stack overflowing.
+
+- **Every 3 placements** triggers a **backward** event: the *newest* activations are consumed (LIFO — the order autograd actually uses).
+- **Every 6 placements** triggers a **step()** event: gradients are used and cleared.
+- Parameters and optimizer states are never freed.
 
 ## Why this matters
 
-ML practitioners spend a lot of time tuning batch size, gradient accumulation, and recomputation strategies because GPU memory is *the* binding constraint at scale. Run out and your training crashes. The shape of the constraint — different tensor types, different lifetimes, fragmentation under live allocation — is what real frameworks like PyTorch's allocator manage every step.
+ML practitioners spend a lot of time tuning batch size, gradient accumulation, and recomputation strategies because GPU memory is *the* binding constraint at scale. The single most important fact: **activations dominate the training memory bill**, not weights — which is why selective recomputation, ZeRO sharding, and smaller batches all exist. [Korthikanti et al. 2022](https://arxiv.org/abs/2205.05198) is the canonical reference; PyTorch's autograd allocator manages this every step.
+
+A note on simplifications: real frameworks free on graph traversal and `optimizer.zero_grad(set_to_none=True)`, not on a placement counter — the rhythm in this game is for your eyes, not PyTorch's.
 
 ---
 
-*Part of [MLSys Playground](/games/).*
+*Part of [MLSysBook Playground](/games/).*

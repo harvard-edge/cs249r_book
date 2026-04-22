@@ -1,5 +1,5 @@
 /* ============================================================
-   MLSys Playground — game registry
+   MLSysBook Playground — game registry
    Single source of truth. The 404 randomiser picks an
    `available: true` game; the gallery lists them all.
    ============================================================ */
@@ -17,13 +17,16 @@ MLSP.registry = [
     available: true
   },
   {
-    id: "roofline",
-    name: "Roofline Runner",
-    tagline: "Catch kernels under the ceiling.",
-    url: "/games/roofline.html",
-    script: "/assets/games/roofline.js",
-    teaches: "Memory-bound vs compute-bound; the ridge point.",
-    available: true
+    id: "straggler",
+    name: "Straggler",
+    tagline: "Don't be the slow GPU.",
+    url: "/games/straggler.html",
+    script: "/assets/games/straggler.mjs",
+    teaches: "Tail latency in distributed training; ring all-reduce.",
+    /* ESM-only game; the 404 randomiser uses legacy <script> injection,
+       so exclude from random rotation until 404 supports module loading.
+       Still listed in the gallery via straggler.qmd. */
+    available: false
   },
   {
     id: "oom",
@@ -42,6 +45,15 @@ MLSP.registry = [
     script: "/assets/games/quantization.js",
     teaches: "Mixed-precision quantization and per-layer sensitivity.",
     available: true
+  },
+  {
+    id: "roofline",
+    name: "Roofline Runner",
+    tagline: "Catch kernels under the ceiling.",
+    url: "/games/roofline.html",
+    script: "/assets/games/_archive/roofline.js",
+    teaches: "Memory-bound vs compute-bound; the ridge point.",
+    available: false
   }
 ];
 

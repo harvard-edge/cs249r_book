@@ -287,7 +287,7 @@ MLSP.games.roofline = function(canvas, opts) {
     ahaLabel: "You just played at",
     ahaText: "The roofline model (Williams, Waterman, Patterson 2009). Each operator has an arithmetic intensity (FLOPs per byte of memory traffic) — GEMM and conv sit on the right (compute-bound), elementwise and softmax on the left (memory-bound), attention spans both depending on sequence length and prefill-vs-decode phase. The ceiling is your hardware's hard limit. Real engineering raises a kernel's intensity (fusion, tiling, recompute) to push it under a higher ceiling — not catching what falls.",
     buildShareText: function(r) {
-      return "MLSys Playground · Roofline Runner · day " + MLSP.dayNumber() + "\n" +
+      return "MLSysBook Playground · Roofline Runner · day " + MLSP.dayNumber() + "\n" +
              "caught " + r.score + " kernels" + (r.won ? " 🏆" : " ✗") + "\n" +
              r.emojiGrid + "\n" +
              "play → mlsysbook.ai/games/roofline/";

@@ -1,0 +1,100 @@
+---
+title: "Straggler"
+subtitle: "One slow GPU and the whole training step waits."
+description: "A browser mini-game from MLSysBook Playground. Run the gradient ring all-reduce across 8 GPUs. Tap to send your chunk; if you're slow, every other GPU sits idle waiting on you. Teaches why tail latency, not average throughput, sets distributed training speed."
+page-layout: article
+format:
+  html:
+    include-in-header:
+      - text: |
+          <link rel="stylesheet" href="/assets/games/common.css">
+          <script type="module">
+            import "/assets/games/runtime.mjs";
+            import "/assets/games/straggler.mjs";
+          </script>
+---
+
+```{=html}
+<div class="mlsp-game-container" role="region" aria-label="Straggler mini-game">
+  <canvas id="mlsp-canvas" class="mlsp-game-canvas" width="680" height="460"></canvas>
+  <div class="mlsp-game-hud">
+    <span class="mlsp-score">step <span id="mlsp-step">0</span> · idle <span id="mlsp-idle">0</span>% · <span id="mlsp-time">60</span>s</span>
+    <span>tap your GPU to pass · <kbd>SPACE</kbd> tap · <kbd>R</kbd> retry</span>
+  </div>
+</div>
+
+<div id="mlsp-aha-slot"></div>
+
+<script>
+(function bootStraggler(){
+  function tryBoot() {
+    if (!window.MLSP || !MLSP.games || !MLSP.games.straggler) return setTimeout(tryBoot, 30);
+    var canvas = document.getElementById("mlsp-canvas");
+    var $step  = document.getElementById("mlsp-step");
+    var $idle  = document.getElementById("mlsp-idle");
+    var $time  = document.getElementById("mlsp-time");
+    var ahaSlot = document.getElementById("mlsp-aha-slot");
+    var pendingResult = null;
+    var resolvedApi = null;
+
+    Promise.resolve(MLSP.games.straggler(canvas, {
+      onScoreChange: function(s) {
+        $step.textContent = s.stepsCompleted;
+        $idle.textContent = s.idlePct.toFixed(0);
+        $time.textContent = Math.ceil(s.timeLeft / 1000);
+      },
+      onGameOver: function(result) {
+        if (resolvedApi) attachAha(resolvedApi, result);
+        else pendingResult = result;
+      },
+      onRetry: function() { window.location.reload(); }
+    })).then(function(api) {
+      resolvedApi = api;
+      if (pendingResult) attachAha(api, pendingResult);
+    });
+
+    function attachAha(api, result) {
+      MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText, api.ahaLink);
+      var card = ahaSlot.querySelector(".mlsp-aha-card");
+      if (card && api.buildShareText) {
+        var share = document.createElement("button");
+        share.type = "button";
+        share.textContent = "📋 Copy share text";
+        share.style.cssText = "margin-top:0.75rem;background:#a31f34;color:#fff;border:none;padding:0.4rem 0.85rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;";
+        share.addEventListener("click", function() {
+          var txt = api.buildShareText(result);
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(txt).then(function(){
+              share.textContent = "✓ Copied!";
+              setTimeout(function(){ share.textContent = "📋 Copy share text"; }, 1800);
+            });
+          }
+        });
+        card.appendChild(share);
+      }
+    }
+  }
+  tryBoot();
+})();
+</script>
+```
+
+## How it works
+
+Eight tiny GPU-creatures stand in a ring. They're training a model together, and to share the gradients each step they have to do a **ring all-reduce**: every GPU passes a chunk of gradient to the GPU on its right, sums what it receives, and passes again. After enough rounds the chunks are summed everywhere — that's one synchronized training step.
+
+You are GPU #4. Your seven friends pass automatically at a steady rhythm. **You have to tap to send your chunk.** Miss the rhythm and your friends sit idle waiting for you — every GPU in the ring blocks on the slowest one.
+
+The HUD tracks two things: how many synchronized steps you've completed in 60 seconds, and what percent of the cluster's time was spent **idle, blocked on you**. The pedagogical fact is right there: keeping idle near zero matters more than going fast in any one moment.
+
+After 30 seconds the second pass kicks in (gather-after-scatter — that's the actual `2(N−1)/N` structure of ring all-reduce). The tempo also speeds up over time. See how many steps you can complete before the cluster melts down.
+
+## Why this matters
+
+A single slow worker — a "straggler" — is the thing that kills throughput on a multi-GPU job. It doesn't matter how fast the other seven are: the synchronizing barrier in [Horovod-style ring all-reduce](https://eng.uber.com/horovod/) (Sergeev & Del Balso, 2018) means everyone waits. Real-world stragglers come from thermal throttling, network contention, a stuck CUDA kernel, or even an OS jitter event. The same idea is why MoE training [does dynamic load balancing](https://arxiv.org/abs/2006.16668) and why Pathways and ZeRO use redundant or overlapping computation: tail latency, not average throughput, is the budget.
+
+A note on simplifications: the ring all-reduce here uses a counter to mark "your chunk arrived" — a real implementation uses NCCL primitives over NVLink/InfiniBand and does scatter-reduce + all-gather as overlapped sub-passes. The rhythm in this game is for your eyes and fingers, not for `nvprof`.
+
+---
+
+*Part of [MLSysBook Playground](/games/).*

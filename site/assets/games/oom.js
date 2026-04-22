@@ -368,7 +368,7 @@ MLSP.games.oom = function(canvas, opts) {
     ahaLabel: "You just played at",
     ahaText: "GPU memory management with lifetimes. Every training step you just drove: forward pass accumulates activations, backward consumes them, and the optimizer step frees gradients. Your packing rhythm *is* the training loop. During inference the residents are different — optimizer state goes away, KV cache grows with sequence length. Real systems fight fragmentation with caching allocators and trade compute for memory via activation checkpointing and offload.",
     buildShareText: function(r) {
-      return "MLSys Playground · OOM · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
+      return "MLSysBook Playground · OOM · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
              "packed " + r.score + " tensors\n" +
              r.emojiGrid + "\n" +
              "play → mlsysbook.ai/games/oom/";

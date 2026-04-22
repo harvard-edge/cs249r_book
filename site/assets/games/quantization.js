@@ -424,7 +424,7 @@ MLSP.games.quantization = function(canvas, opts) {
       for (var i = 0; i < precs.length; i++) {
         ladder += precs[i] === 0 ? "🟦" : precs[i] === 1 ? "🟩" : precs[i] === 2 ? "🟧" : "🟥";
       }
-      return "MLSys Playground · Sharp Shot · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
+      return "MLSysBook Playground · Sharp Shot · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
              (r.won ? "🏆 shipped" : "✗ off-spec") + " · " + r.hits + " / " + r.shots + " hits · " + r.bitsUsed + " bits\n" +
              ladder + "  ← layer precisions\n" +
              "play → mlsysbook.ai/games/quantization/";

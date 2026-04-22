@@ -347,7 +347,7 @@ MLSP.games.prune = function(canvas, opts) {
     ahaText: "Magnitude is a usable proxy for importance (Han et al. 2015). Real pruning adds a fine-tuning step to recover accuracy — you just did the cut.",
     buildShareText: function(result) {
       var tag = result.won ? "🏆 compressed" : "✗ diverged";
-      return "MLSys Playground · Pulse Prune · day " + MLSP.dayNumber() + "\n" +
+      return "MLSysBook Playground · Pulse Prune · day " + MLSP.dayNumber() + "\n" +
              tag + " · " + result.finalSparsity + "% sparsity · " + result.accuracy.toFixed(0) + "% acc\n" +
              result.emojiGrid + "\n" +
              "play → mlsysbook.ai/games/prune/";
