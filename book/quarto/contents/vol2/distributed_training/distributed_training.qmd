@@ -24,7 +24,7 @@ engine: jupyter
 
 _Why does the linear logic of "more hardware = faster training" collapse at the Bisection Bandwidth Wall?_
 
-Distributed training appears simple: split the work across machines and combine the results. But as the Machine Learning Fleet grows, a new physics emerges. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* you train on a single GPU, you optimize for arithmetic intensity; *when* you train on 10,000 GPUs, you optimize for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the **Reliability Gap** and **Communication-Computation Ratio**: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **Coordination Tax**, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
+Distributed training appears simple: split the work across machines and combine the results. But as the Machine Learning Fleet grows, a new physics emerges. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* you train on a single GPU, you optimize for arithmetic intensity; *when* you train on 10,000 GPUs, you optimize for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the **Reliability Gap** and **Communication-Computation Ratio**\index{Communication-Computation Ratio}: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **Coordination Tax**\index{Coordination Tax}, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -124,7 +124,7 @@ class DistTrainConstants:
 
 Part I built the physical fleet: @sec-compute-infrastructure established the accelerator hierarchy, @sec-network-fabrics wired nodes into a high-bandwidth fabric, and @sec-data-storage completed the infrastructure with storage pipelines that keep the fleet fed. With the physical foundation in place, the algorithmic challenge that defines Part II is splitting a single training job across this hardware.
 
-A single GPU with 100 terabytes of memory and an exaflop of compute would make distributed training unnecessary. Because the laws of physics prevent this, training must be shattered across thousands of independent chips. In the **Fleet Stack** framework (@sec-vol2-introduction), Distributed Training represents the **Distribution Layer**—the logic that partitions the mathematical workload across the physical fleet.
+A single GPU with 100 terabytes of memory and an exaflop of compute would make distributed training unnecessary. Because the laws of physics prevent this, training must be shattered across thousands of independent chips. In the **Fleet Stack** framework (@sec-vol2-introduction), Distributed Training represents the **Distribution Layer**\index{Distribution Layer}—the logic that partitions the mathematical workload across the physical fleet.
 
 ### The physics of the cluster
 
@@ -139,7 +139,7 @@ The critical term is the **Communication-Computation Ratio** ($T_{\text{comm}}/T
 
 ::: {.callout-perspective title="Connection: The Fleet Stack"}
 
-In the **Fleet Stack** framework (@fig-fleet-stack in @sec-vol2-introduction), Distributed Training represents the **Distribution Layer**. We are defining *how* to split the math. The actual execution of these split workloads happens on the **Infrastructure Layer**, which we built in Part I. The algorithms defined here (Ring AllReduce, Tensor Parallelism) dictate the bandwidth requirements for the physical interconnects (NVLink, InfiniBand) discussed in @sec-network-fabrics.
+In the **Fleet Stack** framework (@fig-fleet-stack in @sec-vol2-introduction), Distributed Training represents the **Distribution Layer**. We are defining *how* to split the math. The actual execution of these split workloads happens on the **Infrastructure Layer**\index{Infrastructure Layer}, which we built in Part I. The algorithms defined here (Ring AllReduce, Tensor Parallelism) dictate the bandwidth requirements for the physical interconnects (NVLink, InfiniBand) discussed in @sec-network-fabrics.
 
 :::
 
@@ -155,9 +155,9 @@ Third, **dataset scale** exceeds single-machine storage when training data reach
 
 Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
 
-1.  **Communication Overhead**: The cost of synchronizing gradients. For a model with $N$ parameters distributed across $D$ devices, all-reduce operations must transfer approximately $2N(D-1)/D$ bytes per step. On commodity networks, this can dominate computation time.
-2.  **Fault Tolerance**: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
-3.  **Algorithmic Stability**: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
+1.  **Communication Overhead**\index{Communication Overhead}: The cost of synchronizing gradients. For a model with $N$ parameters distributed across $D$ devices, all-reduce operations must transfer approximately $2N(D-1)/D$ bytes per step. On commodity networks, this can dominate computation time.
+2.  **Fault Tolerance**\index{Fault Tolerance}: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
+3.  **Algorithmic Stability**\index{Algorithmic Stability}: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
 ### Single-machine to distributed transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
 
@@ -181,13 +181,13 @@ Choosing the right parallelism strategy is not a matter of preference; it is a c
 | **Tensor Parallel (TP)**   | AllReduce Activations     | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink      |
 | **Pipeline Parallel (PP)** | Point-to-Point (P2P)      | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient) |
 
-: **Parallelism Communication Costs**: Tensor Parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline Parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data Parallelism sits in the middle but scales poorly as $M$ grows, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
+: **Parallelism Communication Costs**\index{Parallelism Communication Costs}: Tensor Parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline Parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data Parallelism sits in the middle but scales poorly as $M$ grows, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
 
 The bandwidth requirements impose a hard constraint on hardware placement, a principle we call the *Jeff Dean Test*.
 
 ::: {.callout-perspective title="The Jeff Dean Test"}
 
-If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume (proportional to Batch$\times$ Layers) requires the `{python} DistTrainConstants.nvlink_a100_str`-`{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data** parallelism to respect the physics of the network.
+If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume (proportional to Batch$\times$ Layers) requires the `{python} DistTrainConstants.nvlink_a100_str`-`{python} DistTrainConstants.nvlink_h100_str` GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline**\index{Pipeline} or **Data**\index{Data} parallelism to respect the physics of the network.
 
 :::
 
