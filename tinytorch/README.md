@@ -139,7 +139,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
-**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](site/getting-started.md).
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](quarto/getting-started.qmd).
 
 ---
 
@@ -306,7 +306,8 @@ TinyTorch/
 ├── src/                        # 💻 Python source files (developers/contributors edit here)
 │   ├── 01_tensor/              # Module 01: Tensor operations from scratch
 │   │   ├── 01_tensor.py        # Python source (version controlled)
-│   │   └── ABOUT.md            # Conceptual overview & learning objectives
+│   │   └── module.yaml         # Module metadata
+│   │   # Chapter content lives in tinytorch/quarto/modules/01_tensor.qmd
 │   ├── 02_activations/         # Module 02: ReLU, Softmax activations
 │   ├── 03_layers/              # Module 03: Linear layers, Module system
 │   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
