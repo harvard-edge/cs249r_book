@@ -39,7 +39,7 @@ SYNC_MAP=(
 )
 
 # Mirrors that are intentionally NOT synced (different content per subsite):
-#   tinytorch/site-quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
+#   tinytorch/quarto/assets/scripts/subscribe-modal.js  (TinyTorch-branded)
 #   tinytorch/site/_static/subscribe-modal.js                (legacy Sphinx site)
 
 stale=0

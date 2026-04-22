@@ -118,7 +118,7 @@ You don't need to set `width=` on individual figures. Don't.
    ```
    Note: the path is `.svg`. The `svg-to-pdf.lua` filter rewrites it
    to `.pdf` for the PDF format only.
-4. From `tinytorch/site-quarto/`: `make pdf`. Verify visually.
+4. From `tinytorch/quarto/`: `make pdf`. Verify visually.
 
 ## How to edit an existing diagram
 
@@ -126,7 +126,7 @@ You don't need to set `width=` on individual figures. Don't.
    Designer both round-trip cleanly; a text editor is fine for
    coordinate or color tweaks).
 2. Save. Don't run any generator — there isn't one anymore.
-3. From `tinytorch/site-quarto/`: `make pdf`. The Makefile pattern
+3. From `tinytorch/quarto/`: `make pdf`. The Makefile pattern
    rule will reconvert only the changed SVG to PDF and re-render.
 
 ## Files in this directory
