@@ -308,20 +308,20 @@ initSlideViewer('19_benchmarking', '../assets/slides/19_benchmarking.pdf');
 ```
 ## Overview
 
-Benchmarking transforms performance optimization from guesswork into engineering discipline. You have learned individual optimization techniques in Modules 14-18, but how do you know which optimizations actually work? How do you compare a quantized model against a pruned one? How do you ensure your measurements are statistically valid rather than random noise?
+"My model is 3x faster!" Faster than what? Measured how? At what input size, on what hardware, after how many warmup runs? Most "speedup" claims dissolve under those four questions — and yours will too if you don't measure with care.
 
-In this module, you will build the infrastructure that powers TorchPerf Olympics, the capstone competition framework. You will implement professional benchmarking tools that measure latency, accuracy, and memory with statistical rigor, generate Pareto frontiers showing optimization trade-offs, and produce reproducible results that guide real engineering decisions.
+Modules 14-18 gave you optimizations. This module gives you the one tool that tells you which of them actually worked: a benchmarking harness that controls for noise, runs proper warmup, and produces confidence intervals you can defend. It is the same statistical machinery MLPerf uses, written in a few hundred lines you build yourself.
 
-By the end, you will have the evaluation framework needed to systematically combine optimizations and compete in the capstone challenge.
+By the end, you will have the evaluation framework that drives the TorchPerf Olympics capstone — and the discipline to never publish a number you cannot justify.
 
 ## Learning Objectives
 
 :::{.callout-tip title="By completing this module, you will:"}
 
-- **Implement** professional benchmarking infrastructure with statistical analysis including confidence intervals and variance control
-- **Master** multi-objective optimization trade-offs between accuracy, latency, and memory through Pareto frontier analysis
-- **Understand** measurement uncertainty, warmup protocols, and reproducibility requirements for fair model comparison
-- **Connect** optimization techniques from Modules 14-18 into systematic evaluation workflows for the TorchPerf Olympics capstone
+- **Implement** a benchmarking harness with confidence intervals, warmup protocols, and variance control
+- **Quantify** trade-offs between accuracy, latency, and memory using Pareto frontiers
+- **Diagnose** measurement noise — coefficient of variation, outliers, cold-start effects — before reporting numbers
+- **Connect** optimizations from Modules 14-18 into a single comparison workflow for the TorchPerf Olympics capstone
 :::
 
 ## What You'll Build
@@ -365,7 +365,7 @@ To keep this module focused, you will **not** implement:
 - Distributed benchmarking (multi-node coordination is beyond scope)
 - Automated hyperparameter tuning for optimization (that is Module 20: Capstone)
 
-**You are building the statistical foundation for fair comparison.** Advanced deployment scenarios come in production systems.
+**You are building the statistical foundation for fair comparison.** The hardware-specific extensions are mechanical once the methodology is right.
 
 ## API Reference
 
@@ -456,9 +456,9 @@ This section covers the fundamental principles that make benchmarking scientific
 
 ### Benchmarking Methodology
 
-Single measurements are meaningless in performance engineering. Consider timing a model inference once: you might get 1.2ms. Run it again and you might get 3.1ms because a background process started. Which number represents the model's true performance? Neither.
+A single measurement tells you nothing. Time one inference and you might see 1.2ms; time it again and you might see 3.1ms because a background process woke up. Neither number is the model's performance — they are samples from a noisy distribution.
 
-Professional benchmarking treats measurements as samples from a noisy distribution. The true performance is the distribution's mean, and your job is to estimate it with statistical confidence. This requires understanding measurement variance and controlling for confounding factors.
+Your job is to estimate that distribution's mean with quantified confidence. That requires controlling the inputs you can (warmup, input shape, iteration count) and reporting the noise you cannot.
 
 The methodology follows a structured protocol:
 
@@ -521,7 +521,11 @@ Different optimization goals require different metrics. Choosing the wrong metri
 
 **Latency (Time per Inference)**: Measures how fast a model processes a single input. Critical for real-time systems like autonomous vehicles where a prediction must complete in 30ms before the next camera frame arrives. Measured in milliseconds or microseconds.
 
-**Throughput (Inputs per Second)**: Measures total processing capacity. Critical for batch processing systems like translating millions of documents. Higher throughput means more efficient hardware utilization. Measured in samples per second or frames per second.
+**Throughput (Inputs per Second)**: Measures total processing capacity. Critical for batch processing systems like translating millions of documents. Higher throughput means more efficient hardware utilization. Measured in samples per second or frames per second. While throughput and latency both measure performance, maximizing one often severely degrades the other.
+
+:::{.callout-note title="⚡ Systems Implication: Throughput vs. Latency and Little's Law"}
+It is a common misconception that optimizing for latency automatically improves throughput. In modern hardware accelerators, these two metrics are fundamentally in tension. Processing inputs one-by-one minimizes per-request latency but leaves massive parallel vector units (ALUs) starved for data, resulting in abysmal GPU utilization. Conversely, batching inputs together drastically increases throughput and hardware utilization, but it artificially inflates latency because the first input must wait for the entire batch to finish processing. This trade-off is formalized in queueing theory by **Little's Law** ($L = \lambda W$): to increase throughput ($\lambda$) while keeping latency ($W$) fixed, you must increase the number of requests processed concurrently ($L$). Professional benchmarking is essential precisely because it maps where your system currently sits on this unforgiving mathematical curve.
+:::
 
 **Accuracy (Prediction Quality)**: Measures how often the model makes correct predictions. The fundamental quality metric. No point having a 1ms model if it is wrong 50% of the time. Measured as percentage of correct predictions on a held-out test set.
 
@@ -533,9 +537,9 @@ The key insight: **these metrics trade off against each other**. Quantization re
 
 ### Statistical Validity
 
-Statistics transforms noisy measurements into reliable conclusions. Without statistical validity, you cannot distinguish true performance differences from random noise.
+Without statistics, you cannot tell a real performance gap from noise — and shipping a "speedup" that is actually noise is how performance work loses credibility.
 
-**Why Variance Matters**: Consider two models. Model A runs in 10.2ms, 10.3ms, 10.1ms (low variance). Model B runs in 9.5ms, 12.1ms, 8.9ms (high variance). Is B faster? Looking at means (10.2ms vs 10.2ms) suggests they are identical, but B's high variance makes it unpredictable. Statistical analysis reveals both the mean and the reliability.
+**Why Variance Matters**: Consider two models. Model A runs in 10.2ms, 10.3ms, 10.1ms (low variance). Model B runs in 9.5ms, 12.1ms, 8.9ms (high variance). Their means are identical, but B is unpredictable — a deal-breaker for any latency SLO. The mean alone hides this; the standard deviation surfaces it.
 
 The BenchmarkResult class computes statistical properties automatically:
 
@@ -576,7 +580,7 @@ The confidence interval calculation uses the standard error of the mean (std / s
 
 ### Reproducibility
 
-Reproducibility means another engineer can run your benchmark and get the same results. Without reproducibility, your optimization insights are not transferable.
+A benchmark that only you can reproduce is a benchmark nobody trusts. The minimum bar: a colleague pulls your code, runs it on equivalent hardware, and lands within your confidence interval.
 
 **System Metadata**: Recording system configuration ensures results are interpreted correctly. A benchmark on a 2020 laptop will differ from a 2024 server, not because the model changed, but because the hardware did.
 
@@ -610,7 +614,7 @@ This metadata gets embedded in every BenchmarkResult, allowing you to understand
 
 ### Reporting Results
 
-Raw data is useless without clear communication. Professional benchmarking generates reports that guide engineering decisions.
+A benchmark that nobody can act on is wasted compute. Reports must do two jobs: surface the trade-off, and be defensible under questioning.
 
 **Comparison Tables**: Show mean, standard deviation, and confidence intervals for each model on each metric. This lets stakeholders quickly identify winners and understand uncertainty.
 
@@ -629,7 +633,7 @@ Model C is dominated by Model A (faster and only 1% less accurate). It is not Pa
 
 ## Common Errors
 
-These are the mistakes students commonly make when implementing benchmarking infrastructure. Understanding these patterns will save you debugging time.
+Four mistakes account for almost every misleading benchmark you will encounter — in classrooms, in blog posts, and in production. Spot them in your own code first.
 
 ### Insufficient Measurement Runs
 
@@ -769,112 +773,17 @@ The statistical methodology, warmup protocols, and reproducibility requirements 
 
 ### Why Benchmarking Matters at Scale
 
-```{python}
-#| echo: false
-#| output: false
+At production scale, small performance differences compound into massive resource consumption — which is exactly why honest measurement is non-negotiable:
 
-
-# Production cost savings from latency reduction
-scale_annual_cost = 50_000_000
-scale_latency_reduction = 0.10
-scale_savings = scale_annual_cost * scale_latency_reduction
-scale_savings = f"${scale_savings / 1_000_000:.0f} million"
-```
-
-Production ML systems operate at scales where small performance differences compound into massive resource consumption:
-
-- **Cost**: A data center running 10,000 GPUs 24/7 consumes $50 million in electricity annually. Reducing latency 10% saves `{python} scale_savings` per year.
+- **Cost**: A data center running 10,000 GPUs 24/7 consumes roughly $50 million in electricity annually. A real 10% latency reduction saves $5 million per year. A *fake* 10% — one that does not survive a careful benchmark — wastes the engineering budget that chased it.
 - **User Experience**: Search engines must return results in under 200ms. A 50ms latency reduction is the difference between keeping or losing users.
-- **Sustainability**: Training GPT-3 consumed 1,287 MWh of energy, equivalent to the annual energy use of 120 US homes. Optimization reduces carbon footprint.
+- **Sustainability**: Training GPT-3 consumed 1,287 MWh, equivalent to the annual energy use of 120 US homes. Optimization reduces carbon footprint — but only if the "optimization" is real.
 
-Fair benchmarking ensures optimization efforts focus on changes that produce measurable, statistically significant improvements.
+This is why fair benchmarking is a discipline, not a courtesy. The next chapter — the capstone — puts that discipline to the test on a public leaderboard.
 
 ## Check Your Understanding
 
-```{python}
-#| echo: false
-#| output: false
-import math
-
-# Q1: Statistical Significance
-# Baseline: mean=12.5ms, std=1.2ms, n=10
-# Optimized: mean=11.8ms, std=1.5ms, n=10
-q1_n = 10
-q1_bl_mean = 12.5
-q1_bl_std = 1.2
-q1_bl_margin = 1.96 * (q1_bl_std / math.sqrt(q1_n))
-q1_bl_ci_lo = q1_bl_mean - q1_bl_margin
-q1_bl_ci_hi = q1_bl_mean + q1_bl_margin
-
-q1_opt_mean = 11.8
-q1_opt_std = 1.5
-q1_opt_margin = 1.96 * (q1_opt_std / math.sqrt(q1_n))
-q1_opt_ci_lo = q1_opt_mean - q1_opt_margin
-q1_opt_ci_hi = q1_opt_mean + q1_opt_margin
-
-q1_mean_diff = q1_bl_mean - q1_opt_mean
-
-q1_bl_margin = f"{q1_bl_margin:.2f}"
-q1_bl_ci_lo = f"{q1_bl_ci_lo:.2f}"
-q1_bl_ci_hi = f"{q1_bl_ci_hi:.2f}"
-q1_opt_margin = f"{q1_opt_margin:.2f}"
-q1_opt_ci_lo = f"{q1_opt_ci_lo:.2f}"
-q1_opt_ci_hi = f"{q1_opt_ci_hi:.2f}"
-q1_mean_diff = f"{q1_mean_diff:.1f}"
-
-# Q2: Sample Size Calculation
-# std=2.0ms, target margin=±0.5ms
-q2_std = 2.0
-q2_target = 0.5
-q2_sqrt_n = 1.96 * q2_std / q2_target
-q2_n = q2_sqrt_n ** 2
-q2_n_ceil = math.ceil(q2_n)
-
-q2_sqrt_n = f"{q2_sqrt_n:.2f}"
-q2_n_raw = f"{q2_n:.1f}"
-q2_n_ceil = f"{q2_n_ceil}"
-
-# Q3: Warmup Impact
-# Without warmup measurements
-q3_no_warmup = [15.2, 12.1, 10.8, 10.5, 10.6, 10.4]
-q3_warmup = [10.5, 10.6, 10.4, 10.7, 10.5, 10.6]
-q3_nw_mean = sum(q3_no_warmup) / len(q3_no_warmup)
-q3_w_mean = sum(q3_warmup) / len(q3_warmup)
-q3_latency_diff = q3_nw_mean - q3_w_mean
-q3_latency_pct = q3_latency_diff / q3_nw_mean * 100
-
-# Std values are given as approximate in the text (1.8 and 0.1)
-q3_nw_std = 1.8
-q3_w_std = 0.1
-q3_var_reduction = (q3_nw_std - q3_w_std) / q3_nw_std * 100
-
-q3_nw_mean = f"{q3_nw_mean:.1f}ms"
-q3_w_mean = f"{q3_w_mean:.2f}ms"
-q3_latency_diff = f"{q3_latency_diff:.2f}ms"
-q3_latency_pct = f"{q3_latency_pct:.0f}%"
-q3_var_reduction = f"{q3_var_reduction:.0f}%"
-
-# Q5: Measurement Overhead
-# 1μs timer overhead, 50μs operation, 1000 measurements
-q5_op_us = 50
-q5_overhead_us = 1
-q5_n_measurements = 1000
-q5_total_op_us = q5_op_us * q5_n_measurements
-q5_total_overhead_us = q5_overhead_us * q5_n_measurements
-q5_total_op_ms = q5_total_op_us / 1000
-q5_total_overhead_ms = q5_total_overhead_us / 1000
-q5_total_measured_ms = q5_total_op_ms + q5_total_overhead_ms
-q5_overhead_pct = (q5_total_overhead_ms / q5_total_measured_ms) * 100
-
-q5_total_op_us = f"{q5_total_op_us:,}"
-q5_total_op_ms = f"{q5_total_op_ms:.0f}ms"
-q5_total_overhead_us = f"{q5_total_overhead_us:,}"
-q5_total_overhead_ms = f"{q5_total_overhead_ms:.0f}ms"
-q5_total_measured_ms = f"{q5_total_measured_ms:.0f}ms"
-q5_overhead_pct = f"{q5_overhead_pct:.2f}%"
-```
-
-Test your understanding of benchmarking statistics and methodology with these quantitative questions.
+Test your understanding of benchmarking statistics and methodology with these quantitative questions. Work each one with a calculator before opening the answer.
 
 **Q1: Statistical Significance**
 
@@ -884,13 +793,13 @@ You benchmark a baseline model and an optimized model 10 times each. Baseline: m
 
 **Calculate 95% confidence intervals:**
 
-Baseline: CI = mean ± 1.96 * (std / sqrt(n)) = 12.5 ± 1.96 * (1.2 / sqrt(10)) = 12.5 ± `{python} q1_bl_margin` = [`{python} q1_bl_ci_lo`, `{python} q1_bl_ci_hi`]
+Baseline: CI = mean ± 1.96 * (std / sqrt(n)) = 12.5 ± 1.96 * (1.2 / sqrt(10)) = 12.5 ± 0.74 = [11.76, 13.24]
 
-Optimized: CI = 11.8 ± 1.96 * (1.5 / sqrt(10)) = 11.8 ± `{python} q1_opt_margin` = [`{python} q1_opt_ci_lo`, `{python} q1_opt_ci_hi`]
+Optimized: CI = 11.8 ± 1.96 * (1.5 / sqrt(10)) = 11.8 ± 0.93 = [10.87, 12.73]
 
-**Result**: The confidence intervals OVERLAP (baseline goes as low as `{python} q1_bl_ci_lo`, optimized goes as high as `{python} q1_opt_ci_hi`). This means the difference is **NOT statistically significant** at the 95% confidence level. You cannot confidently claim the optimized model is faster.
+**Result**: The confidence intervals OVERLAP (baseline goes as low as 11.76, optimized goes as high as 12.73). The difference is **NOT statistically significant** at the 95% confidence level. You cannot claim the optimized model is faster.
 
-**Lesson**: Always compute confidence intervals. A `{python} q1_mean_diff`ms difference in means might seem meaningful, but with these variances and sample sizes, it could be random noise.
+**Lesson**: Always compute confidence intervals. A 0.7ms difference in means looks meaningful, but with these variances and sample sizes it could be random noise.
 :::
 
 **Q2: Sample Size Calculation**
@@ -903,9 +812,9 @@ You measure latency with standard deviation of 2.0ms. How many measurements do y
 
 **Solve for n**: 0.5 = 1.96 * (2.0 / sqrt(n))
 
-sqrt(n) = 1.96 * 2.0 / 0.5 = `{python} q2_sqrt_n`
+sqrt(n) = 1.96 * 2.0 / 0.5 = 7.84
 
-n = `{python} q2_sqrt_n`² = **`{python} q2_n_raw` ≈ `{python} q2_n_ceil` measurements**
+n = 7.84² = **61.5 ≈ 62 measurements**
 
 **Lesson**: Achieving tight confidence intervals requires many measurements. Quadrupling precision (from ±1.0ms to ±0.5ms) requires 4x more samples (15 to 60). This is why professional benchmarks run hundreds of iterations.
 :::
@@ -917,16 +826,19 @@ Without warmup, your measurements are: [15.2, 12.1, 10.8, 10.5, 10.6, 10.4] ms. 
 :::{.callout-note collapse="true" title="Answer"}
 
 **Without warmup:**
-- Mean = (15.2 + 12.1 + 10.8 + 10.5 + 10.6 + 10.4) / 6 = **`{python} q3_nw_mean`**
-- Std = 1.8ms (high variance due to warmup effects)
+
+- Mean = (15.2 + 12.1 + 10.8 + 10.5 + 10.6 + 10.4) / 6 = **11.6ms**
+- Std = 1.8ms (high variance from warmup effects)
 
 **With warmup:**
-- Mean = (10.5 + 10.6 + 10.4 + 10.7 + 10.5 + 10.6) / 6 = **`{python} q3_w_mean`**
+
+- Mean = (10.5 + 10.6 + 10.4 + 10.7 + 10.5 + 10.6) / 6 = **10.55ms**
 - Std = 0.1ms (low variance, stable measurements)
 
 **Impact:**
-- Latency reduced: `{python} q3_nw_mean` - `{python} q3_w_mean` = **`{python} q3_latency_diff` (`{python} q3_latency_pct` reduction)**
-- Variance reduced: 1.8 → 0.1ms = **`{python} q3_var_reduction` reduction in noise**
+
+- Latency reduced: 11.6ms − 10.55ms = **1.05ms (9% reduction)**
+- Variance reduced: 1.8 → 0.1ms = **94% reduction in noise**
 
 **Lesson**: Warmup eliminates cold-start effects and dramatically reduces measurement variance. Without warmup, you are measuring system startup behavior, not steady-state performance.
 :::
@@ -955,15 +867,15 @@ Your timer has 1μs overhead per measurement. You measure a 50μs operation 1000
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Total true operation time**: 50μs × 1000 = `{python} q5_total_op_us`μs = `{python} q5_total_op_ms`
+**Total true operation time**: 50μs × 1000 = 50,000μs = 50ms
 
-**Total timer overhead**: 1μs × 1000 = `{python} q5_total_overhead_us`μs = `{python} q5_total_overhead_ms`
+**Total timer overhead**: 1μs × 1000 = 1,000μs = 1ms
 
-**Total measured time**: `{python} q5_total_op_ms` + `{python} q5_total_overhead_ms` = `{python} q5_total_measured_ms`
+**Total measured time**: 50ms + 1ms = 51ms
 
-**Overhead percentage**: (`{python} q5_total_overhead_ms` / `{python} q5_total_measured_ms`) × 100% = **`{python} q5_overhead_pct`**
+**Overhead percentage**: (1ms / 51ms) × 100% = **1.96%**
 
-**Lesson**: Timer overhead is negligible for operations longer than ~50μs, but becomes significant for microsecond-scale operations. This is why we use `time.perf_counter()` with nanosecond resolution and minimal overhead. For operations under 10μs, consider measuring batches and averaging.
+**Lesson**: Timer overhead is negligible for operations longer than ~50μs but dominates for microsecond-scale operations. That is why we use `time.perf_counter()` (nanosecond resolution, minimal overhead). For operations under 10μs, time a batch and divide.
 :::
 
 ## Further Reading
@@ -972,13 +884,13 @@ For students who want to understand the academic and industry foundations of ML 
 
 ### Seminal Papers
 
-- **MLPerf: An Industry Standard Benchmark Suite for Machine Learning Performance** - Mattson et al. (2020). The definitive industry benchmark framework that establishes fair comparison methodology across hardware vendors. Your benchmarking infrastructure follows the same statistical principles MLPerf uses for standardized evaluation. [arXiv:1910.01500](https://arxiv.org/abs/1910.01500)
+- **MLPerf: An Industry Standard Benchmark Suite for Machine Learning Performance** - Mattson et al. (2020). The definitive industry benchmark framework that establishes fair comparison methodology across hardware vendors. Your benchmarking infrastructure follows the same statistical principles MLPerf uses for standardized evaluation. **Systems Implication:** Standardized rules around hardware-specific optimizations (like mixed precision and custom kernels), enforcing strict timing boundaries to measure true system-level end-to-end throughput. [arXiv:1910.01500](https://arxiv.org/abs/1910.01500)
 
-- **How to Benchmark Code Execution Times on Intel IA-32 and IA-64 Instruction Set Architectures** - Paoloni (2010). White paper explaining low-level timing mechanisms, measurement overhead, and sources of timing variance. Essential reading for understanding what happens when you call `time.perf_counter()`. [Intel](https://www.intel.com/content/dam/www/public/us/en/documents/white-papers/ia-32-ia-64-benchmark-code-execution-paper.pdf)
+- **How to Benchmark Code Execution Times on Intel IA-32 and IA-64 Instruction Set Architectures** - Paoloni (2010). White paper explaining low-level timing mechanisms, measurement overhead, and sources of timing variance. Essential reading for understanding what happens when you call `time.perf_counter()`. **Systems Implication:** Highlighted the impact of CPU clock scaling, thread migration, and caching effects, requiring developers to flush caches and pin threads to get stable nanosecond-level measurements. [Intel](https://www.intel.com/content/dam/www/public/us/en/documents/white-papers/ia-32-ia-64-benchmark-code-execution-paper.pdf)
 
-- **Statistical Tests for Comparing Performance** - Georges et al. (2007). Academic treatment of statistical methodology for benchmarking, including hypothesis testing, sample size calculation, and handling measurement noise. [ACM OOPSLA](https://doi.org/10.1145/1297027.1297033)
+- **Statistical Tests for Comparing Performance** - Georges et al. (2007). Academic treatment of statistical methodology for benchmarking, including hypothesis testing, sample size calculation, and handling measurement noise. **Systems Implication:** Demonstrated that garbage collection pauses, JIT compilation, and OS interrupts introduce non-deterministic latency, necessitating multi-trial warmups to measure steady-state hardware performance. [ACM OOPSLA](https://doi.org/10.1145/1297027.1297033)
 
-- **Benchmarking Deep Learning Inference on Mobile Devices** - Ignatov et al. (2018). Comprehensive study of mobile ML benchmarking challenges including thermal throttling, battery constraints, and heterogeneous hardware. Shows how benchmarking methodology changes for resource-constrained devices. [arXiv:1812.01328](https://arxiv.org/abs/1812.01328)
+- **Benchmarking Deep Learning Inference on Mobile Devices** - Ignatov et al. (2018). Comprehensive study of mobile ML benchmarking challenges including thermal throttling, battery constraints, and heterogeneous hardware. Shows how benchmarking methodology changes for resource-constrained devices. **Systems Implication:** Mobile deployment is constrained by thermal dissipation and battery limits, meaning sustained compute power drops significantly over time, heavily favoring integer quantization over floating-point operations. [arXiv:1812.01328](https://arxiv.org/abs/1812.01328)
 
 ### Additional Resources
 
@@ -987,12 +899,16 @@ For students who want to understand the academic and industry foundations of ML 
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 20 - Capstone"}
+You now have a tool that separates real speedups from noise. Module 20 — the **Capstone: TorchPerf Olympics** — is where that tool earns its keep. You will combine the optimizations from Modules 14-18 (quantization, pruning, fusion, caching), submit results to a public leaderboard, and defend every number against the same statistical scrutiny you just built.
 
-Apply everything you have learned in Modules 01-19 to compete in the TorchPerf Olympics! You will strategically combine optimization techniques, benchmark your results, and compete for the fastest, smallest, or most accurate model on the leaderboard.
+The capstone has no "easy" mode. Every entry is judged by the harness from this chapter — overlapping confidence intervals are not a win, and a faster mean without proper warmup is a disqualification. The discipline you practiced here is the price of admission.
+
+:::{.callout-note title="Coming Up: Module 20 — Capstone"}
+
+Combine everything from Modules 01-19 to compete in the TorchPerf Olympics: stack optimizations, benchmark them honestly, and chase the fastest, smallest, or most accurate model on the leaderboard.
 :::
 
-**Preview - How Your Benchmarking Gets Used in the Capstone:**
+**Preview — How Your Benchmarking Gets Used in the Capstone:**
 
 | Competition Event | Metric Optimized | Your Benchmark In Action |
 |-------------------|------------------|--------------------------|

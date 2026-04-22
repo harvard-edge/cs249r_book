@@ -5,12 +5,13 @@
 
 **OPTIMIZATION TIER** | Difficulty: ●●●● | Time: 6-8 hours | Prerequisites: All modules (01-19)
 
-**Prerequisites: All modules** means you've built a complete ML framework. This capstone assumes:
-- Complete TinyTorch framework (Modules 01-13) - **Required**
-- Optimization techniques (Modules 14-18) - **Optional but recommended**
-- Benchmarking methodology (Module 19) - **Required**
+This capstone assumes you've built a complete framework end-to-end:
 
-The core benchmarking functionality (Parts 1-4) works with just Modules 01-13 and 19. Modules 14-18 enable the advanced optimization workflow (Part 4b), which demonstrates how to integrate all TinyTorch components. If optimization modules aren't available, the system gracefully degrades to baseline benchmarking only.
+- Core framework (Modules 01-13) — **required**
+- Optimization techniques (Modules 14-18) — **recommended**
+- Benchmarking methodology (Module 19) — **required**
+
+Parts 1-4 run on Modules 01-13 + 19 alone. Part 4b layers in Modules 14-18 to drive the full baseline-to-optimized workflow; without them, the pipeline degrades to baseline benchmarking only.
 :::
 
 ```{=html}
@@ -313,11 +314,11 @@ initSlideViewer('20_capstone', '../assets/slides/20_capstone.pdf');
 ```
 ## Overview
 
-You've built an entire machine learning framework from scratch across 19 modules. You can train neural networks, implement transformers, optimize models with quantization and pruning, and measure performance with profiling tools. But there's one critical piece missing: proving your work with reproducible results.
+Nineteen modules in, you have a working ML framework. Tensors, autograd, transformers, quantization, pruning, profiling — every line written by you. The Olympics is where you put it on the scale.
 
-In production ML systems, claims without measurements are worthless. This capstone module teaches you to benchmark models comprehensively, document optimizations systematically, and generate standardized submissions that mirror industry practices like MLPerf and Papers with Code. You'll learn the complete workflow from baseline measurement through optimization to final submission, using the same patterns employed by ML research labs and production engineering teams.
+In production ML, an unmeasured claim is no claim at all. This capstone gives your framework the same treatment MLPerf and Papers with Code give a real submission: a baseline measurement, an optimization pass, an apples-to-apples comparison, and a schema-validated artifact someone else can verify. You'll write the benchmarking harness, run it against your own code, and ship a `results.json` that stands on its own.
 
-By the end, you'll have a professional benchmarking system that demonstrates your framework's capabilities and enables fair comparisons with others' implementations.
+When you finish, you won't just have a framework. You'll have evidence.
 
 ## Learning Objectives
 
@@ -368,14 +369,14 @@ save_submission(submission, "results.json")
 
 ### What You're NOT Building (Yet)
 
-To keep this capstone focused, you will **not** implement:
+Out of scope for this capstone:
 
-- Automated CI/CD pipelines (production systems run benchmarks on every commit)
-- Multi-hardware comparison (benchmarking across CPU/GPU/TPU)
-- Visualization dashboards (plotting accuracy vs latency trade-off curves)
-- Leaderboard aggregation (combining community submissions)
+- CI/CD pipelines that benchmark on every commit
+- Multi-hardware comparison across CPU/GPU/TPU
+- Plotting dashboards for accuracy-vs-latency curves
+- Leaderboard aggregation across community submissions
 
-**You are building the measurement and reporting foundation.** Automation and visualization come later in production MLOps.
+You are building the measurement and reporting foundation everything else stands on. Automation and visualization layer on top — but only if the numbers underneath are trustworthy.
 
 ## API Reference
 
@@ -439,15 +440,16 @@ This section covers the fundamental principles of professional ML benchmarking. 
 
 ### The Reproducibility Crisis in ML
 
-Modern machine learning faces a credibility problem. Many published results cannot be replicated because researchers omit critical details. When a paper claims "92% accuracy with 10ms latency," can you reproduce that result? Often not, because the paper doesn't specify hardware platform, software versions, batch size, measurement methodology, or variance across runs.
+ML has a credibility problem. A paper claims "92% accuracy with 10ms latency" — and you can't reproduce it, because the paper never said which hardware, which software versions, which batch size, or how the measurement was taken. Without those facts the number is folklore.
 
-Industry standards like MLPerf and Papers with Code emerged to address this crisis by requiring:
-- **Standardized tasks** with fixed datasets
-- **Hardware specifications** documented completely
-- **Measurement protocols** defined precisely
-- **Code submissions** for automated verification
+MLPerf and Papers with Code emerged to fix this, and they did it by requiring four things from every submission:
 
-Your benchmarking system implements these same principles. When you generate a submission, it captures everything needed for someone else to verify your claims or build on your work.
+- **Standardized tasks** on fixed datasets
+- **Hardware specifications** documented in full
+- **Measurement protocols** pinned down precisely
+- **Code submissions** that anyone can re-run
+
+Your benchmarking system enforces the same contract. Every submission you generate carries the context another person needs to reproduce — or refute — your claim.
 
 ### The Three Pillars of Reliable Benchmarking
 
@@ -513,33 +515,21 @@ _ = model.forward(X_test[:1])  # Shape: (1, features)
 latency_ms = (time.time() - start) * 1000
 ```
 
-A model with 10ms latency processes one input in 10 milliseconds. If a user submits a query, they wait 10ms for a response. This directly impacts user experience.
+A model with 10ms latency processes one input in 10 milliseconds. The user submits a query and waits 10ms. That number lives or dies on user experience.
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Latency vs Throughput: derived metrics
-lt_latency_ms = 10
-lt_throughput = 1000 / lt_latency_ms
-lt_throughput = f"{lt_throughput:.0f}"
-
-lt_batch_size = 32
-lt_batch_time_ms = 50
-lt_batch_throughput = lt_batch_size * 1000 / lt_batch_time_ms
-lt_batch_throughput = f"{lt_batch_throughput:.0f}"
-```
-
-**Throughput** measures batch capacity: how many inputs can you process per second? This matters for offline batch jobs processing millions of examples. Your implementation derives throughput from latency:
+**Throughput** measures batch capacity: how many inputs can you process per second? This is the metric for offline jobs grinding through millions of examples. Your implementation derives it from latency:
 
 ```python
 throughput_samples_per_sec = 1000 / avg_latency
 ```
 
-If latency is 10ms per sample, throughput is 1000ms / 10ms = `{python} lt_throughput` samples/second. But this assumes processing samples one at a time. In practice, batching increases throughput significantly while adding latency. Processing a batch of 32 samples might take 50ms total, giving `{python} lt_batch_throughput` samples/second throughput but 50ms per-request latency.
+At 10ms per sample, throughput is 1000 / 10 = 100 samples/second — but only if you process one sample at a time. Batching changes the math. A batch of 32 samples might take 50ms total, which is 640 samples/second of throughput at the cost of 50ms per-request latency.
 
-The trade-off: **Batching increases throughput but hurts latency.** A production API serving individual user requests optimizes for latency. A batch processing pipeline optimizes for throughput.
+The trade-off: **Batching increases throughput but hurts latency.** A production API serving individual user requests optimizes for latency to maintain a snappy user experience. A background batch processing pipeline optimizes for throughput to minimize total compute costs. Choosing between them is a fundamental architectural decision.
+
+:::{.callout-warning title="💾 Systems Implication: Hardware Utilization and Little's Law"}
+To truly master this engineering trade-off, you must look beyond timing metrics and analyze Hardware Utilization. A GPU processing a single token (batch size 1) might only utilize 5% of its available ALUs, wasting 95% of the silicon you are paying for. As you increase the batch size, you saturate the computation engines and memory buses, pushing utilization toward 100%. However, **Little's Law** ($L = \lambda W$) mathematically dictates that the number of concurrent items in the system ($L$) equals the throughput ($\lambda$) multiplied by the latency ($W$). In a capstone setting—and in production—you must intentionally target a specific operating point on this curve. You cannot cheat the physical limits of the underlying hardware.
+:::
 
 ### Statistical Rigor: Why Variance Matters
 
@@ -745,39 +735,13 @@ The workflow pattern: baseline → optimize → benchmark → compare → decide
 
 ### Why Benchmarking Matters at Scale
 
-```{python}
-#| echo: false
-#| output: false
+Benchmarking earns its keep when the numbers get large:
 
+- **Model serving.** A recommendation system handles 10M requests/day. Cutting latency from 20ms to 10ms saves 100,000 seconds of compute every day — 1.16 days of CPU time daily, a 50% serving-cost reduction. That's a budget line, not a metric.
+- **Training efficiency.** A $1M LLM training run is 60% bottlenecked on data loading. Fixing the input pipeline frees $600,000 of GPU time. You only know to look because the profiler said so.
+- **Deployment constraints.** A mobile app must fit a 50MB model budget. Quantization shrinks a 200MB checkpoint to 50MB at the cost of 1% accuracy. The app ships — and the only reason anyone signed off on the trade is because the trade was measured.
 
-# Model serving cost calculation
-scale_requests_per_day = 10_000_000
-scale_latency_before_ms = 20
-scale_latency_after_ms = 10
-scale_saved_ms = scale_latency_before_ms - scale_latency_after_ms
-scale_seconds_saved = scale_requests_per_day * scale_saved_ms / 1000
-scale_days_saved = scale_seconds_saved / 86400
-scale_cost_reduction_pct = (scale_saved_ms / scale_latency_before_ms) * 100
-
-scale_seconds_saved = f"{scale_seconds_saved:,.0f}"
-scale_days_saved = f"{scale_days_saved:.2f}"
-scale_cost_reduction = f"{scale_cost_reduction_pct:.0f}%"
-
-# Training pipeline savings
-scale_training_cost = 1_000_000
-scale_data_loading_pct = 60
-scale_pipeline_savings = scale_training_cost * scale_data_loading_pct / 100
-
-scale_pipeline_savings = f"${scale_pipeline_savings:,.0f}"
-```
-
-To appreciate why professional benchmarking matters, consider the scale of production ML systems:
-
-- **Model serving**: A recommendation system handles 10 million requests/day. If you reduce latency from 20ms to 10ms, you save `{python} scale_seconds_saved` seconds of compute daily = `{python} scale_days_saved` days of compute per day = `{python} scale_cost_reduction` cost reduction.
-- **Training efficiency**: Training a large language model costs $1 million in GPU time. Profiling reveals 60% of time is spent in data loading. Optimizing the data pipeline saves `{python} scale_pipeline_savings`.
-- **Deployment constraints**: A mobile app's model must fit in 50MB. Quantization compresses a 200MB model to 50MB with 1% accuracy loss. The app ships; without benchmarking, you wouldn't know the trade-off was acceptable.
-
-Systematic benchmarking with reproducible results isn't academic exercise—it's how engineers justify technical decisions and demonstrate business impact.
+Reproducible benchmarking isn't academic. It's how engineers defend a decision in a design review and prove an optimization paid off in a postmortem.
 
 ## Check Your Understanding
 
@@ -787,186 +751,85 @@ Test yourself with these systems thinking questions about benchmarking and perfo
 
 A model has 5 million parameters stored as FP32. After INT8 quantization, how much memory is saved?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Memory calculation (FP32 vs INT8 quantization)
-# Using binary units: 1 MB = 1024^2 = 1,048,576 bytes
-q1_params = 5_000_000
-q1_fp32_bytes_per_param = 4
-q1_int8_bytes_per_param = 1
-q1_bytes_per_mb = 1024 ** 2
-
-q1_fp32_bytes = q1_params * q1_fp32_bytes_per_param
-q1_int8_bytes = q1_params * q1_int8_bytes_per_param
-q1_fp32_mb = q1_fp32_bytes / q1_bytes_per_mb
-q1_int8_mb = q1_int8_bytes / q1_bytes_per_mb
-q1_savings_mb = q1_fp32_mb - q1_int8_mb
-q1_reduction_pct = q1_savings_mb / q1_fp32_mb * 100
-q1_compression = q1_fp32_mb / q1_int8_mb
-
-q1_fp32_bytes = f"{q1_fp32_bytes:,}"
-q1_fp32_mb = f"{q1_fp32_mb:.2f}"
-q1_int8_bytes = f"{q1_int8_bytes:,}"
-q1_int8_mb = f"{q1_int8_mb:.2f}"
-q1_savings_mb = f"{q1_savings_mb:.2f}"
-q1_reduction_pct = f"{q1_reduction_pct:.0f}%"
-q1_compression = f"{q1_compression:.1f}x"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-FP32: 5,000,000 parameters x 4 bytes = `{python} q1_fp32_bytes` bytes = **`{python} q1_fp32_mb` MB**
+FP32: 5,000,000 params × 4 bytes = 20,000,000 bytes = **19.07 MB**
 
-INT8: 5,000,000 parameters x 1 byte = `{python} q1_int8_bytes` bytes = **`{python} q1_int8_mb` MB**
+INT8: 5,000,000 params × 1 byte = 5,000,000 bytes = **4.77 MB**
 
-Savings: `{python} q1_fp32_mb` MB - `{python} q1_int8_mb` MB = **`{python} q1_savings_mb` MB** (`{python} q1_reduction_pct` reduction)
+Savings: 19.07 MB − 4.77 MB = **14.30 MB** (75% reduction).
 
-Compression ratio: `{python} q1_fp32_mb` MB / `{python} q1_int8_mb` MB = **`{python} q1_compression`**
+Compression ratio: 19.07 / 4.77 = **4.0×**.
 
-This is why quantization is standard in mobile deployment—models must fit in tight memory budgets.
+This is why quantization is standard for mobile deployment — the model has to fit the budget.
 :::
 
 **Q2: Latency Variance Analysis**
 
-Model A: 10.0ms +/- 0.3ms latency. Model B: 10.0ms +/- 3.0ms latency. Both have same accuracy. Which do you deploy and why?
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q2: Latency variance analysis (95% confidence = +/- 2 std)
-q2_mean = 10.0
-q2_std_a = 0.3
-q2_std_b = 3.0
-q2_variance_ratio = q2_std_b / q2_std_a
-q2_a_lo = q2_mean - 2 * q2_std_a
-q2_a_hi = q2_mean + 2 * q2_std_a
-q2_b_lo = q2_mean - 2 * q2_std_b
-q2_b_hi = q2_mean + 2 * q2_std_b
-
-q2_variance_ratio = f"{q2_variance_ratio:.0f}x"
-q2_a_lo = f"{q2_a_lo:.1f}"
-q2_a_hi = f"{q2_a_hi:.1f}"
-q2_b_lo = f"{q2_b_lo:.1f}"
-q2_b_hi = f"{q2_b_hi:.1f}"
-```
+Model A: 10.0ms ± 0.3ms latency. Model B: 10.0ms ± 3.0ms latency. Same accuracy. Which do you deploy and why?
 
 :::{.callout-note collapse="true" title="Answer"}
 
 **Deploy Model A.**
 
-Same mean latency (10.0ms) but Model A has `{python} q2_variance_ratio` lower variance (0.3ms vs 3.0ms std).
+Same mean (10.0ms), but Model A has 10× lower variance (0.3ms vs 3.0ms std).
 
-Model A's latency range: ~`{python} q2_a_lo`-`{python} q2_a_hi`ms (95% confidence: +/- 2 std)
-Model B's latency range: ~`{python} q2_b_lo`-`{python} q2_b_hi`ms (95% confidence: +/- 2 std)
+- Model A's 95% range (±2σ): ~9.4–10.6ms
+- Model B's 95% range (±2σ): ~4.0–16.0ms
 
-**Why consistency matters:**
-- Users prefer predictable performance over erratic speed
-- High variance suggests GC pauses, cache misses, or resource contention
-- Production SLAs commit to p99 latency—Model B's p99 could be 16ms vs Model A's 11ms
+**Why consistency wins:**
 
-In production, **reliability > mean performance**. A consistently decent experience beats an unreliable fast one.
+- Users tolerate predictable slowness; they don't tolerate jitter.
+- High variance is usually GC pauses, cache misses, or resource contention — three problems you don't want in your hot path.
+- Production SLAs are written against p99, not mean. Model B's p99 could land near 16ms while Model A's stays under 11ms.
+
+In production, **reliability beats average speed**. A consistently decent experience trumps an unreliably fast one.
 :::
 
 **Q3: Batch Size Trade-off**
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q3: Batch size trade-off — why amortized != actual per-sample latency
-# Given: batch=32 takes 100ms total, batch=1 takes 8ms actual
-# Solve system of equations:
-#   batch_total = fixed + batch_size * variable_per_sample
-#   batch1_total = fixed + 1 * variable_per_sample
-# => fixed = (batch_total - batch_size * batch1) / (1 - batch_size)
-q3_batch_size = 32
-q3_batch_total_ms = 100
-q3_batch1_actual_ms = 8.0
-
-q3_amortized = q3_batch_total_ms / q3_batch_size
-q3_fixed = (q3_batch_total_ms - q3_batch_size * q3_batch1_actual_ms) / (1 - q3_batch_size)
-q3_var_total = q3_batch_total_ms - q3_fixed
-q3_var_per_sample = q3_var_total / q3_batch_size
-q3_batch1_check = q3_fixed + q3_var_per_sample
-
-q3_amortized = f"{q3_amortized:.1f}"
-q3_fixed = f"{q3_fixed:.1f}"
-q3_var_total = f"{q3_var_total:.1f}"
-q3_var_per_sample = f"{q3_var_per_sample:.1f}"
-q3_batch1_check = f"{q3_batch1_check:.1f}"
-```
-
-Measuring latency with batch_size=32 gives 100ms total. Can you claim 100ms / 32 = `{python} q3_amortized`ms per-sample latency?
+Measuring latency with batch_size=32 gives 100ms total. Can you claim 100 / 32 = 3.1ms per-sample latency?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**No.** This underestimates per-sample latency.
+**No.** Amortized latency is not real latency.
 
-Batching amortizes fixed overhead (data transfer, kernel launch). Per-sample latency at batch=1 is higher than batch=32 divided by 32.
+Batching amortizes fixed overhead (data transfer, kernel launch). Per-sample latency at batch=1 is higher than the batch-32 number divided by 32.
 
-Example reality:
-- Batch=32: 100ms total → `{python} q3_amortized`ms per sample (amortized)
-- Batch=1: 8ms total → 8ms per sample (actual)
+What's actually going on:
 
-**Why the discrepancy?**
-- Fixed overhead: `{python} q3_fixed`ms (data transfer, setup)
-- Variable cost: `{python} q3_var_total`ms / 32 = `{python} q3_var_per_sample`ms per sample
-- At batch=1: `{python} q3_fixed`ms fixed + `{python} q3_var_per_sample`ms variable = `{python} q3_batch1_check`ms
+- Batch=32: 100ms total → 3.1ms/sample (amortized)
+- Batch=1: 8ms total → 8ms/sample (actual)
 
-**Always benchmark at deployment batch size.** If production serves single requests, measure with batch=1.
+The cost decomposes as:
+
+- Fixed overhead: ~5.0ms (data transfer, kernel launch)
+- Variable cost: ~95.0ms / 32 = ~3.0ms per sample
+- At batch=1: 5.0ms + 3.0ms ≈ 8.0ms ✓
+
+**Always benchmark at the deployment batch size.** If production serves single requests, measure with batch=1.
 :::
 
 **Q4: Speedup Calculation**
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q4: Speedup and real-world impact
-q4_baseline_ms = 20
-q4_optimized_ms = 5
-q4_speedup = q4_baseline_ms / q4_optimized_ms
-
-q4_baseline_rps = 100  # requests/sec (given scenario)
-q4_optimized_rps = q4_baseline_rps * q4_speedup
-q4_baseline_cost = 1000  # $/month (given scenario)
-q4_optimized_cost = q4_baseline_cost / q4_speedup
-
-q4_baseline_util = 60  # % utilization (given scenario)
-q4_optimized_util = q4_baseline_util / q4_speedup
-q4_headroom = 100 - q4_optimized_util
-
-q4_speedup = f"{q4_speedup:.1f}x"
-q4_times_faster = f"{q4_speedup:.0f}"
-q4_optimized_rps = f"{q4_optimized_rps:.0f}"
-q4_optimized_cost = f"${q4_optimized_cost:.0f}"
-q4_headroom = f"{q4_headroom:.0f}%"
-```
 
 Baseline: 20ms latency. Optimized: 5ms latency. What is the speedup and what does it mean?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Speedup = baseline_latency / optimized_latency = 20ms / 5ms = **`{python} q4_speedup`**
+Speedup = baseline / optimized = 20ms / 5ms = **4.0×**.
 
-**What it means:**
-- Optimized model is **`{python} q4_times_faster` times faster**
-- Processes same input in 1/`{python} q4_times_faster` the time
-- Can handle `{python} q4_times_faster`x more traffic with same hardware
+What that buys you:
 
-**Real-world impact:**
-- If baseline served 100 requests/sec, optimized serves `{python} q4_optimized_rps` requests/sec
-- If baseline cost $1000/month in compute, optimized costs `{python} q4_optimized_cost`/month
-- If baseline met latency SLA at 60% utilization, optimized has `{python} q4_headroom` headroom
+- Same input processed in one-quarter the time.
+- Same hardware now serves 4× the traffic.
 
-**Note:** Speedup alone doesn't tell the full story. Check accuracy_delta and compression_ratio to understand trade-offs.
+What it means in dollars and SLA:
+
+- 100 req/sec baseline → 400 req/sec optimized.
+- $1,000/month compute → $250/month for the same load.
+- 60% utilization at SLA → 85% headroom before you have to scale.
+
+**Caveat:** speedup is one number. Always read it alongside `accuracy_delta` and `compression_ratio` — a 4× speedup that costs 5% accuracy is not the same product.
 :::
 
 **Q5: Schema Validation Value**
@@ -1009,11 +872,11 @@ For students who want to understand the academic foundations and industry standa
 
 ### Seminal Papers
 
-- **MLPerf: An Industry Standard Benchmark Suite for Machine Learning Performance** - Mattson et al. (2020). Defines standardized ML benchmarks for hardware comparison. The gold standard for fair performance comparisons. [arXiv:1910.01500](https://arxiv.org/abs/1910.01500)
+- **MLPerf: An Industry Standard Benchmark Suite for Machine Learning Performance** - Mattson et al. (2020). Defines standardized ML benchmarks for hardware comparison. The gold standard for fair performance comparisons. **Systems Implication:** Forced hardware vendors to transparently report power consumption and system topology alongside raw FLOPS, cementing the reality that interconnects and power walls dictate cluster-scale ML. [arXiv:1910.01500](https://arxiv.org/abs/1910.01500)
 
-- **A Step Toward Quantifying Independently Reproducible Machine Learning Research** - Pineau et al. (2021). Analyzes reproducibility crisis in ML and proposes requirements for verifiable claims. Introduces reproducibility checklist adopted by NeurIPS. [arXiv:2104.05563](https://arxiv.org/abs/2104.05563)
+- **A Step Toward Quantifying Independently Reproducible Machine Learning Research** - Pineau et al. (2021). Analyzes reproducibility crisis in ML and proposes requirements for verifiable claims. Introduces reproducibility checklist adopted by NeurIPS. **Systems Implication:** Emphasized that identical code can yield divergent results across different hardware architectures (e.g., due to floating-point non-determinism in parallel reductions), making hardware logging a strict requirement for reproducibility. [arXiv:2104.05563](https://arxiv.org/abs/2104.05563)
 
-- **Hidden Technical Debt in Machine Learning Systems** - Sculley et al. (2015). Identifies systems challenges in production ML, including monitoring, versioning, and reproducibility. Required reading for ML systems engineers. [NeurIPS 2015](https://papers.nips.cc/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html)
+- **Hidden Technical Debt in Machine Learning Systems** - Sculley et al. (2015). Identifies systems challenges in production ML, including monitoring, versioning, and reproducibility. Required reading for ML systems engineers. **Systems Implication:** Revealed that the underlying compute infrastructure, data pipelines, and serving systems dwarf the actual ML code, showing that scaling ML is fundamentally a distributed systems engineering problem. [NeurIPS 2015](https://papers.nips.cc/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html)
 
 ### Additional Resources
 
@@ -1023,19 +886,23 @@ For students who want to understand the academic foundations and industry standa
 
 ## What's Next
 
-:::{.callout-note title="Congratulations: You've Completed TinyTorch!"}
+:::{.callout-note title="The framework is finished. The learning isn't."}
 
-You've built a complete ML framework from scratch—from basic tensors to production-ready benchmarking. You understand how PyTorch works under the hood, how optimizations affect performance, and how to measure and document results professionally. These skills transfer directly to production ML engineering.
+Twenty modules ago, `Tensor` was an empty class. Now it has autograd behind it, a transformer on top of it, a quantizer that compresses it, and a benchmark report that proves what it can do. You didn't read about how PyTorch is built. You built it.
+
+The `results.json` you ship from this module is the first artifact in a long career of them. Every system you'll deploy from here forward gets the same treatment: baseline, optimize, measure, justify.
 :::
 
-**Next Steps - Applying Your Knowledge:**
+Where to take the framework next:
 
-| Direction | What To Build | Skills Applied |
-|-----------|--------------|----------------|
-| **Advanced Optimizations** | Benchmark milestone models (MNIST CNN, Transformer) with Modules 14-18 techniques | Apply learned optimizations to real models |
-| **Production Systems** | Integrate MLflow or Weights & Biases into your projects | Scale benchmarking to team workflows |
-| **Research Contributions** | Submit to Papers with Code using your schema validation patterns | Share reproducible results with community |
-| **MLOps Automation** | Build CI/CD pipelines that run benchmarks on every commit | Detect performance regressions automatically |
+| Direction | What to build | What it teaches |
+|-----------|---------------|-----------------|
+| **Push the optimizers** | Benchmark milestone models (MNIST CNN, Transformer) end-to-end through Modules 14-18 | How real optimizations interact under measurement |
+| **Scale to a team** | Wire MLflow or Weights & Biases into the same `BenchmarkReport` flow | How professional experiment tracking grows from this same skeleton |
+| **Publish results** | Convert your schema into a Papers with Code submission | How reproducibility becomes a community contract |
+| **Automate regression detection** | Run the benchmark on every commit in CI | How performance is defended, not just achieved |
+
+The next chapter — the **Conclusion** — steps back from the code. It looks at what you actually learned by writing all of it: which abstractions paid off, which trade-offs you'll keep meeting, and how this framework you built compares to the production systems that inspired it. Read it with your `results.json` open.
 
 ## Get Started
 

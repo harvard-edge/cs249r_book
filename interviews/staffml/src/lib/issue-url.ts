@@ -96,8 +96,8 @@ export function buildSiteIssueUrl(): string {
 }
 
 /** Build a URL for contributing a new question */
-export function buildContributeUrl(): string {
-  const body = [
+export function buildContributeUrl(customBody?: string): string {
+  const body = customBody || [
     '## New Question Submission',
     '',
     '**Track:** <!-- cloud / edge / mobile / tinyml -->',
