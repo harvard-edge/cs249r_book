@@ -88,17 +88,26 @@ figures: $(PDFS) ## Convert all SVG diagrams to PDF (for LaTeX embedding).
 # run Quarto, capture its exit code, then *verify the PDF exists* and
 # treat the cleanup error as benign only if it does. If the PDF is
 # missing, fail loudly — that's a real build failure.
-PDF_OUT := pdf/TinyTorch-Guide.pdf
+# Quarto writes the rendered book into pdf/_build/ (see `output-dir: _build`
+# in pdf/_quarto.yml) — this matches every other Quarto project in the repo
+# (kits, slides, site, labs, etc. all emit under _build/). CI workflows
+# (tinytorch-build-pdfs.yml, tinytorch-update-pdfs.yml) upload the artifact
+# directly from pdf/_build/. We additionally copy it up to pdf/ purely as a
+# local-dev convenience so `open pdf/TinyTorch-Guide.pdf` just works without
+# the _build/ prefix — CI does not need the copy.
+PDF_BUILD := pdf/_build/TinyTorch-Guide.pdf
+PDF_OUT   := pdf/TinyTorch-Guide.pdf
 
 pdf: figures ## Build the TinyTorch Lab Guide PDF.
 	@set +e; \
 	  cd pdf && $(QUARTO) render; \
 	  quarto_exit=$$?; \
 	  cd ..; \
-	  if [ ! -f "$(PDF_OUT)" ]; then \
-	    echo "ERROR: $(PDF_OUT) was not produced (quarto exit=$$quarto_exit)"; \
+	  if [ ! -f "$(PDF_BUILD)" ]; then \
+	    echo "ERROR: $(PDF_BUILD) was not produced (quarto exit=$$quarto_exit)"; \
 	    exit 1; \
 	  fi; \
+	  cp "$(PDF_BUILD)" "$(PDF_OUT)"; \
 	  if [ $$quarto_exit -ne 0 ]; then \
 	    echo "  note: quarto exited $$quarto_exit on post-render cleanup (benign — see Makefile)"; \
 	  fi; \

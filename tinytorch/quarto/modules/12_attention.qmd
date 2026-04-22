@@ -1,84 +1,3 @@
-
-```{python}
-#| echo: false
-#| output: false
-import math
-
-
-# --- Multi-Head Attention: head dimension ---
-mha_embed_dim = 512
-mha_num_heads = 8
-mha_head_dim = mha_embed_dim // mha_num_heads
-mha_head_dim = f"{mha_embed_dim}/{mha_num_heads}={mha_head_dim}"
-
-# --- Computational Complexity (prose): GPT-3 scale ---
-complexity_seq = 2048
-complexity_elements = complexity_seq ** 2
-complexity_bytes = complexity_elements * 4
-complexity_mb = complexity_bytes / 1024**2
-complexity_gpt3_layers = 96
-complexity_gpt3_attn_gb = complexity_gpt3_layers * complexity_mb / 1024
-
-complexity_elements = f"{complexity_elements:,}"
-complexity_mb = f"{complexity_mb:.0f} MB"
-complexity_gpt3_attn_gb = f"{complexity_gpt3_attn_gb:.1f} GB"
-
-# --- Computational Complexity (prose): GPT-3 training (5x inference) ---
-complexity_train_multiplier = 5
-complexity_gpt3_train_gb = complexity_train_multiplier * complexity_gpt3_attn_gb
-complexity_gpt3_train_gb = f"~{complexity_gpt3_train_gb:.1f} GB"
-
-# --- Computational Complexity (prose): GPT-4 estimate ---
-complexity_gpt4_layers = 120
-complexity_gpt4_ctx = 32768
-complexity_gpt4_gb = (complexity_gpt4_layers * (complexity_gpt4_ctx ** 2) * 4) / 1024**3
-complexity_gpt4_gb = f"~{complexity_gpt4_gb:.0f} GB"
-
-# --- Q1: Memory Calculation ---
-q1_seq_a = 1024
-q1_elements_a = q1_seq_a ** 2
-q1_bytes_a = q1_elements_a * 4
-q1_mb_a = q1_bytes_a / 1024**2
-
-q1_seq_b = 2048
-q1_elements_b = q1_seq_b ** 2
-q1_bytes_b = q1_elements_b * 4
-q1_mb_b = q1_bytes_b / 1024**2
-
-q1_scale_factor = (q1_seq_b // q1_seq_a) ** 2
-q1_gpt3_layers = 96
-q1_gpt3_gb = q1_gpt3_layers * q1_mb_b / 1024
-
-q1_elements_a = f"{q1_elements_a:,}"
-q1_mb_a = f"{q1_mb_a:.1f} MB"
-q1_elements_b = f"{q1_elements_b:,}"
-q1_mb_b = f"{q1_mb_b:.1f} MB"
-q1_scale_factor = f"{q1_scale_factor}"
-q1_gpt3_layers = f"{q1_gpt3_layers}"
-q1_gpt3_mb_b = f"{q1_mb_b:.1f} MB"
-q1_gpt3_total_gb = f"{q1_gpt3_gb:.1f} GB"
-
-# --- Q2: Attention Bottleneck ---
-q2_d = 512
-q2_d_squared = q2_d ** 2
-q2_crossover = q2_d_squared // q2_d
-
-q2_d_squared = f"{q2_d_squared:,}"
-q2_crossover = f"{q2_crossover}"
-
-# --- Q5: Gradient Memory ---
-q5_multiplier = 5
-q5_layers = 96
-q5_attn_mb = q1_mb_b  # reuse 2048-context value: 16.0 MB
-q5_inference_gb = q5_layers * q5_attn_mb / 1024
-q5_training_gb = q5_layers * q5_attn_mb * q5_multiplier / 1024
-
-q5_multiplier = f"{q5_multiplier}"
-q5_attn_mb = f"{q5_attn_mb:.0f} MB"
-q5_inference_gb = f"{q5_inference_gb:.1f} GB"
-q5_training_gb = f"{q5_training_gb:.1f} GB"
-```
-
 # Module 12: Attention
 
 :::{.callout-note title="Module Info"}
@@ -86,6 +5,7 @@ q5_training_gb = f"{q5_training_gb:.1f} GB"
 **ARCHITECTURE TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-08, 10-11
 
 **Prerequisites: Modules 01-08 and 10-11** means you should understand:
+
 - Tensor operations and shape manipulation (Module 01)
 - Activations, particularly softmax (Module 02)
 - Linear layers and weight projections (Module 03)
@@ -395,9 +315,9 @@ initSlideViewer('12_attention', '../assets/slides/12_attention.pdf');
 ```
 ## Overview
 
-The attention mechanism revolutionized deep learning by solving a fundamental problem: how can models focus on relevant information when processing sequences? Before attention, models like RNNs compressed entire sequences into fixed-size hidden states, creating an information bottleneck. Attention changes this by allowing every position in a sequence to directly access information from every other position, weighted by relevance.
+Attention is the mechanism behind GPT, BERT, and every modern LLM. In this module you build it from scratch — scaled dot-product attention and multi-head attention — the same math that runs in production transformers, written in NumPy so you can read every line.
 
-You'll build scaled dot-product attention and multi-head attention from scratch, the exact mechanisms powering GPT, BERT, and modern transformers. By implementing the core formula `Attention(Q, K, V) = softmax(QK^T / √d_k) V` with vectorized matrix operations, you'll witness the O(n²) memory complexity that makes attention both powerful and challenging at scale. This hands-on implementation reveals why research into efficient attention variants like FlashAttention is crucial for production systems.
+The shift attention introduced is simple to state. RNNs squeeze a whole sequence into one fixed-size hidden state and hope nothing important falls out. Attention lets every position read directly from every other position, weighted by relevance computed on the fly. That's it. The cost of that freedom is the equation you'll implement: `Attention(Q, K, V) = softmax(QK^T / √d_k) V`. The `QK^T` term creates an `n × n` matrix — quadratic in sequence length. By the end of this module you'll have written that matrix, watched it dominate memory at long context, and understood exactly why FlashAttention and friends exist.
 
 ## Learning Objectives
 
@@ -463,12 +383,14 @@ scaled_dot_product_attention(Q, K, V, mask=None) -> (output, attention_weights)
 Computes the fundamental attention operation that powers all transformers.
 
 **Parameters:**
-- `Q`: Query tensor `(batch_size, seq_len, d_model)` - what each position is looking for
-- `K`: Key tensor `(batch_size, seq_len, d_model)` - what's available at each position
-- `V`: Value tensor `(batch_size, seq_len, d_model)` - actual content to retrieve
-- `mask`: Optional `(batch_size, seq_len, seq_len)` - 1.0 for allowed positions, 0.0 for masked
+
+- `Q`: Query tensor `(batch_size, seq_len, d_model)` — what each position is looking for
+- `K`: Key tensor `(batch_size, seq_len, d_model)` — what's available at each position
+- `V`: Value tensor `(batch_size, seq_len, d_model)` — actual content to retrieve
+- `mask`: Optional `(batch_size, seq_len, seq_len)` — 1.0 for allowed positions, 0.0 for masked
 
 **Returns:**
+
 - `output`: Attended values `(batch_size, seq_len, d_model)`
 - `attention_weights`: Attention matrix `(batch_size, seq_len, seq_len)` showing focus patterns
 
@@ -491,6 +413,7 @@ Creates multi-head attention with `embed_dim // num_heads` dimensions per head.
 | `parameters` | `parameters() -> List[Tensor]` | Return all trainable parameters |
 
 **Attributes:**
+
 - `embed_dim`: Total embedding dimension
 - `num_heads`: Number of parallel attention heads
 - `head_dim`: Dimension per head (embed_dim // num_heads)
@@ -503,11 +426,13 @@ This section covers the fundamental ideas you need to understand attention deepl
 
 ### Query, Key, Value: The Information Retrieval Paradigm
 
-Attention models sequence processing as an information retrieval problem. Think of it like searching a database: you have a query describing what you need, keys that describe what each entry contains, and values representing the actual data. When you search "machine learning papers," the search engine compares your query against document descriptions (keys) to determine relevance, then returns the actual documents (values) weighted by how well they match.
+Attention treats sequence processing as a soft database lookup. Three roles, all learned:
 
-The same pattern applies to transformers. For each position in a sequence, the query asks "what information do I need?", keys describe "what information do I have?", and values contain the actual representations to retrieve. The beauty is that queries, keys, and values are all learned projections of the same input embeddings, allowing the model to discover what aspects of meaning to search for and retrieve.
+- **Query** — what this position is looking for.
+- **Key** — what each other position advertises about itself.
+- **Value** — what each position actually hands over if attended to.
 
-Here's how your implementation creates these three components through linear projections:
+To translate this into code, your implementation creates these three components using dedicated linear projections, mapping the input sequence into distinct representations for querying, indexing, and retrieving:
 
 ```python
 # From MultiHeadAttention.__init__
@@ -521,13 +446,13 @@ K = self.k_proj.forward(x)  # Transform input to keys
 V = self.v_proj.forward(x)  # Transform input to values
 ```
 
-Each linear projection learns a different perspective on the input. During training, the model discovers that queries might emphasize semantic meaning, keys might emphasize syntactic roles, and values might emphasize contextual information, all optimized end-to-end for the task.
+Three projections, three roles, one input. The same embedding plays all three parts at every position — and what those parts mean is whatever the optimizer settles on.
 
 ### Scaled Dot-Product Attention: Similarity as Relevance
 
-The core attention computation answers a simple question: how similar is each query to each key? The dot product between vectors naturally measures similarity, where higher values indicate more aligned directions in embedding space. For a query at position i and key at position j, the dot product `Q[i] · K[j]` quantifies their relevance.
+The core computation asks one question: how similar is each query to each key? A dot product is the cheapest reasonable answer — large positive values mean the vectors point the same way, near-zero means orthogonal, large negative means opposite. For positions `i` and `j`, the score `Q[i] · K[j]` is exactly that.
 
-But raw dot products grow with embedding dimension, creating numerical instability in softmax. With 512-dimensional embeddings, dot products can reach hundreds, causing softmax to saturate (output probabilities near 0 or 1 with tiny gradients). Scaling by `1/√d_k` normalizes the variance, keeping values in a stable range regardless of embedding dimension.
+The `1/√d_k` factor exists for a specific, fixable failure. If the components of Q and K are roughly unit-variance, then `Q[i] · K[j]` is a sum of `d_k` independent products — its variance grows linearly with `d_k`, so its standard deviation grows like `√d_k`. At `d_k = 64` the typical score is around 8; at `d_k = 512` it's around 23. Feed that to softmax and one entry takes essentially all the probability mass, while every other entry sits in the flat tail of `exp` where the gradient is nearly zero. Training stalls. Dividing by `√d_k` cancels exactly that growth, holding score variance at roughly 1 regardless of head dimension.
 
 Your implementation computes this using vectorized matrix operations:
 
@@ -574,13 +499,13 @@ attention_weights = softmax(scores, dim=-1)  # Normalize along last dimension
 output = attention_weights.matmul(V)
 ```
 
-The mask addition is clever: for positions where `mask=0` (masked), we add -1e9 to the score. After softmax, `exp(-1e9)` is effectively zero, so masked positions get zero attention weight. For positions where `mask=1` (allowed), adding zero leaves scores unchanged. This preserves differentiability while enforcing hard constraints.
+The mask trick is worth pausing on. Masked positions get `-1e9` added to their score; after `exp`, that's a number indistinguishable from zero, so they receive no attention weight at all. Allowed positions get `+0` and pass through unchanged. The whole operation stays differentiable — there is no `if` in the gradient path — and the constraint is enforced exactly.
 
 ### Multi-Head Attention: Parallel Relationship Learning
 
-Single-head attention learns one similarity function between queries and keys. But sequences have multiple types of relationships: syntactic dependencies, semantic similarity, positional patterns, long-range coreference. Multi-head attention addresses this by running multiple attention mechanisms in parallel, each with different learned projections.
+A single attention head learns one similarity function — one notion of "what counts as relevant". Real sequences have several at once: local syntactic agreement, long-range coreference, positional offsets, semantic similarity. Multi-head attention runs several attention mechanisms side by side, each with its own learned Q/K/V projections, so each head can specialize.
 
-The key insight is splitting the embedding dimension across heads rather than duplicating it. For `embed_dim=512` and `num_heads=8`, each head operates on `{python} mha_head_dim` dimensions. This keeps parameter count constant while allowing diverse specialization. One head might learn to focus on adjacent tokens (local syntax), another on semantically similar words (meaning), another on specific positional offsets (structured patterns).
+The crucial design choice is to *split* the embedding dimension across heads, not duplicate it. With `embed_dim=512` and `num_heads=8`, each head operates on `512/8 = 64` dimensions. Parameter count stays the same as a single 512-dim head, but you get 8 narrower attention mechanisms running in parallel instead of one wide one. In practice, heads specialize on their own — visualizations of trained models show one head tracking adjacent tokens, another tracking subject–verb pairs across long distances, others doing things no one has named.
 
 Your implementation handles this through reshape and transpose operations:
 
@@ -617,24 +542,24 @@ The reshape-transpose-attend-transpose-reshape dance separates heads for indepen
 
 ### Causal Masking: Preventing Information Leakage
 
-In language modeling, predicting the next token requires a strict causality constraint: position i can only attend to positions 0 through i, never to future positions. Without this, the model could "cheat" by looking at the answer during training. Causal masking enforces this by zeroing attention weights for all positions j > i.
+GPT generates one token at a time, left to right. To train it, we feed in a whole sentence at once and ask it to predict the next token at *every* position in parallel — but only if each position is forbidden from peeking at the tokens that come after it. Otherwise the task is trivial: position 5 just copies token 6 and reports a perfect prediction. Causal masking is what makes the parallel training match the sequential generation: position `i` may attend only to positions `0..i`.
 
-The implementation uses a lower triangular mask: ones below and on the diagonal, zeros above. For a sequence length of 4, the mask looks like:
+The mask itself is a lower-triangular matrix — ones on and below the diagonal, zeros above:
 
 ```
 [[1, 0, 0, 0],   # Position 0 can only see itself
  [1, 1, 0, 0],   # Position 1 sees 0 and 1
  [1, 1, 1, 0],   # Position 2 sees 0, 1, 2
- [1, 1, 1, 1]]   # Position 3 sees all positions
+ [1, 1, 1, 1]]   # Position 3 sees the whole prefix
 ```
 
-When combined with the masking logic in attention (adding -1e9 to masked scores before softmax), this creates a structured sparsity pattern: exactly half the attention matrix becomes zero. This is crucial for autoregressive models like GPT, where generation must proceed left-to-right without access to future tokens.
+Combined with the `-1e9` trick from the previous section, exactly the upper triangle of every attention matrix is zeroed out before the weighted sum. The reader should pause on this: the mask is the *only* thing that turns a bidirectional encoder (like BERT) into an autoregressive decoder (like GPT). Same code, same parameters, one extra triangular tensor.
 
 ### Computational Complexity: The O(n²) Reality
 
 Attention's power comes from all-to-all connectivity: every position can attend to every other position. But this creates quadratic scaling in both computation and memory. For sequence length n, the attention matrix has n² elements. The vectorized `Q @ K^T` operation computes all n² similarity scores in one matrix multiplication, softmax normalizes n² values, and applying attention to values multiplies n² weights by the value vectors.
 
-The memory cost is particularly severe. For GPT-3 with 2048-token context, a single attention matrix stores 2048² = `{python} complexity_elements` float32 values, requiring `{python} complexity_mb`. With 96 layers, attention matrices alone need `{python} complexity_gpt3_attn_gb`, excluding activations, gradients, and other tensors. This quadratic wall is why long-context AI remains an active research challenge.
+The memory cost is the part that bites first. For GPT-3 with 2048-token context, a single attention matrix stores `2048² = 4,194,304` float32 values — 16 MB. With 96 layers stacked, attention matrices alone consume 1.5 GB before you account for activations, gradients, Q/K/V projections, or anything else. That is the quadratic wall, and it is the reason every long-context system you've heard of has a paper attached to it.
 
 | Operation | Time Complexity | Memory Complexity | Dominates When |
 |-----------|----------------|-------------------|----------------|
@@ -644,6 +569,10 @@ The memory cost is particularly severe. For GPT-3 with 2048-token context, a sin
 | **Total** | **O(n² × d)** | **O(n²)** | n > d (long sequences) |
 
 For comparison, feed-forward networks in transformers have O(n × d²) complexity. When sequence length n exceeds embedding dimension d (common in modern models), attention's O(n²) term dominates, making it the primary bottleneck. This explains why research into efficient attention variants like sparse attention, linear attention, and FlashAttention is crucial for production systems.
+
+:::{.callout-warning title="💾 Systems Implication: The Memory Wall (FlashAttention)"}
+The $O(n^2)$ memory requirement of attention is the single biggest bottleneck in modern generative AI. It dictates the "context window" limit of every LLM. To calculate attention, standard implementations must write the massive $N \times N$ similarity matrix to the GPU's slow High Bandwidth Memory (HBM) and then read it back for the softmax operation. Systems engineers bypass this wall using **FlashAttention**. This algorithm doesn't just compute attention in small "blocks" that fit entirely inside the GPU's ultra-fast, but tiny, SRAM; crucially, it **fuses** the operations to avoid the costly **HBM read/write round-trips** entirely.
+:::
 
 ## Common Errors
 
@@ -731,7 +660,7 @@ mask = Tensor(np.tril(np.ones((2, 10, 10))))
 output_masked = mha.forward(x, mask)
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 import torch.nn as nn
@@ -769,9 +698,9 @@ The mathematical operations, architectural patterns, and shape conventions are i
 
 To appreciate why attention research is crucial, consider the scaling characteristics of modern language models:
 
-- **GPT-3** (96 layers, 2048 context): ~`{python} complexity_gpt3_attn_gb` just for attention matrices during forward pass, `{python} complexity_gpt3_train_gb` with gradients during training
-- **GPT-4** (estimated 120 layers, 32K context): Would require `{python} complexity_gpt4_gb` for attention alone without optimization, exceeding single-GPU memory
-- **Long-context models** (100K+ tokens): Attention becomes computationally prohibitive without algorithmic improvements
+- **GPT-3** (96 layers, 2048 context): ~1.5 GB just for attention matrices during the forward pass, ~7.5 GB once gradients and optimizer state are added during training
+- **GPT-4** (estimated 120 layers, 32K context): would require ~480 GB for attention alone without optimization, far exceeding any single-GPU memory budget
+- **Long-context models** (100K+ tokens): attention becomes computationally prohibitive without algorithmic improvements
 
 These constraints drive modern attention research:
 
@@ -793,18 +722,21 @@ For sequence length 1024, how much memory does a single attention matrix require
 :::{.callout-note collapse="true" title="Answer"}
 
 **Sequence length 1024:**
-- Attention matrix: 1024 × 1024 = `{python} q1_elements_a` elements
-- Memory: `{python} q1_elements_a` × 4 bytes = **`{python} q1_mb_a`**
+
+- Attention matrix: 1024 × 1024 = 1,048,576 elements
+- Memory: 1,048,576 × 4 bytes = **4.0 MB**
 
 **Sequence length 2048:**
-- Attention matrix: 2048 × 2048 = `{python} q1_elements_b` elements
-- Memory: `{python} q1_elements_b` × 4 bytes = **`{python} q1_mb_b`**
 
-**Scaling factor:** Doubling sequence length quadruples memory (2² = `{python} q1_scale_factor`×)
+- Attention matrix: 2048 × 2048 = 4,194,304 elements
+- Memory: 4,194,304 × 4 bytes = **16.0 MB**
 
-For GPT-3 (`{python} q1_gpt3_layers` layers, 2048 context):
-- `{python} q1_gpt3_layers` layers × `{python} q1_gpt3_mb_b` = **`{python} q1_gpt3_total_gb`** just for attention matrices!
-- This excludes Q/K/V projections, gradients, and all other tensors.
+**Scaling factor:** Doubling sequence length quadruples memory (2² = 4×)
+
+For GPT-3 (96 layers, 2048 context):
+
+- 96 layers × 16.0 MB = **1.5 GB** just for attention matrices.
+- This excludes Q/K/V projections, gradients, and every other tensor.
 :::
 
 **Q2: Attention Bottleneck**
@@ -814,19 +746,22 @@ A transformer layer has attention (O(n² × d)) and feed-forward network (O(n ×
 :::{.callout-note collapse="true" title="Answer"}
 
 **Complexity comparison:**
+
 - Attention: O(n² × d) = O(n² × 512)
-- FFN: O(n × d²) = O(n × 512²) = O(n × `{python} q2_d_squared`)
+- FFN: O(n × d²) = O(n × 512²) = O(n × 262,144)
 
-**Crossover point:** n² × 512 > n × `{python} q2_d_squared`
-- Simplify: n > `{python} q2_d_squared` / 512 = **`{python} q2_crossover`**
+**Crossover point:** n² × 512 > n × 262,144
 
-**When n > `{python} q2_crossover`**, attention becomes the memory bottleneck.
+- Simplify: n > 262,144 / 512 = **512**
+
+**When n > 512**, attention becomes the memory bottleneck.
 
 **Real-world implications:**
+
 - Short sequences (n=128): FFN dominates, 262K vs 8K operations
-- Medium sequences (n=512): Break-even point
-- Long sequences (n=2048): Attention dominates, 2M vs 262K operations
-- **This is why GPT-3 (2048 context) needed attention optimization!**
+- Medium sequences (n=512): break-even point
+- Long sequences (n=2048): attention dominates, 2M vs 262K operations
+- **This is why GPT-3 (2048 context) needed attention optimization.**
 :::
 
 **Q3: Multi-Head Efficiency**
@@ -836,29 +771,34 @@ Why use 8 heads of 64 dimensions instead of 1 head of 512 dimensions? Parameters
 :::{.callout-note collapse="true" title="Answer"}
 
 **Parameter count (both are identical):**
+
 - 8 heads × 64 dims: Linear(512→512) for Q, K, V, Out = 4 × (512×512 + 512) weights+biases
-- 1 head × 512 dims: Same projection parameters
+- 1 head × 512 dims: same projection parameters
 
 **Key differences:**
 
 **1. Parallelization:**
+
 - 8 heads can process in parallel on modern GPUs (separate CUDA streams)
 - Each head's smaller matmul operations utilize GPU cores more efficiently
 
 **2. Representation diversity:**
+
 - 8 heads learn 8 different similarity functions (syntax, semantics, position, etc.)
 - 1 head learns a single monolithic similarity function
 - Training discovers specialization automatically
 
 **3. Cache efficiency:**
-- Smaller head_dim (64) fits better in GPU cache/shared memory
-- Larger single head (512) causes more cache misses
+
+- Smaller head_dim (64) fits better in GPU cache and shared memory
+- A single 512-dim head causes more cache misses
 
 **4. Gradient flow:**
-- Multiple heads provide diverse gradient signals during backpropagation
-- Single head has one gradient path, slower learning
 
-**Empirical result:** 8 heads consistently outperform 1 head despite same parameter count. Diversity matters!
+- Multiple heads provide diverse gradient signals during backpropagation
+- A single head has one gradient path, slower learning
+
+**Empirical result:** 8 heads consistently outperform 1 head at equal parameter count. Diversity is the whole point.
 :::
 
 **Q4: Causal Masking Computation**
@@ -876,21 +816,24 @@ scores = scores + adder_mask_tensor  # Masking happens after
 ```
 
 **Why no savings:**
+
 - `Q.matmul(K_t)` computes all n² scores
 - Masking only affects softmax, not the initial computation
 - We still store and normalize the full matrix
 
 **To actually save computation, you'd need:**
+
 1. Sparse matrix multiplication (skip masked positions in matmul)
-2. Only compute lower triangle of scores
+2. Computing only the lower triangle of scores
 3. Specialized CUDA kernels that exploit sparsity
 
 **Production optimizations:**
-- PyTorch's standard attention: Also computes full matrix (same as yours)
-- FlashAttention: Uses tiling to avoid full matrix but doesn't exploit sparsity
-- Sparse attention (BigBird, Longformer): Actually skips computation for sparse patterns
 
-**Memory could be saved:** Store only lower triangle (n²/2 elements), but requires custom indexing
+- PyTorch's standard attention also computes the full matrix (same as yours)
+- FlashAttention uses tiling to avoid materializing the full matrix but doesn't exploit sparsity
+- Sparse attention (BigBird, Longformer) actually skips computation for sparse patterns
+
+**Memory could be saved** by storing only the lower triangle (n²/2 elements), but it requires custom indexing.
 :::
 
 **Q5: Gradient Memory**
@@ -900,43 +843,48 @@ Training attention requires storing activations for backpropagation. How much me
 :::{.callout-note collapse="true" title="Answer"}
 
 **Forward pass (inference):**
+
 - Attention matrix: n² values
 
 **Backward pass (training) additional memory:**
+
 - Gradient of attention weights: n² values
 - Gradient of Q, K, V: 3 × (n × d) values
 - Intermediate gradients from softmax: n² values
 
 **With Adam optimizer (standard for transformers):**
+
 - First moment (momentum): n² values
 - Second moment (velocity): n² values
 
 **Total multiplier for attention matrix alone:**
+
 - Forward: 1× (attention weights)
 - Backward: +2× (gradients)
 - Optimizer: +2× (Adam state)
-- **Total: `{python} q5_multiplier`× inference memory**
+- **Total: 5× inference memory**
 
 **For GPT-3 scale (96 layers, 2048 context):**
-- Inference: 96 × `{python} q5_attn_mb` = `{python} q5_inference_gb`
-- Training: 96 × `{python} q5_attn_mb` × `{python} q5_multiplier` = **`{python} q5_training_gb`** just for attention gradients and optimizer state!
+
+- Inference: 96 × 16 MB = 1.5 GB
+- Training: 96 × 16 MB × 5 = **7.5 GB** just for attention gradients and optimizer state.
 
 This excludes Q/K/V matrices, feed-forward networks, embeddings, and activations from other layers. Full GPT-3 training requires 350+ GB.
 :::
 
 ## Further Reading
 
-For students who want to understand the academic foundations and explore the research that created modern transformers:
+The theoretical brilliance of attention is matched only by the engineering challenges required to deploy it at scale. For students who want to understand the architectural turning points and hardware-software co-design that conquered the $O(n^2)$ memory wall:
 
 ### Seminal Papers
 
-- **Attention Is All You Need** - Vaswani et al. (2017). The paper that introduced transformers and the multi-head attention mechanism you just built. Shows how attention alone, without recurrence, achieves state-of-the-art results. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
+- **Attention Is All You Need** - Vaswani et al. (2017). The paper that introduced transformers and the multi-head attention mechanism you just built. Shows how attention alone, without recurrence, achieves state-of-the-art results. **Systems Implication:** By completely discarding recurrence, it shattered the sequential compute bottleneck of RNNs, allowing entire sequences to be ingested in parallel, perfectly saturating the massive SIMD grids of modern GPUs. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
 
-- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). Demonstrates how bidirectional attention (no causal mask) enables powerful language understanding. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
+- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). Demonstrates how bidirectional attention (no causal mask) enables powerful language understanding. **Systems Implication:** Deep bidirectional attention required retaining massive $N \times N$ activation checkpoints during the forward pass for backpropagation. This aggressively pushed the boundaries of GPU HBM, driving the industry-wide adoption of activation recomputation (gradient checkpointing) to trade compute for memory. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
 
-- **Language Models are Unsupervised Multitask Learners (GPT-2)** - Radford et al. (2019). Shows how causal attention with your masking pattern enables autoregressive language modeling at scale. [OpenAI](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+- **Language Models are Unsupervised Multitask Learners (GPT-2)** - Radford et al. (2019). Shows how causal attention with the masking pattern you implemented enables autoregressive language modeling at unprecedented scale. **Systems Implication:** As model footprints exploded beyond the capacity of a single GPU, autoregressive generation became heavily latency-bound. This architecture popularized large-scale tensor parallelism, splitting the attention heads across distinct hardware accelerators to preserve inference speed. [OpenAI](https://d4mucfpksywv.cloudfront.net/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 
-- **FlashAttention: Fast and Memory-Efficient Exact Attention** - Dao et al. (2022). Addresses the O(n²) memory bottleneck you experienced, achieving 2-4× speedups without approximation. [arXiv:2205.14135](https://arxiv.org/abs/2205.14135)
+- **FlashAttention: Fast and Memory-Efficient Exact Attention** - Dao et al. (2022). Directly addresses the $O(n^2)$ memory bottleneck you experienced, achieving 2-4× speedups without mathematical approximation. **Systems Implication:** By leveraging precise hardware-aware SRAM tiling, it entirely eliminated the need to materialize the massive attention matrix in slow HBM. This masterclass in systems engineering single-handedly rescued self-attention from the memory bandwidth ceiling, dragging it back to a compute-bound operation. [arXiv:2205.14135](https://arxiv.org/abs/2205.14135)
 
 ### Additional Resources
 
@@ -946,18 +894,18 @@ For students who want to understand the academic foundations and explore the res
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 13 - Transformers"}
+:::{.callout-note title="Coming Up: Module 13 — Transformers"}
 
-Build complete transformer blocks by combining your attention mechanism with feed-forward networks, layer normalization, and residual connections. You'll assemble the architecture behind GPT, BERT, and modern language models.
+You have built the engine. Module 13 builds the chassis around it. The question Module 13 answers is: *what do you wrap attention in to actually train it?* Bare attention has two problems — its outputs collapse to similar values across positions (no per-token computation), and stacking it deeply makes gradients vanish. The transformer block fixes both, with feed-forward networks for per-position transformation, layer normalization to keep activations well-scaled, and residual connections to keep gradients flowing through arbitrarily many layers. Stack the result and you have GPT.
 :::
 
-**Preview - How Your Attention Gets Used in Future Modules:**
+**Preview — how your attention gets used in future modules:**
 
 | Module | What It Does | Your Attention In Action |
 |--------|--------------|--------------------------|
 | **13: Transformers** | Complete transformer blocks | `TransformerLayer(attention + FFN + LayerNorm)` |
-| **13: Transformers** | Positional encoding | Attention on position-aware embeddings |
-| **13: Transformers** | Stacked layers | `attention → FFN → attention → FFN...` |
+| **13: Transformers** | Residual connections | `x + attention(x)` keeps gradients flowing |
+| **13: Transformers** | Stacked layers | `attention → FFN → attention → FFN…` |
 
 ## Get Started
 
