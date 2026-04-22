@@ -1,23 +1,12 @@
 # Periodic Table of ML Systems
 
 <!-- EARLY-RELEASE-CALLOUT:START -->
-<div align="center">
-<table border="0" cellspacing="0" cellpadding="0" width="92%">
-<tr><td align="center" bgcolor="#f6f8fa">
-
-<table border="0" cellspacing="0" cellpadding="20" width="100%">
-<tr><td align="center">
-
-<h3>📌 Early release (2026)</h3>
-<p align="center">This artifact shipped with the <b>2026</b> MLSysBook refresh. The table data, build scripts, and HTML outputs are <b>actively iterated</b> as the curriculum and tooling evolve.</p>
-<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
-
-</td></tr>
-</table>
-
-</td></tr>
-</table>
-</div>
+> [!NOTE]
+> **📌 Early release (2026)**
+>
+> This artifact shipped with the **2026** MLSysBook refresh. The table data, build scripts, and HTML outputs are **actively iterated** as the curriculum and tooling evolve.
+>
+> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 This directory holds the **Periodic Table of ML Systems**: `table.yml` is the source of truth; Node build scripts generate HTML and validation consumes the same data. See `package.json` for `build` and `validate` scripts.

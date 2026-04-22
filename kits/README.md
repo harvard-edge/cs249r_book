@@ -11,23 +11,12 @@
 ---
 
 <!-- EARLY-RELEASE-CALLOUT:START -->
-<div align="center">
-<table border="0" cellspacing="0" cellpadding="0" width="92%">
-<tr><td align="center" bgcolor="#f6f8fa">
-
-<table border="0" cellspacing="0" cellpadding="20" width="100%">
-<tr><td align="center">
-
-<h3>📌 Early release (2026)</h3>
-<p align="center">Hardware Kits shipped with the <b>2026</b> MLSysBook refresh. Labs, build recipes, board notes, and PDF exports are <b>actively iterated</b> as hardware and SDKs evolve.</p>
-<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
-
-</td></tr>
-</table>
-
-</td></tr>
-</table>
-</div>
+> [!NOTE]
+> **📌 Early release (2026)**
+>
+> Hardware Kits shipped with the **2026** MLSysBook refresh. Labs, build recipes, board notes, and PDF exports are **actively iterated** as hardware and SDKs evolve.
+>
+> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 ## What This Is
@@ -40,13 +29,11 @@ This is where AI systems meet the physical world.
 
 ## 🎓 What You Will Learn
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Concept</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="75%">What You Do</th>
+      <th align="left" width="25%">Concept</th>
+      <th align="left" width="75%">What You Do</th>
     </tr>
   </thead>
   <tbody>
@@ -76,20 +63,15 @@ This is where AI systems meet the physical world.
     </tr>
   </tbody>
 </table>
-</td></tr>
-</table>
-</div>
 
 ### 🛠️ Hardware Platforms
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Platform</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">Description</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Best For</th>
+      <th align="left" width="25%">Platform</th>
+      <th align="left" width="50%">Description</th>
+      <th align="left" width="25%">Best For</th>
     </tr>
   </thead>
   <tbody>
@@ -115,9 +97,6 @@ This is where AI systems meet the physical world.
     </tr>
   </tbody>
 </table>
-</td></tr>
-</table>
-</div>
 
 ---
 
@@ -150,14 +129,12 @@ This is where AI systems meet the physical world.
 
 Each platform includes progressive labs:
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Lab</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="50%">What You Build</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Skills</th>
+      <th align="left" width="25%">Lab</th>
+      <th align="left" width="50%">What You Build</th>
+      <th align="left" width="25%">Skills</th>
     </tr>
   </thead>
   <tbody>
@@ -188,9 +165,6 @@ Each platform includes progressive labs:
     </tr>
   </tbody>
 </table>
-</td></tr>
-</table>
-</div>
 
 ---
 
@@ -216,13 +190,11 @@ kits/
 
 ## 📚 Documentation
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Who</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="80%">Resources</th>
+      <th align="left" width="20%">Who</th>
+      <th align="left" width="80%">Resources</th>
     </tr>
   </thead>
   <tbody>
@@ -235,9 +207,7 @@ kits/
       <td>See build instructions above</td>
     </tr>
   </tbody>
-</table></td></tr>
 </table>
-</div>
 
 ---
 
@@ -254,13 +224,11 @@ We welcome contributions to the hardware labs! To contribute:
 
 ## 🔗 Related
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Component</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="75%">Description</th>
+      <th align="left" width="25%">Component</th>
+      <th align="left" width="75%">Description</th>
     </tr>
   </thead>
   <tbody>
@@ -281,9 +249,7 @@ We welcome contributions to the hardware labs! To contribute:
       <td>Read labs online</td>
     </tr>
   </tbody>
-</table></td></tr>
 </table>
-</div>
 
 ---
 

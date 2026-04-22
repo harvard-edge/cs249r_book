@@ -1,19 +1,15 @@
 <div align="center">
   <h1>🗺️ The Blueprint — Instructor Site</h1>
-  <!-- EARLY-RELEASE-CALLOUT:START -->
-  <table border="0" cellspacing="0" cellpadding="0" width="92%">
-  <tr><td align="center" bgcolor="#f6f8fa">
-  <table border="0" cellspacing="0" cellpadding="20" width="100%">
-  <tr><td align="center">
-  <h3>📌 Early release (2026)</h3>
-  <p align="center">This instructor site shipped with the <b>2026</b> MLSysBook refresh and is <b>actively iterated</b>: syllabi, rubrics, layouts, and diagrams (including SVGs) will keep improving as we teach from it.</p>
-  <p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
-  </td></tr>
-  </table>
-  </td></tr>
-  </table>
-  <!-- EARLY-RELEASE-CALLOUT:END -->
 </div>
+
+<!-- EARLY-RELEASE-CALLOUT:START -->
+> [!NOTE]
+> **📌 Early release (2026)**
+>
+> This instructor site shipped with the **2026** MLSysBook refresh and is **actively iterated**: syllabi, rubrics, layouts, and diagrams (including SVGs) will keep improving as we teach from it.
+>
+> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
 
@@ -21,13 +17,11 @@
 
 "The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course.
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Area</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="80%">What you get</th>
+      <th align="left" width="20%">Area</th>
+      <th align="left" width="80%">What you get</th>
     </tr>
   </thead>
   <tbody>
@@ -56,9 +50,7 @@
       <td><b>FAQ</b> for adopting instructors.</td>
     </tr>
   </tbody>
-</table></td></tr>
 </table>
-</div>
 
 ---
 

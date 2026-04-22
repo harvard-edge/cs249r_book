@@ -1,26 +1,12 @@
 <!-- EARLY-RELEASE-CALLOUT:START -->
-<div align="center">
-<table border="0" cellspacing="0" cellpadding="0" width="92%">
-<tr><td align="center" bgcolor="#f6f8fa">
-
-<table border="0" cellspacing="0" cellpadding="20" width="100%">
-<tr><td align="center">
-
-<h3>📌 Early release (2026)</h3>
-<p align="center">MLSys·im shipped with the <b>2026</b> MLSysBook refresh. The modeling platform, APIs, and lab integrations are <b>actively iterated</b> as we harden the simulator and teaching workflows.</p>
-<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
-<p align="center">
-<a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
-&nbsp;
-<a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
-</p>
-
-</td></tr>
-</table>
-
-</td></tr>
-</table>
-</div>
+> [!NOTE]
+> **📌 Early release (2026)**
+>
+> MLSys·im shipped with the **2026** MLSysBook refresh. The modeling platform, APIs, and lab integrations are **actively iterated** as we harden the simulator and teaching workflows.
+>
+> **Feedback** — [GitHub issues](https://github.com/harvard-edge/cs249r_book/issues) or pull requests.
+>
+> [![dev branch](https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white)](https://github.com/harvard-edge/cs249r_book/tree/dev) [![live site](https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white)](https://mlsysbook.ai)
 <!-- EARLY-RELEASE-CALLOUT:END -->
 
 <div align="center">
@@ -141,28 +127,23 @@ MLSysim is an **analytical hardware calculator**, not a production deployment si
 The 22 walls model physical and economic constraints that bound ML system performance.
 Several critical production concerns are deliberately **out of scope**:
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="22%">Concern</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="38%">Why it matters</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Where to learn more</th>
+      <th align="left" width="22%">Concern</th>
+      <th align="left" width="38%">Why it matters</th>
+      <th align="left" width="40%">Where to learn more</th>
     </tr>
   </thead>
   <tbody>
-    <tr bgcolor="#fafbfc"><td><b>Data drift / distribution shift</b></td><td>The #1 cause of production ML failures — model accuracy degrades silently as input distributions change</td><td>Sculley et al. (2015), &quot;Hidden Technical Debt in ML Systems&quot;</td></tr>
+    <tr><td><b>Data drift / distribution shift</b></td><td>The #1 cause of production ML failures — model accuracy degrades silently as input distributions change</td><td>Sculley et al. (2015), &quot;Hidden Technical Debt in ML Systems&quot;</td></tr>
     <tr><td><b>Model versioning &amp; rollback</b></td><td>Production requires running multiple versions, A/B testing, and safe rollback</td><td>Huyen (2022), <i>Designing Machine Learning Systems</i></td></tr>
-    <tr bgcolor="#fafbfc"><td><b>Monitoring &amp; observability</b></td><td>You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates</td><td>Google SRE Book (2016); Huyen (2022)</td></tr>
+    <tr><td><b>Monitoring &amp; observability</b></td><td>You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates</td><td>Google SRE Book (2016); Huyen (2022)</td></tr>
     <tr><td><b>Feature store freshness</b></td><td>Stale features silently degrade real-time models (recommendations, fraud detection)</td><td>Uber Michelangelo (2017)</td></tr>
-    <tr bgcolor="#fafbfc"><td><b>Software bugs &amp; misconfigurations</b></td><td>Most outages are caused by software, not hardware</td><td>Barroso et al. (2018)</td></tr>
+    <tr><td><b>Software bugs &amp; misconfigurations</b></td><td>Most outages are caused by software, not hardware</td><td>Barroso et al. (2018)</td></tr>
     <tr><td><b>Human factors</b></td><td>Team velocity, on-call burden, and organizational alignment often dominate outcomes</td><td>Brooks (1975), <i>The Mythical Man-Month</i></td></tr>
   </tbody>
 </table>
-</td></tr>
-</table>
-</div>
 
 **Passing all 22 walls is necessary but not sufficient for a successful production deployment.**
 
@@ -228,28 +209,23 @@ print(evaluation.scorecard())
 
 The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
 
-<div align="center">
-<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
-<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+<table width="100%">
   <thead>
     <tr>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Scenario</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="18%">Efficiency</th>
-      <th bgcolor="#eef2f7" align="left" valign="top" width="42%">Rationale</th>
+      <th align="left" width="40%">Scenario</th>
+      <th align="left" width="18%">Efficiency</th>
+      <th align="left" width="42%">Rationale</th>
     </tr>
   </thead>
   <tbody>
-    <tr bgcolor="#fafbfc"><td>Training (Megatron-LM, large Transformer)</td><td align="center">0.40–0.55</td><td>Well-optimized GEMM + FlashAttention</td></tr>
+    <tr><td>Training (Megatron-LM, large Transformer)</td><td align="center">0.40–0.55</td><td>Well-optimized GEMM + FlashAttention</td></tr>
     <tr><td>Training (PyTorch eager, small model)</td><td align="center">0.08–0.15</td><td>Kernel launch overhead dominates</td></tr>
-    <tr bgcolor="#fafbfc"><td>Inference decode, batch=1</td><td align="center">0.01–0.05</td><td>Memory-bound; compute nearly idle</td></tr>
+    <tr><td>Inference decode, batch=1</td><td align="center">0.01–0.05</td><td>Memory-bound; compute nearly idle</td></tr>
     <tr><td>Inference decode, batch=32+</td><td align="center">0.15–0.35</td><td>Batch amortizes weight loading</td></tr>
-    <tr bgcolor="#fafbfc"><td>Inference prefill, long context</td><td align="center">0.30–0.50</td><td>Compute-bound GEMM + attention</td></tr>
+    <tr><td>Inference prefill, long context</td><td align="center">0.30–0.50</td><td>Compute-bound GEMM + attention</td></tr>
     <tr><td>TinyML (TFLite Micro on ESP32)</td><td align="center">0.05–0.15</td><td>Interpreter overhead, no tensor cores</td></tr>
   </tbody>
 </table>
-</td></tr>
-</table>
-</div>
 
 ---
 
