@@ -12,7 +12,7 @@ Your contributions are welcome and can encompass a variety of tasks, such as:
 - Enhancing the accessibility of the material
 - Suggesting topics for new content
 
-Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
+Please read our [Code of Conduct](../../CODE_OF_CONDUCT.md) before contributing.
 
 If you are unsure about whether a contribution is appropriate, feel free to open an [issue](https://github.com/harvard-edge/cs249r_book/issues) or start a [discussion](https://github.com/harvard-edge/cs249r_book/discussions).
 
