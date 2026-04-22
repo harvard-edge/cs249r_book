@@ -109,11 +109,11 @@ def register(app: typer.Typer) -> None:
                 if prev_q:
                     console.print(f"    prev: [dim]{prev_q.id}[/dim]  ({prev_q.question.level}, {prev_q.question.zone})  {prev_q.question.title}")
                 else:
-                    console.print(f"    prev: [dim](start of chain)[/dim]")
+                    console.print("    prev: [dim](start of chain)[/dim]")
                 if next_q:
                     console.print(f"    next: [dim]{next_q.id}[/dim]  ({next_q.question.level}, {next_q.question.zone})  {next_q.question.title}")
                 else:
-                    console.print(f"    next: [dim](end of chain)[/dim]")
+                    console.print("    next: [dim](end of chain)[/dim]")
 
         console.print(f"\n[dim]file: {lq.path.relative_to(vault_dir)}[/dim]")
 
