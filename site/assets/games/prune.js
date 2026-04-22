@@ -414,7 +414,7 @@ MLSP.games.prune = function(canvas, opts) {
     id: "prune",
     name: "Pulse Prune",
     ahaLabel: "You just played at",
-    ahaText: "Magnitude-based pruning. Real neural networks have many redundant weights — the small ones. Real compression pipelines cut the dim ones and keep the bright ones, shrinking models 5–20× with minimal accuracy loss. You just did that by eye.",
+    ahaText: "Magnitude-based pruning. Real neural networks have many redundant weights — the small ones. Production compression pipelines cut those dim weights to substantially shrink parameter counts (combined with quantization and distillation) while keeping accuracy intact. You just did that by eye.",
     buildShareText: function(result) {
       var tag = result.won ? "🏆 compressed" : "✗ diverged";
       return "MLSys Playground · Pulse Prune · " + today + "\n" +

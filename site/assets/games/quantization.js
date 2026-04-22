@@ -1,14 +1,12 @@
 /* ============================================================
-   MLSys Playground — Quantization Cliff
+   MLSys Playground — Quantization Cliff (v2)
    ------------------------------------------------------------
-   Six layers with precision dials (fp32 / fp16 / int8 / int4).
-   Total bit budget enforced. Click a layer to cycle its
-   precision. Click "deploy" to reveal accuracy.
+   Six layers, four precisions (fp32/fp16/int8/int4), three
+   deploys, 96-bit budget, target 85% accuracy.
 
-   Sensitivity is HIDDEN and PER-LAYER. First and last layers
-   are most sensitive to low precision; middle layers tolerate
-   int4 fine. 3 deploys per run. Best score = highest accuracy
-   that fits the budget.
+   v2: deterministic accuracy calc (was randomised, made the
+   game unlearnable). Same configuration always produces the
+   same result. Daily seed.
    ============================================================ */
 
 window.MLSP = window.MLSP || {};
@@ -26,21 +24,23 @@ MLSP.games.quantization = function(canvas, opts) {
     { name: "int4", bits: 4,  color: "#f9d6d5", stroke: "#c44" }
   ];
   var NUM_LAYERS = 6;
-  var MAX_BUDGET = 96;            // e.g. half of 6*32 = 96
+  var MAX_BUDGET = 96;
   var DEPLOYS_PER_RUN = 3;
   var WIN_ACCURACY = 85;
 
-  var rand = Math.random;
+  /* Daily seed */
+  function hashString(s) { var h = 2166136261 >>> 0; for (var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;} return h; }
+  function mulberry32(seed) { var a = seed >>> 0; return function(){ a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  var today = new Date().toISOString().slice(0, 10);
+  var rand = mulberry32(hashString("quant-" + today));
 
-  // Sensitivity per layer: how much accuracy loss per bit-reduction step.
-  // First and last layers are very sensitive. Pre-seeded each run.
+  // Sensitivity per layer is now fixed for the day (deterministic).
   function makeSensitivity() {
     var s = [];
     for (var i = 0; i < NUM_LAYERS; i++) {
       var edgeDistance = Math.min(i, NUM_LAYERS - 1 - i);
-      // Edge layers: sensitivity ~0.9; middle: ~0.2
       var base = 0.9 - 0.7 * Math.min(1, edgeDistance / 2);
-      s.push(base + (rand() - 0.5) * 0.15);
+      s.push(base + (rand() - 0.5) * 0.15);   // seeded once per day, never re-rolled
     }
     return s;
   }
@@ -48,7 +48,7 @@ MLSP.games.quantization = function(canvas, opts) {
   var layerNames = ["embedding", "attn.1", "ffn.1", "attn.2", "ffn.2", "output"];
 
   var state = {
-    layers: [],              // array of { precisionIdx, revealedAccDrop, lastDeployedIdx }
+    layers: [],
     sensitivity: makeSensitivity(),
     deploysLeft: DEPLOYS_PER_RUN,
     lastAccuracy: 100,
@@ -58,9 +58,7 @@ MLSP.games.quantization = function(canvas, opts) {
     shakeAmt: 0, shakeT: 0,
     floats: []
   };
-  for (var i = 0; i < NUM_LAYERS; i++) {
-    state.layers.push({ precisionIdx: 0, accDrop: 0, revealed: false });
-  }
+  for (var i = 0; i < NUM_LAYERS; i++) state.layers.push({ precisionIdx: 0, accDrop: 0, revealed: false });
 
   var alltimeBest = MLSP.bestScore.get("quantization");
 
@@ -73,11 +71,11 @@ MLSP.games.quantization = function(canvas, opts) {
   function cycleLayer(idx) {
     if (state.over) return;
     var layer = state.layers[idx];
-    var next = (layer.precisionIdx + 1) % PRECISIONS.length;
-    layer.precisionIdx = next;
+    layer.precisionIdx = (layer.precisionIdx + 1) % PRECISIONS.length;
     layer.revealed = false;
   }
 
+  /* Deterministic accuracy calculation — same config = same result */
   function deploy() {
     if (state.over || state.deploysLeft <= 0) return;
     if (bitsUsed() > MAX_BUDGET) {
@@ -90,8 +88,9 @@ MLSP.games.quantization = function(canvas, opts) {
     for (var i = 0; i < NUM_LAYERS; i++) {
       var layer = state.layers[i];
       var prec = PRECISIONS[layer.precisionIdx];
-      var bitsReduction = (32 - prec.bits) / 4;  // 0, 4, 6, 7 steps
-      var drop = bitsReduction * state.sensitivity[i] * (3 + rand() * 2);
+      var bitsReduction = (32 - prec.bits) / 4;     // 0, 4, 6, 7
+      // DETERMINISTIC: the same precision pick always yields the same accuracy drop.
+      var drop = bitsReduction * state.sensitivity[i] * 4;
       layer.accDrop = drop;
       layer.revealed = true;
       totalDrop += drop;
@@ -101,14 +100,8 @@ MLSP.games.quantization = function(canvas, opts) {
 
     addFloat(W/2, 80, state.lastAccuracy.toFixed(1) + "% accuracy", state.lastAccuracy >= WIN_ACCURACY ? "#3d9e5a" : "#c87b2a");
 
-    if (state.lastAccuracy >= WIN_ACCURACY) {
-      state.won = true;
-      state.over = true;
-      endGame();
-    } else if (state.deploysLeft <= 0) {
-      state.over = true;
-      endGame();
-    }
+    if (state.lastAccuracy >= WIN_ACCURACY) { state.won = true; state.over = true; endGame(); }
+    else if (state.deploysLeft <= 0)        { state.over = true;                   endGame(); }
   }
 
   function endGame() {
@@ -118,33 +111,26 @@ MLSP.games.quantization = function(canvas, opts) {
       MLSP.bestScore.set("quantization", alltimeBest);
     }
     if (opts.onGameOver) opts.onGameOver({
-      bestAccuracy: state.bestAccuracy,
-      won: state.won,
-      bitsUsed: bitsUsed(),
-      alltimeBest: alltimeBest
+      bestAccuracy: state.bestAccuracy, won: state.won,
+      bitsUsed: bitsUsed(), alltimeBest: alltimeBest
     });
   }
 
   function shake(a, ms) { state.shakeAmt = Math.max(state.shakeAmt, a); state.shakeT = Math.max(state.shakeT, ms); }
   function addFloat(x, y, t, c) { state.floats.push({ x: x, y: y, text: t, color: c, age: 0, maxAge: 1500 }); }
 
-  /* Layout — compute layer row positions for hit testing */
   function layerRowRect(idx) {
     var rowH = 32;
     var totalH = NUM_LAYERS * rowH;
     var startY = (H - totalH) / 2 - 10;
     return { x: 80, y: startY + idx * rowH, w: W - 160, h: rowH - 4 };
   }
-  function deployBtnRect() {
-    return { x: W/2 - 80, y: H - 80, w: 160, h: 36 };
-  }
+  function deployBtnRect() { return { x: W/2 - 80, y: H - 80, w: 160, h: 36 }; }
 
-  /* Input */
   canvas.addEventListener("pointerdown", function(e) {
     e.preventDefault();
     if (state.over) { if (opts.onRetry) opts.onRetry(); return; }
     var p = MLSP.canvasPoint(canvas, e);
-    // Layer clicks
     for (var i = 0; i < NUM_LAYERS; i++) {
       var r = layerRowRect(i);
       if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) { cycleLayer(i); return; }
@@ -167,11 +153,7 @@ MLSP.games.quantization = function(canvas, opts) {
     if (state.shakeT === 0) state.shakeAmt = 0;
     for (var ff of state.floats) { ff.age += dt; ff.y -= dt * 0.04; }
     state.floats = state.floats.filter(function(x){ return x.age < x.maxAge; });
-
-    if (opts.onScoreChange && !state.over) opts.onScoreChange({
-      bitsUsed: bitsUsed(), budget: MAX_BUDGET, deploysLeft: state.deploysLeft, alltimeBest: alltimeBest
-    });
-
+    if (opts.onScoreChange && !state.over) opts.onScoreChange({ bitsUsed: bitsUsed(), budget: MAX_BUDGET, deploysLeft: state.deploysLeft, alltimeBest: alltimeBest });
     draw();
     requestAnimationFrame(frame);
   }
@@ -179,18 +161,16 @@ MLSP.games.quantization = function(canvas, opts) {
   function draw() {
     var sx = 0, sy = 0;
     if (state.shakeAmt > 0) { sx = (rand()-0.5)*state.shakeAmt; sy = (rand()-0.5)*state.shakeAmt; }
-    ctx.save();
-    ctx.translate(sx, sy);
+    ctx.save(); ctx.translate(sx, sy);
     ctx.clearRect(-20, -20, W + 40, H + 40);
 
-    // Header
     ctx.fillStyle = "#333";
     ctx.font = "bold 15px 'Helvetica Neue', Arial, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("Quantization Cliff", W/2, 24);
     ctx.font = "10.5px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillStyle = "#888";
-    ctx.fillText("click a layer to cycle precision · deploy when ready · hit " + WIN_ACCURACY + "% accuracy to win", W/2, 42);
+    ctx.fillText("click a layer to cycle precision · deploy · hit " + WIN_ACCURACY + "% accuracy under " + MAX_BUDGET + " bits", W/2, 42);
 
     // Budget bar
     var budgetX = 60, budgetY = 56, budgetW = W - 120, budgetH = 6;
@@ -201,9 +181,7 @@ MLSP.games.quantization = function(canvas, opts) {
     var over = used > MAX_BUDGET;
     ctx.fillStyle = over ? "#c44" : (frac > 0.9 ? "#c87b2a" : "#4a90c4");
     MLSP.roundRect(ctx, budgetX, budgetY, budgetW * frac, budgetH, 3); ctx.fill();
-    ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillStyle = "#555";
-    ctx.textAlign = "left";
+    ctx.font = "10px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#555"; ctx.textAlign = "left";
     ctx.fillText("budget " + used + " / " + MAX_BUDGET + " bits", budgetX, budgetY - 4);
     ctx.textAlign = "right";
     ctx.fillText("deploys left: " + state.deploysLeft + " / " + DEPLOYS_PER_RUN, budgetX + budgetW, budgetY - 4);
@@ -225,7 +203,6 @@ MLSP.games.quantization = function(canvas, opts) {
       ctx.textAlign = "right";
       ctx.fillStyle = prec.stroke;
       ctx.fillText(prec.name + "  " + prec.bits + "-bit", r.x + r.w - 12, r.y + r.h/2 + 4);
-      // If revealed from last deploy: show drop
       if (layer.revealed) {
         ctx.fillStyle = layer.accDrop < 1 ? "#3d9e5a" : layer.accDrop < 4 ? "#c87b2a" : "#c44";
         ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
@@ -244,7 +221,6 @@ MLSP.games.quantization = function(canvas, opts) {
     ctx.textAlign = "center";
     ctx.fillText("deploy", btn.x + btn.w/2, btn.y + btn.h/2 + 5);
 
-    // Last accuracy readout
     if (state.lastAccuracy < 100) {
       ctx.font = "bold 15px 'Helvetica Neue', Arial, sans-serif";
       ctx.fillStyle = state.lastAccuracy >= WIN_ACCURACY ? "#3d9e5a" : "#c87b2a";
@@ -252,7 +228,12 @@ MLSP.games.quantization = function(canvas, opts) {
       ctx.fillText("last deploy: " + state.lastAccuracy.toFixed(1) + "%", W/2, H - 30);
     }
 
-    // Floats
+    // Daily seed line
+    ctx.font = "9px 'Helvetica Neue', Arial, sans-serif";
+    ctx.fillStyle = "#999";
+    ctx.textAlign = "left";
+    ctx.fillText("daily " + today + "  · same network for everyone today  · alltime best " + alltimeBest + "%", 20, H - 10);
+
     for (var fi = 0; fi < state.floats.length; fi++) {
       var ff = state.floats[fi];
       ctx.globalAlpha = Math.max(0, 1 - ff.age / ff.maxAge);
@@ -288,9 +269,9 @@ MLSP.games.quantization = function(canvas, opts) {
     id: "quantization",
     name: "Quantization Cliff",
     ahaLabel: "You just played at",
-    ahaText: "Mixed-precision quantization. In real ML systems, layers have wildly different sensitivity to low precision — first and last layers (embeddings, output heads) hate int4, while middle layers often tolerate it. Finding the right allocation is what techniques like HAQ and SmoothQuant automate. You just did it by feel.",
+    ahaText: "Mixed-precision quantization. Layers have wildly different sensitivity to low precision — first and last layers (embeddings, output heads) hate int4, while middle layers often tolerate it. Production techniques like AWQ and GPTQ search for the same per-layer bit allocation you just made by feel.",
     buildShareText: function(r) {
-      return "MLSys Playground · Quantization Cliff\n" +
+      return "MLSys Playground · Quantization Cliff · " + today + "\n" +
              (r.won ? "🏆 shipped" : "✗ off-spec") + " · " + r.bestAccuracy.toFixed(0) + "% accuracy · " + r.bitsUsed + " bits\n" +
              "play → mlsysbook.ai/games/quantization/";
     }

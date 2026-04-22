@@ -1,13 +1,10 @@
 /* ============================================================
-   MLSys Playground — Roofline Runner
+   MLSys Playground — Roofline Runner (v2)
    ------------------------------------------------------------
-   Kernels fly in from the right at various heights. You control
-   a horizontal catcher; move it up/down to match the kernel's
-   height. Catching a kernel BELOW the ceiling: +score. Catching
-   one ABOVE the ceiling: -score (you picked an unrealisable
-   implementation). Missing: -life.
-
-   30-second round. Score = kernels caught.
+   Kernels fly from the right at fixed arithmetic intensities
+   (GEMM right, attention middle, softmax/elementwise far left).
+   Catch them under the ceiling for +score; catch above for -1.
+   Predictive landing reticle shows where each kernel will arrive.
    ============================================================ */
 
 window.MLSP = window.MLSP || {};
@@ -21,23 +18,31 @@ MLSP.games.roofline = function(canvas, opts) {
   var TIME_LIMIT_MS = 30000;
   var MAX_LIVES = 3;
 
-  // Chart region
+  /* Daily seed */
+  function hashString(s) { var h = 2166136261 >>> 0; for (var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;} return h; }
+  function mulberry32(seed) { var a = seed >>> 0; return function(){ a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  var today = new Date().toISOString().slice(0, 10);
+  var rand = mulberry32(hashString("roofline-" + today));
+
+  // Chart layout
   var chartX = 80, chartY = 70, chartW = W - 140, chartH = H - 160;
   var chartRight = chartX + chartW;
   var chartBottom = chartY + chartH;
-
-  // Roofline curve: memory-bound slope on left, compute-bound flat on right
-  // Translate intensity x in [0, 1] to y (performance ceiling)
-  var ridgeX = 0.45;          // position of ridge point
-  var peakY = 0.9;            // peak performance (top of chart area, normalized)
-  function ceilingAt(xFrac) {
-    if (xFrac <= ridgeX) return (xFrac / ridgeX) * peakY;
-    return peakY;
-  }
+  var ridgeX = 0.45, peakY = 0.9;
+  function ceilingAt(xFrac) { return xFrac <= ridgeX ? (xFrac / ridgeX) * peakY : peakY; }
   function yFromFrac(f) { return chartBottom - f * chartH; }
   function xFromFrac(f) { return chartX + f * chartW; }
 
-  var ops = ["GEMM", "attn", "softmax", "conv", "elem", "relu", "layernorm", "gelu"];
+  /* Op intensity bands — kernels appear in the realistic part of the chart */
+  var OPS = [
+    { name: "GEMM",      band: [0.65, 0.85] },
+    { name: "conv",      band: [0.50, 0.65] },
+    { name: "attn",      band: [0.35, 0.50] },
+    { name: "gelu",      band: [0.18, 0.28] },
+    { name: "layernorm", band: [0.12, 0.20] },
+    { name: "softmax",   band: [0.10, 0.18] },
+    { name: "elem",      band: [0.05, 0.12] }
+  ];
 
   var state = {
     catcherX: chartX + chartW * 0.5,
@@ -54,15 +59,14 @@ MLSP.games.roofline = function(canvas, opts) {
   };
 
   var alltimeBest = MLSP.bestScore.get("roofline");
-  var rand = Math.random;
 
-  /* Input: arrow keys + mouse/touch */
+  /* Input */
   var keysDown = {};
   window.addEventListener("keydown", function(e) {
     if (!MLSP.inViewport(canvas)) return;
     keysDown[e.key] = true;
     if (e.key === "r" || e.key === "R") { e.preventDefault(); if (opts.onRetry) opts.onRetry(); }
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", " "].indexOf(e.key) >= 0) e.preventDefault();
+    if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].indexOf(e.key) >= 0) e.preventDefault();
   });
   window.addEventListener("keyup", function(e) { keysDown[e.key] = false; });
   canvas.addEventListener("mousemove", function(e) {
@@ -75,8 +79,7 @@ MLSP.games.roofline = function(canvas, opts) {
     e.preventDefault();
     if (state.over) { if (opts.onRetry) opts.onRetry(); return; }
     var p = MLSP.canvasPoint(canvas, e);
-    state.catcherX = p.x;
-    state.catcherY = p.y;
+    state.catcherX = p.x; state.catcherY = p.y;
   });
   canvas.addEventListener("touchmove", function(e) {
     e.preventDefault();
@@ -87,12 +90,12 @@ MLSP.games.roofline = function(canvas, opts) {
   }, { passive: false });
 
   function spawnKernel() {
-    var xFrac = 0.1 + rand() * 0.85;
-    // Kernel true y: sometimes under ceiling, sometimes above
+    var op = OPS[Math.floor(rand() * OPS.length)];
+    var xFrac = op.band[0] + rand() * (op.band[1] - op.band[0]);
     var ceilFrac = ceilingAt(xFrac);
     var belowCeiling = rand() < 0.7;
     var yFrac = belowCeiling
-      ? 0.1 + rand() * Math.max(0.05, ceilFrac - 0.1)
+      ? 0.08 + rand() * Math.max(0.05, ceilFrac - 0.1)
       : Math.min(0.95, ceilFrac + 0.05 + rand() * 0.25);
     state.kernels.push({
       x: chartRight + 30,
@@ -101,20 +104,21 @@ MLSP.games.roofline = function(canvas, opts) {
       xFrac: xFrac,
       yFrac: yFrac,
       belowCeiling: belowCeiling,
-      op: ops[Math.floor(rand() * ops.length)],
-      vx: -(1.0 + rand() * 0.7),
-      state: "flying" // flying, caught, missed
+      op: op.name,
+      vx: -(0.85 + rand() * 0.55),
+      state: "flying"
     });
   }
 
   function updateKernels(dt) {
-    var catcherR = 20;
+    var catcherR = 22;
     for (var i = 0; i < state.kernels.length; i++) {
       var k = state.kernels[i];
       if (k.state !== "flying") continue;
       k.x += k.vx * (dt * 0.15);
-      // Arrived at its target x position
-      if (k.x <= k.targetX + 2) {
+      // Use a continuous overlap test instead of "did we cross targetX this frame"
+      // so dt spikes can't teleport kernels past their hit window.
+      if (k.x <= k.targetX + 16) {
         var dx = k.targetX - state.catcherX;
         var dy = k.y - state.catcherY;
         var dist = Math.sqrt(dx*dx + dy*dy);
@@ -130,8 +134,8 @@ MLSP.games.roofline = function(canvas, opts) {
             burst(k.targetX, k.y, "#c44", 10);
           }
           k.state = "caught";
-        } else {
-          // Missed
+        } else if (k.x <= k.targetX - 8) {
+          // Passed by without being caught
           state.lives--;
           shake(4, 180);
           addFloat(k.targetX, k.y - 10, "missed " + k.op, "#c44");
@@ -145,18 +149,12 @@ MLSP.games.roofline = function(canvas, opts) {
   }
 
   function endGame(won) {
-    state.over = true;
-    state.won = won;
+    state.over = true; state.won = won;
     if (state.score > alltimeBest) {
       alltimeBest = state.score;
       MLSP.bestScore.set("roofline", alltimeBest);
     }
-    if (opts.onGameOver) opts.onGameOver({
-      score: state.score,
-      won: won,
-      alltimeBest: alltimeBest,
-      timeUsed: Math.round((TIME_LIMIT_MS - state.timeLeft) / 1000)
-    });
+    if (opts.onGameOver) opts.onGameOver({ score: state.score, won: won, alltimeBest: alltimeBest });
   }
 
   function shake(a, ms) { state.shakeAmt = Math.max(state.shakeAmt, a); state.shakeT = Math.max(state.shakeT, ms); }
@@ -173,7 +171,6 @@ MLSP.games.roofline = function(canvas, opts) {
     var dt = lastTime ? (now - lastTime) : 16;
     lastTime = now;
     if (dt > 100) dt = 100;
-
     if (!state.over) {
       state.timeLeft -= dt;
       if (state.timeLeft <= 0) { state.timeLeft = 0; endGame(true); }
@@ -181,34 +178,28 @@ MLSP.games.roofline = function(canvas, opts) {
       if (state.spawnCooldown <= 0) {
         spawnKernel();
         var elapsed = TIME_LIMIT_MS - state.timeLeft;
-        state.spawnCooldown = 750 - Math.min(400, elapsed / 40);
+        state.spawnCooldown = 800 - Math.min(450, elapsed / 38);
       }
-      // Keyboard movement
       if (keysDown["ArrowLeft"])  state.catcherX = Math.max(chartX, state.catcherX - 5);
       if (keysDown["ArrowRight"]) state.catcherX = Math.min(chartRight, state.catcherX + 5);
       if (keysDown["ArrowUp"])    state.catcherY = Math.max(chartY, state.catcherY - 5);
       if (keysDown["ArrowDown"])  state.catcherY = Math.min(chartBottom, state.catcherY + 5);
       updateKernels(dt);
     }
-
     state.shakeT = Math.max(0, state.shakeT - dt);
     if (state.shakeT === 0) state.shakeAmt = 0;
     for (var pp of state.particles) { pp.x += pp.vx; pp.y += pp.vy; pp.vy += 0.15; pp.age += dt; }
     state.particles = state.particles.filter(function(x){ return x.age < x.maxAge; });
     for (var ff of state.floats) { ff.age += dt; ff.y -= dt * 0.03; }
     state.floats = state.floats.filter(function(x){ return x.age < x.maxAge; });
-
-    if (opts.onScoreChange && !state.over) opts.onScoreChange({
-      score: state.score, lives: state.lives, timeLeft: state.timeLeft, alltimeBest: alltimeBest
-    });
-
+    if (opts.onScoreChange && !state.over) opts.onScoreChange({ score: state.score, lives: state.lives, timeLeft: state.timeLeft, alltimeBest: alltimeBest });
     draw();
     requestAnimationFrame(frame);
   }
 
   function draw() {
     var sx = 0, sy = 0;
-    if (state.shakeAmt > 0) { sx = (Math.random()-0.5)*state.shakeAmt; sy = (Math.random()-0.5)*state.shakeAmt; }
+    if (state.shakeAmt > 0) { sx = (rand()-0.5)*state.shakeAmt; sy = (rand()-0.5)*state.shakeAmt; }
     ctx.save();
     ctx.translate(sx, sy);
     ctx.clearRect(-20, -20, W + 40, H + 40);
@@ -220,65 +211,54 @@ MLSP.games.roofline = function(canvas, opts) {
     ctx.fillText("Roofline Runner", W/2, 24);
     ctx.font = "10.5px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillStyle = "#888";
-    ctx.fillText("catch kernels UNDER the ceiling · avoid the ones above", W/2, 42);
+    ctx.fillText("catch kernels UNDER the red ceiling · the dotted ghost shows where each will land", W/2, 42);
 
-    // Chart grid
-    ctx.strokeStyle = "#eee";
-    ctx.lineWidth = 1;
+    // Grid
+    ctx.strokeStyle = "#eee"; ctx.lineWidth = 1;
     for (var g = 0; g <= 4; g++) {
       var y = chartY + (g / 4) * chartH;
       ctx.beginPath(); ctx.moveTo(chartX, y); ctx.lineTo(chartRight, y); ctx.stroke();
       var x = chartX + (g / 4) * chartW;
       ctx.beginPath(); ctx.moveTo(x, chartY); ctx.lineTo(x, chartBottom); ctx.stroke();
     }
-
     // Axes
-    ctx.strokeStyle = "#555";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(chartX, chartY); ctx.lineTo(chartX, chartBottom); ctx.lineTo(chartRight, chartBottom);
-    ctx.stroke();
-    ctx.fillStyle = "#555";
-    ctx.font = "10px 'Helvetica Neue', Arial, sans-serif";
-    ctx.textAlign = "center";
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(chartX, chartY); ctx.lineTo(chartX, chartBottom); ctx.lineTo(chartRight, chartBottom); ctx.stroke();
+    ctx.fillStyle = "#555"; ctx.font = "10px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "center";
     ctx.fillText("arithmetic intensity (FLOPs / byte) →", (chartX + chartRight) / 2, chartBottom + 26);
-    ctx.save();
-    ctx.translate(chartX - 28, (chartY + chartBottom) / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText("performance (TFLOP/s) →", 0, 0);
-    ctx.restore();
-
+    ctx.save(); ctx.translate(chartX - 28, (chartY + chartBottom) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("performance (TFLOP/s) →", 0, 0); ctx.restore();
     // Region labels
-    ctx.fillStyle = "#bbb";
-    ctx.font = "italic 10px 'Helvetica Neue', Arial, sans-serif";
+    ctx.fillStyle = "#bbb"; ctx.font = "italic 10px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillText("memory-bound", xFromFrac(ridgeX/2), chartY + 16);
     ctx.fillText("compute-bound", xFromFrac((ridgeX + 1) / 2), chartY + 16);
-
     // Roofline ceiling
-    ctx.strokeStyle = "#a31f34";
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#a31f34"; ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(xFromFrac(0), yFromFrac(0));
     ctx.lineTo(xFromFrac(ridgeX), yFromFrac(peakY));
     ctx.lineTo(xFromFrac(1), yFromFrac(peakY));
     ctx.stroke();
-
-    // Ridge marker
-    ctx.fillStyle = "#a31f34";
-    ctx.beginPath();
-    ctx.arc(xFromFrac(ridgeX), yFromFrac(peakY), 4, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillStyle = "#a31f34"; ctx.beginPath(); ctx.arc(xFromFrac(ridgeX), yFromFrac(peakY), 4, 0, Math.PI * 2); ctx.fill();
     ctx.fillText("ridge", xFromFrac(ridgeX), yFromFrac(peakY) - 8);
-
-    // Above-ceiling fill
+    // Above-ceiling shaded
     ctx.fillStyle = "rgba(196,68,68,0.05)";
     ctx.beginPath();
     ctx.moveTo(xFromFrac(0), chartY);
     ctx.lineTo(xFromFrac(ridgeX), yFromFrac(peakY));
     ctx.lineTo(xFromFrac(1), yFromFrac(peakY));
     ctx.lineTo(xFromFrac(1), chartY);
-    ctx.closePath();
-    ctx.fill();
+    ctx.closePath(); ctx.fill();
+
+    // Predictive landing reticles
+    for (var i = 0; i < state.kernels.length; i++) {
+      var k = state.kernels[i];
+      if (k.state !== "flying") continue;
+      ctx.strokeStyle = k.belowCeiling ? "rgba(74,144,196,0.4)" : "rgba(196,68,68,0.4)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.arc(k.targetX, k.y, 10, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+    }
 
     // Kernels
     for (var i = 0; i < state.kernels.length; i++) {
@@ -287,18 +267,13 @@ MLSP.games.roofline = function(canvas, opts) {
       ctx.strokeStyle = k.belowCeiling ? "#3d79a8" : "#a31f34";
       ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(k.x, k.y, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 8px 'Helvetica Neue', Arial, sans-serif";
-      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff"; ctx.font = "bold 8px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "center";
       ctx.fillText(k.op, k.x, k.y + 2.5);
     }
 
-    // Catcher — a crosshair
-    ctx.strokeStyle = "#a31f34";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(state.catcherX, state.catcherY, 16, 0, Math.PI * 2);
-    ctx.stroke();
+    // Catcher
+    ctx.strokeStyle = "#a31f34"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(state.catcherX, state.catcherY, 16, 0, Math.PI * 2); ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(state.catcherX - 22, state.catcherY); ctx.lineTo(state.catcherX - 10, state.catcherY);
     ctx.moveTo(state.catcherX + 10, state.catcherY); ctx.lineTo(state.catcherX + 22, state.catcherY);
@@ -334,24 +309,18 @@ MLSP.games.roofline = function(canvas, opts) {
     ctx.fillStyle = "#333";
     ctx.textAlign = "left";
     ctx.fillText("score " + state.score, 20, H - 26);
-    // Lives
     ctx.textAlign = "center";
     var lives = "";
     for (var i = 0; i < MAX_LIVES; i++) lives += i < state.lives ? "❤️ " : "🖤 ";
     ctx.fillText(lives, W/2 - 30, H - 26);
-    // Time
     var secs = Math.ceil(state.timeLeft / 1000);
     ctx.fillStyle = secs <= 5 ? "#c44" : "#333";
     ctx.font = "bold 13px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillText("⏱ " + secs + "s", W/2 + 30, H - 26);
-    ctx.fillStyle = "#333";
-    ctx.font = "11px 'Helvetica Neue', Arial, sans-serif";
-    ctx.textAlign = "right";
+    ctx.fillStyle = "#333"; ctx.font = "11px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "right";
     ctx.fillText("alltime best " + alltimeBest, W - 20, H - 26);
-    ctx.font = "9px 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillStyle = "#999";
-    ctx.textAlign = "left";
-    ctx.fillText("mouse or arrow keys to move the crosshair · R to retry", 20, H - 10);
+    ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999"; ctx.textAlign = "left";
+    ctx.fillText("daily " + today + "  · mouse / arrows · R = retry", 20, H - 10);
   }
 
   function drawGameOver() {
@@ -377,9 +346,9 @@ MLSP.games.roofline = function(canvas, opts) {
     id: "roofline",
     name: "Roofline Runner",
     ahaLabel: "You just played at",
-    ahaText: "The roofline model. Every kernel has an arithmetic intensity (FLOPs per byte of memory traffic); the red line is the hardware's performance ceiling, which bends at the 'ridge' where workloads transition from memory-bound to compute-bound. You were catching kernels beneath the line because no amount of engineering can push above it.",
+    ahaText: "The roofline model. Every kernel has an arithmetic intensity (FLOPs per byte of memory traffic) — GEMM and convolution sit on the right (compute-bound), attention in the middle, softmax and element-wise ops on the left (memory-bound). The red line is your hardware's ceiling. Real engineering means raising a kernel's intensity (fusion, tiling, recompute) to push it under a higher ceiling — not catching what falls.",
     buildShareText: function(r) {
-      return "MLSys Playground · Roofline Runner\n" +
+      return "MLSys Playground · Roofline Runner · " + today + "\n" +
              "caught " + r.score + " kernels" + (r.won ? " 🏆" : "") + "\n" +
              "play → mlsysbook.ai/games/roofline/";
     }
