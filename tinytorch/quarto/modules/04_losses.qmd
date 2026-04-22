@@ -6,6 +6,7 @@
 **FOUNDATION TIER** | Difficulty: ●●○○ | Time: 4-6 hours | Prerequisites: 01, 02, 03
 
 **Prerequisites:** Modules 01 (Tensor), 02 (Activations), and 03 (Layers) must be completed. This module assumes you understand:
+
 - Tensor operations and broadcasting (Module 01)
 - Activation functions and their role in neural networks (Module 02)
 - Layers and how they transform data (Module 03)
@@ -313,11 +314,11 @@ initSlideViewer('04_losses', '../assets/slides/04_losses.pdf');
 ```
 ## Overview
 
-Loss functions are the mathematical conscience of machine learning. Every neural network needs to know when it's right and when it's wrong. Loss functions provide that feedback by measuring the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
+A neural network without a loss function is a guess machine. The loss is the single scalar that tells optimization which direction to move — turning a forward pass into a learning step. Get it wrong and training stalls, diverges, or silently optimizes the wrong objective.
 
-In this module, you'll implement three essential loss functions: Mean Squared Error (MSE) for regression, Cross-Entropy for multi-class classification, and Binary Cross-Entropy for binary decisions. You'll also master the log-sum-exp trick, a crucial numerical stability technique that prevents computational overflow with large numbers. These implementations serve as the foundation for automatic differentiation, where gradients flow backward from loss values to update model parameters.
+In this module you'll implement three losses that cover most supervised learning: **Mean Squared Error** for regression, **CrossEntropy** for multi-class classification, and **Binary Cross-Entropy** for multi-label or binary decisions. Along the way you'll implement the log-sum-exp trick — the one numerical safeguard that separates a softmax that trains from one that returns `nan` on the first batch with large logits.
 
-By the end, you'll understand not just how to compute loss, but why different problems require different loss functions, and how numerical stability shapes production ML systems.
+By the end, you'll know not just *how* to compute each loss, but *why* the choice of loss reshapes what your model learns, and where naive implementations break at production scale.
 
 ## Learning Objectives
 
@@ -427,11 +428,11 @@ This section covers the fundamental ideas you need to understand loss functions 
 
 ### Loss as a Feedback Signal
 
-Loss functions transform the abstract question "how good is my model?" into a concrete number that can drive improvement. Consider a simple example: predicting house prices. If your model predicts $250,000 for a house that sold for $245,000, how wrong is that? What about $150,000 when the actual price was $250,000? The loss function quantifies these errors in a way that optimization algorithms can use.
+A loss function turns "how good is my model?" into a single number that optimization can act on. Predict $250,000 for a house that sold for $245,000 — how wrong is that compared to predicting $150,000? The loss assigns a precise penalty to each, and the gradient of that penalty tells the optimizer which way to move every parameter.
 
-The key insight is that loss functions must be differentiable - you need to know not just the current error, but which direction to move parameters to reduce that error. This is why we use squared differences instead of absolute differences in MSE: the square function has a smooth derivative that points toward improvement.
+That second part is what matters. A loss must be differentiable: you need not just the current error, but the direction to move to reduce it. This is why MSE squares the error rather than taking the absolute value — the square has a smooth gradient everywhere, while `|x|` has a kink at zero that confuses optimizers.
 
-Every training iteration follows the same pattern: forward pass produces predictions, loss function measures error, backward pass computes how to improve. The loss value itself becomes a single number summarizing model quality across an entire batch of examples.
+Every training iteration is the same loop: forward pass produces predictions, loss measures error, backward pass turns that error into parameter updates. The loss value is the scalar summary of model quality for the whole batch — and the only signal the optimizer ever sees.
 
 ### Mean Squared Error
 
@@ -454,15 +455,15 @@ def forward(self, predictions: Tensor, targets: Tensor) -> Tensor:
     return Tensor(mse)
 ```
 
-The beauty of MSE is its simplicity: subtract, square, average. Yet this simple formula creates a quadratic error landscape. An error of 10 contributes 100 to the loss, while an error of 20 contributes 400. This quadratic growth means the loss function cares much more about fixing large errors than small ones, naturally prioritizing the worst predictions during optimization.
+Three operations: subtract, square, average. Yet squaring creates a quadratic error landscape: an error of 10 contributes 100 to the loss; an error of 20 contributes 400. The optimizer sees the worst-predicted samples as four times more important than samples half as wrong, so it spends most of its capacity fixing the largest errors first.
 
-Consider predicting house prices. An error of $5,000 on a $200,000 house gets squared to 25,000,000. An error of $50,000 gets squared to 2,500,000,000 - one hundred times worse for an error only ten times larger. This sensitivity to outliers can be both a strength (quickly correcting large errors) and a weakness (vulnerable to noisy labels).
+Back to house prices. An error of $5,000 squares to 25M. An error of $50,000 squares to 2.5B — one hundred times the penalty for ten times the error. That asymmetry is MSE's defining feature: it aggressively corrects outliers, but it also lets noisy labels dominate the gradient. If your dataset has bad labels, MSE will chase them.
 
 ### Cross-Entropy Loss
 
-Cross-entropy measures how wrong your probability predictions are for classification problems. Unlike MSE which measures distance, cross-entropy measures surprise: how unexpected is the true outcome given your model's probability distribution?
+Cross-entropy measures *surprise*: how unexpected the true label is under the distribution your model predicted. Where MSE measures geometric distance in output space, cross-entropy measures information-theoretic mismatch in probability space — and that distinction is why classifiers train faster with cross-entropy than with MSE on the same logits.
 
-The mathematical formula is deceptively simple: negative log-likelihood of the correct class. But implementing it correctly requires careful attention to numerical stability. Here's how your implementation handles it:
+The formula reduces to a single number: the negative log-probability the model assigned to the correct class. Easy to write, easy to break — the implementation lives or dies on numerical stability:
 
 ```python
 def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
@@ -483,15 +484,15 @@ def forward(self, logits: Tensor, targets: Tensor) -> Tensor:
     return Tensor(cross_entropy)
 ```
 
-The critical detail is using `log_softmax` instead of computing softmax then taking the log. This seemingly minor choice prevents catastrophic overflow with large logits. Without it, a logit value of 100 would compute `exp(100) = 2.7×10^43`, which exceeds float32 range and becomes infinity.
+The critical detail is calling `log_softmax` directly instead of `log(softmax(...))`. The two are mathematically identical but computationally worlds apart: a logit of 100 makes `exp(100) ≈ 2.7×10^43`, which overflows float32 to `inf`, which becomes `nan` after division. The fused log-softmax never materializes the dangerous exponentials — see the next subsection for the trick.
 
-Cross-entropy's power comes from its asymmetric penalty structure. If your model predicts 0.99 probability for the correct class, the loss is `-log(0.99) = 0.01` - very small. But if you predict 0.01 for the correct class, the loss is `-log(0.01) = 4.6` - much larger. This creates strong pressure to be confident when correct and uncertain when wrong.
+Cross-entropy's gradient pressure is asymmetric on purpose. Predict 0.99 for the correct class and the loss is `-log(0.99) ≈ 0.01`; predict 0.01 and the loss is `-log(0.01) ≈ 4.6` — 460× larger for the same gap in probability. The further the model is from "confident and right," the harder cross-entropy pulls — which is exactly the dynamic you want for classification.
 
 ### Numerical Stability in Loss Computation
 
-The log-sum-exp trick is one of the most important numerical stability techniques in machine learning. It solves a fundamental problem: computing softmax directly causes overflow, but we need softmax for classification.
+The log-sum-exp trick is the single most important numerical-stability technique in classification. The problem it solves is structural: softmax requires exponentiating every logit, but `exp` overflows float32 at inputs above ~88. Real models routinely produce logits in the hundreds.
 
-Consider what happens without the trick. Standard softmax computes `exp(x) / sum(exp(x))`. With logits `[100, 200, 300]`, you'd compute `exp(300) = 1.97×10^130`, which is infinity in float32. The trick subtracts the maximum value first, making the largest exponent zero:
+Watch what happens without the trick. Naive softmax computes `exp(x) / sum(exp(x))`. With logits `[100, 200, 300]`, the denominator alone needs `exp(300) ≈ 1.97×10^130` — `inf` in float32, and `inf / inf = nan` everywhere downstream. The fix is to subtract the per-row max *before* exponentiating, which leaves the result mathematically unchanged but pulls every exponent into the safe range:
 
 ```python
 def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
@@ -511,19 +512,17 @@ def log_softmax(x: Tensor, dim: int = -1) -> Tensor:
     return Tensor(result)
 ```
 
-After subtracting the max (300), the shifted logits become `[-200, -100, 0]`. Now the largest exponent is `exp(0) = 1.0`, perfectly safe. The smaller values like `exp(-200)` underflow to zero, but that's acceptable - they contribute negligibly to the sum anyway.
+After subtracting the max (300), the shifted logits become `[-200, -100, 0]`. The largest exponent is now `exp(0) = 1.0` — always safe. The smallest, `exp(-200)`, underflows to 0, but those terms were going to round to nothing in the sum anyway, so the loss is exact in the regime we care about.
 
-This trick is mathematically exact, not an approximation. Subtracting the max from both numerator and denominator cancels out, leaving the result unchanged. But the computational difference is dramatic: infinity versus valid probabilities.
+The trick is algebraically exact, not an approximation: subtracting a constant `m` from every logit multiplies both the numerator and denominator of softmax by `exp(-m)`, which cancels. What changes is the floating-point dynamic range — and that change is the difference between training and `nan`.
 
 ### Reduction Strategies
 
-All three loss functions reduce a batch of per-sample errors to a single scalar by taking the mean. This reduction strategy affects both the loss magnitude and the resulting gradients during backpropagation.
+All three losses collapse a batch of per-sample errors to a single scalar by taking the mean. The choice of reduction quietly shapes both loss magnitude and gradient scale, so it's worth understanding even though we only ship `mean` here.
 
-The mean reduction has important properties. First, it normalizes by batch size, making loss values comparable across different batch sizes. A batch of 32 samples and a batch of 128 samples produce similar loss magnitudes if the per-sample errors are similar. Second, it makes gradients inversely proportional to batch size - with 128 samples, each sample contributes 1/128 to the total gradient, preventing gradient explosion with large batches.
+Mean reduction does two useful things. It normalizes by batch size, so loss values are comparable across batches of 32 and 128 samples — and it makes the per-sample gradient contribution `1/B`, which keeps gradient magnitudes stable as you scale the batch. Sum reduction (`np.sum`) drops the `1/B`, so the gradient grows linearly with batch size; if you switch from `mean` to `sum`, you must shrink the learning rate by the same factor to get equivalent updates. No reduction (`reduction='none'` in PyTorch) returns the per-sample loss vector — useful for weighted sampling, hard-example mining, or per-sample diagnostics.
 
-Alternative reduction strategies exist but aren't implemented in this module. Sum reduction (`np.sum` instead of `np.mean`) accumulates total error across the batch, making loss scale with batch size. No reduction (`reduction='none'`) returns per-sample losses, useful for weighted sampling or analyzing individual predictions. Production frameworks support all these modes, but mean reduction is the standard choice for stable training.
-
-The choice of reduction interacts with learning rate. If you switch from mean to sum reduction, you must divide your learning rate by batch size to maintain equivalent optimization dynamics. This is why PyTorch defaults to mean reduction - it makes hyperparameters more transferable across different batch sizes.
+The reason `mean` is the universal default: it makes learning rates transferable across batch sizes without manual rescaling.
 
 ## Common Errors
 
@@ -584,7 +583,7 @@ loss = BinaryCrossEntropyLoss()(probabilities, targets)
 
 ### Your Implementation vs. PyTorch
 
-Your TinyTorch loss functions and PyTorch's implementations share the same mathematical foundations and numerical stability techniques. The differences are in performance optimizations, GPU support, and additional features for production use.
+Mathematically, your TinyTorch losses and PyTorch's are the same function — same formulas, same log-sum-exp safeguard. The gap is engineering: GPU kernels, fused ops, lower-precision arithmetic, and configurable reductions. The table makes the gap concrete:
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -618,7 +617,7 @@ labels = Tensor([0, 1])
 loss = ce_loss(logits, labels)
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 import torch.nn as nn
@@ -652,33 +651,13 @@ The mathematical formulas, numerical stability techniques (log-sum-exp trick), a
 
 ### Why Loss Functions Matter at Scale
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Scale section: exponential operations for language model loss
-scale_exp_ops = 50_000 * 128
-scale_exp_ops = f"{scale_exp_ops / 1e6:.1f}M"
-
-# Cross-entropy memory: 3 tensors (logits, softmax, log-softmax)
-scale_ce_bytes = 128 * 50_000 * 4 * 3
-scale_ce_mb = scale_ce_bytes / 1024**2
-scale_ce_mb = f"{scale_ce_mb:.1f} MB"
-
-# FP16 cross-entropy memory
-scale_fp16_bytes = 128 * 50_000 * 2 * 3
-scale_fp16_mb = scale_fp16_bytes / 1024**2
-scale_fp16_mb = f"{scale_fp16_mb:.1f} MB"
-```
-
 To appreciate why loss functions matter in production, consider the scale of modern ML systems:
 
-- **Language models**: 50,000 token vocabulary × 128 batch size = **`{python} scale_exp_ops` exponential operations per loss computation**. With sampled softmax, this reduces to ~128K operations (50× speedup).
-- **Computer vision**: ImageNet with 1,000 classes processes **256,000 softmax computations** per batch. Fused CUDA kernels reduce this from 15ms to 0.5ms.
-- **Recommendation systems**: Billions of items require specialized loss functions. YouTube's recommendation system uses **sampled softmax over 1M+ videos**, making loss computation the primary bottleneck.
+- **Language models**: 50,000-token vocabulary × 128 batch size = **6.4M exponential operations per loss computation**. Sampled softmax cuts this to ~128K (50× speedup).
+- **Computer vision**: ImageNet with 1,000 classes runs **256,000 softmax computations per batch**. Fused CUDA kernels drop this from ~15 ms to ~0.5 ms.
+- **Recommendation systems**: Billions of items demand specialized losses. YouTube's recommender uses **sampled softmax over 1M+ videos**, making loss computation the primary training bottleneck.
 
-Memory pressure is equally significant. A language model forward pass might consume 8GB for activations, 2GB for parameters, but **`{python} scale_ce_mb` just for the cross-entropy loss computation** (B=128, C=50000, float32). Using FP16 cuts this to `{python} scale_fp16_mb`. Using hierarchical softmax eliminates the materialization entirely.
+Memory tells the same story. A language-model forward pass might burn 8 GB on activations and 2 GB on parameters, but **another 73.2 MB just for the cross-entropy loss tensors** (B=128, C=50,000, float32 — three copies: logits, softmax, log-softmax). FP16 halves that to 36.6 MB. Hierarchical or sampled softmax avoids materializing the full vocabulary at all.
 
 The loss computation typically accounts for **5-10% of total training time** in well-optimized systems, but can dominate (30-50%) for large vocabularies without optimization. This is why production frameworks invest heavily in fused kernels, specialized data structures, and algorithmic improvements like hierarchical softmax.
 
@@ -690,70 +669,42 @@ Test yourself with these systems thinking questions. They're designed to build i
 
 A language model with 50,000 token vocabulary uses CrossEntropyLoss with batch size 128. Using float32, how much memory does the loss computation require for logits, softmax probabilities, and log-probabilities?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Per-tensor memory (B × C × 4 bytes, binary MB)
-q1_per_tensor_bytes = 128 * 50_000 * 4
-q1_per_tensor_mb = q1_per_tensor_bytes / 1024**2
-q1_per_tensor_mb = f"{q1_per_tensor_mb:.1f} MB"
-
-# Q1: Total for 3 tensors
-q1_total_bytes = q1_per_tensor_bytes * 3
-q1_total_mb = q1_total_bytes / 1024**2
-q1_total_mb = f"{q1_total_mb:.1f} MB"
-
-# Q1: FP16 total
-q1_fp16_bytes = 128 * 50_000 * 2 * 3
-q1_fp16_mb = q1_fp16_bytes / 1024**2
-q1_fp16_mb = f"{q1_fp16_mb:.1f} MB"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
 **Calculation:**
-- Logits: 128 × 50,000 × 4 bytes = `{python} q1_per_tensor_mb`
-- Softmax probabilities: 128 × 50,000 × 4 bytes = `{python} q1_per_tensor_mb`
-- Log-softmax: 128 × 50,000 × 4 bytes = `{python} q1_per_tensor_mb`
 
-**Total: `{python} q1_total_mb`** just for loss computation (before model activations!)
+- Logits: 128 × 50,000 × 4 bytes = **24.4 MB**
+- Softmax probabilities: 128 × 50,000 × 4 bytes = **24.4 MB**
+- Log-softmax: 128 × 50,000 × 4 bytes = **24.4 MB**
 
-**Key insight**: Memory scales as B×C. Doubling vocabulary doubles loss computation memory. This is why large language models use techniques like sampled softmax - they literally can't afford to materialize the full vocabulary every forward pass.
+**Total: 73.2 MB** just for loss computation (before any model activations).
 
-**Production solution**: Switch to FP16 (cuts to `{python} q1_fp16_mb`) or use hierarchical/sampled softmax (reduces C from 50,000 to ~1,000).
+**Key insight**: Memory scales as B × C. Doubling vocabulary doubles loss memory. This is why large language models can't afford to materialize the full vocabulary on every forward pass — they use sampled or hierarchical softmax instead.
+
+**Production solution**: switch to FP16 (cuts the total to **36.6 MB**), or use hierarchical/sampled softmax (reduces effective C from 50,000 to ~1,000).
 :::
 
 **Q2: Complexity Analysis - Softmax Bottleneck**
 
 Your training profile shows: Forward pass 80ms, Loss computation 120ms, Backward pass 150ms. Your model has 1,000 output classes and batch size 64. Why is loss computation so expensive, and what's the fix?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q2: exp/log operations
-q2_ops = 64 * 1_000
-q2_ops = f"{q2_ops:,}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-**Problem**: Loss taking 120ms (34% of iteration time) is unusually high. Normal ratio is 5-10%.
+**Problem**: Loss taking 120 ms (34% of iteration time) is unusually high — the normal range is 5–10%.
 
-**Root cause**: CrossEntropyLoss is O(B×C). With B=64 and C=1,000, that's `{python} q2_ops` exp/log operations. If implemented naively in Python loops (not vectorized), this becomes a bottleneck.
+**Root cause**: CrossEntropyLoss is O(B × C). With B=64 and C=1,000, that's **64,000** exp/log operations per batch. Implemented naively (Python loops instead of vectorized NumPy), this dominates the iteration.
 
 **Diagnosis steps**:
-1. Profile within loss: Is `log_softmax` the bottleneck? (Likely yes)
-2. Check vectorization: Are you using NumPy broadcasting or Python loops?
-3. Check batch size: Is B=64 too small to utilize vectorization?
+
+1. Profile within loss: is `log_softmax` the bottleneck? (Likely yes.)
+2. Check vectorization: NumPy broadcasting or Python loops?
+3. Check batch size: is B=64 too small to amortize vectorization overhead?
 
 **Fixes**:
-- **Immediate**: Ensure you're using vectorized NumPy ops (not loops)
-- **Better**: Use PyTorch with CUDA - GPU acceleration gives 10-50× speedup
-- **Advanced**: For C>10,000, use hierarchical softmax (reduces to O(B×log C))
+
+- **Immediate**: use vectorized NumPy ops, not loops.
+- **Better**: switch to PyTorch on CUDA — 10–50× speedup from GPU acceleration.
+- **Advanced**: for C > 10,000, use hierarchical softmax (reduces complexity to O(B × log C)).
 
 **Reality check**: In optimized PyTorch on GPU, loss should be ~5ms for this size, not 120ms. Your implementation in pure Python/NumPy is expected to be slower, but vectorization is crucial.
 :::
@@ -794,11 +745,17 @@ You're building a medical diagnosis system with 5 disease categories. Should you
 :::{.callout-note collapse="true" title="Answer"}
 
 **Case 1: Mutually exclusive diseases** (patient has exactly one)
+
 - **Use**: CrossEntropyLoss
 - **Model output**: Logits of shape (batch_size, 5)
-- **Why**: Categories are mutually exclusive - softmax ensures probabilities sum to 1.0
+- **Why**: Categories are mutually exclusive — softmax ensures probabilities sum to 1.0
+
+::: {.content-visible when-format="pdf"}
+\vspace{1em}
+:::
 
 **Case 2: Multi-label classification** (patient can have multiple diseases)
+
 - **Use**: BinaryCrossEntropyLoss
 - **Model output**: Probabilities of shape (batch_size, 5) after sigmoid
 - **Why**: Each disease is an independent binary decision. Softmax would incorrectly force them to sum to 1.
@@ -825,25 +782,27 @@ You train with batch size 32, using 4GB GPU memory. You want to increase to batc
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Memory usage**: Yes, approximately **16GB** (4× increase)
-- Loss computation scales linearly: 4× batch → 4× memory
-- Activations scale linearly: 4× batch → 4× memory
-- Model parameters: Fixed (same regardless of batch size)
+**Memory usage**: Yes, approximately **16 GB** (4× increase).
 
-**Problem**: If your GPU only has 12GB, training will crash with OOM (out of memory).
+- Loss computation scales linearly: 4× batch → 4× memory.
+- Activations scale linearly: 4× batch → 4× memory.
+- Model parameters: fixed regardless of batch size.
 
-**Loss value**: **Stays the same** (assuming similar data)
+**Problem**: if your GPU only has 12 GB, training crashes with OOM.
+
+**Loss value**: **stays roughly the same** (assuming similar data):
+
 ```python
-# Both compute the mean over their batch:
-batch_32_loss = mean(losses[:32])   # Average of 32 samples
-batch_128_loss = mean(losses[:128]) # Average of 128 samples
-# If data is similar, means are similar
+batch_32_loss = mean(losses[:32])
+batch_128_loss = mean(losses[:128])
+# Both are means over per-sample errors; with similar data they converge to similar values.
 ```
 
-**Gradient quality**: **Improves with larger batch**
-- Batch 32: High variance, noisy gradient estimates
-- Batch 128: Lower variance, smoother gradient, more stable convergence
-- Trade-off: More computation per step, fewer steps per epoch
+**Gradient quality**: **improves with larger batch.**
+
+- Batch 32: high variance, noisy gradient estimates.
+- Batch 128: lower variance, smoother gradient, steadier convergence.
+- Trade-off: more compute per step, fewer steps per epoch.
 
 **Production solution - Gradient Accumulation**:
 ```python
@@ -877,18 +836,19 @@ For students who want to understand the academic foundations and explore deeper:
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 05 - DataLoader"}
+:::{.callout-note title="Coming Up: Module 05 — DataLoader"}
 
-Build efficient data pipelines that handle batching, shuffling, and iteration over your datasets. DataLoader prepares your training data so that autograd and training loops can consume it efficiently.
+You now have a feedback signal. The next problem is feeding it: a single sample at a time is too slow, an entire dataset at once won't fit in memory, and unshuffled data trains a different model than shuffled data. Module 05 builds the **DataLoader** — batching, shuffling, and iteration — so the loss you just wrote can be averaged over `B` samples per step instead of one.
 :::
 
-**Preview - How Your Loss Functions Get Used in Future Modules:**
+**Preview — How Your Loss Functions Get Used in Future Modules:**
 
 | Module | What It Does | Your Loss In Action |
 |--------|--------------|---------------------|
-| **06: Autograd** | Automatic differentiation | `loss.backward()` computes gradients |
-| **07: Optimizers** | Parameter updates | `optimizer.step()` uses loss gradients to improve weights |
-| **08: Training** | Complete training loop | `loss = criterion(outputs, targets)` measures progress |
+| **05: DataLoader** | Batching + shuffling | Feeds `(predictions, targets)` pairs into your loss every step |
+| **06: Autograd** | Automatic differentiation | `loss.backward()` traces the loss back into parameter gradients |
+| **07: Optimizers** | Parameter updates | `optimizer.step()` consumes those gradients to shrink the loss |
+| **08: Training** | Complete training loop | `loss = criterion(outputs, targets)` becomes the heartbeat of every epoch |
 
 ## Get Started
 

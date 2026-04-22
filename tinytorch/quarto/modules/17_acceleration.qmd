@@ -6,6 +6,7 @@
 **OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
 
 **Prerequisites: Modules 01-14** means you need:
+
 - Tensor operations (Module 01) for understanding data structures
 - Neural network layers (Module 03) for knowing what to accelerate
 - Training loops (Module 08) for understanding the performance context
@@ -314,23 +315,20 @@ initSlideViewer('17_acceleration', '../assets/slides/17_acceleration.pdf');
 ```
 ## Overview
 
-Neural network training and inference spend 90% of their time on matrix operations. A single forward pass through a transformer model can involve billions of floating-point operations, and training requires thousands of these passes. The difference between a model that trains in hours versus days, or that serves predictions in milliseconds versus seconds, comes down to how efficiently these operations execute on hardware.
+Neural networks spend 90% of their time multiplying matrices. The same workload that trains in three hours on optimized kernels takes a week of naive Python loops — same math, same hardware, two orders of magnitude apart. The gap is paid for entirely in how the code talks to the processor.
 
-This module teaches you hardware-aware optimization through vectorization and kernel fusion. You'll learn to leverage SIMD instructions, optimize memory access patterns, and eliminate unnecessary memory traffic. By the end, you'll understand why a naive matrix multiplication can be 100x slower than an optimized one, and how to achieve 2-5x speedups in your own code.
+This module teaches hardware-aware optimization through vectorization and kernel fusion. You'll exploit SIMD lanes, fix memory access patterns, and eliminate the intermediate arrays that quietly burn most of your bandwidth. By the end you'll know why a naive matmul is 100x slower than an optimized one, and you'll have shipped 2–5x speedups against your own baseline.
 
-Acceleration isn't about clever algorithms. It's about understanding how processors work and writing code that exploits their design.
+Acceleration isn't clever algorithms. It's understanding how processors actually work, then writing code that doesn't fight them.
 
 ## Why Acceleration Before Memoization?
 
-The Optimization tier divides into **model-level** (15-16) and **runtime** (17-18) optimizations:
+The Optimization tier splits into **model-level** (15–16) and **runtime** (17–18) work:
 
-- **Model-level** (Quantization, Compression): Change the model itself
-- **Runtime** (Acceleration, Memoization): Change how execution happens
+- **Model-level** (Quantization, Compression): change the model itself.
+- **Runtime** (Acceleration, Memoization): change how execution happens.
 
-Within runtime optimizations, **Acceleration comes first** because:
-1. **General before specific**: Vectorization and kernel fusion apply to ANY numerical computation—matrix multiplication, convolutions, attention, everything
-2. **Memoization (KV-cache)** is domain-specific: it only applies to transformer autoregressive generation
-3. Once you understand general speedup techniques, you can appreciate the specialized optimization that makes LLM inference economically viable
+Acceleration comes first because it is general — vectorization and kernel fusion apply to every numerical operation a network runs: matmuls, convolutions, attention, activations. Memoization is the opposite: a domain-specific trick that pays off mostly for transformer autoregressive generation. Build the general tools first, then specialize.
 
 ## Learning Objectives
 
@@ -452,31 +450,13 @@ The magic happens inside `np.matmul`. NumPy delegates to BLAS (Basic Linear Alge
 
 ### BLAS and LAPACK
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# GEMM for N=1024: FLOPs = 2 * N^3, memory = 3 * N^2 elements * 4 bytes (float32)
-N_blas = 1024
-blas_flops = 2 * N_blas**3
-blas_elements = 3 * N_blas**2
-blas_bytes = blas_elements * 4
-blas_data_mb = blas_bytes / 1024**2
-blas_ai = blas_flops / blas_bytes
-
-blas_flops_billions = f"{blas_flops / 1e9:.1f}"
-blas_data_mb = f"{blas_data_mb:.0f}"
-blas_ai = f"{blas_ai:.0f}"
-```
-
 BLAS provides three levels of operations, each with different performance characteristics:
 
-- **Level 1**: Vector operations (AXPY: y = αx + y). These are memory-bound with low arithmetic intensity.
-- **Level 2**: Matrix-vector operations (GEMV: y = αAx + βy). Better arithmetic intensity but still memory-limited.
+- **Level 1**: Vector operations (AXPY: y = αx + y). Memory-bound, low arithmetic intensity.
+- **Level 2**: Matrix-vector operations (GEMV: y = αAx + βy). Better arithmetic intensity, still memory-limited.
 - **Level 3**: Matrix-matrix operations (GEMM: C = αAB + βC). High arithmetic intensity, compute-bound.
 
-Matrix multiplication (GEMM) dominates neural network training because every linear layer, every attention mechanism, and every convolution ultimately reduces to matrix multiplication. GEMM performs 2N³ floating-point operations while reading only 3N² elements from memory. For a 1024×1024 matrix, that's `{python} blas_flops_billions` billion operations on just `{python} blas_data_mb` MB of data - an arithmetic intensity of `{python} blas_ai` FLOPs/byte. This high ratio of computation to memory access makes GEMM perfect for hardware acceleration.
+Matrix multiplication (GEMM) dominates neural network training: every linear layer, every attention head, every convolution ultimately reduces to it. GEMM performs 2N³ floating-point operations while reading only 3N² elements. For a 1024×1024 matrix that's 2.1 billion operations on just 12 MB of data — an arithmetic intensity of ~171 FLOPs/byte. That ratio is why GEMM is the operation hardware designers tune for first.
 
 ### Memory Layout Optimization
 
@@ -513,52 +493,9 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
 
 ### Kernel Fusion
 
-```{python}
-#| echo: false
-#| output: false
+Element-wise operations like GELU are memory-bound: they spend more time moving data than computing on it. Consider the GELU formula:
 
-
-# Kernel fusion memory traffic analysis
-# 4 million element tensor, float32 (4 bytes each)
-num_elements = 4_000_000
-bytes_per_element = 4
-tensor_bytes = num_elements * bytes_per_element
-tensor_mb = tensor_bytes / 1024**2
-
-# Unfused: 7 intermediate arrays created and consumed
-# Each intermediate array is written then read = 2 memory ops per intermediate
-# Plus 1 input read + 1 output write = 7*2 + 2 = 16 memory operations
-# But the original text counts: "7 reads + 7 writes per element" = 14 per element
-# Total memory ops = 14 per element => 14 * tensor_size_in_bytes
-unfused_mem_ops = 14
-unfused_traffic_bytes = unfused_mem_ops * tensor_bytes
-unfused_traffic_mb = unfused_traffic_bytes / 1024**2
-
-# Fused: 1 read + 1 write = 2 memory operations
-fused_mem_ops = 2
-fused_traffic_bytes = fused_mem_ops * tensor_bytes
-fused_traffic_mb = fused_traffic_bytes / 1024**2
-
-# Bandwidth calculation: 50 GB/s
-bandwidth_gb_s = 50
-bandwidth_bytes_s = bandwidth_gb_s * 1e9
-unfused_time_ms = (unfused_traffic_bytes / bandwidth_bytes_s) * 1000
-fused_time_ms = (fused_traffic_bytes / bandwidth_bytes_s) * 1000
-fusion_speedup = unfused_time_ms / fused_time_ms
-
-fusion_tensor_elements = f"{num_elements:,}"
-fusion_tensor_mb = f"{tensor_mb:.0f}"
-fusion_unfused_mem_ops = f"{num_elements * unfused_mem_ops / 1e6:.0f}"
-fusion_unfused_traffic_mb = f"{unfused_traffic_mb:.0f}"
-fusion_unfused_time_ms = f"{unfused_time_ms:.2f}"
-fusion_fused_traffic_mb = f"{fused_traffic_mb:.0f}"
-fusion_fused_time_ms = f"{fused_time_ms:.2f}"
-fusion_speedup = f"{fusion_speedup:.1f}"
-```
-
-Element-wise operations like GELU activation are memory-bound: they spend more time loading and storing data than computing results. Consider the GELU formula:
-
-```
+```text
 GELU(x) = 0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))
 ```
 
@@ -581,7 +518,7 @@ def unfused_gelu(x: Tensor) -> Tensor:
     return result
 ```
 
-Each temporary array allocation writes to memory, and each subsequent operation reads from memory. For a `{python} fusion_tensor_elements` element tensor, this unfused version performs `{python} fusion_unfused_mem_ops` million memory operations (7 reads + 7 writes per element). Memory bandwidth on a typical CPU is around 50 GB/s, so moving `{python} fusion_unfused_traffic_mb` MB takes `{python} fusion_unfused_time_ms` milliseconds - just for memory traffic, before any computation.
+Every temporary writes to memory and the next operation reads it back. For a 4,000,000-element tensor, the unfused version issues 56 million memory operations (7 reads + 7 writes per element). At 50 GB/s — typical desktop CPU bandwidth — moving 214 MB takes 4.48 ms. That's just the memory traffic, before any actual arithmetic.
 
 Kernel fusion combines all operations into a single expression:
 
@@ -598,7 +535,7 @@ def fused_gelu(x: Tensor) -> Tensor:
     return Tensor(result_data)
 ```
 
-Now there are only two memory operations: read the input, write the output. For the same `{python} fusion_tensor_elements` element tensor, that's just `{python} fusion_fused_traffic_mb` MB of memory traffic, completing in `{python} fusion_fused_time_ms` milliseconds. The fused version is `{python} fusion_speedup`x faster purely from memory bandwidth reduction, even though both versions perform the same arithmetic.
+Now there are only two memory operations: read the input, write the output. For the same 4,000,000-element tensor that's 31 MB of traffic in 0.64 ms. The fused version is 7.0x faster on identical math — purely from doing less memory I/O.
 
 ### Parallel Processing
 
@@ -606,10 +543,11 @@ Modern CPUs have multiple cores that can execute operations simultaneously. BLAS
 
 However, parallel processing has overhead. Creating threads, synchronizing results, and merging data takes time. For small matrices, this overhead exceeds the benefit. BLAS libraries use heuristics to decide when to parallelize: large matrices get multiple threads, small matrices run on a single core.
 
-This is why you see sublinear speedups in practice. A 4-core system might achieve 3x speedup rather than 4x, due to:
+This is why real speedups are sublinear. A 4-core system typically lands at 3x rather than 4x:
+
 - Thread creation and destruction overhead
-- Cache coherence traffic between cores
-- Memory bandwidth saturation (all cores sharing the same memory bus)
+- Cache-coherence traffic between cores
+- Memory-bandwidth saturation (all cores share one memory bus)
 - Load imbalance (some threads finish before others)
 
 ### Hardware Acceleration
@@ -624,49 +562,32 @@ The acceleration techniques you implement in this module - vectorization, fusion
 
 ### Arithmetic Intensity and the Roofline Model
 
-```{python}
-#| echo: false
-#| output: false
+Not all operations are created equal. The roofline model predicts whether an operation will be limited by memory bandwidth or by raw compute. Its driving number is *arithmetic intensity* — floating-point operations per byte transferred:
 
-
-# Element-wise addition: AI = N / (3N * 4) = 1/12
-ai_elemwise = 1 / 12
-
-# Matrix multiplication: AI = 2N^3 / (3N^2 * 4) = N/6
-N_roof = 1024
-ai_matmul_formula = "N/6"
-ai_matmul_1024 = N_roof / 6
-ai_ratio = ai_matmul_1024 / ai_elemwise
-
-roof_ai_elemwise = f"{ai_elemwise:.3f}"
-roof_ai_matmul_1024 = f"{ai_matmul_1024:.0f}"
-roof_ai_ratio = f"{ai_ratio:.0f}"
-```
-
-Not all operations are created equal. The roofline model helps predict whether an operation will be limited by memory bandwidth or computational throughput. Arithmetic intensity is the ratio of floating-point operations to bytes transferred:
-
-```
+```text
 Arithmetic Intensity (AI) = FLOPs / Bytes
 ```
 
-For element-wise addition of two N-element arrays:
-- FLOPs: N (one addition per element)
-- Bytes: 3N × 4 = 12N (read A, read B, write C, each 4 bytes for float32)
-- AI = N / 12N = `{python} roof_ai_elemwise` FLOPs/byte
+Element-wise addition of two N-element float32 arrays:
 
-For matrix multiplication of N×N matrices:
-- FLOPs: 2N³ (N³ multiplications + N³ additions)
+- FLOPs: N (one add per element)
+- Bytes: 3N × 4 = 12N (read A, read B, write C)
+- AI = 1/12 ≈ 0.083 FLOPs/byte
+
+Matrix multiplication of two N×N float32 matrices:
+
+- FLOPs: 2N³ (N³ multiplies + N³ adds)
 - Bytes: 3N² × 4 = 12N² (read A, read B, write C)
-- AI = 2N³ / 12N² = N/6 FLOPs/byte
+- AI = N/6 FLOPs/byte
 
-For a 1024×1024 matrix: AI = `{python} roof_ai_matmul_1024` FLOPs/byte. Matrix multiplication performs `{python} roof_ai_ratio`x more computation per byte transferred than element-wise addition. This is why GPUs excel at matrix operations but struggle with element-wise ops.
+For N=1024 that's 171 FLOPs/byte — about 2048x more arithmetic per byte than element-wise addition. That gap is the whole reason GPUs and tensor cores are spectacular at matmul and uninspiring at element-wise ops.
 
 | Operation | Arithmetic Intensity | Bottleneck | Optimization Strategy |
 |-----------|---------------------|------------|----------------------|
 | Element-wise add | ~0.08 FLOPs/byte | Memory bandwidth | Kernel fusion |
 | Element-wise multiply | ~0.08 FLOPs/byte | Memory bandwidth | Kernel fusion |
 | GELU activation | ~1.0 FLOPs/byte | Memory bandwidth | Kernel fusion |
-| Matrix multiply (1024×1024) | ~`{python} roof_ai_matmul_1024` FLOPs/byte | Compute throughput | Vectorization, tiling |
+| Matrix multiply (1024×1024) | ~171 FLOPs/byte | Compute throughput | Vectorization, tiling |
 
 The roofline model plots achievable performance against arithmetic intensity. Your hardware has a peak memory bandwidth (horizontal line) and peak computational throughput (diagonal line). The minimum of these two lines is your performance ceiling.
 
@@ -755,7 +676,7 @@ h = vectorized_matmul(x, w)
 output = fused_gelu(h)
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 
@@ -790,203 +711,91 @@ The acceleration principles: vectorization reduces instruction count, fusion red
 
 ### Why Acceleration Matters at Scale
 
-Real-world systems demonstrate the impact of acceleration:
+Three numbers explain why every framework team obsesses over kernel performance:
 
-- **GPT-3 training**: 175 billion parameters × 300 billion tokens = **10²³ FLOPs**. Without GPU acceleration, this would take centuries. With optimized TPUs, it takes weeks.
-- **Real-time inference**: Serving 1000 requests/second requires **sub-millisecond latency** per request. Every 2x speedup doubles your throughput.
-- **Cost efficiency**: Cloud GPU time costs $2-10/hour. A 2x speedup saves **$1000-5000 per week** for a production model.
+- **GPT-3 training**: 175B parameters × 300B tokens ≈ **10²³ FLOPs**. Naive code: centuries. Optimized TPUs: weeks.
+- **Real-time inference**: 1000 requests/second forces **sub-millisecond latency** per request. Every 2x speedup doubles throughput at the same dollar cost.
+- **Cost efficiency**: cloud GPU time runs $2–10/hour. A 2x speedup saves **$1000–5000/week** on a single production model.
 
-Small percentage improvements at this scale translate to millions in savings and fundamentally new capabilities.
+At this scale, the percent improvements you ship in this module compound into millions in savings — and into capabilities that simply weren't reachable on the slow path.
 
 ## Check Your Understanding
 
 Test your understanding of acceleration techniques with these quantitative questions.
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Arithmetic Intensity for 1024x1024 float32 matmul
-N_q1 = 1024
-q1_flops = 2 * N_q1**3
-q1_matrix_bytes = N_q1 * N_q1 * 4  # float32 = 4 bytes
-q1_matrix_mb = q1_matrix_bytes / 1024**2
-q1_total_bytes = 3 * q1_matrix_bytes  # read A + read B + write C
-q1_total_mb = 3 * q1_matrix_mb
-q1_ai = q1_flops / q1_total_bytes
-
-q1_flops = f"{q1_flops:,}"
-q1_matrix_mb = f"{q1_matrix_mb:.0f}"
-q1_total_mb = f"{q1_total_mb:.0f}"
-q1_total_bytes = f"{q1_total_bytes:,}"
-q1_ai = f"{q1_ai:.0f}"
-```
-
 **Q1: Arithmetic Intensity**
 
-Matrix multiplication of two 1024×1024 float32 matrices performs `{python} q1_flops` FLOPs. It reads `{python} q1_matrix_mb` MB (matrix A) + `{python} q1_matrix_mb` MB (matrix B) = `{python} q1_total_mb` MB and writes `{python} q1_matrix_mb` MB (matrix C) = `{python} q1_total_mb` MB total. What is the arithmetic intensity?
+Matrix multiplication of two 1024×1024 float32 matrices performs 2,147,483,648 FLOPs. It reads 4 MB (A) + 4 MB (B) and writes 4 MB (C), so 12 MB of memory traffic total. What is the arithmetic intensity?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Arithmetic Intensity = `{python} q1_flops` FLOPs / `{python} q1_total_bytes` bytes = **~`{python} q1_ai` FLOPs/byte**
+Arithmetic Intensity = 2,147,483,648 FLOPs / 12,582,912 bytes = **~171 FLOPs/byte**
 
-This high arithmetic intensity (compared to ~0.08 for element-wise ops) is why matrix multiplication is ideal for GPUs and why it dominates neural network training time.
+This high arithmetic intensity — compared to ~0.08 for element-wise ops — is why matrix multiplication is ideal for GPUs and why it dominates neural network training time.
 :::
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q2: Memory bandwidth savings from kernel fusion
-q2_elements = 1_000_000
-q2_tensor_bytes = q2_elements * 4  # float32
-q2_tensor_mb = q2_tensor_bytes / 1024**2
-
-# Unfused: 7 intermediate arrays => 7 reads + 7 writes + 1 input read + 1 output write = 16 ops
-q2_unfused_ops = 16
-q2_unfused_mb = q2_unfused_ops * q2_tensor_mb
-
-# Fused: 1 input read + 1 output write = 2 ops
-q2_fused_ops = 2
-q2_fused_mb = q2_fused_ops * q2_tensor_mb
-
-q2_savings_mb = q2_unfused_mb - q2_fused_mb
-q2_savings_pct = (q2_savings_mb / q2_unfused_mb) * 100
-
-q2_elements = f"{q2_elements:,}"
-q2_tensor_mb = f"{q2_tensor_mb:.0f}"
-q2_unfused_mb = f"{q2_unfused_mb:.0f}"
-q2_fused_mb = f"{q2_fused_mb:.0f}"
-q2_savings_mb = f"{q2_savings_mb:.0f}"
-q2_savings_pct = f"{q2_savings_pct:.1f}"
-```
 
 **Q2: Memory Bandwidth Savings**
 
-Your fused GELU processes a tensor with `{python} q2_elements` elements (`{python} q2_tensor_mb` MB as float32). The unfused version creates 7 intermediate arrays. How much memory bandwidth does fusion save?
+Your fused GELU processes a tensor with 1,000,000 elements (~4 MB as float32). The unfused version creates 7 intermediate arrays. How much memory bandwidth does fusion save?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Unfused**: 7 reads + 7 writes + 1 input read + 1 output write = 16 memory operations × `{python} q2_tensor_mb` MB = **`{python} q2_unfused_mb` MB**
+**Unfused**: 7 reads + 7 writes + 1 input read + 1 output write = 16 ops × ~4 MB ≈ **61 MB**
 
-**Fused**: 1 input read + 1 output write = 2 memory operations × `{python} q2_tensor_mb` MB = **`{python} q2_fused_mb` MB**
+**Fused**: 1 input read + 1 output write = 2 ops × ~4 MB ≈ **8 MB**
 
-**Savings**: `{python} q2_unfused_mb` - `{python} q2_fused_mb` = **`{python} q2_savings_mb` MB saved (`{python} q2_savings_pct`% reduction)**
+**Savings**: 61 − 8 ≈ **53 MB saved (~87.5% reduction)**
 
-For typical CPUs with ~50 GB/s bandwidth, this saves ~1 millisecond per GELU call. In a transformer with 96 GELU activations per forward pass, that's 96ms saved - enough to improve throughput by 10-20%.
+At ~50 GB/s CPU bandwidth that's roughly 1 ms saved per GELU call. A transformer with 96 GELU activations per forward pass recovers ~96 ms — a 10–20% throughput win on inference for free.
 :::
-
-```{python}
-#| echo: false
-#| output: false
-
-import math
-
-# Q3: Cache tiling for 2048x2048 float32 with 256 KB L2
-q3_cache_kb = 256
-q3_cache_bytes = q3_cache_kb * 1024  # binary: 262,144 bytes
-q3_matrix_dim = 2048
-q3_matrix_bytes = q3_matrix_dim * q3_matrix_dim * 4
-q3_matrix_mb = q3_matrix_bytes / 1024**2
-
-# 3 tiles must fit in cache: 3 * tile^2 * 4 <= cache_bytes
-q3_max_tile_sq = q3_cache_bytes / 12  # 3 tiles * 4 bytes
-q3_max_tile = math.isqrt(int(q3_max_tile_sq))  # integer sqrt (floor)
-# Practical power-of-2 tile size
-q3_practical_tile = 128
-q3_practical_bytes = 3 * q3_practical_tile**2 * 4
-q3_practical_kb = q3_practical_bytes / 1024
-
-q3_cache_kb = f"{q3_cache_kb}"
-q3_matrix_dim = f"{q3_matrix_dim}"
-q3_matrix_mb = f"{q3_matrix_mb:.0f}"
-q3_cache_bytes = f"{q3_cache_bytes:,}"
-q3_max_tile_sq = f"{q3_max_tile_sq:,.0f}"
-q3_max_tile = f"{q3_max_tile}"
-q3_practical_tile = f"{q3_practical_tile}"
-q3_practical_kb = f"{q3_practical_kb:.0f}"
-```
 
 **Q3: Cache Tiling**
 
-A CPU has `{python} q3_cache_kb` KB L2 cache. You're multiplying two `{python} q3_matrix_dim`×`{python} q3_matrix_dim` float32 matrices (`{python} q3_matrix_mb` MB each). What tile size keeps the working set in L2 cache?
+A CPU has 256 KB L2 cache. You're multiplying two 2048×2048 float32 matrices (16 MB each). What tile size keeps the working set in L2 cache?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-For tiled multiplication, we need 3 tiles in cache simultaneously:
-- Tile from matrix A: tile_size × tile_size × 4 bytes
-- Tile from matrix B: tile_size × tile_size × 4 bytes
-- Output tile: tile_size × tile_size × 4 bytes
+Tiled multiplication needs three tiles resident at once:
 
-Total: 3 × tile_size² × 4 bytes ≤ `{python} q3_cache_kb` KB
+- Tile from A: `tile_size × tile_size × 4` bytes
+- Tile from B: `tile_size × tile_size × 4` bytes
+- Output tile: `tile_size × tile_size × 4` bytes
 
-Solving: tile_size² ≤ `{python} q3_cache_bytes` / 12 = `{python} q3_max_tile_sq`
+Constraint: 3 × tile_size² × 4 ≤ 256 KB
 
-**tile_size ≈ `{python} q3_max_tile`**
+Solving: tile_size² ≤ 262,144 / 12 ≈ 21,845, so **tile_size ≈ 147**.
 
-In practice, use powers of 2: **`{python} q3_practical_tile` works well** (3 × `{python} q3_practical_tile`² × 4 = `{python} q3_practical_kb` KB, leaving room for other data).
+In practice, snap to a power of two: **128 works well** (3 × 128² × 4 = 192 KB, leaving headroom for other data).
 :::
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q4: BLAS performance calculation
-q4_flops = 2.15e9
-q4_time_s = 0.01  # 10ms
-q4_gflops = q4_flops / (q4_time_s * 1e9)
-q4_peak_gflops = 500
-q4_efficiency_pct = (q4_gflops / q4_peak_gflops) * 100
-
-q4_gflops = f"{q4_gflops:.0f}"
-q4_efficiency_pct = f"{q4_efficiency_pct:.0f}"
-```
 
 **Q4: BLAS Performance**
 
-Your vectorized matmul completes a 1024×1024 multiplication in 10ms. The operation requires 2.15 billion FLOPs. What is your achieved performance in GFLOPS?
+Your vectorized matmul completes a 1024×1024 multiplication in 10 ms. The operation requires 2.15 billion FLOPs. What is your achieved performance in GFLOPS?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-GFLOPS = 2,150,000,000 FLOPs / (0.01 seconds × 1,000,000,000) = **`{python} q4_gflops` GFLOPS**
+GFLOPS = 2,150,000,000 FLOPs / (0.01 s × 1,000,000,000) = **215 GFLOPS**
 
 For reference:
-- Modern CPU peak: 500-1000 GFLOPS (AVX-512)
-- Your efficiency: `{python} q4_gflops`/500 = **`{python} q4_efficiency_pct`% of peak** (typical for real code)
-- GPU equivalent: ~50 TFLOPS (230x faster than single CPU core)
+
+- Modern CPU peak: 500–1000 GFLOPS (AVX-512)
+- Your efficiency: 215 / 500 = **~43% of peak** (typical for real code)
+- GPU equivalent: ~50 TFLOPS (about 230x faster than a single CPU core)
 :::
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q5: Speedup from fusion
-q5_unfused_ms = 8.0
-q5_fused_ms = 2.5
-q5_speedup = q5_unfused_ms / q5_fused_ms
-q5_mem_overhead_pct = ((q5_unfused_ms - q5_fused_ms) / q5_unfused_ms) * 100
-
-q5_speedup = f"{q5_speedup:.1f}"
-q5_mem_overhead_pct = f"{q5_mem_overhead_pct:.2f}"
-q5_mem_overhead_approx = f"{round(q5_mem_overhead_pct)}"
-```
 
 **Q5: Speedup from Fusion**
 
-Unfused GELU takes 8ms on a 2000×2000 tensor. Fused GELU takes 2.5ms. What percentage of the unfused time was memory overhead?
+Unfused GELU takes 8 ms on a 2000×2000 tensor. Fused GELU takes 2.5 ms. What percentage of the unfused time was memory overhead?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Speedup = 8ms / 2.5ms = **`{python} q5_speedup`x faster**
+Speedup = 8 ms / 2.5 ms = **3.2x faster**
 
-Assuming both versions do the same computation, the difference is memory bandwidth:
-- Memory overhead = (8 - 2.5) / 8 = **`{python} q5_mem_overhead_pct`%**
+Both versions perform the same arithmetic, so the gap is memory bandwidth:
 
-Nearly **`{python} q5_mem_overhead_approx`% of the unfused version's time** was spent waiting for memory! This is typical for element-wise operations with low arithmetic intensity.
+- Memory overhead = (8 − 2.5) / 8 = **68.75%**
+
+Nearly **69% of the unfused version's runtime was spent waiting for memory.** That's typical for element-wise operations with low arithmetic intensity.
 :::
 
 ## Further Reading
@@ -1010,9 +819,11 @@ For students who want to understand the academic foundations and implementation 
 
 ## What's Next
 
+You just made each operation as cheap as the hardware allows. The next move is to skip operations entirely.
+
 :::{.callout-note title="Coming Up: Module 18 - Memoization"}
 
-Implement caching and memoization strategies to eliminate redundant computations. You'll build KV-caching for transformer generation, cache repeated forward passes, and store attention patterns for dramatic speedups in production inference.
+Acceleration shrinks the cost of every call. **Memoization eliminates the call.** Module 18 builds KV-caching for transformer generation, caches repeated forward passes, and reuses attention patterns so the model never recomputes what it already knows. The two techniques compose: a fused kernel that gets called zero times is the cheapest kernel of all.
 :::
 
 **Preview - How Acceleration Gets Used in Future Modules:**

@@ -5,7 +5,7 @@
 
 **FOUNDATION TIER** | Difficulty: ●●○○ | Time: 5-7 hours | Prerequisites: 01-07
 
-By completing Modules 01-07, you've built all the fundamental components: tensors, activations, layers, losses, dataloader, autograd, and optimizers. Each piece works perfectly in isolation, but real machine learning requires orchestrating these components into a cohesive training process. This module provides that orchestration.
+This is the capstone of the Foundation Tier. The seven components you built — tensors, activations, layers, losses, dataloader, autograd, optimizers — finally fit together into a Trainer that actually learns.
 :::
 
 ```{=html}
@@ -308,11 +308,9 @@ initSlideViewer('08_training', '../assets/slides/08_training.pdf');
 ```
 ## Overview
 
-Training is where all your previous work comes together. You've built tensors that can store data, layers that transform inputs, loss functions that measure error, autograd that computes gradients, and optimizers that update parameters. But these components don't connect themselves. The training loop is the conductor that orchestrates this symphony: forward passes flow data through layers, loss functions measure mistakes, backward passes compute gradients, and optimizers improve parameters. Repeat this cycle thousands of times and your randomly initialized network learns to solve problems.
+Seven modules of components, none of them yet doing anything together. A tensor on its own does not learn. A layer on its own does not learn. Even autograd plus an optimizer does not learn — somebody has to call them, in order, on real data, again and again. That somebody is the training loop, and you are about to build it.
 
-Production training systems need more than this basic loop. Learning rates should start high for rapid progress, then decay for stable convergence. Gradients sometimes explode and need clipping. Long training runs require checkpointing to survive crashes. Models need separate train and evaluation modes. This module builds all of this infrastructure into a complete Trainer class that mirrors PyTorch Lightning and Hugging Face training systems.
-
-By the end, you'll have a production-grade training infrastructure ready for the MLP milestone.
+The loop itself is four lines: forward pass, loss, backward pass, optimizer step. Repeat. The hard part is what production wraps around those four lines. Learning rates need to start high and decay. Gradients sometimes explode and need clipping. Long runs crash and need checkpoints to resume from. Models need separate train and evaluation modes so dropout and batch norm behave correctly. By the end of this module you will have a `Trainer` class that handles all of this — the same architecture PyTorch Lightning and Hugging Face Transformers expose to millions of users, just smaller and yours.
 
 ## Learning Objectives
 
@@ -327,7 +325,7 @@ By the end, you'll have a production-grade training infrastructure ready for the
 
 ## What You'll Build
 
-
+Five pieces wrapped around the inner loop: a learning-rate schedule, a gradient clipper, the training loop itself, an evaluation pass, and checkpoint save/load.
 
 ::: {#fig-08_training-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Training Ecosystem**: Orchestration of scheduling, clipping, and checkpointing within the Trainer class." fig-alt="Diagram showing infrastructure components (Schedule, Clipping, Trainer, Checkpoint) feeding into the core Training Loop cycle."}
 
@@ -359,17 +357,17 @@ for epoch in range(100):
 
 ### What You're NOT Building (Yet)
 
-To keep this module focused, you will **not** implement:
+To keep the module focused, you will **not** implement:
 
 - Distributed training across multiple GPUs (PyTorch uses `DistributedDataParallel`)
-- Mixed precision training (PyTorch Automatic Mixed Precision requires specialized tensor types)
-- Advanced schedulers like warmup or cyclical learning rates (production frameworks offer dozens of variants)
+- Mixed-precision training (PyTorch's Automatic Mixed Precision relies on dedicated FP16/BF16 tensor types)
+- Exotic schedulers — warmup, cyclic, one-cycle, polynomial decay (production frameworks ship dozens)
 
-**You are building the core training orchestration.** Spatial operations for computer vision come next.
+**You are building the core training orchestration.** That orchestration is what the rest of the framework plugs into.
 
 ## API Reference
 
-This section provides a quick reference for the training infrastructure you'll build. Use this while implementing to understand expected signatures and behavior.
+The signatures you need to satisfy. Keep this open in a second tab while you implement.
 
 ### CosineSchedule
 
@@ -410,11 +408,11 @@ Orchestrates complete training lifecycle with forward pass, loss computation, ba
 
 ## Core Concepts
 
-This section covers the fundamental ideas behind production training systems. These patterns apply to every ML framework and understanding them deeply will serve you throughout your career.
+Five ideas. The training loop, epochs vs. iterations, train vs. eval mode, learning rate scheduling, and gradient clipping. Every ML framework — yours, PyTorch, JAX — implements these the same way at the conceptual level.
 
 ### The Training Loop
 
-The training loop is a simple pattern repeated thousands of times: push data through the model (forward pass), measure how wrong it is (loss), compute how to improve (backward pass), and update parameters (optimizer step). This cycle transforms random weights into intelligent systems.
+The training loop is a four-step pattern repeated thousands of times: push data through the model (forward pass), measure how wrong it is (loss), compute how to improve each parameter (backward pass), apply the update (optimizer step). Random weights at iteration 0; a network that recognizes digits at iteration 30,000.
 
 Here's the complete training loop from your Trainer implementation:
 
@@ -480,37 +478,17 @@ def train_epoch(self, dataloader, accumulation_steps=1):
     return avg_loss
 ```
 
-Each iteration processes one batch: the model transforms inputs into predictions, the loss function compares predictions to targets, backward pass computes gradients, gradient clipping prevents instability, and the optimizer updates parameters. The accumulated loss divided by batch count gives average training loss for monitoring convergence.
+Each iteration processes one batch: the model turns inputs into predictions, the loss function scores them against targets, the backward pass fills `.grad` on every parameter, the clipper bounds the global norm, and the optimizer applies the step. Total loss divided by batch count is the average training loss you watch to see convergence.
 
-The `accumulation_steps` parameter enables a clever memory trick: if you want an effective batch size of 128 but can only fit 32 samples in GPU memory, set `accumulation_steps=4`. Gradients accumulate across 4 batches before the optimizer step, creating the same update as processing all 128 samples at once.
+The `accumulation_steps` knob is a memory trick worth understanding. If you want an effective batch size of 128 but can only fit 32 samples in GPU memory, set `accumulation_steps=4`. Gradients accumulate across four batches before the optimizer step, producing the same update as a single batch of 128 — at the cost of 4× the wall-clock time per update.
 
 ### Epochs and Iterations
 
-```{python}
-#| echo: false
-#| output: false
-import math
+Training operates on two timescales: iterations (single batch updates) and epochs (complete passes through the dataset). The hierarchy is what lets you reason about training progress and cost.
 
+An iteration processes one batch: forward, backward, step. With 10,000 samples and batch size 32, one epoch is 313 iterations (10,000 ÷ 32, rounded up). Convergence typically takes dozens to hundreds of epochs, so tens of thousands of iterations.
 
-# Iterations per epoch: 10,000 samples / batch size 32
-epoch_iters_10k = math.ceil(10_000 / 32)
-epoch_iters_10k = f"{epoch_iters_10k:,}"
-
-# ImageNet iterations: 1.2M images / batch 256 * 90 epochs
-imagenet_iters_per_epoch = math.ceil(1_200_000 / 256)
-imagenet_total_iters = imagenet_iters_per_epoch * 90
-imagenet_total_iters = f"{imagenet_total_iters:,}"
-
-# ImageNet wall-clock time at 250ms/iter
-imagenet_hours = imagenet_total_iters * 0.250 / 3600
-imagenet_hours = f"{imagenet_hours:.0f}"
-```
-
-Training operates on two timescales: iterations (single batch updates) and epochs (complete passes through the dataset). Understanding this hierarchy helps you reason about training progress and resource requirements.
-
-An iteration processes one batch: forward pass, backward pass, optimizer step. If your dataset has 10,000 samples and batch size is 32, one epoch requires `{python} epoch_iters_10k` iterations (10,000 ÷ 32, rounded up). Training a model to convergence typically requires dozens or hundreds of epochs, meaning tens of thousands of iterations.
-
-The mathematics is straightforward but the implications are significant. Training ImageNet with 1.2 million images, batch size 256, for 90 epochs requires `{python} imagenet_total_iters` iterations (1,200,000 ÷ 256 × 90). At 250ms per iteration, that's `{python} imagenet_hours` hours of compute. Understanding this arithmetic helps you estimate training costs and debug slow convergence.
+Scale that up and the implications get real. ImageNet has 1.2M images; batch size 256 and 90 epochs is 421,920 iterations (1,200,000 ÷ 256 × 90). At 250ms per iteration, that's **29 hours** on one GPU. The same arithmetic tells you whether a hyperparameter sweep is feasible or whether you should rent more machines.
 
 Your Trainer tracks both: `self.step` counts total iterations across all epochs, while `self.epoch` counts how many complete dataset passes you've completed. Schedulers typically operate on epoch boundaries (learning rate changes each epoch), while monitoring systems track loss per iteration.
 
@@ -573,45 +551,17 @@ def get_lr(self, epoch: int) -> float:
     return self.min_lr + (self.max_lr - self.min_lr) * cosine_factor
 ```
 
-The mathematics creates a smooth curve. At epoch 0, `np.cos(0) = 1`, so `cosine_factor = (1+1)/2 = 1.0`, giving `max_lr`. At the final epoch, `np.cos(π) = -1`, so `cosine_factor = (1-1)/2 = 0.0`, giving `min_lr`. Between these extremes, the cosine function creates a smooth descent.
+At epoch 0, `cos(0) = 1` so `cosine_factor = 1.0` and the rate is `max_lr`. At the final epoch, `cos(π) = -1` so `cosine_factor = 0.0` and the rate is `min_lr`. Between those endpoints the curve falls off smoothly — fast at first, slower as it bottoms out.
 
-```{python}
-#| echo: false
-#| output: false
-import math
+For `max_lr=0.1`, `min_lr=0.01`, `total_epochs=100`:
 
-
-# Cosine annealing schedule: max_lr=0.1, min_lr=0.01, total_epochs=100
-max_lr = 0.1
-min_lr = 0.01
-total_epochs = 100
-
-def cosine_lr(epoch):
-    if epoch >= total_epochs:
-        return min_lr
-    cosine_factor = (1 + math.cos(math.pi * epoch / total_epochs)) / 2
-    return min_lr + (max_lr - min_lr) * cosine_factor
-
-lr_epoch_0 = cosine_lr(0)
-lr_epoch_25 = cosine_lr(25)
-lr_epoch_50 = cosine_lr(50)
-lr_epoch_75 = cosine_lr(75)
-lr_epoch_100 = cosine_lr(100)
-
-cosine_lr_0 = f"{lr_epoch_0:.3f}"
-cosine_lr_25 = f"{lr_epoch_25:.3f}"
-cosine_lr_50 = f"{lr_epoch_50:.3f}"
-cosine_lr_75 = f"{lr_epoch_75:.3f}"
-cosine_lr_100 = f"{lr_epoch_100:.3f}"
+```text
+Epoch   0:  0.100   (aggressive learning)
+Epoch  25:  0.087   (still fast)
+Epoch  50:  0.055   (slowing down)
+Epoch  75:  0.023   (fine-tuning)
+Epoch 100:  0.010   (stable convergence)
 ```
-
-Visualizing the schedule for `max_lr=0.1`, `min_lr=0.01`, `total_epochs=100`:
-
-Epoch   0:  `{python} cosine_lr_0` (aggressive learning)
-Epoch  25:  `{python} cosine_lr_25` (still fast)
-Epoch  50:  `{python} cosine_lr_50` (slowing down)
-Epoch  75:  `{python} cosine_lr_75` (fine-tuning)
-Epoch 100:  `{python} cosine_lr_100` (stable convergence)
 
 Your Trainer applies the schedule automatically after each epoch:
 
@@ -625,26 +575,7 @@ This updates the optimizer's learning rate before the next epoch begins, creatin
 
 ### Gradient Clipping
 
-```{python}
-#| echo: false
-#| output: false
-import math
-
-
-# Gradient clipping example: gradients [100, 200, 50]
-grads = [100, 200, 50]
-clip_norm_prose = math.sqrt(sum(g**2 for g in grads))
-clip_coef_prose = 1.0 / clip_norm_prose
-clipped_prose = [g * clip_coef_prose for g in grads]
-
-clip_norm_prose = f"{clip_norm_prose:.0f}"
-clip_coef_prose = f"{clip_coef_prose:.5f}"
-clip_g1_prose = f"{clipped_prose[0]:.3f}"
-clip_g2_prose = f"{clipped_prose[1]:.3f}"
-clip_g3_prose = f"{clipped_prose[2]:.3f}"
-```
-
-Gradient clipping prevents exploding gradients that destroy training progress. During backpropagation, gradients sometimes become extremely large (thousands or even infinity), causing parameter updates that jump far from the optimal solution or create numerical overflow (NaN values). Clipping rescales large gradients to a safe maximum while preserving their direction.
+Gradient clipping prevents exploding gradients that destroy training progress. During backpropagation, gradients sometimes become extremely large (thousands or even infinity), causing parameter updates that jump far from the optimum or overflow into NaN. Clipping rescales large gradients to a safe maximum while preserving their direction.
 
 The key insight is clipping by global norm rather than individual gradients. Computing the norm across all parameters `√(Σ g²)` and scaling uniformly preserves the relative magnitudes between different parameters:
 
@@ -673,7 +604,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     return float(total_norm)
 ```
 
-Consider gradients [100, 200, 50] with global norm √(100² + 200² + 50²) = `{python} clip_norm_prose`. With max_norm=1.0, we compute clip_coef = 1.0 / `{python} clip_norm_prose` = `{python} clip_coef_prose` and scale all gradients: [`{python} clip_g1_prose`, `{python} clip_g2_prose`, `{python} clip_g3_prose`]. The new norm is exactly 1.0, but the relative magnitudes are preserved (the second gradient is still twice the first).
+Consider gradients `[100, 200, 50]` with global norm √(100² + 200² + 50²) ≈ 229. With `max_norm=1.0`, the clip coefficient is `1.0 / 229 ≈ 0.00437`, and every gradient is scaled by it: `[0.437, 0.873, 0.218]`. The new norm is exactly 1.0, but the relative magnitudes survive — the second gradient is still twice the first.
 
 This uniform scaling is crucial. If we clipped each gradient independently to 1.0, we'd get `[1.0, 1.0, 1.0]`, destroying the information that the second parameter needs larger updates than the first. Global norm clipping prevents explosions while respecting the gradient's message about relative importance.
 
@@ -729,46 +660,7 @@ After loading, training resumes as if the interruption never happened. The next 
 
 ### Computational Complexity
 
-```{python}
-#| echo: false
-#| output: false
-import math
-
-
-# Computational complexity: 2-layer network (d=512), 10k samples, batch 32, 100 epochs
-d = 512
-L = 2
-N = 10_000
-B = 32
-E = 100
-
-d_sq_L = d**2 * L
-comp_d_sq_L = f"{d_sq_L:,}"
-
-batch_ops = d_sq_L * B
-batch_ops_M = batch_ops / 1e6
-comp_batch_ops = f"{batch_ops_M:.1f}"
-
-iters_per_epoch = math.ceil(N / B)
-comp_iters_per_epoch = f"{iters_per_epoch:,}"
-
-total_iters = iters_per_epoch * E
-comp_total_iters = f"{total_iters:,}"
-
-total_ops = total_iters * batch_ops
-total_ops_B = total_ops / 1e9
-comp_total_ops_B = f"{total_ops_B:.0f}"
-
-cpu_seconds = total_ops / 1e9
-cpu_minutes = cpu_seconds / 60
-comp_cpu_seconds = f"{cpu_seconds:.0f}"
-comp_cpu_minutes = f"{cpu_minutes:.0f}"
-
-gpu_seconds = total_ops / 1e12
-comp_gpu_seconds = f"{gpu_seconds:.1f}"
-```
-
-Training complexity depends on model architecture and dataset size. For a simple fully connected network with L layers of size d, each forward pass is O(d² × L) (matrix multiplications dominate). Backward pass has the same complexity (automatic differentiation revisits each operation). With N training samples and batch size B, one epoch requires N/B iterations.
+Training cost is a function of architecture and dataset size. For a fully connected network with `L` layers of width `d`, the forward pass is O(d² × L) — matrix multiplications dominate. The backward pass has the same complexity, since autograd revisits every operation. With `N` samples and batch size `B`, one epoch is `N / B` iterations.
 
 Total training cost for E epochs:
 
@@ -779,15 +671,17 @@ Total iterations:      (N / B) × E
 Total complexity:      O((N × E × d² × L) / B)
 ```
 
-Real numbers make this concrete. Training a 2-layer network (d=512) on 10,000 samples (batch size 32) for 100 epochs:
+Real numbers make this concrete. A 2-layer network (`d=512`) on 10,000 samples (batch size 32) for 100 epochs:
 
-d² × L = 512² × 2 = `{python} comp_d_sq_L` operations per sample
-Batch operations = `{python} comp_d_sq_L` × 32 = `{python} comp_batch_ops` million ops
-Iterations per epoch = 10,000 / 32 = `{python} comp_iters_per_epoch`
-Total iterations = `{python} comp_iters_per_epoch` × 100 = `{python} comp_total_iters`
-Total operations = `{python} comp_total_iters` × `{python} comp_batch_ops`M = `{python} comp_total_ops_B` billion operations
+```text
+d² × L              = 512² × 2          = 524,288 ops per sample
+Batch operations    = 524,288 × 32      = 16.8M ops per batch
+Iterations / epoch  = 10,000 / 32       = 313
+Total iterations    = 313 × 100         = 31,300
+Total operations    = 31,300 × 16.8M    ≈ 525 billion ops
+```
 
-At 1 billion operations per second (typical CPU), that's `{python} comp_cpu_seconds` seconds (`{python} comp_cpu_minutes` minutes). This arithmetic explains why GPUs matter: a GPU at 1 trillion ops/second (1000× faster) completes this in `{python} comp_gpu_seconds` seconds.
+At 1 GFLOP/s (typical CPU), that's about **525 seconds (≈ 9 minutes)**. A GPU at 1 TFLOP/s (1000× faster) finishes it in **0.5 seconds**. The arithmetic is exactly why GPUs exist for ML: the workload is dense linear algebra, and a GPU eats dense linear algebra.
 
 Memory complexity is simpler but just as important:
 
@@ -805,7 +699,7 @@ Total training memory is typically 4-6× model size, depending on optimizer. Thi
 
 ### Your Implementation vs. PyTorch
 
-Your Trainer class and PyTorch's training infrastructure (Lightning, Hugging Face Trainer) share the same architectural patterns. The differences lie in scale: production frameworks support distributed training, mixed precision, complex schedulers, and dozens of callbacks. But the core loop is identical.
+Your `Trainer` and PyTorch's training stack (Lightning, Hugging Face `Trainer`) share the same architecture. Production adds distributed training, mixed precision, dozens of schedulers, and a callback system. The inner loop is identical.
 
 | Feature | Your Implementation | PyTorch / Lightning |
 |---------|---------------------|---------------------|
@@ -818,7 +712,7 @@ Your Trainer class and PyTorch's training infrastructure (Lightning, Hugging Fac
 
 ### Code Comparison
 
-The following comparison shows equivalent training pipelines in TinyTorch and PyTorch. Notice how the conceptual flow is identical: create model, optimizer, loss, trainer, then loop through epochs.
+Equivalent training pipelines side by side. Same conceptual flow: build model, attach optimizer and scheduler, hand them to a trainer, loop.
 
 ::: {.panel-tabset}
 ## Your TinyTorch
@@ -840,7 +734,7 @@ for epoch in range(100):
         trainer.save_checkpoint(f"ckpt_{epoch}.pkl")
 ```
 
-## ⚡ PyTorch
+## PyTorch Lightning
 ```python
 import torch
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -858,14 +752,14 @@ trainer.fit(model, train_dataloader, val_dataloader)
 ```
 :::
 
-Let's walk through the key similarities and differences:
+The pieces line up almost one-for-one:
 
-- **Line 1-2 (Imports)**: TinyTorch exposes classes directly; PyTorch uses module hierarchy. Same concepts, different organization.
-- **Line 4-5 (Model and Optimizer)**: Identical pattern. Both frameworks pass model parameters to optimizer for tracking.
-- **Line 6 (Scheduler)**: TinyTorch uses `CosineSchedule` class; PyTorch uses `CosineAnnealingLR`. Same mathematics (cosine annealing), same purpose.
-- **Line 7 (Trainer Setup)**: TinyTorch takes explicit model, optimizer, loss, and scheduler; PyTorch Lightning abstracts these into the model definition. Both support gradient clipping.
-- **Line 9-13 (Training Loop)**: TinyTorch makes the epoch loop explicit; Lightning hides it inside `trainer.fit()`. Under the hood, Lightning runs the exact same loop you implemented.
-- **Checkpointing**: TinyTorch requires manual `save_checkpoint()` calls; Lightning checkpoints automatically based on validation metrics.
+- **Imports** — TinyTorch exposes classes directly; PyTorch uses a deeper module hierarchy. Same concepts, different organization.
+- **Model + optimizer** — identical pattern. Both pass `model.parameters()` to the optimizer so it can track what to update.
+- **Scheduler** — `CosineSchedule` versus `CosineAnnealingLR`. Different names, same math.
+- **Trainer setup** — TinyTorch takes model, optimizer, loss, and scheduler explicitly. Lightning hides them behind a model definition + `Trainer(...)`. Both support `gradient_clip`.
+- **Training loop** — TinyTorch makes the epoch loop explicit; Lightning hides it inside `trainer.fit()`. The loop Lightning runs is the loop you wrote.
+- **Checkpointing** — TinyTorch requires manual `save_checkpoint()` calls; Lightning checkpoints automatically based on validation metrics.
 
 :::{.callout-tip title="What's Identical"}
 
@@ -874,78 +768,39 @@ The core training loop pattern: forward pass → loss → backward → gradient 
 
 ### Why Training Infrastructure Matters at Scale
 
-```{python}
-#| echo: false
-#| output: false
-import math
+The same patterns scale up brutally. Three numbers from production:
 
+- **GPT-3 training**: 175 billion parameters, 300 billion tokens, ~$4.6 million in compute. A single checkpoint is **350 GB** — larger than most laptop SSDs. Checkpoint frequency is a real engineering tradeoff between fault tolerance and storage cost.
+- **ImageNet training**: 1.2 million images, 90 epochs is standard. At 250ms per iteration (batch 256), that's **29 hours** on one GPU. Learning rate scheduling is the difference between 75% accuracy (mediocre) and 76.5% (state-of-the-art) — a difference papers are written about.
+- **Training instability**: Without gradient clipping, roughly 1 in 50 training runs randomly diverges — gradients explode, outputs go NaN, all progress lost. A 2% failure rate is unacceptable when each run costs thousands of dollars.
 
-# ImageNet training time: 1.2M images, batch 256, 90 epochs, 250ms/iter
-imagenet_iters_per_epoch = math.ceil(1_200_000 / 256)
-imagenet_total_iters = imagenet_iters_per_epoch * 90
-imagenet_hours = imagenet_total_iters * 0.250 / 3600
-prod_imagenet_hours = f"{imagenet_hours:.0f}"
-```
-
-To appreciate the engineering behind training systems, consider production scale:
-
-- **GPT-3 training**: 175 billion parameters, trained on 300 billion tokens, cost ~$4.6 million in compute time. A single checkpoint is **350 GB** (larger than most hard drives). Checkpoint frequency must balance fault tolerance against storage costs.
-
-- **ImageNet training**: 1.2 million images, 90 epochs standard. At 250ms per iteration (batch size 256), that's **`{python} prod_imagenet_hours` hours** on one GPU. Learning rate scheduling is the difference between 75% accuracy (poor) and 76.5% accuracy (state-of-the-art).
-
-- **Training instability**: Without gradient clipping, 1 in 50 training runs randomly diverges (gradients explode, model outputs NaN, all progress lost). Production systems can't tolerate 2% failure rates when runs cost thousands of dollars.
-
-The infrastructure you built handles these challenges at educational scale. The same patterns scale to production: checkpointing every N epochs, cosine schedules for stable convergence, gradient clipping for reliability.
+Your `Trainer` handles all three of these at educational scale, with the same architecture the production systems use. The numbers get bigger; the loop does not.
 
 ## Check Your Understanding
 
-Test yourself with these systems thinking questions. They build intuition for the performance characteristics and trade-offs you'll encounter in production ML.
+Five systems-thinking questions. They build intuition for the performance characteristics and trade-offs you'll meet again in production ML — usually under a deadline.
 
 **Q1: Training Memory Calculation**
 
-You have a model with 10 million parameters (float32) and use Adam optimizer. Estimate total training memory required: parameters + gradients + optimizer state. Then compare with SGD optimizer.
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Training memory for 10M param model
-num_params = 10_000_000
-bytes_per_param = 4  # float32
-
-param_mb = num_params * bytes_per_param / 1e6
-q1_param_mb = f"{param_mb:.0f}"
-
-adam_moments_mb = num_params * 2 * bytes_per_param / 1e6
-q1_adam_moments_mb = f"{adam_moments_mb:.0f}"
-
-adam_total_mb = param_mb + param_mb + adam_moments_mb  # params + grads + 2 moments
-q1_adam_total_mb = f"{adam_total_mb:.0f}"
-
-sgd_momentum_mb = param_mb  # one momentum buffer
-sgd_total_mb = param_mb + param_mb + sgd_momentum_mb  # params + grads + momentum
-q1_sgd_total_mb = f"{sgd_total_mb:.0f}"
-
-mem_diff_pct = (adam_total_mb - sgd_total_mb) / sgd_total_mb * 100
-q1_mem_diff_pct = f"{mem_diff_pct:.0f}"
-```
+You have a model with 10 million parameters (float32) and use the Adam optimizer. Estimate total training memory required: parameters + gradients + optimizer state. Then compare with SGD.
 
 :::{.callout-note collapse="true" title="Answer"}
 
 **Adam optimizer:**
-- Parameters: 10M × 4 bytes = **`{python} q1_param_mb` MB**
-- Gradients: 10M × 4 bytes = **`{python} q1_param_mb` MB**
-- Adam state (two moments): 10M × 2 × 4 bytes = **`{python} q1_adam_moments_mb` MB**
-- **Total: `{python} q1_adam_total_mb` MB** (4× parameter size)
+
+- Parameters: 10M × 4 bytes = **40 MB**
+- Gradients: 10M × 4 bytes = **40 MB**
+- Adam state (two moments): 10M × 2 × 4 bytes = **80 MB**
+- **Total: 160 MB** (4× parameter size)
 
 **SGD with momentum:**
-- Parameters: 10M × 4 bytes = **`{python} q1_param_mb` MB**
-- Gradients: 10M × 4 bytes = **`{python} q1_param_mb` MB**
-- Momentum buffer: 10M × 4 bytes = **`{python} q1_param_mb` MB**
-- **Total: `{python} q1_sgd_total_mb` MB** (3× parameter size)
 
-**Key insight:** Optimizer choice affects memory by `{python} q1_mem_diff_pct`%. For large models near GPU memory limits, SGD may be the only option.
+- Parameters: 10M × 4 bytes = **40 MB**
+- Gradients: 10M × 4 bytes = **40 MB**
+- Momentum buffer: 10M × 4 bytes = **40 MB**
+- **Total: 120 MB** (3× parameter size)
+
+**Key insight:** Optimizer choice changes training memory by 33%. For large models close to the GPU's memory ceiling, SGD is sometimes the only optimizer that fits.
 :::
 
 **Q2: Gradient Accumulation Trade-off**
@@ -988,25 +843,7 @@ Starting high (0.1) provides fast early progress. Gradual decay (0.1 → 0.01) a
 
 **Q4: Checkpoint Storage Strategy**
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q4: Checkpoint storage strategy
-epochs = 100
-ckpt_size_gb = 1
-total_every_epoch_gb = epochs * ckpt_size_gb
-q4_total_every_epoch_gb = f"{total_every_epoch_gb:,}"
-
-last_n = 3
-best = 1
-milestones = 3  # every 25 epochs: 25, 50, 75
-smart_total_gb = (last_n + best + milestones) * ckpt_size_gb
-q4_smart_total_gb = f"{smart_total_gb:,}"
-```
-
-You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epoch creates `{python} q4_total_every_epoch_gb` GB of storage. Checkpointing every 10 epochs risks losing 10 epochs of work if training crashes. Design a checkpointing strategy that balances fault tolerance and storage costs.
+You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epoch costs 100 GB of storage. Checkpointing every 10 epochs risks losing 10 epochs of work if training crashes. Design a checkpointing strategy that balances fault tolerance and storage cost.
 
 :::{.callout-note collapse="true" title="Answer"}
 
@@ -1016,9 +853,10 @@ You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epo
 2. **Keep best checkpoint** (lowest validation loss): `best_epoch_72.pkl` (1 GB)
 3. **Keep milestone checkpoints** (every 25 epochs): `epoch_25.pkl`, `epoch_50.pkl`, `epoch_75.pkl` (3 GB)
 
-**Total storage: `{python} q4_smart_total_gb` GB** (vs `{python} q4_total_every_epoch_gb` GB for every epoch)
+**Total storage: 7 GB** (vs 100 GB for every epoch)
 
 **Fault tolerance:**
+
 - Last 3 checkpoints: Lose at most 1 epoch of work
 - Best checkpoint: Can always restart from best validation performance
 - Milestones: Can restart experiments from quarter-points
@@ -1038,49 +876,28 @@ if is_best_validation:  # Best
 
 **Q5: Global Norm Clipping Analysis**
 
-```{python}
-#| echo: false
-#| output: false
-import math
-
-
-# Q5: Global norm clipping analysis with gradients [50, 100, 5]
-grads_q5 = [50, 100, 5]
-global_norm_q5 = math.sqrt(sum(g**2 for g in grads_q5))
-q5_global_norm = f"{global_norm_q5:.0f}"
-
-scale_factor_q5 = 1.0 / global_norm_q5
-q5_scale_factor = f"{scale_factor_q5:.4f}"
-
-clipped_q5 = [g * scale_factor_q5 for g in grads_q5]
-q5_clipped_g1 = f"{clipped_q5[0]:.2f}"
-q5_clipped_g2 = f"{clipped_q5[1]:.2f}"
-q5_clipped_g3 = f"{clipped_q5[2]:.2f}"
-
-verify_norm_q5 = math.sqrt(sum(g**2 for g in clipped_q5))
-q5_verify_norm = f"{verify_norm_q5:.1f}"
-```
-
-Two training runs: (A) clips each gradient individually to max 1.0, (B) clips by global norm (max_norm=1.0). Both encounter gradients [50, 100, 5] with global norm √(50² + 100² + 5²) ≈ `{python} q5_global_norm`. What are the clipped gradients in each case? Which preserves gradient direction better?
+Two training runs: (A) clips each gradient individually to max 1.0, (B) clips by global norm with `max_norm=1.0`. Both encounter gradients `[50, 100, 5]` with global norm √(50² + 100² + 5²) ≈ 112. What are the clipped gradients in each case? Which preserves gradient direction better?
 
 :::{.callout-note collapse="true" title="Answer"}
 
 **(A) Individual clipping** (clip each to max 1.0):
+
 - Original: `[50, 100, 5]`
 - Clipped: `[1.0, 1.0, 1.0]`
-- **Result:** All parameters get equal updates (destroys relative importance information)
+- **Result:** All parameters get equal updates — relative-importance information is destroyed.
 
 **(B) Global norm clipping** (scale uniformly):
-- Original: [50, 100, 5], global norm ≈ `{python} q5_global_norm`
-- Scale factor: 1.0 / `{python} q5_global_norm` ≈ `{python} q5_scale_factor`
-- Clipped: [`{python} q5_clipped_g1`, `{python} q5_clipped_g2`, `{python} q5_clipped_g3`]
-- New global norm: **`{python} q5_verify_norm`** (exactly max_norm)
-- **Result:** Relative magnitudes preserved (second parameter still gets 2× update of first)
+
+- Original: `[50, 100, 5]`, global norm ≈ 112
+- Scale factor: `1.0 / 112 ≈ 0.0089`
+- Clipped: `[0.45, 0.89, 0.04]`
+- New global norm: **1.0** (exactly `max_norm`)
+- **Result:** Relative magnitudes preserved — the second parameter still gets a 2× larger update than the first.
 
 **Why (B) is better:**
-Gradients encode relative importance: parameter 2 needs larger updates than parameter 1. Global norm clipping prevents explosion while respecting this information. Individual clipping destroys it, effectively treating all parameters as equally important.
+Gradients encode relative importance: parameter 2 *needs* larger updates than parameter 1. Global-norm clipping bounds the explosion while respecting that signal. Individual clipping flattens the signal, treating every parameter as equally important.
 
-**Verification:** √(`{python} q5_clipped_g1`² + `{python} q5_clipped_g2`² + `{python} q5_clipped_g3`²) ≈ `{python} q5_verify_norm` ✓
+**Verification:** √(0.45² + 0.89² + 0.04²) ≈ 1.0.
 :::
 
 ## Further Reading
@@ -1102,18 +919,20 @@ For students who want to understand the academic foundations and advanced traini
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 09 - Convolutions"}
+You just shipped the Foundation Tier. Tensors, autograd, optimizers, dataloader, and a `Trainer` that ties them together — these are the load-bearing pieces of every modern ML framework, and you wrote all of them. The next tier is about *what gets put inside the model*. The training loop you built does not change.
 
-Implement Conv2d, MaxPool2d, and Flatten layers to build convolutional neural networks. Your Trainer will orchestrate training CNNs on image datasets, enabling the CNN milestone.
+:::{.callout-note title="Coming Up: Module 09 — Convolutions"}
+
+Architecture Tier begins. You'll implement `Conv2d`, `MaxPool2d`, and `Flatten` — the layers that exploit spatial structure in images and make computer vision possible. Same `Trainer.train_epoch()` you wrote here will train the CNNs you build there, with no code changes. That's the payoff of separating orchestration from architecture.
 :::
 
-**Preview - How Your Training Infrastructure Gets Used:**
+**Preview — how the Trainer you just built gets reused:**
 
-| Module | What It Does | Your Trainer In Action |
+| Module | What It Adds | Your Trainer In Action |
 |--------|--------------|------------------------|
-| **09: Convolutions** | Convolutional layers for images | Train CNNs with same `trainer.train_epoch()` loop |
-| **Milestone: MLP** | Complete MNIST digit recognition | `trainer` orchestrates full training pipeline |
-| **Milestone: CNN** | Complete CIFAR-10 classification | Train vision models with your training infrastructure |
+| **09: Convolutions** | Spatial layers for images | Same `train_epoch()` trains CNNs unchanged |
+| **Milestone: MLP** | Complete MNIST digit recognition | `Trainer` orchestrates the full pipeline |
+| **Milestone: CNN** | Complete CIFAR-10 classification | Vision models trained with your infrastructure |
 
 ## Get Started
 

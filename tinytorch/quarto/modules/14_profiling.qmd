@@ -6,11 +6,12 @@
 **OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-13
 
 **Prerequisites: Modules 01-13** means you should have:
+
 - Built the complete ML stack (Modules 01-08)
 - Implemented CNN architectures (Module 09) or Transformers (Modules 10-13)
 - Models to profile and optimize
 
-**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results (e.g., why attention is memory-bound).
+**Why these prerequisites**: You'll profile models built in Modules 1-13. Understanding the implementations helps you interpret profiling results — for example, why attention is memory-bound.
 :::
 
 ```{=html}
@@ -313,11 +314,11 @@ initSlideViewer('14_profiling', '../assets/slides/14_profiling.pdf');
 ```
 ## Overview
 
-Profiling is the foundation of performance optimization. Before making a model faster or smaller, you need to measure where time and memory go. In this module, you'll build professional profiling tools that measure parameters, FLOPs, memory usage, and latency with statistical rigor.
+You have built a working ML framework. Now you have to make it fast. The Optimization Tier starts here, and it starts with a rule that almost every engineer breaks at least once: **measure before you optimize**. Guess at the bottleneck and you will spend a week speeding up code that was never on the critical path.
 
-Every optimization decision starts with measurement. Is your model memory-bound or compute-bound? Which layers consume the most resources? How does batch size affect throughput? Your profiler will answer these questions with data, not guesses, enabling the targeted optimizations in later modules.
+This module gives you the instruments. You'll build a profiler that counts parameters, estimates FLOPs, tracks memory, and measures latency with enough statistical rigor that the numbers actually mean something. By the end you can answer the questions every optimization decision rests on: Is this model compute-bound or memory-bound? Which layer dominates? Where will quantization or caching pay off — and where will it waste your time?
 
-By the end, you'll have built the same measurement infrastructure used by production ML teams to make data-driven optimization decisions.
+Every later module in this tier — quantization, compression, acceleration, KV-caching — depends on the data this profiler produces. Build the instrument first. Then optimize.
 
 ## The Optimization Tier Flow
 
@@ -329,25 +330,17 @@ Profiling (14) → Model-Level (15-16) → Runtime (17-18) → Benchmarking (19)
  "What's slow?"   "Shrink the model"   "Speed up execution"  "Did it work?"
 ```
 
-```{python}
-#| echo: false
-#| output: false
+**Model-Level Optimizations (15-16)** — change the model itself:
 
-
-# Quantization compression ratio: FP32 (32 bits) -> INT8 (8 bits)
-quant_compression = 32 // 8
-tier_quant_compression = f"{quant_compression}"
-```
-
-**Model-Level Optimizations (15-16)**: Change the model itself
-- Quantization: FP32 → INT8 for `{python} tier_quant_compression`× compression
+- Quantization: FP32 → INT8 for 4× compression
 - Compression: Prune unnecessary weights
 
-**Runtime Optimizations (17-18)**: Change how execution happens
+**Runtime Optimizations (17-18)** — change how execution happens:
+
 - Acceleration: Vectorization, kernel fusion (general-purpose)
 - Memoization: KV-cache for transformers (domain-specific)
 
-You can't optimize what you can't measure. That's why profiling comes first.
+You can't optimize what you can't measure. Profiling comes first because every other tier depends on its output.
 
 ## Learning Objectives
 
@@ -442,13 +435,11 @@ This section covers the fundamental ideas you need to understand profiling deepl
 
 ### Why Profile First
 
-Optimization without measurement is guessing. You might spend days optimizing the wrong bottleneck, achieving minimal speedup while the real problem goes untouched. Profiling reveals ground truth: where time and memory actually go, not where you think they go.
+Optimization without measurement is guessing. You spend a week speeding up a layer that wasn't on the critical path while the real bottleneck sits untouched. Profiling replaces intuition with ground truth: where time and memory actually go, not where you assumed they did.
 
-Consider a transformer model running slowly. Is it the attention mechanism? The feed-forward layers? Matrix multiplications? Memory transfers? Without profiling, you're guessing. With profiling, you know. If 80% of time is in attention and it's memory-bound, you know exactly what to optimize and how.
+Take a slow transformer. Is it attention? The feed-forward layers? Matrix multiplication? Memory transfers? Without numbers, you're picking randomly. With numbers, you might find that 80% of time is in attention and it's memory-bound — and now you know to reach for FlashAttention rather than a faster matmul kernel.
 
-The profiling workflow follows a systematic process. You measure first to establish a baseline. Then you analyze the measurements to identify bottlenecks. Next you optimize the critical path, not every operation. Finally you measure again to verify improvement. This cycle repeats until you hit performance targets.
-
-Your profiler implements the measurement and analysis steps, providing the data needed for optimization decisions in later modules.
+The workflow is always the same: measure to baseline, analyze to find the bottleneck, optimize the critical path (not every operation), measure again to verify. Repeat until the numbers hit your target. Your profiler implements the measure-and-analyze steps; later modules supply the optimizations.
 
 ### Timing Operations
 
@@ -476,9 +467,9 @@ def measure_latency(self, model, input_tensor, warmup: int = 10, iterations: int
     return float(median_latency)
 ```
 
-The warmup phase is critical. The first few runs are slower due to cold CPU caches, Python interpreter warmup, and NumPy initialization. Running 10+ warmup iterations ensures the system reaches steady state before measurement begins.
+Warmup is non-negotiable. The first few runs are slower because of cold CPU caches, Python interpreter warmup, and NumPy initialization. Ten or more warmup iterations push the system into steady state before any measurement counts.
 
-Using median instead of mean makes the measurement robust against outliers. If the operating system interrupts your process once during measurement, that outlier won't skew the result. The median captures typical performance, not worst-case spikes.
+Median, not mean. A single OS interrupt or garbage-collection pause during measurement can blow the mean apart; the median ignores it. Median captures typical performance, which is what you want to compare across runs. (For SLA work you also report p95 or p99 — but that's a separate question.)
 
 ### Memory Profiling
 
@@ -526,44 +517,31 @@ def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float
     }
 ```
 
-```{python}
-#| echo: false
-#| output: false
+Parameter memory is persistent and batch-independent. A 125M-parameter model uses 500 MB (125M × 4 bytes per float32) whether you process one sample or a thousand.
 
+Activation memory scales with batch size. Double the batch, double the activations. This is why training needs far more memory than inference at the same model size.
 
-# 125M parameter model memory: 125,000,000 params * 4 bytes/float32
-mem_125m_params = 125_000_000
-mem_125m_bytes = mem_125m_params * 4
-mem_125m_mb = mem_125m_bytes / (1024 ** 2)
-mem_125m_params = f"{mem_125m_params // 1_000_000}"
-mem_125m_mb = f"{round(mem_125m_mb)}"
-```
-
-Parameter memory is persistent and constant regardless of batch size. A model with `{python} mem_125m_params` million parameters uses `{python} mem_125m_mb` MB (`{python} mem_125m_params`M × 4 bytes per float32) whether you're processing one sample or a thousand.
-
-Activation memory scales with batch size. Doubling the batch doubles activation memory. This is why large batch training requires more GPU memory than inference.
-
-Gradient memory matches parameter memory exactly. Every parameter needs a gradient during training, adding another `{python} mem_125m_mb` MB for a `{python} mem_125m_params`M parameter model.
+Gradient memory matches parameter memory exactly. Every parameter has one gradient, so training that 125M model adds another 500 MB on top of the weights — and that's before the optimizer state.
 
 ### Bottleneck Identification
 
-The most important profiling insight is whether your workload is compute-bound or memory-bound. This determines which optimizations will help.
+The single most useful piece of profiling data is whether a workload is compute-bound or memory-bound. That answer dictates which optimization is worth your time.
 
-Compute-bound workloads are limited by arithmetic throughput. The CPU or GPU can't compute fast enough to keep up with available memory bandwidth. Optimizations focus on better algorithms, vectorization, and reducing FLOPs.
+**Compute-bound** — limited by arithmetic throughput. The chip can't multiply fast enough to keep up with the memory feeding it. Fix it with better algorithms, vectorization, or fewer FLOPs.
 
-Memory-bound workloads are limited by data movement. The hardware can compute faster than it can load data from memory. Optimizations focus on reducing memory transfers, improving cache locality, and data layout.
+**Memory-bound** — limited by data movement. The chip can multiply faster than memory can deliver operands. Fix it with cache locality, data layout, fused kernels, or reduced precision.
 
-Your profiler identifies bottlenecks by comparing computational intensity to memory bandwidth. If you're achieving low GFLOP/s despite high theoretical compute capability, you're memory-bound. If you're achieving high GFLOP/s and high computational efficiency, you're compute-bound.
+Your profiler distinguishes the two by comparing achieved GFLOP/s to peak. Low achieved GFLOP/s on capable hardware means memory-bound; high achieved GFLOP/s near the peak means compute-bound. Pick the wrong category and your optimization will be a no-op.
 
 ### Profiling Tools
 
-Your implementation uses Python's built-in profiling tools: `time.perf_counter()` for high-precision timing and `tracemalloc` for memory tracking. These provide the foundation for accurate measurement.
+The profiler stands on two Python primitives: `time.perf_counter()` for timing and `tracemalloc` for memory.
 
-`time.perf_counter()` uses the system's highest-resolution timer, typically nanosecond precision. It measures wall-clock time, which includes all system effects (cache misses, context switches) that affect real-world performance.
+`time.perf_counter()` reads the system's highest-resolution monotonic clock — typically nanosecond precision. It returns wall-clock time, so cache misses, context switches, and every other real-world effect show up in your measurement. That's a feature, not a bug.
 
-`tracemalloc` tracks Python memory allocations with byte-level precision. It records both current and peak memory usage, letting you identify memory spikes during execution.
+`tracemalloc` tracks every Python allocation with byte-level precision and reports both current and peak usage. Peak is what catches the spike that crashes your run.
 
-Production profilers add GPU support (CUDA events, NVTX markers), distributed tracing (for multi-GPU setups), and kernel-level analysis. But the core concepts remain the same: measure, analyze, identify bottlenecks, optimize.
+Production profilers layer on GPU support (CUDA events, NVTX markers), distributed tracing, and kernel-level analysis. The instruments get fancier; the loop stays the same: measure, analyze, identify the bottleneck, optimize.
 
 ## Production Context
 
@@ -604,7 +582,7 @@ print(f"Bottleneck: {profile['bottleneck']}")
 print(f"GFLOP/s: {profile['gflops_per_second']:.2f}")
 ```
 
-## ⚡ PyTorch
+## PyTorch
 ```python
 import torch
 from torch.profiler import profile, ProfilerActivity
@@ -641,26 +619,13 @@ The profiling workflow: measure parameters, FLOPs, memory, and latency to identi
 
 ### Why Profiling Matters at Scale
 
-```{python}
-#| echo: false
-#| output: false
+The stakes get larger with the model. A few examples from production:
 
+- **GPT-3 (175B parameters)** — 652 GB at FP32. Profiling reveals which layers tolerate INT8, which determines whether the model fits on the deployment hardware at all.
+- **BERT training** — 80% of step time in self-attention. That single profiling result is what motivated FlashAttention.
+- **Image classification, batch 256** — 12 GB of GPU memory used, of which 10 GB is activations. Profiling points straight at gradient checkpointing.
 
-# GPT-3: 175B parameters at FP32 (4 bytes each)
-gpt3_params_b = 175
-gpt3_bytes = gpt3_params_b * 1_000_000_000 * 4
-gpt3_gb = gpt3_bytes / (1024 ** 3)
-scale_gpt3_params = f"{gpt3_params_b}"
-scale_gpt3_gb = f"{round(gpt3_gb)}"
-```
-
-To appreciate profiling's importance, consider production ML systems:
-
-- **GPT-3 (`{python} scale_gpt3_params`B parameters)**: `{python} scale_gpt3_gb` GB model size at FP32. Profiling reveals which layers to quantize for deployment.
-- **BERT training**: 80% of time in self-attention. Profiling identifies FlashAttention as the optimization to implement.
-- **Image classification**: Batch size 256 uses 12 GB GPU memory. Profiling shows 10 GB is activations, suggesting gradient checkpointing.
-
-A single profiling session can reveal optimization opportunities worth 10× speedups or 4× memory reduction. Understanding profiling isn't just academic; it's essential for deploying real ML systems.
+In each case the profiler did not invent the optimization — it told the engineer which optimization was worth implementing. A single session routinely uncovers 10× speedups or 4× memory reductions. The instrument earns its keep on the first run.
 
 ## Check Your Understanding
 
@@ -670,154 +635,65 @@ Test yourself with these systems thinking questions about profiling and performa
 
 A transformer model has 12 layers, each with a feed-forward network containing two Linear layers: Linear(768, 3072) and Linear(3072, 768). How much memory do the feed-forward network parameters consume across all layers?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q1: Feed-forward network parameter memory calculation
-q1_first_weights = 768 * 3072
-q1_first_bias = 3072
-q1_first_total = q1_first_weights + q1_first_bias
-
-q1_second_weights = 3072 * 768
-q1_second_bias = 768
-q1_second_total = q1_second_weights + q1_second_bias
-
-q1_per_layer = q1_first_total + q1_second_total
-q1_num_layers = 12
-q1_all_layers = q1_num_layers * q1_per_layer
-
-q1_bytes = q1_all_layers * 4
-q1_mb = round(q1_bytes / (1024 ** 2))
-
-q1_first_weights = f"{q1_first_weights:,}"
-q1_first_bias = f"{q1_first_bias:,}"
-q1_first_total = f"{q1_first_total:,}"
-q1_second_weights = f"{q1_second_weights:,}"
-q1_second_bias = f"{q1_second_bias:,}"
-q1_second_total = f"{q1_second_total:,}"
-q1_per_layer = f"{q1_per_layer:,}"
-q1_all_layers = f"{q1_all_layers:,}"
-q1_bytes = f"{q1_bytes:,}"
-q1_mb = f"{q1_mb}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
 Each feed-forward network:
-- First layer: (768 × 3072) + 3072 = `{python} q1_first_total` parameters
-- Second layer: (3072 × 768) + 768 = `{python} q1_second_total` parameters
-- Total per layer: `{python} q1_per_layer` parameters
 
-Across 12 layers: 12 × `{python} q1_per_layer` = `{python} q1_all_layers` parameters
+- First layer: (768 × 3072) + 3072 = 2,362,368 parameters
+- Second layer: (3072 × 768) + 768 = 2,360,064 parameters
+- Total per layer: 4,722,432 parameters
 
-Memory: `{python} q1_all_layers` × 4 bytes = `{python} q1_bytes` bytes ≈ **`{python} q1_mb` MB**
+Across 12 layers: 12 × 4,722,432 = 56,669,184 parameters.
 
-This is just the feed-forward networks. Attention adds more parameters.
+Memory: 56,669,184 × 4 bytes = 226,676,736 bytes ≈ **216 MB**.
+
+That's just the feed-forward networks. Attention adds more parameters on top.
 :::
 
 **Q2: FLOP Counting and Computational Cost**
 
 A Linear(512, 512) layer processes a batch of 64 samples. Your profiler's `count_flops()` method returns FLOPs per sample (batch-size independent). How many FLOPs are required for one sample? For the whole batch, if each sample is processed independently?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q2: FLOP counting for Linear(512, 512)
-q2_in_features = 512
-q2_out_features = 512
-q2_per_sample = q2_in_features * q2_out_features * 2
-q2_batch_size = 64
-q2_batch_total = q2_batch_size * q2_per_sample
-
-# Latency at 50 GFLOP/s
-q2_gflops = 50
-q2_latency_s = q2_batch_total / (q2_gflops * 1e9)
-q2_latency_ms = q2_latency_s * 1000
-
-q2_per_sample = f"{q2_per_sample:,}"
-q2_batch_total = f"{q2_batch_total:,}"
-q2_latency_ms = f"{q2_latency_ms:.2f}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-Per-sample FLOPs (what `count_flops()` returns): 512 × 512 × 2 = **`{python} q2_per_sample` FLOPs**
+Per-sample FLOPs (what `count_flops()` returns): 512 × 512 × 2 = **524,288 FLOPs**.
 
-Note: The `count_flops()` method is batch-size independent. It returns per-sample FLOPs whether you pass input_shape=(1, 512) or (64, 512).
+`count_flops()` is batch-size independent — it returns per-sample FLOPs whether you pass `input_shape=(1, 512)` or `(64, 512)`.
 
-If processing a batch of 64 samples: 64 × `{python} q2_per_sample` = `{python} q2_batch_total` total FLOPs
+For a batch of 64 samples: 64 × 524,288 = 33,554,432 total FLOPs.
 
-Minimum latency at 50 GFLOP/s: `{python} q2_batch_total` FLOPs ÷ 50 GFLOP/s = **`{python} q2_latency_ms` ms** for the full batch
+Minimum latency at 50 GFLOP/s: 33,554,432 ÷ 50 × 10⁹ = **0.67 ms** for the full batch.
 
-This assumes perfect computational efficiency (100%). Real latency is higher due to memory bandwidth and overhead.
+That assumes 100% computational efficiency. Real latency is higher because of memory bandwidth and overhead — which is exactly the kind of gap profiling exposes.
 :::
 
 **Q3: Memory Bottleneck Analysis**
 
 A model achieves 5 GFLOP/s on hardware with 100 GFLOP/s peak compute. The memory bandwidth is 50 GB/s. Is this workload compute-bound or memory-bound?
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q3: Computational efficiency
-q3_achieved = 5
-q3_peak = 100
-q3_efficiency_pct = (q3_achieved / q3_peak) * 100
-
-q3_efficiency_pct = f"{q3_efficiency_pct:.0f}"
-```
-
 :::{.callout-note collapse="true" title="Answer"}
 
-Computational efficiency: 5 GFLOP/s ÷ 100 GFLOP/s = **`{python} q3_efficiency_pct`% efficiency**
+Computational efficiency: 5 GFLOP/s ÷ 100 GFLOP/s = **5% efficiency**.
 
-This extremely low efficiency suggests the workload is **memory-bound**. The hardware can compute 100 GFLOP/s but only achieves 5 GFLOP/s because it spends most of the time waiting for data transfers.
+That gap is the giveaway: this workload is **memory-bound**. The chip can do 100 GFLOP/s but only manages 5, because most of its time is spent waiting on data transfers.
 
-Optimization strategy: Focus on reducing memory transfers, improving cache locality, and data layout optimization. Improving the algorithm's FLOPs won't help because compute isn't the bottleneck.
+The right optimization strategy is to cut memory traffic — better cache locality, improved data layout, or kernel fusion. Reducing FLOPs won't help when compute is already idle.
 :::
 
 **Q4: Training Memory Estimation**
 
-```{python}
-#| echo: false
-#| output: false
-
-
-# Q4: Training memory with Adam optimizer
-# 125M params at FP32 = 500 MB for parameters
-q4_param_mb = 500
-q4_grad_mb = q4_param_mb        # gradients match parameters
-q4_adam_m_mb = q4_param_mb      # first moment (momentum)
-q4_adam_v_mb = q4_param_mb      # second moment (velocity)
-q4_total_mb = q4_param_mb + q4_grad_mb + q4_adam_m_mb + q4_adam_v_mb
-q4_total_gb = q4_total_mb / 1000
-
-q4_param_mb = f"{q4_param_mb}"
-q4_grad_mb = f"{q4_grad_mb}"
-q4_adam_m_mb = f"{q4_adam_m_mb}"
-q4_adam_v_mb = f"{q4_adam_v_mb}"
-q4_total_mb = f"{q4_total_mb:,}"
-q4_total_gb = f"{q4_total_gb:.0f}"
-```
-
-A model has 125M parameters (`{python} q4_param_mb` MB). You're training with Adam optimizer. What's the total memory requirement during training, including gradients and optimizer state?
+A model has 125M parameters (500 MB at FP32). You're training with the Adam optimizer. What's the total memory requirement during training, including gradients and optimizer state?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-- Parameters: `{python} q4_param_mb` MB
-- Gradients: `{python} q4_grad_mb` MB (same as parameters)
-- Adam momentum: `{python} q4_adam_m_mb` MB (first moment estimates)
-- Adam velocity: `{python} q4_adam_v_mb` MB (second moment estimates)
+- Parameters: 500 MB
+- Gradients: 500 MB (one per parameter)
+- Adam momentum: 500 MB (first moment estimates)
+- Adam velocity: 500 MB (second moment estimates)
 
-Total: `{python} q4_param_mb` + `{python} q4_grad_mb` + `{python} q4_adam_m_mb` + `{python} q4_adam_v_mb` = **`{python} q4_total_mb` MB (`{python} q4_total_gb` GB)**
+Total: 500 + 500 + 500 + 500 = **2,000 MB (2 GB)** — 4× the raw model size, just to train.
 
-This is just model state. Activations add more memory that scales with batch size. A typical training run might use 4-8 GB total including activations.
+That's only the model state. Activations add more memory that scales with batch size, putting a typical training run in the 4–8 GB range. This 4× factor is why optimizer-state sharding (ZeRO, FSDP) exists.
 :::
 
 **Q5: Latency Measurement Statistics**
@@ -853,18 +729,21 @@ For students who want to understand the academic foundations and professional pr
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 15 - Quantization"}
+You now have the instrument. Module 15 picks up the first real optimization it enables: **quantization**.
 
-Implement quantization to reduce model size and accelerate inference. You'll use profiling insights to identify which layers benefit most from reduced precision, achieving 4× memory reduction with minimal accuracy loss.
+:::{.callout-note title="Coming Up: Module 15 — Quantization"}
+
+You'll cut FP32 weights down to INT8 — a 4× memory reduction — and use this profiler to answer the question that decides whether quantization is worth applying: *which layers tolerate reduced precision, and which ones break?* Profile first, quantize second, profile again to verify. You're about to see why this loop is the foundation of every production deployment.
 :::
 
-**Preview - How Your Profiler Gets Used in Future Modules:**
+**Preview — how your profiler gets used in future modules:**
 
 | Module | What It Does | Your Profiler In Action |
 |--------|--------------|------------------------|
 | **15: Quantization** | Reduce precision to INT8 | `profile_layer()` identifies quantization candidates |
-| **16: Compression** | Prune and compress weights | `count_parameters()` measures compression ratio |
-| **17: Acceleration** | Vectorize computations | `measure_latency()` validates speedup |
+| **16: Compression** | Prune and compress weights | `count_parameters()` measures the compression ratio |
+| **17: Acceleration** | Vectorize computations | `measure_latency()` validates the speedup |
+| **19: Benchmarking** | Compare across systems | `profile_forward_pass()` produces the comparable numbers |
 
 ## Get Started
 
