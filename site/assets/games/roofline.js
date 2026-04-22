@@ -92,8 +92,12 @@ MLSP.games.roofline = function(canvas, opts) {
     for (var i = 0; i < state.kernels.length; i++) {
       var k = state.kernels[i];
       if (k.state !== "flying") continue;
+      var prevX = k.x;
       k.x += k.vx * (dt * 0.15);
-      if (k.x <= k.targetX + 16) {
+      // Resolve atomically the frame the kernel crosses its targetX — no
+      // mercy window. The ghost reticle promises 'land here'; the catcher
+      // must actually be there when the kernel arrives.
+      if (prevX > k.targetX && k.x <= k.targetX) {
         var dx = k.targetX - state.catcherX;
         var dy = k.y - state.catcherY;
         var dist = Math.sqrt(dx*dx + dy*dy);
@@ -113,7 +117,7 @@ MLSP.games.roofline = function(canvas, opts) {
             MLSP.pop(state, k.targetX, k.y, "#c44", { r: 22 });
           }
           k.state = "caught";
-        } else if (k.x <= k.targetX - 8) {
+        } else {
           state.lives--;
           state.history.push("miss");
           shake(4, 180);

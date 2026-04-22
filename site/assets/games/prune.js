@@ -321,7 +321,7 @@ MLSP.games.prune = function(canvas, opts) {
     id: "prune",
     name: "Pulse Prune",
     ahaLabel: "You just played at",
-    ahaText: "Magnitude-based pruning. Han et al. (2015) showed that small-magnitude weights are a usable proxy for low importance: cut them, fine-tune briefly, and a network shrinks substantially with modest accuracy loss. You did the cutting decision by eye. The lottery-ticket hypothesis (Frankle & Carbin 2018) goes further — the bright survivors, retrained from scratch, can match the original.",
+    ahaText: "Magnitude-based pruning. Han et al. (2015) showed small-magnitude weights are a usable proxy for low importance — you made the bright-vs-dim call by eye. Real pruning also requires a fine-tuning step to recover accuracy (the game skips this) and structured sparsity patterns like 2:4 to actually accelerate on current GPUs. The lottery-ticket hypothesis (Frankle & Carbin 2018) suggests the bright survivors, retrained from scratch, can match the original.",
     buildShareText: function(result) {
       var tag = result.won ? "🏆 compressed" : "✗ diverged";
       return "MLSys Playground · Pulse Prune · day " + MLSP.dayNumber() + "\n" +
