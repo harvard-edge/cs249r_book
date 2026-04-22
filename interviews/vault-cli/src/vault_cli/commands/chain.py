@@ -19,7 +19,6 @@ from rich.table import Table
 
 from vault_cli.loader import load_all
 
-
 chain_app = typer.Typer(help="Browse and inspect question chains.")
 
 
@@ -91,15 +90,15 @@ def chain_show(
     topics = sorted({m[1].question.topic for m in members})
     tracks = sorted({m[1].question.track for m in members})
     levels = [m[1].question.level for m in members]
-    levels_sorted = sorted(levels, key=lambda L: ("L1","L2","L3","L4","L5","L6+").index(L))
+    levels_sorted = sorted(levels, key=lambda lvl: ("L1","L2","L3","L4","L5","L6+").index(lvl))
     monotonic = levels == levels_sorted
 
     console.print(f"[bold cyan]{chain_id}[/bold cyan]   "
                   f"{len(members)} members   track(s)={','.join(tracks)}   topic(s)={','.join(topics)}")
     if len(topics) > 1:
-        console.print(f"  [yellow]warning[/yellow]: chain spans multiple topics — likely mis-linked")
+        console.print("  [yellow]warning[/yellow]: chain spans multiple topics — likely mis-linked")
     if not monotonic:
-        console.print(f"  [yellow]warning[/yellow]: levels not monotonically non-decreasing across positions")
+        console.print("  [yellow]warning[/yellow]: levels not monotonically non-decreasing across positions")
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("#", justify="right", no_wrap=True)
