@@ -91,7 +91,7 @@ with this layering.
 | Slides           | [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss) | [`slides/assets/styles/dark-mode.scss`](../../slides/assets/styles/dark-mode.scss) |
 | Instructors      | [`instructors/assets/styles/style.scss`](../../instructors/assets/styles/style.scss) | [`instructors/assets/styles/dark-mode.scss`](../../instructors/assets/styles/dark-mode.scss) |
 | MLSys·im docs    | [`mlsysim/docs/styles/style.scss`](../../mlsysim/docs/styles/style.scss) | [`mlsysim/docs/styles/dark-mode.scss`](../../mlsysim/docs/styles/dark-mode.scss) |
-| TinyTorch (Quarto)| [`tinytorch/site-quarto/assets/styles/style.scss`](../../tinytorch/site-quarto/assets/styles/style.scss) | [`tinytorch/site-quarto/assets/styles/dark-mode.scss`](../../tinytorch/site-quarto/assets/styles/dark-mode.scss) |
+| TinyTorch (Quarto)| [`tinytorch/quarto/assets/styles/style.scss`](../../tinytorch/quarto/assets/styles/style.scss) | [`tinytorch/quarto/assets/styles/dark-mode.scss`](../../tinytorch/quarto/assets/styles/dark-mode.scss) |
 
 The book Vol I / Vol II theme files in [`book/quarto/assets/styles/themes/`](../../book/quarto/assets/styles/themes/)
 are **symlinks** to the canonical files in [`shared/styles/themes/`](themes/).
