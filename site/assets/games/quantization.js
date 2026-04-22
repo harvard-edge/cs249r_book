@@ -91,6 +91,10 @@ MLSP.games.quantization = function(canvas, opts) {
       var prec = PRECISIONS[layer.precisionIdx];
       var bitsReduction = (32 - prec.bits) / 4;
       var drop = bitsReduction * state.sensitivity[i] * 4;
+      // The actual cliff: int4 on an edge layer triggers nonlinear collapse.
+      // First and last layer at int4 = 1.8× penalty. Earns the game's name.
+      var isEdge = (i === 0 || i === NUM_LAYERS - 1);
+      if (layer.precisionIdx === 3 && isEdge) drop *= 1.8;
       state.pendingDrops.push(drop);
       state.pendingTotalDrop += drop;
       layer.revealed = false;

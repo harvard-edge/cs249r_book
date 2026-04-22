@@ -70,7 +70,9 @@ MLSP.games.prune = function(canvas, opts) {
 
     var mx = (w.from.x + w.to.x) / 2;
     var my = (w.from.y + w.to.y) / 2;
-    var isBright = w.magnitude > 0.45;
+    // Aligned with the visual tier threshold (> 0.55 renders as solid blue).
+    // Previously 0.45, which punished weights that looked "medium" — unfair.
+    var isBright = w.magnitude > 0.55;
     if (isBright) {
       w.wasCriticalCut = true;
       shake(7, 260);
