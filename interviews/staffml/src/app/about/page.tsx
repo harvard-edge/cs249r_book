@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, FileText, Shuffle } from "lucide-react";
+import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, Shuffle } from "lucide-react";
 import { LEVELS } from "@/lib/levels";
 import { getQuestions } from "@/lib/corpus";
 import {
@@ -264,24 +264,19 @@ export default function AboutPage() {
             verification pass found an 8.3% error rate across the corpus. All identified
             errors were corrected.
           </p>
-          <a
-            href={PAPER_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-start gap-4 p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 hover:border-accentBlue/40 transition-colors mb-4 group"
-          >
-            <FileText className="w-8 h-8 text-accentBlue shrink-0 mt-0.5" />
-            <div>
-              <span className="text-[14px] font-bold text-textPrimary group-hover:text-accentBlue transition-colors block mb-1">
-                Read the Research Paper
-              </span>
-              <span className="text-[12px] text-textSecondary leading-relaxed block">
-                The full methodology: backward design from textbook chapters, four-axis taxonomy,
-                LLM-assisted generation pipeline, independent math verification, and the ikigai-inspired
-                competency zone framework.
-              </span>
-            </div>
-          </a>
+          {/* Paper link is intentionally a low-key inline reference here, not
+              a duplicate CTA card. The full citation card with PDF + BibTeX
+              already sits above the fold (see <PaperCitationCard /> at the
+              top of this page). Repeating the card created two competing
+              "read the paper" surfaces; the inline link preserves the
+              in-context pointer (this section IS the methodology) without
+              the visual duplication. */}
+          <p className="text-[14px] text-textSecondary leading-relaxed mb-4">
+            The full methodology — backward design from textbook chapters, four-axis taxonomy,
+            LLM-assisted generation pipeline, independent math verification, and the
+            ikigai-inspired competency zone framework — is described in{' '}
+            <a href={PAPER_URL} target="_blank" rel="noopener noreferrer" className="text-accentBlue hover:underline font-medium">our paper</a>.
+          </p>
           <div className="p-4 rounded-xl border border-accentAmber/20 bg-accentAmber/5">
             <p className="text-[13px] text-textSecondary leading-relaxed">
               <strong className="text-textPrimary">Found an error?</strong>{' '}

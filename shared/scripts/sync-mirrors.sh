@@ -28,7 +28,7 @@ fi
 # canonical_path|mirror_path_1,mirror_path_2,...
 SYNC_MAP=(
   "shared/scripts/subscribe-modal.js|site/assets/scripts/subscribe-modal.js,book/quarto/assets/scripts/subscribe-modal.js,labs/assets/scripts/subscribe-modal.js,kits/assets/scripts/subscribe-modal.js,mlsysim/docs/scripts/subscribe-modal.js"
-  "shared/assets/img/logo-seas-shield.png|book/quarto/assets/images/icons/logo-seas-shield.png"
+  "shared/assets/img/logo-seas-shield.png|book/quarto/assets/images/icons/logo-seas-shield.png,interviews/staffml/public/logo-seas-shield.png"
 
   # SCSS partials consumed by the book Quarto build. Sass resolves @import
   # relative to the importing file's physical location (not the symlink
