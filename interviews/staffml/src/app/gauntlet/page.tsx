@@ -161,25 +161,6 @@ export default function GauntletPage() {
     }
   }, [timeRemaining, phase]);
 
-  // Keyboard shortcuts: Cmd+Enter to reveal, 1-4 for scoring
-  useEffect(() => {
-    if (phase !== "active") return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLTextAreaElement) {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !showAnswer) {
-          e.preventDefault();
-          revealAnswer();
-        }
-        return;
-      }
-      if (showAnswer && ['1', '2', '3', '4'].includes(e.key)) {
-        scoreAndNext(parseInt(e.key) - 1);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [phase, showAnswer]);
-
   const isDesignMode = selectedDuration === 3; // "Design (1 deep)"
 
   const startGauntlet = useCallback(() => {
@@ -228,7 +209,7 @@ export default function GauntletPage() {
     setShowAnswer(true);
   };
 
-  const scoreAndNext = (score: number) => {
+  const scoreAndNext = useCallback((score: number) => {
     const q = questions[currentIdx];
     const attempt: AttemptRecord = {
       questionId: q.id,
@@ -276,7 +257,27 @@ export default function GauntletPage() {
       track({ type: 'gauntlet_completed', track: selectedTrack, level: selectedLevel, pct: pctScore, questionCount: questions.length });
       setPhase("results");
     }
-  };
+  }, [questions, currentIdx, scores, timeRemaining, selectedDuration, selectedTrack, selectedLevel]);
+
+  // Keyboard shortcuts: Cmd+Enter to reveal, 1-4 for scoring.
+  // Placed after scoreAndNext so the stable callback reference is in scope.
+  useEffect(() => {
+    if (phase !== "active") return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !showAnswer) {
+          e.preventDefault();
+          revealAnswer();
+        }
+        return;
+      }
+      if (showAnswer && ['1', '2', '3', '4'].includes(e.key)) {
+        scoreAndNext(parseInt(e.key) - 1);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [phase, showAnswer, scoreAndNext]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
