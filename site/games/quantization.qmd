@@ -1,7 +1,7 @@
 ---
-title: "Quantization Cliff"
-subtitle: "Dial layer precisions. Ship within budget."
-description: "A browser mini-game from MLSys Playground. Six neural network layers, four precision levels, three deploys to ship within the bit budget. Teaches mixed-precision quantization."
+title: "Sharp Shot"
+subtitle: "Compress a model before the target blurs."
+description: "A browser mini-game from MLSys Playground. Shoot a target with per-layer precision dials. Teaches mixed-precision quantization through visual noise — blur, jitter, and drift representing real per-layer sensitivity to low-precision arithmetic."
 page-layout: article
 format:
   html:
@@ -13,30 +13,32 @@ format:
 ---
 
 ```{=html}
-<div class="mlsp-game-container" role="region" aria-label="Quantization Cliff mini-game">
+<div class="mlsp-game-container" role="region" aria-label="Sharp Shot mini-game">
   <canvas id="mlsp-canvas" class="mlsp-game-canvas" width="680" height="460"></canvas>
   <div class="mlsp-game-hud">
-    <span class="mlsp-score">bits <span id="mlsp-bits">192</span> / <span id="mlsp-budget">96</span> · deploys <span id="mlsp-deploys">3</span></span>
-    <span>click layer to cycle precision · <kbd>space</kbd> to deploy · <kbd>R</kbd> retry</span>
+    <span class="mlsp-score">bits <span id="mlsp-bits">192</span> / <span id="mlsp-budget">96</span> · shots <span id="mlsp-shots">10</span> · hits <span id="mlsp-hits">0</span></span>
+    <span>1-6 cycles a layer · space to fire · <kbd>R</kbd> retry</span>
   </div>
 </div>
 
 <div id="mlsp-aha-slot"></div>
 
 <script>
-(function mountQuant(){
+(function mountSharpShot(){
   function boot() {
     if (!window.MLSP || !MLSP.games || !MLSP.games.quantization) return setTimeout(boot, 30);
     var canvas = document.getElementById("mlsp-canvas");
-    var $bits    = document.getElementById("mlsp-bits");
-    var $budget  = document.getElementById("mlsp-budget");
-    var $deploys = document.getElementById("mlsp-deploys");
-    var ahaSlot  = document.getElementById("mlsp-aha-slot");
+    var $bits   = document.getElementById("mlsp-bits");
+    var $budget = document.getElementById("mlsp-budget");
+    var $shots  = document.getElementById("mlsp-shots");
+    var $hits   = document.getElementById("mlsp-hits");
+    var ahaSlot = document.getElementById("mlsp-aha-slot");
     var api = MLSP.games.quantization(canvas, {
       onScoreChange: function(s) {
         $bits.textContent = s.bitsUsed;
         $budget.textContent = s.budget;
-        $deploys.textContent = s.deploysLeft;
+        $shots.textContent = s.shotsLeft;
+        $hits.textContent = s.hits;
       },
       onGameOver: function() {
         MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText);
@@ -51,15 +53,17 @@ format:
 
 ## How it works
 
-You're shipping a quantized model. Six layers, each starting at fp32 (32 bits per weight). You have **96 bits total** to spend — half the original. Click a layer to cycle its precision: fp32 → fp16 → int8 → int4 → fp32.
+A target sits downrange. Your weapon has six per-layer precision dials (embedding, attn.1, ffn.1, attn.2, ffn.2, output) and a total **bit budget of 96**. Every layer starts at fp32 (32 bits) — well over budget. Lowering precision frees bits for the budget, but it visually degrades your sight:
 
-Press **deploy** to push the model and see the resulting accuracy. You get **3 deploys per run**. Hit **85% accuracy** within budget and you ship.
+- **Edge layers** (embedding + output) at **int4**: the target **drifts** away from where it appears — systematic bias. You aim at the bullseye, but the true target has shifted. This is the [LLM.int8 cliff](https://arxiv.org/abs/2208.07339) (Dettmers et al., 2022) in visual form — embeddings and output heads collapse hard at very low precision.
+- **Attention layers** at low precision: the target **jitters** — softmax amplifies numerical noise.
+- **FFN layers** at low precision: the target **blurs** — reduced contrast, most robust to aggressive quantization.
 
-The catch: **layer sensitivity is hidden and uneven**. First and last layers (embeddings, output heads) tend to hate aggressive quantization. Middle layers usually tolerate int8 or int4 fine. You'll learn which layers are robust by deploying and watching where the cliff drops.
+You have **10 shots**. Hit **7 or more** to ship the model. If you miss, the game briefly reveals where the *true* target was so you can see how far your sight was misaligned.
 
 ## Why this matters
 
-Real production quantization solves this in two layers: **per-layer bit-allocation methods** like [HAQ](https://arxiv.org/abs/1811.08886) (Wang et al. 2019, RL) and [HAWQ](https://arxiv.org/abs/1905.03696) (Dong et al. 2019, Hessian-based) decide how many bits each layer gets, while **uniform-precision techniques** like GPTQ and AWQ minimize the accuracy cost *at* a chosen precision. Embeddings and output heads at low precision destroy accuracy; middle layers are surprisingly robust. The reason your phone can run a 7B-parameter model is that someone made these calls correctly.
+Production quantization (GPTQ, AWQ, SmoothQuant) spends most of its time navigating exactly this asymmetry: most of a model can be aggressively quantized, but a few layers — typically the first and last — cannot. Mixed-precision bit-allocation algorithms like [HAWQ](https://arxiv.org/abs/1905.03696) (Dong et al. 2019) search for the right per-layer budget automatically. You just did a 30-second version by eye.
 
 ---
 

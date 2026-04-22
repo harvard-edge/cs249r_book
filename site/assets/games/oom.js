@@ -1,9 +1,10 @@
 /* ============================================================
-   MLSys Playground — OOM (v3)
-   Tetris-shape; lifetime-driven freeing on STEP() and BACKWARD
-   events. v3: dramatically louder step event (full screen flash
-   + pop ring per freed cell + bigger particles), HBM emoji-grid
-   share artifact, training-vs-inference aha card, day number.
+   MLSys Playground — OOM (v4, connective tissue)
+   Tetris-shape with lifetime-driven freeing — but now the
+   training-step events are DRIVEN BY PACKING, not a wall clock.
+   Every 3 blocks placed fires a BACKWARD (oldest activations
+   consumed). Every 6 blocks placed fires a STEP (all gradient
+   blocks freed). The right-side bar fills as you pack.
    ============================================================ */
 
 window.MLSP = window.MLSP || {};
@@ -15,8 +16,8 @@ MLSP.games.oom = function(canvas, opts) {
   var W = canvas.width, H = canvas.height;
 
   var TIME_LIMIT_MS = 60000;
-  var STEP_INTERVAL_MS = 7000;
-  var BACKWARD_INTERVAL_MS = 4500;
+  var STEP_BLOCKS = 6;       // place N blocks → optimizer step fires
+  var BACKWARD_BLOCKS = 3;   // place N blocks → backward pass event fires
 
   function hashString(s) { var h = 2166136261 >>> 0; for (var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)>>>0;} return h; }
   function mulberry32(seed) { var a = seed >>> 0; return function(){ a = (a + 0x6D2B79F5) >>> 0; var t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -48,8 +49,8 @@ MLSP.games.oom = function(canvas, opts) {
     score: 0,
     over: false,
     timeLeft: TIME_LIMIT_MS,
-    stepCountdown: STEP_INTERVAL_MS,
-    backwardCountdown: BACKWARD_INTERVAL_MS,
+    stepProgress: 0,        // 0..STEP_BLOCKS — fills on each placement
+    backwardProgress: 0,    // 0..BACKWARD_BLOCKS
     stepFlashTime: 0, backwardFlashTime: 0,
     shakeAmt: 0, shakeT: 0,
     floats: [], particles: [],
@@ -89,6 +90,12 @@ MLSP.games.oom = function(canvas, opts) {
     state.fallInterval = Math.max(280, 800 - state.score * 8);
     state.current = null;
     state.nextFallIn = 350;
+
+    /* CONNECTIVE TISSUE: every block placed advances the training loop */
+    state.backwardProgress++;
+    if (state.backwardProgress >= BACKWARD_BLOCKS) { fireBackwardEvent(); state.backwardProgress = 0; }
+    state.stepProgress++;
+    if (state.stepProgress >= STEP_BLOCKS) { fireStepEvent(); state.stepProgress = 0; }
   }
   function tryMove(dc, dr) {
     if (!state.current || state.over) return;
@@ -103,7 +110,6 @@ MLSP.games.oom = function(canvas, opts) {
     lockBlock();
   }
 
-  /* STEP event: huge juice (full-screen green flash + pop ring per cell) */
   function fireStepEvent() {
     state.stepFlashTime = 1200;
     MLSP.flash(state, "#3d9e5a", 360);
@@ -152,13 +158,9 @@ MLSP.games.oom = function(canvas, opts) {
 
   function endGame() {
     if (state.score > alltimeBest) { alltimeBest = state.score; MLSP.bestScore.set("oom", alltimeBest); }
-    if (opts.onGameOver) opts.onGameOver({
-      score: state.score, alltimeBest: alltimeBest,
-      emojiGrid: buildHbmGrid()
-    });
+    if (opts.onGameOver) opts.onGameOver({ score: state.score, alltimeBest: alltimeBest, emojiGrid: buildHbmGrid() });
   }
 
-  /* HBM emoji grid: subsample 16×17 to 8×4 for share */
   function buildHbmGrid() {
     var sampleRows = 4, sampleCols = 8;
     var rowsPerBin = Math.max(1, Math.floor(rows / sampleRows));
@@ -219,10 +221,6 @@ MLSP.games.oom = function(canvas, opts) {
     if (!state.over) {
       state.timeLeft -= dt;
       if (state.timeLeft <= 0) { state.timeLeft = 0; state.over = true; MLSP.flash(state, "#3d9e5a", 360); endGame(); }
-      state.stepCountdown -= dt;
-      if (state.stepCountdown <= 0) { fireStepEvent(); state.stepCountdown = STEP_INTERVAL_MS; }
-      state.backwardCountdown -= dt;
-      if (state.backwardCountdown <= 0) { fireBackwardEvent(); state.backwardCountdown = BACKWARD_INTERVAL_MS; }
       if (!state.current) { state.nextFallIn -= dt; if (state.nextFallIn <= 0) spawnBlock(); }
       else { state.nextFallIn -= dt; if (state.nextFallIn <= 0) { tryMove(0, 1); state.nextFallIn = state.fallInterval; } }
     }
@@ -251,11 +249,11 @@ MLSP.games.oom = function(canvas, opts) {
     ctx.fillStyle = "#333"; ctx.font = "bold 15px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "center";
     ctx.fillText("OOM", W/2, 24);
     ctx.font = "10.5px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#888";
-    ctx.fillText("← → move · space drop · gradients freed on step() · activations on backward", W/2, 42);
+    ctx.fillText("← → move · space drop · every 3 blocks = backward · every 6 blocks = step() freeing grads", W/2, 42);
 
-    var phaseStr = state.stepFlashTime > 0 ? "STEP() — gradients freeing"
-                  : state.backwardFlashTime > 0 ? "BACKWARD — activations consuming"
-                  : "FORWARD — accumulating";
+    var phaseStr = state.stepFlashTime > 0 ? "STEP() — gradients freed"
+                  : state.backwardFlashTime > 0 ? "BACKWARD — activations consumed"
+                  : "FORWARD — packing tensors";
     var phaseColor = state.stepFlashTime > 0 ? "#3d9e5a" : state.backwardFlashTime > 0 ? "#4a90c4" : "#888";
     ctx.fillStyle = phaseColor; ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillText(phaseStr, W/2, 60);
@@ -286,12 +284,24 @@ MLSP.games.oom = function(canvas, opts) {
       }
     }
 
-    var bx = hbmX + hbmW + 20, by = hbmY, bw = 12, bh = hbmH;
+    /* Step-progress bar (fills with each placement — driven by YOU, not a clock) */
+    var bx = hbmX + hbmW + 20, by = hbmY, bw = 14, bh = hbmH;
     ctx.fillStyle = "#eee"; ctx.fillRect(bx, by, bw, bh);
-    var stepFrac = Math.max(0, state.stepCountdown / STEP_INTERVAL_MS);
+    var stepFrac = state.stepProgress / STEP_BLOCKS;
     ctx.fillStyle = "#3d9e5a"; ctx.fillRect(bx, by + bh * (1 - stepFrac), bw, bh * stepFrac);
+    ctx.strokeStyle = "#3d9e5a"; ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh);
     ctx.fillStyle = "#555"; ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "left";
     ctx.fillText("step", bx, by - 4);
+    ctx.fillText(state.stepProgress + "/" + STEP_BLOCKS, bx, by + bh + 12);
+
+    /* Backward-progress mini indicator */
+    var bbx = bx + bw + 6, bby = by, bbw = 6, bbh = bh;
+    ctx.fillStyle = "#eee"; ctx.fillRect(bbx, bby, bbw, bbh);
+    var bwdFrac = state.backwardProgress / BACKWARD_BLOCKS;
+    ctx.fillStyle = "#4a90c4"; ctx.fillRect(bbx, bby + bbh * (1 - bwdFrac), bbw, bbh * bwdFrac);
+    ctx.fillStyle = "#555"; ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "left";
+    ctx.fillText("bwd", bbx, bby - 4);
 
     for (var pi = 0; pi < state.particles.length; pi++) {
       var pa = state.particles[pi];
@@ -356,7 +366,7 @@ MLSP.games.oom = function(canvas, opts) {
     id: "oom",
     name: "OOM",
     ahaLabel: "You just played at",
-    ahaText: "GPU memory management. During training, activations live from forward pass to backward; gradients clear when the optimizer step fires; optimizer state persists across steps. During inference, KV cache grows with sequence length instead. Real systems fight fragmentation with caching allocators, and trade compute for memory via activation checkpointing and offload — different lifetimes, different reclamation events, all coexisting in HBM.",
+    ahaText: "GPU memory management with lifetimes. Every training step you just drove: forward pass accumulates activations, backward consumes them, and the optimizer step frees gradients. Your packing rhythm *is* the training loop. During inference the residents are different — optimizer state goes away, KV cache grows with sequence length. Real systems fight fragmentation with caching allocators and trade compute for memory via activation checkpointing and offload.",
     buildShareText: function(r) {
       return "MLSys Playground · OOM · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
              "packed " + r.score + " tensors\n" +

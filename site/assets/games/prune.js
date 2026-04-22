@@ -284,24 +284,47 @@ MLSP.games.prune = function(canvas, opts) {
   }
 
   function drawHud() {
-    var barX = 20, barY = H - 28, barW = W - 40, barH = 8;
-    ctx.fillStyle = "#eee"; MLSP.roundRect(ctx, barX, barY, barW, barH, 4); ctx.fill();
+    /* Two bars stacked: accuracy (below) + sparsity progress toward goal (above) */
+    var barX = 20, barW = W - 40;
+    var spY = H - 40, spH = 6;
+    var accY = H - 26, accH = 8;
+
+    /* Sparsity progress bar — visible finish line */
+    ctx.fillStyle = "#eee"; MLSP.roundRect(ctx, barX, spY, barW, spH, 3); ctx.fill();
+    var spFrac = Math.min(1, state.sparsity / TARGET_SPARSITY);
+    ctx.fillStyle = state.sparsity >= TARGET_SPARSITY ? "#3d9e5a" : "#88b4d8";
+    MLSP.roundRect(ctx, barX, spY, barW * spFrac, spH, 3); ctx.fill();
+    /* Target goal marker */
+    ctx.strokeStyle = "#3d9e5a"; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(barX + barW, spY - 3); ctx.lineTo(barX + barW, spY + spH + 3); ctx.stroke();
+
+    /* Accuracy bar below it */
+    ctx.fillStyle = "#eee"; MLSP.roundRect(ctx, barX, accY, barW, accH, 4); ctx.fill();
     var accFrac = Math.max(0, Math.min(1, state.accuracy / 100));
     var accColor = state.accuracy >= 80 ? "#3d9e5a" : state.accuracy >= ACCURACY_FLOOR ? "#c87b2a" : "#c44";
-    ctx.fillStyle = accColor; MLSP.roundRect(ctx, barX, barY, barW * accFrac, barH, 4); ctx.fill();
+    ctx.fillStyle = accColor; MLSP.roundRect(ctx, barX, accY, barW * accFrac, accH, 4); ctx.fill();
     var floorX = barX + barW * (ACCURACY_FLOOR / 100);
     ctx.strokeStyle = "#c44"; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
-    ctx.beginPath(); ctx.moveTo(floorX, barY - 2); ctx.lineTo(floorX, barY + barH + 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(floorX, accY - 2); ctx.lineTo(floorX, accY + accH + 2); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.font = "11px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#333";
-    ctx.textAlign = "left"; ctx.fillText("accuracy " + state.accuracy.toFixed(1) + "%", barX, barY - 5);
+
+    /* Labels above bars */
+    ctx.font = "10px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#555";
+    ctx.textAlign = "left";
+    ctx.fillText("trim " + state.sparsity.toFixed(0) + "% / " + TARGET_SPARSITY + "% goal", barX, spY - 3);
+    ctx.textAlign = "right";
     var secs = Math.ceil(state.timeLeft / 1000);
-    ctx.textAlign = "center"; ctx.fillStyle = secs <= 10 ? "#c44" : "#333";
-    ctx.font = "bold 13px 'Helvetica Neue', Arial, sans-serif"; ctx.fillText("⏱ " + secs + "s", W/2, barY - 5);
-    ctx.fillStyle = "#333"; ctx.font = "11px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "right";
-    ctx.fillText("sparsity " + state.sparsity.toFixed(0) + "% / " + TARGET_SPARSITY + "%", W - 20, barY - 5);
-    ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999"; ctx.textAlign = "left";
-    ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · alltime best " + alltimeBest + "% · R retry", barX, barY + barH + 12);
+    ctx.fillStyle = secs <= 10 ? "#c44" : "#555";
+    ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
+    ctx.fillText("⏱ " + secs + "s", W - 20, spY - 3);
+
+    ctx.font = "10px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#555";
+    ctx.textAlign = "left";
+    ctx.fillText("accuracy " + state.accuracy.toFixed(1) + "% (stay above " + ACCURACY_FLOOR + "%)", barX, accY - 3);
+
+    ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999";
+    ctx.textAlign = "left";
+    ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · alltime best " + alltimeBest + "% · R retry", barX, accY + accH + 12);
   }
 
   function drawGameOver() {
@@ -321,7 +344,7 @@ MLSP.games.prune = function(canvas, opts) {
     id: "prune",
     name: "Pulse Prune",
     ahaLabel: "You just played at",
-    ahaText: "Magnitude-based pruning. Han et al. (2015) showed small-magnitude weights are a usable proxy for low importance — you made the bright-vs-dim call by eye. Real pruning also requires a fine-tuning step to recover accuracy (the game skips this) and structured sparsity patterns like 2:4 to actually accelerate on current GPUs. The lottery-ticket hypothesis (Frankle & Carbin 2018) suggests the bright survivors, retrained from scratch, can match the original.",
+    ahaText: "Magnitude is a usable proxy for importance (Han et al. 2015). Real pruning adds a fine-tuning step to recover accuracy — you just did the cut.",
     buildShareText: function(result) {
       var tag = result.won ? "🏆 compressed" : "✗ diverged";
       return "MLSys Playground · Pulse Prune · day " + MLSP.dayNumber() + "\n" +

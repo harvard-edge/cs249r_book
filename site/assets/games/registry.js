@@ -36,11 +36,11 @@ MLSP.registry = [
   },
   {
     id: "quantization",
-    name: "Quantization Cliff",
-    tagline: "Dial layer precisions. Ship within budget.",
+    name: "Sharp Shot",
+    tagline: "Shoot a target. Lower precision = cheaper but blurry.",
     url: "/games/quantization.html",
     script: "/assets/games/quantization.js",
-    teaches: "Mixed-precision quantization and layer sensitivity.",
+    teaches: "Mixed-precision quantization and per-layer sensitivity.",
     available: true
   }
 ];
