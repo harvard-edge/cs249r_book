@@ -232,6 +232,33 @@ def _populate_taxonomy(conn: sqlite3.Connection, data_dir: Path) -> None:
     conn.commit()
 
 
+def _populate_chains(conn: sqlite3.Connection, vault_dir: Path) -> None:
+    """Load chains.json into the `chains` table.
+
+    The compiler previously left this table empty, which made
+    chain_questions FK constraints fail on any engine that enforces
+    them (e.g., Cloudflare D1).
+    """
+    chains_path = vault_dir / "chains.json"
+    if not chains_path.exists():
+        return
+    data = json.loads(chains_path.read_text(encoding="utf-8"))
+    if not isinstance(data, list):
+        return
+    cur = conn.cursor()
+    for c in data:
+        if not isinstance(c, dict):
+            continue
+        cid = c.get("chain_id") or c.get("id")
+        if not cid:
+            continue
+        cur.execute(
+            "INSERT OR REPLACE INTO chains(id, name, topic) VALUES (?, ?, ?)",
+            (cid, c.get("name"), c.get("topic")),
+        )
+    conn.commit()
+
+
 def _populate_zones(conn: sqlite3.Connection, data_dir: Path) -> None:
     """Load zones.json into the zones table."""
     zones_path = data_dir / "zones.json"
@@ -280,6 +307,11 @@ def build(
         staffml_data = (vault_dir / ".." / "staffml" / "src" / "data").resolve()
         _populate_taxonomy(conn, staffml_data)
         _populate_zones(conn, staffml_data)
+
+        # ── Populate chains table from chains.json ──
+        # Without this the chains table is empty and FK enforcement (D1)
+        # rejects chain_questions inserts pointing at unknown chain IDs.
+        _populate_chains(conn, vault_dir)
 
         taxonomy_path = vault_dir / "taxonomy.yaml"
         chains_path = vault_dir / "chains.yaml"

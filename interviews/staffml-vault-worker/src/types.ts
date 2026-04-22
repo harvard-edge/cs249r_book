@@ -27,16 +27,24 @@ export interface QuestionRow {
   track: string;
   level: string;
   zone: string;
+  /** v1.0: 13 canonical competency areas (memory, compute, latency, …). */
+  competency_area: string | null;
+  /** v1.0: Bloom's revised taxonomy verb (remember/understand/apply/analyze/evaluate/create). */
+  bloom_level: string | null;
+  /** v1.0: ML lifecycle phase (training/inference/both). */
+  phase: string | null;
   status: string;
   scenario: string;
   common_mistake: string | null;
   realistic_solution: string;
   napkin_math: string | null;
-  deep_dive_title: string | null;
-  deep_dive_url: string | null;
   provenance: string;
   created_at: string | null;
   last_modified: string | null;
+  /** v1.0: human verification status, independent of LLM validation. */
+  human_review_status: string | null;
+  human_review_by: string | null;
+  human_review_date: string | null;
   content_hash: string;
   authors_json: string | null;
 }
