@@ -1,30 +1,27 @@
 /* ============================================================
-   MLSys Playground — Pulse Prune (v3)
+   MLSys Playground — Pulse Prune (v4)
    ------------------------------------------------------------
    Thesis: subtraction under scarcity. Every cut buys you sparsity
    and costs you potential paths through the network.
 
+   v4 additions:
+     - VISIBLE TARGET: reach 60% sparsity while accuracy stays up.
+       Crosses the target = celebratory banner + bonus phase.
+     - REWIRING VIZ: on each prune, sibling weights (sharing an
+       endpoint) immediately brighten and thicken — the player
+       literally sees the network redistribute capacity.
+     - R RETRIES ANY TIME: previously R only worked on game-over.
+       Now R starts a fresh run whenever the canvas is in view.
+
    Three simultaneous beats:
      - Fine-tune tick (~2 Hz): weight magnitudes drift toward
-       importance-weighted targets; surviving weights strengthen
-       as sparsity grows; idle play accrues staleness.
-     - Inference pulse (~one at a time, ~500ms gap): a sample
-       picks a CONCRETE PATH through unpruned weights, hops leg
-       by leg. If a leg has no unpruned outgoing weight, the
-       pulse DIES at that node — visibly. Pruning has direct,
-       legible inference-side consequences.
-     - Player cuts: clicking a weight that has stayed dim for
-       many consecutive ticks scores high "patience" (Confidence
-       redesign — was Combo). Cutting a load-bearing weight
-       triggers screenshake, tracks as a mistake for the
-       failure-skeleton on game-over.
-
-   Onboarding: 3-second ghost demo plays itself before control
-   passes to the player.
-
-   Failure-as-content: game-over reveals the pruned-weight
-   skeleton in red (what you destroyed) and an emoji-grid
-   shareable that captures the run's network shape.
+       importance-weighted targets.
+     - Inference pulse (one at a time, ~500ms gap): picks a
+       concrete path through unpruned weights; dies at broken
+       boundaries.
+     - Player cuts: patience (weight stayed dim for N ticks) →
+       score. Load-bearing cuts → screenshake + flagged as
+       mistake in failure skeleton.
 
    Daily seed: everyone playing today gets the same network.
    ============================================================ */
@@ -40,17 +37,18 @@ MLSP.games.prune = function(canvas, opts) {
   /* ===== Tunables ===== */
   var LAYERS = [5, 8, 3];
   var ACCURACY_FLOOR = 60;
+  var TARGET_SPARSITY = 60;             // win the day at this sparsity
   var TICK_MS = 500;
-  var PULSE_LEG_MS = 850;             // time the pulse takes to traverse one leg
-  var PULSE_GAP_MS = 500;             // quiet time between pulses
-  var DEMO_MS = 3000;                 // 3-second ghost demo
+  var PULSE_LEG_MS = 850;
+  var PULSE_GAP_MS = 500;
+  var DEMO_MS = 3000;
   var HOVER_RADIUS = 9;
-  var MAGNITUDE_JITTER = 0.006;       // visible drift per tick (was 0.015)
-  var ACTIVATION_DECAY = 0.92;        // per frame (was 0.82 — slower)
-  var NEURON_PULSE_DECAY = 0.94;      // per frame (was 0.88 — slower)
+  var MAGNITUDE_JITTER = 0.006;
+  var ACTIVATION_DECAY = 0.92;
+  var NEURON_PULSE_DECAY = 0.94;
   var STALENESS_RATE = 0.04;
   var RECOVERY_RATE = 0.18;
-  var PATIENCE_REWARD_TICKS = 5;      // cut after this many small-ticks = max patience
+  var PATIENCE_REWARD_TICKS = 5;
 
   /* ===== Seeded PRNG (mulberry32) for daily mode ===== */
   function hashString(s) {
@@ -118,7 +116,7 @@ MLSP.games.prune = function(canvas, opts) {
           fadeAlpha: 1.0,
           ticksSmall: 0,
           activation: 0,
-          wasCriticalCut: false        // set true if pruning this triggered shake (load-bearing mistake)
+          wasCriticalCut: false
         });
       });
     });
@@ -134,18 +132,20 @@ MLSP.games.prune = function(canvas, opts) {
     pruned: 0,
     total: weights.length,
     staleness: 0,
-    confidenceScore: 0,                // total patience earned
+    confidenceScore: 0,
     cuts: 0,
     correct: 0,
     attempts: 0,
-    dropped: 0,                        // pulses that died at pruned boundaries
+    dropped: 0,
     ticksSinceCut: 0,
     over: false,
+    targetReached: false,
+    targetBannerTime: 0,
     hoverIdx: -1,
     shakeAmt: 0, shakeT: 0,
     particles: [], floats: [],
     inferencePulse: null,
-    pulseCooldown: PULSE_GAP_MS + 600, // delay first pulse so demo isn't overrun
+    pulseCooldown: PULSE_GAP_MS + 600,
     demoMode: true,
     demoStart: 0,
     demoTargetIdx: -1,
@@ -168,7 +168,7 @@ MLSP.games.prune = function(canvas, opts) {
   var dailyStore = readDailyBest();
   var dailyBest = (dailyStore.date === today) ? dailyStore.best : 0;
 
-  /* ===== Path picking — the bug fix ===== */
+  /* ===== Path picking ===== */
   function pickOutgoingUnpruned(fromNeuron, toLayer) {
     var candidates = [];
     for (var i = 0; i < weights.length; i++) {
@@ -177,7 +177,6 @@ MLSP.games.prune = function(canvas, opts) {
       if (w.from === fromNeuron && w.to.layer === toLayer) candidates.push(w);
     }
     if (candidates.length === 0) return null;
-    // Weighted by magnitude (stronger paths more likely to carry signal)
     var total = 0;
     for (var i = 0; i < candidates.length; i++) total += candidates[i].magnitude + 0.05;
     var r = rand() * total;
@@ -215,7 +214,7 @@ MLSP.games.prune = function(canvas, opts) {
     }
   }
 
-  /* ===== Inference pulse — picks a concrete path ===== */
+  /* ===== Inference pulse ===== */
   function spawnPulse() {
     var inputs = neurons.filter(function(n){ return n.layer === 0; });
     var sourceIdx = Math.floor(rand() * inputs.length);
@@ -259,7 +258,6 @@ MLSP.games.prune = function(canvas, opts) {
     }
 
     if (p.legs.length === 0) {
-      // Died at source immediately
       p.deathLingerMs = 0;
       p.done = true;
       state.attempts++; state.dropped++;
@@ -276,7 +274,6 @@ MLSP.games.prune = function(canvas, opts) {
       p.currentLeg++;
       p.progress = 0;
       if (p.currentLeg >= p.legs.length) {
-        // Reached the end of the chosen path
         p.done = true;
         p.deathLingerMs = 0;
         state.attempts++;
@@ -291,12 +288,10 @@ MLSP.games.prune = function(canvas, opts) {
           addFloat(outNeuron.x, outNeuron.y - 14, "✗", "#c44");
         }
       } else {
-        // Just finished a leg — pulse the intermediate neuron
         p.legs[p.currentLeg - 1].to.pulse = 1;
       }
     }
 
-    // If path dies mid-traversal (because we already reached diedAt)
     if (!p.pathAlive && p.currentLeg >= p.legs.length && !p.done) {
       p.done = true;
       p.deathLingerMs = 0;
@@ -320,14 +315,11 @@ MLSP.games.prune = function(canvas, opts) {
     state.ticksSinceCut = 0;
     state.staleness = Math.max(0, state.staleness - 0.35);
 
-    // Confidence (replaces combo): rewards patience.
-    // Patience = how long the weight stayed dim before you cut it.
     var patience = Math.min(w.ticksSmall, PATIENCE_REWARD_TICKS);
     var mx = (w.from.x + w.to.x) / 2;
     var my = (w.from.y + w.to.y) / 2;
 
     if (severity > 3) {
-      // Load-bearing mistake
       w.wasCriticalCut = true;
       shake(7, 260);
       addFloat(mx, my - 6, "−" + severity.toFixed(1) + "% load-bearing", "#c44");
@@ -341,6 +333,29 @@ MLSP.games.prune = function(canvas, opts) {
       burst(mx, my, "#c87b2a", 5);
     }
 
+    /* ----- REWIRING VIZ: siblings pick up capacity ----- */
+    var redistribution = w.importance * 0.22;
+    for (var si = 0; si < weights.length; si++) {
+      var sibling = weights[si];
+      if (sibling === w || sibling.pruned) continue;
+      if (sibling.from === w.from || sibling.to === w.to) {
+        sibling.activation = Math.min(1, sibling.activation + 0.6);
+        sibling.targetMag = Math.min(1.3, sibling.targetMag + redistribution);
+      }
+    }
+
+    /* ----- TARGET ACHIEVEMENT ----- */
+    if (state.sparsity >= TARGET_SPARSITY && !state.targetReached) {
+      state.targetReached = true;
+      state.targetBannerTime = 0;
+      var outs = neurons.filter(function(n){ return n.layer === LAYERS.length - 1; });
+      for (var oi = 0; oi < outs.length; oi++) {
+        burst(outs[oi].x, outs[oi].y, "#3d9e5a", 18);
+      }
+      addFloat(W/2, H/2 - 40, "🏆 " + TARGET_SPARSITY + "% sparsity!", "#3d9e5a");
+      addFloat(W/2, H/2 - 20, "keep going for bonus", "#3d9e5a");
+    }
+
     if (state.accuracy < ACCURACY_FLOOR && state.ceiling < ACCURACY_FLOOR + 3) {
       endGame();
     }
@@ -349,7 +364,6 @@ MLSP.games.prune = function(canvas, opts) {
   /* ===== Demo ===== */
   function setupDemo(now) {
     state.demoStart = now;
-    // Pick a low-magnitude weight as the demo target
     var smallest = -1, smallestMag = Infinity;
     for (var i = 0; i < weights.length; i++) {
       if (weights[i].magnitude < smallestMag) {
@@ -367,18 +381,15 @@ MLSP.games.prune = function(canvas, opts) {
   function updateDemo(now, dt) {
     var elapsed = now - state.demoStart;
     var t = Math.max(0, Math.min(1, elapsed / DEMO_MS));
-    // Ease ghost cursor toward target
     var targetX = state._demoTargetX;
     var targetY = state._demoTargetY;
     var ease = 1 - Math.pow(1 - t, 3);
     state.ghostCursor.x = 30 + (targetX - 30) * ease;
     state.ghostCursor.y = 30 + (targetY - 30) * ease;
     state.ghostCursor.alpha = Math.min(1, t * 4);
-    // Highlight target weight
     if (state.demoTargetIdx >= 0 && elapsed > 800) {
       weights[state.demoTargetIdx].activation = Math.min(1, weights[state.demoTargetIdx].activation + 0.04);
     }
-    // Auto-prune at ~75% through demo
     if (elapsed > DEMO_MS * 0.75 && state.demoTargetIdx >= 0) {
       pruneWeight(weights[state.demoTargetIdx]);
       state.demoTargetIdx = -1;
@@ -412,6 +423,7 @@ MLSP.games.prune = function(canvas, opts) {
       confidenceScore: state.confidenceScore,
       cuts: state.cuts,
       finalSparsity: final,
+      targetReached: state.targetReached,
       alltimeBest: alltimeBest,
       dailyBest: dailyBest,
       date: today,
@@ -419,14 +431,12 @@ MLSP.games.prune = function(canvas, opts) {
     });
   }
 
-  /* ===== Emoji grid (Wordle-style share artifact) ===== */
+  /* ===== Emoji grid ===== */
   function buildEmojiGrid() {
-    // 5x8 grid for input → hidden weights (the most visually distinctive layer)
     var rows = [];
     for (var i = 0; i < LAYERS[0]; i++) {
       var row = "";
       for (var j = 0; j < LAYERS[1]; j++) {
-        // Find weight from input i to hidden j
         var w = null;
         for (var k = 0; k < weights.length; k++) {
           if (weights[k].from.layer === 0 && weights[k].from.idx === i &&
@@ -454,12 +464,12 @@ MLSP.games.prune = function(canvas, opts) {
       var spd = 1 + rand() * 2.4;
       state.particles.push({
         x: x, y: y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 0.4,
-        age: 0, maxAge: 560, color: color
+        age: 0, maxAge: 700, color: color
       });
     }
   }
   function addFloat(x, y, text, color) {
-    state.floats.push({ x: x, y: y, text: text, color: color, age: 0, maxAge: 1000 });
+    state.floats.push({ x: x, y: y, text: text, color: color, age: 0, maxAge: 1400 });
   }
 
   /* ===== Input ===== */
@@ -481,7 +491,7 @@ MLSP.games.prune = function(canvas, opts) {
   });
   canvas.addEventListener("pointerdown", function(e) {
     e.preventDefault();
-    if (state.demoMode) return;        // ignore until demo finishes
+    if (state.demoMode) return;
     if (state.over) {
       if (opts.onRetry) opts.onRetry();
       return;
@@ -492,9 +502,17 @@ MLSP.games.prune = function(canvas, opts) {
     if (idx >= 0) pruneWeight(weights[idx]);
   });
   canvas.addEventListener("touchmove", function(e){ e.preventDefault(); }, { passive: false });
+
+  // R retries any time (not just on game-over) — usability fix
+  // Enter/Space only retries on game-over to avoid hijacking page scroll mid-play
   window.addEventListener("keydown", function(e) {
-    if (!state.over || !MLSP.inViewport(canvas)) return;
-    if (e.key === "r" || e.key === "R" || e.key === "Enter" || e.code === "Space") {
+    if (!MLSP.inViewport(canvas)) return;
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      if (opts.onRetry) opts.onRetry();
+      return;
+    }
+    if (state.over && (e.key === "Enter" || e.code === "Space")) {
       e.preventDefault();
       if (opts.onRetry) opts.onRetry();
     }
@@ -514,7 +532,6 @@ MLSP.games.prune = function(canvas, opts) {
     } else if (!state.over) {
       tickAcc += dt;
       while (tickAcc >= TICK_MS) { fineTuneTick(); tickAcc -= TICK_MS; }
-      // Pulse scheduling: only one pulse at a time
       if (!state.inferencePulse) {
         state.pulseCooldown -= dt;
         if (state.pulseCooldown <= 0) {
@@ -526,12 +543,15 @@ MLSP.games.prune = function(canvas, opts) {
       }
     }
 
-    // Decay activations + pulses (always, even in demo)
     for (var i = 0; i < weights.length; i++) {
       if (!weights[i].pruned) weights[i].activation *= ACTIVATION_DECAY;
     }
     for (var ni = 0; ni < neurons.length; ni++) {
       neurons[ni].pulse *= NEURON_PULSE_DECAY;
+    }
+
+    if (state.targetReached && state.targetBannerTime < 3000) {
+      state.targetBannerTime += dt;
     }
 
     if (!state.over) {
@@ -547,6 +567,7 @@ MLSP.games.prune = function(canvas, opts) {
       if (opts.onScoreChange) opts.onScoreChange({
         accuracy: state.accuracy,
         sparsity: state.sparsity,
+        targetReached: state.targetReached,
         correct: state.correct,
         attempts: state.attempts,
         confidenceScore: state.confidenceScore,
@@ -570,21 +591,23 @@ MLSP.games.prune = function(canvas, opts) {
     ctx.translate(sx, sy);
     ctx.clearRect(-20, -20, W + 40, H + 40);
 
-    // Title row
+    // Title row with GOAL printed explicitly
     ctx.fillStyle = "#333";
     ctx.font = "bold 15px 'Helvetica Neue', Arial, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText("Pulse Prune", W / 2, 22);
     ctx.font = "10.5px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillStyle = "#888";
-    ctx.fillText("subtraction under scarcity · cut weights that stay dim", W / 2, 38);
+    ctx.fillText(
+      "goal: reach " + TARGET_SPARSITY + "% sparsity without accuracy collapsing",
+      W / 2, 38
+    );
 
     // Edges
     for (var i = 0; i < weights.length; i++) {
       var w = weights[i];
       if (w.pruned) {
         if (state.over) {
-          // Skeleton view: show pruned edges in red as the "what you destroyed"
           ctx.globalAlpha = w.wasCriticalCut ? 0.65 : 0.35;
           ctx.strokeStyle = w.wasCriticalCut ? "#a31f34" : "#c44";
           ctx.lineWidth = w.wasCriticalCut ? 1.6 : 1.0;
@@ -613,17 +636,15 @@ MLSP.games.prune = function(canvas, opts) {
     }
     ctx.globalAlpha = 1;
 
-    // Inference pulse (per-leg traversal)
+    // Inference pulse
     if (state.inferencePulse) {
       var p = state.inferencePulse;
       var dotX, dotY;
       var pulseColor = p.pathAlive ? "#4a90c4" : "#c44";
-
       if (p.legs.length === 0) {
         dotX = p.sourceNeuron.x;
         dotY = p.sourceNeuron.y;
       } else if (p.done) {
-        // Linger at terminal
         var terminal = p.legs[p.legs.length - 1].to;
         dotX = p.diedAt ? p.diedAt.x : terminal.x;
         dotY = p.diedAt ? p.diedAt.y : terminal.y;
@@ -682,7 +703,7 @@ MLSP.games.prune = function(canvas, opts) {
       var mx = (hw.from.x + hw.to.x) / 2;
       var my = (hw.from.y + hw.to.y) / 2;
       var label = "|w| = " + hw.magnitude.toFixed(2);
-      if (hw.ticksSmall >= 3) label += "  · stayed dim " + hw.ticksSmall + " ticks";
+      if (hw.ticksSmall >= 3) label += "  · dim for " + hw.ticksSmall + " ticks";
       ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
       var tw = ctx.measureText(label).width;
       var padX = 6, padY = 3;
@@ -720,10 +741,9 @@ MLSP.games.prune = function(canvas, opts) {
     }
     ctx.globalAlpha = 1;
 
-    // Stripped HUD: just the accuracy bar + ceiling tick + sparsity, nothing else
     drawHud();
 
-    // Ghost cursor (during demo)
+    // Demo banner
     if (state.demoMode && state.ghostCursor.alpha > 0) {
       ctx.globalAlpha = state.ghostCursor.alpha;
       ctx.fillStyle = "#a31f34";
@@ -736,33 +756,43 @@ MLSP.games.prune = function(canvas, opts) {
       ctx.arc(state.ghostCursor.x, state.ghostCursor.y, 6, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
-      // Demo banner
-      ctx.fillStyle = "rgba(0,0,0,0.65)";
-      MLSP.roundRect(ctx, W/2 - 95, 50, 190, 22, 4);
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      MLSP.roundRect(ctx, W/2 - 130, 50, 260, 22, 4);
       ctx.fill();
       ctx.fillStyle = "#fff";
       ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("watch · then click any dim weight", W/2, 65);
+      ctx.fillText("watch · then click dim weights to prune them", W/2, 65);
     } else if (state.promptVisible) {
-      ctx.fillStyle = "rgba(163,31,52,0.9)";
-      MLSP.roundRect(ctx, W/2 - 90, 50, 180, 22, 4);
+      ctx.fillStyle = "rgba(163,31,52,0.92)";
+      MLSP.roundRect(ctx, W/2 - 100, 50, 200, 22, 4);
       ctx.fill();
       ctx.fillStyle = "#fff";
       ctx.font = "bold 11px 'Helvetica Neue', Arial, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("your turn — click dim weights", W/2, 65);
+      ctx.fillText("your turn — click a dim weight", W/2, 65);
     }
 
-    // Game over overlay
+    // Target-reached celebration banner
+    if (state.targetReached && state.targetBannerTime < 3000) {
+      var a = state.targetBannerTime < 2200 ? 1 : Math.max(0, 1 - (state.targetBannerTime - 2200) / 800);
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "#3d9e5a";
+      MLSP.roundRect(ctx, W/2 - 150, 50, 300, 24, 4);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 12px 'Helvetica Neue', Arial, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("🏆 target reached — keep going for bonus sparsity", W/2, 67);
+      ctx.globalAlpha = 1;
+    }
+
     if (state.over) drawGameOver();
 
     ctx.restore();
   }
 
   function drawHud() {
-    // ONE accuracy bar with ceiling tick. That's the on-canvas HUD now.
-    // Combo + tally are stripped (per design review: too many numbers).
     var barX = 20, barY = H - 26, barW = W - 40, barH = 8;
     ctx.fillStyle = "#eee";
     MLSP.roundRect(ctx, barX, barY, barW, barH, 4); ctx.fill();
@@ -793,53 +823,64 @@ MLSP.games.prune = function(canvas, opts) {
     ctx.textAlign = "left";
     ctx.fillText("accuracy " + state.accuracy.toFixed(1) + "%", barX, barY - 4);
     ctx.textAlign = "right";
-    ctx.fillText("sparsity " + state.sparsity.toFixed(0) + "%", W - 20, barY - 4);
+    var sparsityLabel = "sparsity " + state.sparsity.toFixed(0) + "% / " + TARGET_SPARSITY + "% goal";
+    if (state.targetReached) sparsityLabel += "  🏆";
+    ctx.fillText(sparsityLabel, W - 20, barY - 4);
     ctx.fillStyle = "#999";
     ctx.font = "9px 'Helvetica Neue', Arial, sans-serif";
     ctx.textAlign = "left";
     ctx.fillText("daily " + today + "  · today best " + dailyBest + "%  · alltime " + alltimeBest + "%", barX, barY + barH + 12);
+    ctx.textAlign = "right";
+    ctx.fillText("press R to retry", W - 20, barY + barH + 12);
   }
 
   function drawGameOver() {
     ctx.fillStyle = "rgba(255,255,255,0.86)";
     ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = "#a31f34";
+    var title, titleColor;
+    if (state.targetReached) {
+      title = "🏆 goal cleared";
+      titleColor = "#3d9e5a";
+    } else {
+      title = "accuracy collapsed";
+      titleColor = "#a31f34";
+    }
+    ctx.fillStyle = titleColor;
     ctx.font = "bold 22px 'Helvetica Neue', Arial, sans-serif";
     ctx.textAlign = "center";
-    ctx.fillText("Training diverged", W / 2, 90);
+    ctx.fillText(title, W / 2, 90);
     ctx.fillStyle = "#555";
     ctx.font = "italic 11px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillText("the dashed red lines are weights you destroyed", W / 2, 108);
 
-    // Show network skeleton (already drawn beneath the overlay since draw() iterates
-    // pruned weights with state.over === true and renders them dashed-red).
-    // The translucent overlay above lets the skeleton ghost through.
-
-    // Bottom-band stats
-    var bandY = H - 90;
+    var bandY = H - 100;
     ctx.fillStyle = "rgba(255,255,255,0.97)";
-    MLSP.roundRect(ctx, 30, bandY, W - 60, 70, 6);
+    MLSP.roundRect(ctx, 30, bandY, W - 60, 80, 6);
     ctx.fill();
     ctx.strokeStyle = "#e0e0e0";
     ctx.lineWidth = 1;
-    MLSP.roundRect(ctx, 30, bandY, W - 60, 70, 6);
+    MLSP.roundRect(ctx, 30, bandY, W - 60, 80, 6);
     ctx.stroke();
 
     ctx.fillStyle = "#333";
-    ctx.font = "bold 16px 'Helvetica Neue', Arial, sans-serif";
+    ctx.font = "bold 15px 'Helvetica Neue', Arial, sans-serif";
     ctx.textAlign = "center";
+    var targetText = state.targetReached ? "target reached ✓" : "target missed ✗";
     ctx.fillText(
-      "sparsity " + Math.round(state.sparsity) + "%  ·  patience " + state.confidenceScore +
-      "  ·  " + state.correct + "/" + state.attempts + " correct  ·  " + state.dropped + " dropped",
-      W / 2, bandY + 28
+      "sparsity " + Math.round(state.sparsity) + "%  ·  " + targetText,
+      W / 2, bandY + 24
     );
-    ctx.fillStyle = "#555";
     ctx.font = "12px 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillText("today best " + dailyBest + "%  ·  alltime " + alltimeBest + "%", W / 2, bandY + 48);
+    ctx.fillStyle = "#555";
+    ctx.fillText(
+      "patience " + state.confidenceScore + "  ·  " + state.correct + "/" + state.attempts + " correct  ·  " + state.dropped + " dropped",
+      W / 2, bandY + 44
+    );
+    ctx.fillText("today best " + dailyBest + "%  ·  alltime " + alltimeBest + "%", W / 2, bandY + 60);
     ctx.fillStyle = "#777";
     ctx.font = "italic 11px 'Helvetica Neue', Arial, sans-serif";
-    ctx.fillText("tap or press R to retry", W / 2, bandY + 64);
+    ctx.fillText("tap or press R to retry", W / 2, bandY + 76);
   }
 
   requestAnimationFrame(frame);
@@ -848,11 +889,13 @@ MLSP.games.prune = function(canvas, opts) {
     id: "prune",
     name: "Pulse Prune",
     ahaLabel: "You just felt",
-    ahaText: "The network rewiring around your cuts. Magnitude-based pruning works because most weights are redundant — but redundancy is dynamic: what's safe to remove at 30% sparsity is often load-bearing at 60%, because surviving weights have to carry the same signal through fewer paths. Patient observation (cutting weights that have stayed dim across many fine-tune ticks) beats rapid clicking. This is the lottery-ticket hypothesis (Frankle & Carbin 2018) plus gradual magnitude pruning (Zhu & Gupta 2017) — felt in your fingers.",
+    ahaText: "The network rewiring around your cuts. Magnitude-based pruning works because most weights are redundant — but redundancy is dynamic. When you cut a weight, its neighbours (the 'sibling' weights sharing an endpoint) pick up the lost capacity and thicken on the next fine-tune tick. That's the visible rewiring. The art is finding weights that have stayed dim long enough that their siblings can absorb the load without damage. This is the lottery-ticket hypothesis (Frankle & Carbin 2018) plus gradual magnitude pruning (Zhu & Gupta 2017) — felt in your fingers.",
     buildShareText: function(result) {
+      var targetLine = result.targetReached
+        ? "🏆 " + TARGET_SPARSITY + "% target reached"
+        : "✗ missed " + TARGET_SPARSITY + "% target";
       return "MLSys Playground · Pulse Prune · " + today + "\n" +
-             "sparsity " + result.finalSparsity + "%  ·  patience " + result.confidenceScore +
-             "  ·  " + result.correct + "/" + result.attempts + " correct\n" +
+             "sparsity " + result.finalSparsity + "% · " + targetLine + " · patience " + result.confidenceScore + "\n" +
              result.emojiGrid + "\n" +
              "play → mlsysbook.ai/games/prune/";
     }
