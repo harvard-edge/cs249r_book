@@ -518,7 +518,11 @@ The trick is algebraically exact, not an approximation: subtracting a constant `
 
 ### Reduction Strategies
 
-All three losses collapse a batch of per-sample errors to a single scalar by taking the mean. The choice of reduction quietly shapes both loss magnitude and gradient scale, so it's worth understanding even though we only ship `mean` here.
+All three loss functions reduce a batch of per-sample errors to a single scalar by taking the mean. Mathematically, this is trivial: just sum the values and divide by the count. However, from a systems perspective, condensing millions of concurrent loss calculations down to a single number presents a massive synchronization bottleneck. When thousands of GPU threads attempt to update a global sum simultaneously, the hardware must meticulously orchestrate the memory access to prevent threads from overwriting each other's work.
+
+:::{.callout-warning title="💾 Systems Implication: Parallel Reductions & Atomic Locks"}
+To prevent data races during mean or sum calculations, hardware could use **atomic locks** to ensure only one thread updates the global sum at a time. However, excessive locking bottlenecks performance. Instead, frameworks use **parallel reductions**: threads sum their local chunks independently, and the results are aggregated hierarchically (like a tournament bracket). Furthermore, when summing millions of elements, the running total can become so large that adding small individual losses gets swallowed by **FP32 precision limits**. To prevent precision loss, these reductions are often accumulated in higher precision (FP64) or calculated in blocks.
+:::
 
 Mean reduction does two useful things. It normalizes by batch size, so loss values are comparable across batches of 32 and 128 samples — and it makes the per-sample gradient contribution `1/B`, which keeps gradient magnitudes stable as you scale the batch. Sum reduction (`np.sum`) drops the `1/B`, so the gradient grows linearly with batch size; if you switch from `mean` to `sum`, you must shrink the learning rate by the same factor to get equivalent updates. No reduction (`reduction='none'` in PyTorch) returns the per-sample loss vector — useful for weighted sampling, hard-example mining, or per-sample diagnostics.
 
@@ -818,7 +822,7 @@ This gives you the gradient quality of batch 128 with only the memory cost of ba
 
 ## Further Reading
 
-For students who want to understand the academic foundations and explore deeper:
+Loss functions are the steering wheel of machine learning; changing the loss changes what the model learns to prioritize. To understand how the field moved from simple least-squares regression to the nuanced, stability-focused loss landscapes that train today's massive models, the following papers are essential reading.
 
 ### Seminal Papers
 

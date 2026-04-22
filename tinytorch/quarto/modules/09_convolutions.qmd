@@ -496,8 +496,6 @@ def forward(self, x):
                     output[b, out_ch, out_h, out_w] = conv_sum
 ```
 
-The seven nested loops reveal where the computational cost comes from. For a typical CNN layer processing a batch of 32 RGB images (224×224) with 64 output channels and 3×3 kernels, this structure executes **2.8 billion multiply-accumulate operations** per forward pass. That is why optimized implementations matter.
-
 Each output pixel summarizes information from a local neighborhood in the input. A 3×3 convolution looks at 9 pixels to produce each output value, enabling the network to detect local patterns like edges, corners, and textures.
 
 ### Stride and Padding
@@ -651,11 +649,17 @@ Operations = B × C_out × H_out × W_out × C_in × K_h × K_w
 **Example:** Batch=32, Input=(3, 224, 224), Conv2d(3→64, kernel=3, padding=1, stride=1)
 
 Operations = 32 × 64 × 224 × 224 × 3 × 3 × 3
-= 32 × 64 × 50,176 × 27
-= 2,774,532,096 multiply-accumulate operations
-≈ 2.8 billion operations per forward pass.
+= 32 × 64 × `{python} complexity_hw` × `{python} complexity_kernel`
+= `{python} complexity_ops` multiply-accumulate operations
+≈ **`{python} complexity_approx` billion operations** per forward pass!
 
-That is why kernel size matters. A 7×7 kernel requires (7×7)/(3×3) = 5.4× more computation than 3×3, so modern architectures stack multiple 3×3 convolutions rather than reach for a single large kernel.
+Executing billions of scattered operations sequentially via deeply nested `for` loops yields catastrophic cache-miss rates because it fails to leverage **temporal locality** (reusing recently accessed data) and **spatial locality** (accessing contiguous memory blocks). This forces engineers to radically restructure how convolutions map to massively parallel hardware.
+
+:::{.callout-note title="⚡ Systems Implication: Memory Duplication (im2col)"}
+Modern GPUs physically cannot execute branching, nested `for` loops efficiently; however, they possess thousands of highly specialized cores explicitly optimized for dense General Matrix Multiplication (GEMM) via hardware cache tiling. To bridge this architectural gap, frameworks employ `im2col` (Image to Column). This algorithm systematically duplicates the spatial image memory in VRAM, unrolling the overlapping sliding windows into one massive, contiguous 2D matrix. By deliberately sacrificing raw memory capacity, `im2col` artificially creates perfect **spatial locality** for the GEMM hardware. This structural reorganization ensures that cache tiling can maximally exploit **temporal locality**, transforming a disjointed spatial traversal into a monolithic matrix multiplication and achieving a 100× throughput acceleration.
+:::
+
+While `im2col` elegantly bypasses the compute bottleneck, it aggressively transfers that pressure directly onto VRAM capacity. This harsh tension between tensor memory duplication and computational vectorization underscores why spatial kernel size is aggressively optimized. Because a 7×7 kernel imposes `{python} kernel_ratio`× more compute and spatial redundancy than a 3×3 kernel, modern architectures (like VGG and ResNet) strictly favor stacking deep sequences of 3×3 convolutions rather than deploying monolithic, large-footprint kernels.
 
 Pooling operations are cheap by comparison: no learnable parameters, just comparison or addition operations. A 2×2 max pooling visits each output position once and compares 4 values, requiring only 4× comparisons per output.
 
@@ -920,13 +924,17 @@ For students who want to understand the academic foundations and explore spatial
 
 ### Seminal Papers
 
-- **Gradient-Based Learning Applied to Document Recognition** - LeCun et al. (1998). The paper that launched convolutional neural networks, introducing LeNet-5 for handwritten digit recognition. Essential reading for understanding why convolution works for vision. [IEEE](http://yann.lecun.com/exdb/publis/pdf/lecun-01a.pdf)
+- **Gradient-Based Learning Applied to Document Recognition** - LeCun et al. (1998). The paper that launched convolutional neural networks, introducing LeNet-5 for handwritten digit recognition. Essential reading for understanding why convolution works for vision.
+  - **Systems Implication:** Weight sharing in convolutions drastically reduced the required parameter count compared to dense, fully connected layers. This architectural breakthrough made high-fidelity inference mathematically feasible on the severely constrained memory and cache architecture of 1990s-era CPUs. [IEEE](http://yann.lecun.com/exdb/publis/pdf/lecun-01a.pdf)
 
-- **ImageNet Classification with Deep Convolutional Neural Networks** - Krizhevsky et al. (2012). AlexNet, the breakthrough that demonstrated CNNs could win ImageNet. Introduced ReLU, dropout, and data augmentation patterns still used today. [NeurIPS](https://papers.nips.cc/paper/4824-imagenet-classification-with-deep-convolutional-neural-networks.pdf)
+- **ImageNet Classification with Deep Convolutional Neural Networks** - Krizhevsky et al. (2012). AlexNet, the breakthrough that demonstrated CNNs could conquer the massive ImageNet dataset, cementing ReLU, dropout, and data augmentation into the modern deep learning canon.
+  - **Systems Implication:** The parameter density of AlexNet exceeded the physical limits of a single GTX 580 GPU (3GB VRAM). The authors were forced to shard the layer weights and feature maps across two independent GPUs, unintentionally giving birth to the modern paradigm of Model Parallelism. [NeurIPS](https://papers.nips.cc/paper/4824-imagenet-classification-with-deep-convolutional-neural-networks.pdf)
 
-- **Very Deep Convolutional Networks for Large-Scale Image Recognition** - Simonyan & Zisserman (2014). VGG networks showed that stacking many 3×3 convolutions works better than few large kernels. This principle guides modern architecture design. [arXiv:1409.1556](https://arxiv.org/abs/1409.1556)
+- **Very Deep Convolutional Networks for Large-Scale Image Recognition** - Simonyan & Zisserman (2014). VGG networks proved that relentlessly stacking many compact 3×3 convolutions yields vastly superior hierarchical features compared to using sparse, large kernels.
+  - **Systems Implication:** While VGG's uniform architecture simplified GPU kernel scheduling, its decision to maintain high-resolution, multi-channel feature maps deep into the network created a catastrophic memory footprint, severely constraining batch sizes and dictating the need for more efficient downstream architectures. [arXiv:1409.1556](https://arxiv.org/abs/1409.1556)
 
-- **Deep Residual Learning for Image Recognition** - He et al. (2015). ResNet introduced skip connections that enable training 100+ layer networks. Revolutionized computer vision and won ImageNet 2015. [arXiv:1512.03385](https://arxiv.org/abs/1512.03385)
+- **Deep Residual Learning for Image Recognition** - He et al. (2015). ResNet introduced residual skip connections, enabling the stable training of ultra-deep, 100+ layer networks and entirely conquering the vanishing gradient problem.
+  - **Systems Implication:** Residual skip connections structurally necessitated keeping early-layer spatial activations alive in VRAM long after their immediate computation finished. This elongated tensor lifecycle fundamentally complicated GPU memory allocator design and severely worsened Activation Pinning during the forward pass. [arXiv:1512.03385](https://arxiv.org/abs/1512.03385)
 
 ### Additional Resources
 

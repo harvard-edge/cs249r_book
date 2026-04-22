@@ -443,7 +443,7 @@ The workflow is always the same: measure to baseline, analyze to find the bottle
 
 ### Timing Operations
 
-Accurate timing is harder than it looks. Systems have variance, warmup effects, and measurement overhead. Your `measure_latency` method handles these challenges with statistical rigor:
+Accurate timing is harder than it looks in modern systems due to OS variance, cache warmup effects, and measurement overhead. To counteract these hidden variables, your `measure_latency` method implements a rigorous statistical approach, ensuring the hardware reaches a steady state before any measurements are recorded:
 
 ```python
 def measure_latency(self, model, input_tensor, warmup: int = 10, iterations: int = 100) -> float:
@@ -467,7 +467,7 @@ def measure_latency(self, model, input_tensor, warmup: int = 10, iterations: int
     return float(median_latency)
 ```
 
-Warmup is non-negotiable. The first few runs are slower because of cold CPU caches, Python interpreter warmup, and NumPy initialization. Ten or more warmup iterations push the system into steady state before any measurement counts.
+The warmup phase is critical. The first few runs are artificially slow due to cold CPU caches, Python interpreter overhead, and NumPy initialization. Running 10+ warmup iterations forces the system into a steady state, yielding reliable baseline measurements.
 
 Median, not mean. A single OS interrupt or garbage-collection pause during measurement can blow the mean apart; the median ignores it. Median captures typical performance, which is what you want to compare across runs. (For SLA work you also report p95 or p99 — but that's a separate question.)
 
@@ -523,15 +523,17 @@ Activation memory scales with batch size. Double the batch, double the activatio
 
 Gradient memory matches parameter memory exactly. Every parameter has one gradient, so training that 125M model adds another 500 MB on top of the weights — and that's before the optimizer state.
 
-### Bottleneck Identification
+### Bottleneck Identification and The Roofline Model
 
-The single most useful piece of profiling data is whether a workload is compute-bound or memory-bound. That answer dictates which optimization is worth your time.
+The single most critical insight a profiler yields is whether a workload is **compute-bound** or **memory-bound**. This classification dictates your entire optimization trajectory. Engineers formalize this relationship using the **Roofline Model**, a visual performance framework that plots a system's peak compute throughput (the horizontal "roof") against its memory bandwidth (the sloped "attic").
 
-**Compute-bound** — limited by arithmetic throughput. The chip can't multiply fast enough to keep up with the memory feeding it. Fix it with better algorithms, vectorization, or fewer FLOPs.
+A workload's placement under the roof is determined by its **arithmetic intensity**—the ratio of FLOPs executed per byte of memory accessed.
 
-**Memory-bound** — limited by data movement. The chip can multiply faster than memory can deliver operands. Fix it with cache locality, data layout, fused kernels, or reduced precision.
+**Compute-bound** workloads possess high arithmetic intensity. They reside under the flat roof of the model, limited entirely by the arithmetic logic units (e.g., Tensor Cores or SIMD registers). The hardware has ample data but cannot crunch the numbers fast enough. Optimizations here require dense vectorization, kernel fusion, and lower-precision math (like INT8 or FP8).
 
-Your profiler distinguishes the two by comparing achieved GFLOP/s to peak. Low achieved GFLOP/s on capable hardware means memory-bound; high achieved GFLOP/s near the peak means compute-bound. Pick the wrong category and your optimization will be a no-op.
+**Memory-bound** workloads have low arithmetic intensity, trapped under the sloping memory bandwidth line. The processor's arithmetic units sit idle, starved of data because the hardware cannot fetch information from High Bandwidth Memory (HBM) fast enough. Embedding lookups (sparse gathers) and autoregressive generation (token-by-token processing) notoriously fall here. Optimizations must ruthlessly target data movement: improving cache locality, exploiting SRAM tiling, and reducing the precision footprint.
+
+Your profiler calculates this exact dynamic: if you register a meager GFLOP/s despite running on hardware with massive theoretical throughput, your arithmetic intensity is too low—you have hit the memory wall.
 
 ### Profiling Tools
 
@@ -744,6 +746,20 @@ You'll cut FP32 weights down to INT8 — a 4× memory reduction — and use this
 | **16: Compression** | Prune and compress weights | `count_parameters()` measures the compression ratio |
 | **17: Acceleration** | Vectorize computations | `measure_latency()` validates the speedup |
 | **19: Benchmarking** | Compare across systems | `profile_forward_pass()` produces the comparable numbers |
+
+## Get Started
+
+:::{.callout-tip title="Interactive Options"}
+
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/14_profiling/profiling.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/14_profiling/14_profiling.py)** - Browse the implementation code
+:::
+
+:::{.callout-warning title="Save Your Progress"}
+
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+:::
+e_latency()` validates speedup |
 
 ## Get Started
 

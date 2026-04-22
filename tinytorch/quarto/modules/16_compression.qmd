@@ -532,14 +532,24 @@ def structured_prune(model, prune_ratio=0.5):
 
 The L2 norm `||W[:,i]||_2 = sqrt(sum(w_j^2))` measures the total magnitude of a channel. Channels with small norms contribute less to the output, so dropping them costs the least. Removing whole channels also creates *block* sparsity, which hardware can vectorize over the channels that remain.
 
-When you zero channel `i` in layer `l`, you don't just zero some weights — you eliminate a column of forward connections, a column of gradient computation, and the channel's slot in activation memory. That is what turns sparsity into speed:
+The key insight in structured pruning is that you remove entire computational units, not scattered weights. When you zero out channel `i` in layer `l`, you're eliminating:
+- All connections from that channel to the next layer (forward propagation)
+- All gradient computation for that channel (backward propagation)
+- The entire channel's activation storage (memory footprint reduction)
 
-1. **Memory coalescing** — the remaining dense channels live in contiguous memory.
-2. **SIMD execution** — CPUs and GPUs process the surviving channels in parallel without masking.
-3. **No indexing overhead** — no sparse format needed; you can literally rebuild a smaller dense matrix.
-4. **Cache efficiency** — dense access patterns keep spatial locality.
+At first glance, structured pruning might seem inferior because it achieves lower overall compression than magnitude pruning. However, the theoretical parameter reduction of unstructured sparsity rarely translates to actual inference speedups on modern hardware.
 
-The trade-off is honest: structured pruning maxes out around 30–50% sparsity, well below the 80–90% magnitude pruning can hit. But on real GPUs and accelerators, structured sparsity delivers 2–3x speedup out of the box, while unstructured sparsity needs custom kernels to deliver anything at all.
+:::{.callout-warning title="💾 Systems Implication: The Hardware Lottery"}
+Why accept lower sparsity ratios with structured pruning? It comes down to the "Hardware Lottery." Modern AI accelerators—whether NVIDIA GPUs, Google TPUs, or edge NPUs—are fundamentally designed for dense matrix multiplication. They rely on contiguous memory accesses and highly parallel vector engines. These architectures cannot efficiently skip scattered zeros without incurring complex, slow indexing overhead that destroys performance. Structured pruning, by removing entire channels, creates smaller but perfectly dense matrices. Instead of forcing the hardware to adapt to an irregular algorithm, you are adapting the algorithm to win the hardware lottery, ensuring the underlying silicon executes the remaining work at peak efficiency.
+:::
+
+Because structured pruning preserves dense computation, it directly enables:
+1. **Memory Coalescing**: Hardware can fetch the remaining dense channels sequentially, maximizing memory bandwidth utilization.
+2. **SIMD Vectorization**: CPUs and GPUs can process multiple channels in perfect parallel lockstep.
+3. **Zero Indexing Overhead**: Execution does not require specialized sparse matrix formats (like CSR) to track non-zero locations.
+4. **Cache Spatial Locality**: Sequential memory access perfectly aligns with L1/L2 cache line prefetching.
+
+The ultimate trade-off is clear: structured pruning achieves lower sparsity (typically 30-50%) than magnitude pruning (80-90%), but the block sparsity it yields translates directly to proportional hardware acceleration. On dense accelerators, structured sparsity routinely provides 2-3x end-to-end speedups, whereas unstructured sparsity often results in zero acceleration—or even slowdowns—without bespoke sparse computational kernels.
 
 ### Knowledge Distillation
 

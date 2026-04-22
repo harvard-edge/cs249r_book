@@ -89,9 +89,12 @@ figures: $(PDFS) ## Convert all SVG diagrams to PDF (for LaTeX embedding).
 # treat the cleanup error as benign only if it does. If the PDF is
 # missing, fail loudly — that's a real build failure.
 # Quarto writes the rendered book into pdf/_build/ (see `output-dir: _build`
-# in pdf/_quarto.yml); we then copy it up to pdf/ so the publish workflow
-# (.github/workflows/tinytorch-publish-live.yml) finds it at the stable
-# path it expects.
+# in pdf/_quarto.yml) — this matches every other Quarto project in the repo
+# (kits, slides, site, labs, etc. all emit under _build/). CI workflows
+# (tinytorch-build-pdfs.yml, tinytorch-update-pdfs.yml) upload the artifact
+# directly from pdf/_build/. We additionally copy it up to pdf/ purely as a
+# local-dev convenience so `open pdf/TinyTorch-Guide.pdf` just works without
+# the _build/ prefix — CI does not need the copy.
 PDF_BUILD := pdf/_build/TinyTorch-Guide.pdf
 PDF_OUT   := pdf/TinyTorch-Guide.pdf
 

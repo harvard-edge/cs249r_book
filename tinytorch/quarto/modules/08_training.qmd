@@ -480,7 +480,13 @@ def train_epoch(self, dataloader, accumulation_steps=1):
 
 Each iteration processes one batch: the model turns inputs into predictions, the loss function scores them against targets, the backward pass fills `.grad` on every parameter, the clipper bounds the global norm, and the optimizer applies the step. Total loss divided by batch count is the average training loss you watch to see convergence.
 
-The `accumulation_steps` knob is a memory trick worth understanding. If you want an effective batch size of 128 but can only fit 32 samples in GPU memory, set `accumulation_steps=4`. Gradients accumulate across four batches before the optimizer step, producing the same update as a single batch of 128 — at the cost of 4× the wall-clock time per update.
+While this implementation reads like standard sequential Python, scaling this loop to production hardware transforms it into a highly asynchronous, choreographed dance between the host CPU (dispatching kernel instructions) and the target GPU (executing them massively in parallel).
+
+:::{.callout-warning title="💾 Systems Implication: CPU/GPU Sync Overhead"}
+Innocuous operations like calculating `total_loss += loss.item()` or printing loss values inside the inner loop force a hard synchronization block. The CPU must halt and wait for the GPU to drain its computation queue just to copy a single scalar value back across the PCIe bus. This catastrophic synchronization stalls the entire training pipeline, starving the GPU. High-performance systems meticulously defer, asynchronously accumulate, or strictly periodically sample these metrics to prevent interrupting the compute symphony.
+:::
+
+To circumvent hard physical VRAM limits without sacrificing statistical stability, the `accumulation_steps` parameter introduces a profound memory-compute trade-off. If an architecture requires an effective batch size of 128 but the GPU can only harbor 32 samples at a time, setting `accumulation_steps=4` serially accrues gradients over four distinct forward-backward passes. This achieves the mathematically identical optimizer update of a 128-sample batch, trading raw wall-clock time for an artificially expanded memory horizon.
 
 ### Epochs and Iterations
 
@@ -906,11 +912,14 @@ For students who want to understand the academic foundations and advanced traini
 
 ### Seminal Papers
 
-- **Cyclical Learning Rates for Training Neural Networks** - Smith (2017). Introduced cyclical learning rate schedules and the learning rate finder technique. Cosine annealing is a variant of these ideas. [arXiv:1506.01186](https://arxiv.org/abs/1506.01186)
+- **Cyclical Learning Rates for Training Neural Networks** - Smith (2017). Introduced cyclical learning rate schedules and the learning rate finder technique. Cosine annealing is a variant of these ideas.
+  - **Systems Implication:** By architecting non-monotonic learning rate schedules that enable significantly faster convergence, this work directly reduced the total end-to-end wall-clock time and the exorbitant compute-hour costs required to train large-scale models on datacenter hardware. [arXiv:1506.01186](https://arxiv.org/abs/1506.01186)
 
-- **On the Difficulty of Training Recurrent Neural Networks** - Pascanu et al. (2013). Analyzed the exploding and vanishing gradient problem, introducing gradient clipping as a solution. The global norm clipping you implemented comes from this work. [arXiv:1211.5063](https://arxiv.org/abs/1211.5063)
+- **On the Difficulty of Training Recurrent Neural Networks** - Pascanu et al. (2013). Analyzed the exploding and vanishing gradient problem, introducing gradient clipping as a robust stabilization solution. The global norm clipping you implemented originates directly from this research.
+  - **Systems Implication:** While mathematically stabilizing, global gradient clipping requires an exhaustive reduction operation across *all* parameter gradients. In distributed training, this introduces a mandatory, global cross-GPU communication block (an `AllReduce` operation) that can severely bottleneck the pipeline right before parameter updates. [arXiv:1211.5063](https://arxiv.org/abs/1211.5063)
 
-- **Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour** - Goyal et al. (2017). Showed how to scale batch size and learning rate together, introducing linear warmup and gradient accumulation techniques for distributed training. [arXiv:1706.02677](https://arxiv.org/abs/1706.02677)
+- **Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour** - Goyal et al. (2017). Demonstrated the mathematical scaling laws linking batch size and learning rate, formalizing linear warmup and distributed gradient accumulation techniques.
+  - **Systems Implication:** Provided the rigorous empirical proof that scaling batch sizes linearly allows deep models to be efficiently distributed across massive GPU clusters via Data Parallelism. This high-batch-size regime effectively masks network communication latency behind large, dense matrix multiplications, achieving peak hardware utilization. [arXiv:1706.02677](https://arxiv.org/abs/1706.02677)
 
 ### Additional Resources
 

@@ -457,7 +457,13 @@ result_tensor = Tensor(result)
 result_tensor._grad_fn = AddBackward(x, y)  # Track operation
 ```
 
-This simple pattern enables arbitrarily complex computation graphs.
+This simple pattern scales elegantly, enabling arbitrarily complex computation graphs. However, this flexibility masks a profound structural cost: the mere act of recording operations fundamentally alters the memory lifecycle of the tensors involved.
+
+:::{.callout-warning title="💾 Systems Implication: Activation Pinning"}
+By passing `(x, y)` into `AddBackward(x, y)`, the computation graph captures a hard reference to the input tensors. To the Python interpreter, this means the Garbage Collector cannot free the memory for `x` and `y` until the backward pass is complete and the graph is destroyed. This "Activation Pinning" is the root cause of `CUDA Out of Memory` (OOM) errors during training, as every layer's output is kept alive in VRAM for the entirety of the forward pass. In practice, researchers rely on telemetry tools like `torch.cuda.memory_allocated()` to hunt down subtle computation graph memory leaks and measure the exact overhead of retaining these activations.
+:::
+
+Because these pinned activations iteratively consume precious VRAM, scaling networks to hundreds of layers requires rigorous strategies—such as gradient checkpointing—to mitigate this memory exhaustion while preserving the integrity of the gradient flow.
 
 ### The Chain Rule
 
@@ -836,11 +842,14 @@ For students who want to understand the academic foundations and mathematical un
 
 ### Seminal Papers
 
-- **Automatic Differentiation in Machine Learning: a Survey** - Baydin et al. (2018). Comprehensive survey of AD techniques, covering forward-mode, reverse-mode, and mixed-mode differentiation. Essential reading for understanding autograd theory. [arXiv:1502.05767](https://arxiv.org/abs/1502.05767)
+- **Automatic Differentiation in Machine Learning: a Survey** - Baydin et al. (2018). Comprehensive survey of AD techniques, covering forward-mode, reverse-mode, and mixed-mode differentiation. Essential reading for understanding autograd theory.
+  - **Systems Implication:** This work formalized the foundational memory-compute trade-off: reverse-mode AD minimizes compute at the steep cost of O(N) memory to store the forward activation graph, permanently dictating modern GPU VRAM requirements. [arXiv:1502.05767](https://arxiv.org/abs/1502.05767)
 
-- **Automatic Differentiation of Algorithms** - Griewank (1989). The foundational work on reverse-mode AD that underlies all modern deep learning frameworks. Introduces the mathematical formalism for gradient computation via the chain rule. [Computational Optimization and Applications](https://doi.org/10.1007/BF00139316)
+- **Automatic Differentiation of Algorithms** - Griewank (1989). The foundational work on reverse-mode AD that underlies all modern deep learning frameworks. Introduces the mathematical formalism for gradient computation via the chain rule.
+  - **Systems Implication:** Exposed the inherent sequential data dependencies during the backward pass. Because gradients must be propagated backwards sequentially from output to input, this creates a structural bottleneck that prevents perfect parallelization across network layers. [Computational Optimization and Applications](https://doi.org/10.1007/BF00139316)
 
-- **PyTorch: An Imperative Style, High-Performance Deep Learning Library** - Paszke et al. (2019). Describes PyTorch's autograd implementation and design philosophy. Shows how imperative programming (define-by-run) enables dynamic computation graphs. [NeurIPS 2019](https://arxiv.org/abs/1912.01703)
+- **PyTorch: An Imperative Style, High-Performance Deep Learning Library** - Paszke et al. (2019). Describes PyTorch's autograd implementation and design philosophy. Shows how imperative programming (define-by-run) enables dynamic computation graphs.
+  - **Systems Implication:** By introducing dynamic computation graphs, PyTorch mandated that memory allocation and operator dispatch overhead occur strictly at runtime (eager execution). This paradigm shift required highly optimized C++ backends to aggressively hide Python's interpretive latency. [NeurIPS 2019](https://arxiv.org/abs/1912.01703)
 
 ### Additional Resources
 
@@ -876,4 +885,8 @@ You'll implement SGD, momentum, and Adam: the rules that turn the `param.grad` t
 :::{.callout-warning title="Save Your Progress"}
 
 Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+:::
+ne, or clone the repository for persistent local work.
+:::
+ocal work.
 :::

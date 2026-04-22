@@ -510,7 +510,7 @@ class QuantizedLinear:
         self.input_zero_point = None
 ```
 
-The forward pass dequantizes weights on the fly, runs an FP32 matmul, and returns FP32 outputs. This is the *teaching* implementation: every step is visible. Production runtimes skip the round trip and execute the matmul directly in INT8 using GEMM kernels (FBGEMM, QNNPACK, cuDNN's INT8 path), which is where the speedup actually comes from — memory savings are free, but compute speedup requires INT8-native arithmetic.
+During inference, the forward pass dequantizes weights on-the-fly, performs the standard FP32 matrix multiplication, and returns FP32 outputs. While this educational approach clarifies the math, production implementations keep the data in 8-bit format entirely, leveraging specialized INT8 GEMM (general matrix multiply) hardware instructions for maximum speed:
 
 ```python
 def forward(self, x: Tensor) -> Tensor:
@@ -638,10 +638,14 @@ The core quantization mathematics: scale calculation, zero-point mapping, INT8 r
 
 The 4× number sounds modest until you put it next to the device it has to fit on:
 
-- **Mobile**: A phone has 6–8 GB of RAM shared across every app. A quantized BERT (105 MB) fits without disturbing the rest of the system; the FP32 version (420 MB) thrashes memory and gets killed by the OS.
-- **Edge**: IoT boards often ship with 512 MB of RAM. Quantization is what makes on-device inference possible at all for privacy-sensitive workloads (medical devices, security cameras).
-- **Data center**: Serving at 1000 req/s needs multiple model replicas per GPU. 4× compression means 4× the replicas per GPU, which means roughly 75% off the serving bill.
-- **Battery**: INT8 ops cost 2–4× less energy than FP32 on mobile silicon. The model that runs on your phone is also the one that drains your battery — quantization buys back hours.
+:::{.callout-warning title="💾 Systems Implication: Escaping the Memory Wall via Reduced Precision"}
+As neural networks scale, they inevitably hit the **memory wall** of the Roofline model. Generating tokens autoregressively is inherently memory-bound because the system must constantly stream gigabytes of weight matrices from HBM to the processing cores for every single token. **Quantization is the ultimate systems hack to bypass this wall.** By compressing FP32 weights down to INT8, we instantly cut the memory footprint and the required memory bandwidth by 4×. Furthermore, modern architectures leverage specific **SIMD** (Single Instruction, Multiple Data) instructions—like AVX-512 VNNI or specialized Tensor Cores—to process these packed 8-bit integers natively. This means we are not just saving RAM; we are quadrupling our cache capacity, slashing the power consumption of data movement, and forcing a memory-bound workload significantly closer to the compute-bound ceiling.
+:::
+
+- **Mobile AI**: Modern smartphones have limited RAM shared across all apps. A quantized BERT (`{python} bert_int8_mb`) fits comfortably; the FP32 version (`{python} bert_mb`) causes severe memory pressure and OS-level cache eviction.
+- **Edge computing**: IoT devices often have 512 MB RAM. Quantization enables on-device inference for privacy-sensitive applications (medical devices, security cameras) by fitting massive computational graphs into tiny SRAM footprints.
+- **Data centers**: Serving 1000 requests/second requires multiple model replicas. With 4× memory reduction, you fit 4× more models per GPU, reducing hardware serving costs by 75% and massively improving aggregate throughput.
+- **Battery life**: Moving data is vastly more expensive than computing it. INT8 memory transfers and operations consume fractions of the energy required for FP32 equivalents, extending battery life and reducing thermal throttling.
 
 ## Check Your Understanding
 
@@ -808,6 +812,14 @@ Module 16 builds **pruning** — first unstructured (zero out individual weights
 :::{.callout-tip title="Interactive Options"}
 
 - **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
+:::
+
+:::{.callout-warning title="Save Your Progress"}
+
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+:::
+tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
 :::
 

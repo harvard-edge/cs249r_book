@@ -482,7 +482,11 @@ Step 3: Compute K₃, V₃ → Append to cache
   Attention: Q₃ @ cached[K₁, K₂, K₃] @ cached[V₁, V₂, V₃]
 ```
 
-Each step now computes only one new K,V pair instead of recomputing all previous pairs.
+Each step now computes only one new K,V pair instead of recomputing all previous pairs. This algorithmic optimization dramatically accelerates single-batch inference, but scaling this to thousands of concurrent users introduces a formidable systems engineering challenge.
+
+:::{.callout-note title="⚡ Systems Implication: KV-Cache Memory Fragmentation and PagedAttention"}
+While KV caching transforms computational time complexity from O(n²) to O(n), it creates a severe systems bottleneck: memory fragmentation. Because the final length of an autoregressively generated sequence is unknown ahead of time, naive inference engines must statically pre-allocate maximum-length, contiguous memory blocks for every request's cache. If a request finishes early, the remaining allocated memory is wasted, leading to massive internal fragmentation. Modern production engines like vLLM solve this with **PagedAttention**. Inspired by operating system virtual memory, PagedAttention divides the KV-cache into fixed-size, non-contiguous "pages." By dynamically allocating pages on demand and mapping them to a virtual sequence space, this approach nearly eliminates internal fragmentation, allowing a single GPU to serve exponentially larger batch sizes and drastically reducing the cost per token.
+:::
 
 ### Gradient Checkpointing
 
@@ -843,13 +847,13 @@ For students who want to understand the academic foundations and production impl
 
 ### Seminal Papers
 
-- **Attention Is All You Need** - Vaswani et al. (2017). The original transformer paper that introduced the architecture requiring KV caching for efficient generation. Section 3.2 describes the attention mechanism that benefits from memoization. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
+- **Attention Is All You Need** - Vaswani et al. (2017). The original transformer paper that introduced the architecture requiring KV caching for efficient generation. Section 3.2 describes the attention mechanism that benefits from memoization. **Systems Implication:** The parallelization advantage over RNNs breaks the sequential compute bottleneck during training, but causes autoregressive inference to be heavily memory-bandwidth bound without caching. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
 
-- **Generating Sequences With Recurrent Neural Networks** - Graves (2013). Early work on autoregressive generation patterns, establishing the sequential token generation that creates the redundant computation KV caching eliminates. [arXiv:1308.0850](https://arxiv.org/abs/1308.0850)
+- **Generating Sequences With Recurrent Neural Networks** - Graves (2013). Early work on autoregressive generation patterns, establishing the sequential token generation that creates the redundant computation KV caching eliminates. **Systems Implication:** RNN inference natively maintains a hidden state vector in memory (O(1) memory), making it highly efficient for single-batch generation on memory-constrained hardware. [arXiv:1308.0850](https://arxiv.org/abs/1308.0850)
 
-- **Training Compute-Optimal Large Language Models** - Hoffmann et al. (2022). Analyzes the computational costs of training and inference, quantifying the importance of inference optimizations like KV caching at scale. [arXiv:2203.15556](https://arxiv.org/abs/2203.15556)
+- **Training Compute-Optimal Large Language Models** - Hoffmann et al. (2022). Analyzes the computational costs of training and inference, quantifying the importance of inference optimizations like KV caching at scale. **Systems Implication:** Established that optimal scaling requires massive datasets, turning training into a massive I/O problem where storage bandwidth and network interconnects dictate overall cluster efficiency. [arXiv:2203.15556](https://arxiv.org/abs/2203.15556)
 
-- **FlashAttention: Fast and Memory-Efficient Exact Attention** - Dao et al. (2022). Modern attention optimization that combines with KV caching in production systems, demonstrating complementary optimization strategies. [arXiv:2205.14135](https://arxiv.org/abs/2205.14135)
+- **FlashAttention: Fast and Memory-Efficient Exact Attention** - Dao et al. (2022). Modern attention optimization that combines with KV caching in production systems, demonstrating complementary optimization strategies. **Systems Implication:** Overcame GPU HBM bandwidth limits via SRAM tiling, fusing the attention computation into a single kernel to avoid costly memory reads and writes. [arXiv:2205.14135](https://arxiv.org/abs/2205.14135)
 
 ### Additional Resources
 
