@@ -10,7 +10,8 @@ import clsx from "clsx";
 import Link from "next/link";
 import {
   getTracks, getLevels, selectGauntletQuestions,
-  getQuestionsByFilter, Question, cleanScenario
+  getQuestionsByFilter, Question, cleanScenario,
+  getQuestionFullDetail,
 } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
 import { buildReportUrl } from "@/lib/issue-url";
@@ -213,6 +214,13 @@ export default function GauntletPage() {
     setTimeRemaining(dur.minutes * 60);
     setPhase("active");
     track({ type: 'gauntlet_started', track: selectedTrack, level: selectedLevel, questionCount: selected.length });
+    // Hydrate scenario/details for the whole session in parallel. When the
+    // worker responses come back, swap the questions state to the hydrated
+    // copies. Until then the UI shows summaries (empty scenario/details).
+    Promise.all(selected.map(q => getQuestionFullDetail(q.id))).then(results => {
+      const hydrated = results.filter((q): q is Question => q !== undefined);
+      if (hydrated.length === selected.length) setQuestions(hydrated);
+    });
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
   const revealAnswer = () => {
