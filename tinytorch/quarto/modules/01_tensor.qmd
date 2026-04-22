@@ -595,11 +595,19 @@ def reshape(self, *shape):
 
 The `-1` syntax is particularly useful: it tells NumPy to infer one dimension automatically. When flattening a batch of images, `x.reshape(batch_size, -1)` lets NumPy calculate the feature dimension.
 
+While these mathematical abstractions are powerful, they mask the physical reality of how data is stored and accessed. Understanding the gap between mathematical shape and physical memory layout is what separates a machine learning practitioner from a systems engineer.
+
+:::{.callout-warning title="💾 Systems Implication: Contiguous Memory & Strides"}
+To the math, `reshape` or `transpose` just change dimensions. To the hardware, they manipulate *strides*. A tensor's data is stored as a flat, 1D contiguous block of bytes in RAM. A `reshape` is an O(1) metadata update—the underlying memory is completely untouched.
+
+However, `transpose` introduces a systems trap. By swapping dimensions, you swap strides. The memory is no longer sequentially aligned with the new shape. If you iterate over a transposed tensor, the processor jumps back and forth across RAM, destroying spatial locality and causing massive **cache misses**. This is why systems engineers call `.contiguous()` after a transpose—trading a one-time O(n) memory copy to restore sequential alignment and keep the cache fed.
+:::
+
 ### Computational Complexity
 
-Not all tensor operations are equal. Element-wise operations like addition visit each element once: O(n) time where n is the total number of elements. Reductions like sum also visit each element once. But matrix multiplication is fundamentally different.
+As we saw with the explicit loops in our matrix multiplication implementation, not all tensor operations are equal. Element-wise operations like addition visit each element exactly once, resulting in O(n) time complexity where n is the total number of elements. Reductions like `sum` also visit each element once. But matrix multiplication is fundamentally different.
 
-Multiplying two n×n matrices requires n³ operations: for each of the n² output elements, you compute a dot product of n values. This cubic scaling is why a 2000×2000 matmul takes 8x longer than a 1000×1000 matmul, not 4x. In neural networks, matrix multiplications consume over 90% of compute time. This is precisely why GPUs exist for ML: a modern GPU has thousands of cores that can compute thousands of dot products simultaneously, turning an 800ms CPU operation into an 8ms GPU operation.
+Multiplying two n×n matrices requires n³ operations: for each of the n² output elements, you compute a dot product of n values. This cubic scaling is why a 2000×2000 matmul takes 8x longer than a 1000×1000 matmul, not 4x. In neural networks, matrix multiplications consume over 90% of compute time. This computational density is precisely why GPUs exist for ML: a modern GPU has thousands of cores that can compute thousands of dot products simultaneously, turning an 800ms CPU operation into an 8ms GPU operation.
 
 | Operation | Complexity | Notes |
 |-----------|------------|-------|
@@ -872,17 +880,19 @@ This distinction matters enormously for:
 
 ## Further Reading
 
-For students who want to understand the academic foundations and mathematical underpinnings of tensor operations:
+The abstractions we rely on today—broadcasting, memory views, and hardware-accelerated matrix multiplication—were not developed overnight. They are the culmination of decades of research bridging mathematics and computer architecture. For students who want to trace the evolution of these ideas from early linear algebra libraries to modern tensor frameworks, the following literature is essential.
 
 ### Seminal Papers
 
-- **NumPy: Array Programming** - Harris et al. (2020). The definitive reference for NumPy, which underlies your Tensor implementation. Explains broadcasting, views, and the design philosophy. [Nature](https://doi.org/10.1038/s41586-020-2649-2)
+- **NumPy: Array Programming** - Harris et al. (2020). The definitive reference for NumPy, which underlies your Tensor implementation. Explains broadcasting, views, and the design philosophy. **Systems Implication:** Standardized memory layouts (strides) and contiguous blocks allowed C-level operations to bypass the slow Python interpreter, maximizing memory bandwidth. [Nature](https://doi.org/10.1038/s41586-020-2649-2)
 
-- **BLAS (Basic Linear Algebra Subprograms)** - Lawson et al. (1979). The foundation of all high-performance matrix operations. Your `np.matmul` ultimately calls BLAS routines optimized over 40+ years. Understanding BLAS levels (1, 2, 3) explains why matmul is special. [ACM TOMS](https://doi.org/10.1145/355841.355847)
+- **BLAS (Basic Linear Algebra Subprograms)** - Lawson et al. (1979). The foundation of all high-performance matrix operations. Your `np.matmul` ultimately calls BLAS routines optimized over 40+ years. Understanding BLAS levels (1, 2, 3) explains why matmul is special. **Systems Implication:** Defined the memory hierarchy abstractions (registers, L1/L2 cache, RAM) allowing matrix multiplication to be tiled for optimal cache reuse, fundamentally defining modern dense compute limits. [ACM TOMS](https://doi.org/10.1145/355841.355847)
 
-- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
+- **Automatic Differentiation in ML** - Baydin et al. (2018). Survey of automatic differentiation techniques. **Systems Implication:** Reverse-mode AD required materializing the intermediate forward pass tensors in memory, making memory capacity a primary bottleneck for deep learning before checkpointing techniques were developed. [JMLR](https://www.jmlr.org/papers/v18/17-468.html)
 
 ### Additional Resources
 
 - **Textbook**: "Deep Learning" by Goodfellow, Bengio, and Courville - Chapter 2 covers linear algebra foundations including tensor operations
+- **Documentation**: [PyTorch Tensor Tutorial](https://pytorch.org/tutorials/beginner/basics/tensorqs_tutorial.html) - See how production frameworks implement similar concepts
+ter 2 covers linear algebra foundations including tensor operations
 - **Documentation**: [PyTorch Tensor Tutorial](https://pytorch.org/tutorials/beginner/basics/tensorqs_tutorial.html) - See how production frameworks implement similar concepts

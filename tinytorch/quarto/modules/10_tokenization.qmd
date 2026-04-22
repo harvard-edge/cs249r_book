@@ -465,7 +465,7 @@ The elegance is in the simplicity: iterate through each character, look up its I
 
 Before encoding text, you need a vocabulary: the complete set of tokens your tokenizer recognizes. For character-level tokenization, this means extracting all unique characters from a training corpus.
 
-Here's how the vocabulary building process works:
+To construct this vocabulary systematically, we extract every unique character observed in the training corpus and sort them to ensure a consistent mapping:
 
 ```python
 def build_vocab(self, corpus: List[str]) -> None:
@@ -666,11 +666,15 @@ tradeoff_bpe_embed = f"{bpe_embed_bytes / 1024**2:.1f} MB"
 tradeoff_bpe_attn = f"{bpe_attn:,}"
 ```
 
-A character tokenizer with vocabulary 100 and embedding dimension 512 needs 100 × 512 × 4 = `{python} tradeoff_char_embed` for embeddings. But a 50-word sentence produces roughly 250 character tokens, requiring 250² = `{python} tradeoff_char_attn` attention computations per layer.
+A character tokenizer with a vocabulary of 100 and an embedding dimension of 512 requires a negligible `{python} tradeoff_char_embed` for its embedding table. However, a standard 50-word sentence explodes into roughly 250 individual character tokens. Because self-attention complexity scales quadratically with sequence length, this requires 250² = `{python} tradeoff_char_attn` attention computations *per layer*.
 
-A BPE tokenizer with vocabulary 50,000 and embedding dimension 512 needs 50,000 × 512 × 4 = `{python} tradeoff_bpe_embed` for embeddings. But that same 50-word sentence might produce only 75 BPE tokens, requiring 75² = `{python} tradeoff_bpe_attn` attention computations per layer.
+Conversely, a BPE tokenizer expands the vocabulary to 50,000, driving the embedding table footprint up to `{python} tradeoff_bpe_embed`. Yet, that exact same 50-word sentence compresses into a mere 75 BPE subword tokens, slashing the computational burden to just 75² = `{python} tradeoff_bpe_attn` attention operations per layer.
 
-The attention cost savings (`{python} tradeoff_char_attn` vs `{python} tradeoff_bpe_attn`) dwarf the embedding memory cost (`{python} tradeoff_char_embed` vs `{python} tradeoff_bpe_embed`) for models with multiple layers. This is why production language models use large vocabularies: the embedding table fits easily in memory, while shorter sequences dramatically reduce training and inference time.
+:::{.callout-note title="⚡ Systems Implication: The Attention Bottleneck"}
+The monumental O(N²) computational savings in attention (`{python} tradeoff_char_attn` vs. `{python} tradeoff_bpe_attn` ops) absolutely dwarf the static VRAM penalty of hosting a massive embedding table (`{python} tradeoff_char_embed` vs. `{python} tradeoff_bpe_embed`). By condensing text into information-dense subwords, BPE tokenization explicitly trades static GPU memory capacity to aggressively alleviate the catastrophic sequence-length bottleneck in the Transformer's attention mechanism.
+:::
+
+This fundamental trade-off dictates the architecture of every production language model: large, static embedding tables are enthusiastically absorbed by VRAM precisely because the resulting abbreviated sequence lengths dramatically accelerate end-to-end training and real-time inference.
 
 Modern language models balance these factors:
 
@@ -1010,11 +1014,14 @@ For students who want to understand the academic foundations and production impl
 
 ### Seminal Papers
 
-- **Neural Machine Translation of Rare Words with Subword Units** - Sennrich et al. (2016). The original BPE paper that introduced subword tokenization for neural machine translation. Shows how BPE handles rare words through decomposition and achieves better translation quality. [arXiv:1508.07909](https://arxiv.org/abs/1508.07909)
+- **Neural Machine Translation of Rare Words with Subword Units** - Sennrich et al. (2016). The original BPE paper that introduced subword tokenization for neural machine translation. Shows how BPE handles rare words through intelligent subword decomposition, achieving superior translation quality.
+  - **Systems Implication:** By mathematically compressing raw text into information-dense subword tokens, this algorithm radically reduced average sequence lengths. This directly mitigated the crippling O(N²) memory and compute bottlenecks inherent to sequence-processing attention layers, enabling the modern LLM era. [arXiv:1508.07909](https://arxiv.org/abs/1508.07909)
 
-- **SentencePiece: A simple and language independent approach to subword tokenization** - Kudo & Richardson (2018). Extends BPE with language-agnostic tokenization that handles raw text without pre-tokenization. Used in T5, ALBERT, and many multilingual models. [arXiv:1808.06226](https://arxiv.org/abs/1808.06226)
+- **SentencePiece: A simple and language independent approach to subword tokenization** - Kudo & Richardson (2018). Extends BPE with a language-agnostic, raw-text-to-token pipeline that elegantly sidesteps brittle regex pre-tokenization rules. Used extensively in T5, ALBERT, and LLaMA.
+  - **Systems Implication:** SentencePiece cleanly eliminated complex, language-specific text pre-processing heuristics from the dataloader. By absorbing the entire pipeline into a unified, heavily optimized C++ binary, it prevented host CPUs from bottlenecking the GPU during massive-scale text ingestion. [arXiv:1808.06226](https://arxiv.org/abs/1808.06226)
 
-- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). While primarily about transformers, introduces WordPiece tokenization used in BERT family models. Section 4.1 discusses vocabulary and tokenization choices. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
+- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). While primarily focused on bidirectional transformer encoders, this paper formally introduced WordPiece tokenization to the mass-market NLP ecosystem.
+  - **Systems Implication:** By aggressively fixing the vocabulary size at 30,522 tokens, BERT strictly constrained the memory footprint of the final, massive softmax projection layer. This calculated engineering decision ensured the enormous output embedding matrix remained tightly bounded within the strict VRAM limits of 2018-era datacenter GPUs. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
 
 ### Additional Resources
 
@@ -1036,6 +1043,20 @@ Convert your token IDs into learnable dense vector representations. You'll imple
 | **11: Embeddings** | Learnable lookup tables | `embedding = Embedding(vocab_size=1000, dim=128)` |
 | **12: Attention** | Sequence-to-sequence processing | Token sequences attend to each other |
 | **13: Transformers** | Complete language models | Full pipeline: tokenize → embed → attend → predict |
+
+## Get Started
+
+:::{.callout-tip title="Interactive Options"}
+
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/10_tokenization/tokenization.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
+:::
+
+:::{.callout-warning title="Save Your Progress"}
+
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+:::
+ Transformers** | Complete language models | Full pipeline: tokenize → embed → attend → predict |
 
 ## Get Started
 
