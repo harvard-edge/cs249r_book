@@ -134,6 +134,7 @@ class ValidateCommand:
             ("inline-python", "_run_inline_python"),
             ("cross-refs", "_run_refs"),
             ("citations", "_run_citations"),
+            ("duplicate-year", "_run_duplicate_citation_year"),  # "[@foo1964] (1964)" → redundant year
             ("inline", "_run_inline_refs"),
             ("self-ref", "_run_self_referential"),
             ("capitalized", "_run_mitpress_capitalized_refs"),  # "chapter 12" lowercase in prose
@@ -916,6 +917,66 @@ class ValidateCommand:
         return ValidationRunResult(
             name="citations",
             description="Validate citation keys against bibliography files",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_duplicate_citation_year(self, root: Path) -> ValidationRunResult:
+        """Flag `[@citekey] (YEAR)` patterns — the citation already renders the year.
+
+        Authors sometimes write `[@foo1964] (1964)` as belt-and-suspenders, but
+        Pandoc renders `[@foo1964]` as "(Foo 1964)", so the literal `(1964)` is
+        redundant and ships as "(Foo 1964) (1964)". Applies to `[@key]`,
+        `[-@key]`, and multi-citation brackets like `[@a; @b]`.
+
+        Resolution: move the citation to the end of the sentence and drop the
+        parenthetical year, OR — when the literal year genuinely differs from
+        the cited paper's year (e.g. system deployment year vs. publication
+        year) — reword to avoid two adjacent parenthetical years.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # `[-?@...]` followed by optional whitespace and a bare `(YEAR)`.
+        # Year range 1800–2099 keeps things loose without false-matching
+        # measurements like `(1964 ms)` or `(100 µs)`.
+        dup_year = re.compile(r"\[-?@[^\]]+\]\s*\((1[89]\d{2}|20\d{2})\)")
+
+        for file in files:
+            content = self._read_text(file)
+            lines = content.splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                # Strip inline code spans so `[@foo] (1964)` inside backticks
+                # — documentation of the anti-pattern itself — does not fire.
+                scrubbed = re.sub(r"`[^`]+`", "", line)
+                for m in dup_year.finditer(scrubbed):
+                    context = scrubbed[max(0, m.start() - 10) : min(len(scrubbed), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="duplicate_citation_year",
+                            message=(
+                                "Redundant (YEAR) after citation — Pandoc already renders "
+                                "the year inside the citation. Move citation to sentence end "
+                                "or reword to avoid two parenthetical years."
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="duplicate-citation-year",
+            description='Flag "[@citekey] (YEAR)" — citation already carries the year',
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
