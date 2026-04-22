@@ -168,7 +168,15 @@ jobs:
           echo "📦 Archives created:"
           ls -lh MLSysBook-Slides-*.zip MLSysBook-TinyML-*.zip
 
+      # softprops/action-gh-release@v2 occasionally exits non-zero on a
+      # transient "update release asset metadata" 404 (the asset exists on
+      # the next refresh and the action's own log says "continuing...").
+      # All assets upload regardless. We mark the action continue-on-error
+      # and treat the next step — an explicit gh-CLI verification of the
+      # release state — as the authoritative pass/fail signal.
       - name: 🏷️ Create or Update Release
+        id: release
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: slides-latest
@@ -222,6 +230,53 @@ jobs:
             builds/vol1/*.pptx
             builds/vol2/*.pptx
           make_latest: true
+
+      - name: ✅ Verify Release has required archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # The nine top-level archives are the authoritative set. If each of
+          # these is present, the release is correct regardless of how many
+          # individual per-deck files attached or whether the action exited
+          # non-zero on a transient metadata-update 404.
+          REQUIRED=(
+            MLSysBook-Slides-All-PDF.zip
+            MLSysBook-Slides-Vol1-PDF.zip
+            MLSysBook-Slides-Vol2-PDF.zip
+            MLSysBook-Slides-All-PPTX.zip
+            MLSysBook-Slides-Vol1-PPTX.zip
+            MLSysBook-Slides-Vol2-PPTX.zip
+            MLSysBook-TinyML-All.zip
+            MLSysBook-TinyML-Slides.zip
+            MLSysBook-TinyML-Readings.zip
+          )
+
+          ASSETS=$(gh release view slides-latest \
+            --repo ${{ github.repository }} \
+            --json assets --jq '.assets[].name')
+
+          TOTAL=$(echo "$ASSETS" | wc -l | tr -d ' ')
+          echo "Release slides-latest has $TOTAL assets."
+
+          MISSING=()
+          for f in "${REQUIRED[@]}"; do
+            echo "$ASSETS" | grep -Fxq "$f" || MISSING+=("$f")
+          done
+
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "❌ Required archives missing from slides-latest release:"
+            for m in "${MISSING[@]}"; do echo "   - $m"; done
+            exit 1
+          fi
+
+          if [ "${{ steps.release.outcome }}" = "failure" ]; then
+            echo "🟡 softprops/action-gh-release exited non-zero, but all required"
+            echo "   archives verified present — treating as transient and passing."
+          fi
+
+          echo "✅ Release verified: all 9 required archives present."
 
   # ===========================================================================
   # Stage 3: Deploy Quarto portal
