@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import {
   BarChart3, Terminal, Activity, Users, Target, Crosshair,
   Flag, Lightbulb, Calendar, TrendingUp, Trash2, ThumbsUp, ThumbsDown, Gauge,
+  Link as LinkIcon,
 } from "lucide-react";
 import clsx from "clsx";
 import { computeSummary, getAnalyticsEvents, clearAnalytics, type AnalyticsSummary } from "@/lib/analytics";
@@ -72,6 +73,58 @@ export default function DashboardPage() {
           <StatCard label="Issues Reported" value={summary.questionsReported.toString()} icon={Flag} color="red" />
           <StatCard label="Improvements" value={summary.improvementsSuggested.toString()} icon={Lightbulb} color="amber" />
         </div>
+
+        {/* Phase-5 chain CTR. Hidden until at least one badge has been
+            shown (otherwise it would render 0/0 on first load). The 15%
+            target is from ARCHITECTURE.md §8 — clearing it is the gate
+            to building out additional chain UX (sidebar filter, /chains
+            browse, dashboard chain-completion tracking). */}
+        {summary.chainBadgesShown > 0 && (
+          <div className="mb-8">
+            <div className="p-4 rounded-xl border border-borderSubtle bg-surface/50">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <LinkIcon className="w-3.5 h-3.5 text-textTertiary" />
+                  <span className="text-[10px] font-mono text-textTertiary uppercase">Chain Discoverability (CTR)</span>
+                </div>
+                <span
+                  className={clsx(
+                    "text-[10px] font-mono uppercase px-2 py-0.5 rounded",
+                    summary.chainBadgeCTR >= 0.15
+                      ? "bg-accentGreen/10 text-accentGreen"
+                      : "bg-textTertiary/10 text-textTertiary",
+                  )}
+                  title="Phase-5 promotion gate (ARCHITECTURE.md §8): 15%"
+                >
+                  Gate: 15%
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3 mb-2">
+                <span className="text-2xl font-bold font-mono text-textPrimary">
+                  {(summary.chainBadgeCTR * 100).toFixed(1)}%
+                </span>
+                <span className="text-[11px] text-textTertiary">
+                  {summary.chainBadgesClicked} click{summary.chainBadgesClicked === 1 ? '' : 's'} / {summary.chainBadgesShown} unique chain{summary.chainBadgesShown === 1 ? '' : 's'} seen
+                </span>
+              </div>
+              <div className="h-2 bg-border rounded-full overflow-hidden relative">
+                <div
+                  className={clsx(
+                    "h-full rounded-full transition-all",
+                    summary.chainBadgeCTR >= 0.15 ? "bg-accentGreen" : "bg-accentBlue",
+                  )}
+                  style={{ width: `${Math.min(summary.chainBadgeCTR * 100, 100)}%` }}
+                />
+                {/* 15% gate marker */}
+                <div
+                  className="absolute top-0 h-full w-px bg-textPrimary/40"
+                  style={{ left: '15%' }}
+                  title="15% gate"
+                />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Feedback summary */}
         {(summary.thumbsUp + summary.thumbsDown > 0 ||

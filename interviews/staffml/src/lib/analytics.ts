@@ -35,6 +35,10 @@ export type AnalyticsEvent =
   // Navigation
   | { type: 'page_view'; page: string }
   | { type: 'search_query'; query: string; topicResults: number; questionResults: number }
+  // Chain discoverability — Phase-5 single-intervention CTR gate
+  // (ARCHITECTURE.md §8: promote multi-intervention only if shown→clicked > 15%).
+  | { type: 'chain_badge_shown'; chainId: string; position: number; total: number }
+  | { type: 'chain_badge_clicked'; chainId: string; position: number; total: number }
   // Star gate
   | { type: 'star_gate_shown' }
   | { type: 'star_gate_verified' }
@@ -215,6 +219,12 @@ export interface AnalyticsSummary {
   thumbsUp: number;
   thumbsDown: number;
   difficultyDistribution: Record<'too_easy' | 'about_right' | 'too_hard', number>;
+  // Phase-5 chain CTR. shown counts dedup per (chainId, sessionId) so
+  // navigating across siblings within a single session doesn't inflate
+  // the denominator. clicked is a raw click count (intent signal).
+  chainBadgesShown: number;
+  chainBadgesClicked: number;
+  chainBadgeCTR: number; // 0..1, 0 if shown == 0
   scoresByZone: Record<string, { total: number; count: number; avg: number }>;
   scoresByTopic: Record<string, { total: number; count: number; avg: number }>;
   scoresByLevel: Record<string, { total: number; count: number; avg: number }>;
@@ -240,6 +250,12 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
   // Dedup feedback: only count latest per (questionId, sessionId)
   const latestThumbs = new Map<string, 'up' | 'down'>();
   const latestDifficulty = new Map<string, 'too_easy' | 'about_right' | 'too_hard'>();
+  // Dedup chain badge impressions per (chainId, sessionId). A user
+  // bouncing across siblings in one session shouldn't inflate the
+  // denominator of CTR. Clicks stay raw — repeated clicks DO matter
+  // because each is a fresh intent signal.
+  const chainShownKeys = new Set<string>();
+  let chainBadgesClicked = 0;
 
   const scoresByZone: Record<string, { total: number; count: number; avg: number }> = {};
   const scoresByTopic: Record<string, { total: number; count: number; avg: number }> = {};
@@ -291,8 +307,18 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
       case 'question_difficulty_feedback':
         latestDifficulty.set(`${event.questionId}:${sessionId}`, event.perceived);
         break;
+      case 'chain_badge_shown':
+        chainShownKeys.add(`${event.chainId}:${sessionId}`);
+        break;
+      case 'chain_badge_clicked':
+        chainBadgesClicked++;
+        break;
     }
   }
+  const chainBadgesShown = chainShownKeys.size;
+  const chainBadgeCTR = chainBadgesShown > 0
+    ? chainBadgesClicked / chainBadgesShown
+    : 0;
 
   // Aggregate deduplicated feedback (last-write-wins per question+session)
   Array.from(latestThumbs.values()).forEach(value => {
@@ -325,6 +351,9 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
     thumbsUp,
     thumbsDown,
     difficultyDistribution,
+    chainBadgesShown,
+    chainBadgesClicked,
+    chainBadgeCTR,
     scoresByZone,
     scoresByTopic,
     scoresByLevel,
