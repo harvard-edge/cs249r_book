@@ -756,7 +756,11 @@ function PracticePage() {
                           navigator.clipboard.writeText(url);
                           showToast({ type: 'badge', title: 'Link copied', description: 'Share this question with others' });
                         }}
-                        className="text-textMuted hover:text-textSecondary transition-colors"
+                        // p-2 -m-2 extends the tap target to 30x30px on mobile
+                        // while keeping the visual icon at 14x14 (Apple HIG
+                        // "extend hit target without changing appearance").
+                        className="text-textMuted hover:text-textSecondary transition-colors p-2 -m-2"
+                        aria-label="Copy question link"
                         title="Copy question link"
                       >
                         <LinkIcon className="w-3.5 h-3.5" />
@@ -821,7 +825,11 @@ function PracticePage() {
                 </span>
                 <button
                   onClick={() => pickRandom()}
-                  className="text-[10px] font-mono text-textTertiary hover:text-textPrimary transition-colors flex items-center gap-1"
+                  // Extend tap target to ~32x52px on mobile while keeping
+                  // visual text inline-sized. Negative margin cancels the
+                  // padding so layout doesn't shift.
+                  className="text-[10px] font-mono text-textTertiary hover:text-textPrimary transition-colors flex items-center gap-1 py-2 -my-2 px-2 -mx-2"
+                  aria-label="Skip to a random question"
                 >
                   <SkipForward className="w-3 h-3" /> Skip
                 </button>
