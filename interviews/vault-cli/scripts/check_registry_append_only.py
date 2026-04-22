@@ -6,7 +6,7 @@ Rejects PRs that remove or reorder lines from ``interviews/vault/id-registry.yam
 between the PR base and HEAD; ensures every base-line is still present and
 in the same relative order.
 
-Invoked from ``.github/workflows/vault-ci.yml``.
+Invoked from ``.github/workflows/staffml-validate-vault.yml``.
 """
 
 from __future__ import annotations
