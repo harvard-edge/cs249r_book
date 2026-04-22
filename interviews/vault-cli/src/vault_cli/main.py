@@ -18,6 +18,9 @@ from vault_cli.commands import (
     build as build_cmd_mod,
 )
 from vault_cli.commands import (
+    chain as chain_cmd_mod,
+)
+from vault_cli.commands import (
     check as check_cmd_mod,
 )
 from vault_cli.commands import (
@@ -42,16 +45,13 @@ from vault_cli.commands import (
     ls as ls_cmd_mod,
 )
 from vault_cli.commands import (
-    show as show_cmd_mod,
-)
-from vault_cli.commands import (
-    chain as chain_cmd_mod,
-)
-from vault_cli.commands import (
     promote as promote_cmd_mod,
 )
 from vault_cli.commands import (
     release as release_cmd_mod,
+)
+from vault_cli.commands import (
+    show as show_cmd_mod,
 )
 from vault_cli.commands import (
     stats as stats_cmd_mod,

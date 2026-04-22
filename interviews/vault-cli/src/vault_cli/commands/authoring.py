@@ -45,7 +45,7 @@ def _id_hash(title: str, topic: str) -> str:
     Including the topic defends against two unrelated questions with
     identical titles hashing identically.
     """
-    payload = f"{title}\n{topic}".encode("utf-8")
+    payload = f"{title}\n{topic}".encode()
     return hashlib.sha256(payload).hexdigest()[:4]
 
 
@@ -235,6 +235,7 @@ def register(app: typer.Typer) -> None:
             },
         })
 
+        candidate = cell_dir / f"{qid}.yaml"
         candidate.write_text(dump_str(payload), encoding="utf-8")
         _append_registry({"id": qid, "created_at": now, "created_by": author or "unknown"})
         console.print(f"created [cyan]{candidate}[/cyan] (id={qid})")

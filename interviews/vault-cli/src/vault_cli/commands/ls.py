@@ -53,13 +53,19 @@ def register(app: typer.Typer) -> None:
         rows = []
         for lq in loaded:
             q = lq.question
-            if track and q.track != track: continue
-            if level and q.level != level: continue
-            if zone and q.zone != zone: continue
-            if topic and q.topic != topic: continue
-            if status and q.status != status: continue
+            if track and q.track != track:
+                continue
+            if level and q.level != level:
+                continue
+            if zone and q.zone != zone:
+                continue
+            if topic and q.topic != topic:
+                continue
+            if status and q.status != status:
+                continue
             n_chains = len(q.chains or [])
-            if in_chains and n_chains == 0: continue
+            if in_chains and n_chains == 0:
+                continue
             rows.append((q.id, q.track, q.level, q.zone, q.topic, n_chains, q.title))
 
         rows.sort(key=lambda r: (r[1], r[2], r[0]))   # track, level, id
