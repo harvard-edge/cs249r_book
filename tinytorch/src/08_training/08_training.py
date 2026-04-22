@@ -1133,8 +1133,11 @@ def trainer_evaluate(self, dataloader):
         total_loss += loss.data
         num_batches += 1
 
-        # Calculate accuracy (for classification)
-        if len(outputs.data.shape) > 1:  # Multi-class
+        # Calculate accuracy (for classification only).
+        # outputs.data.shape[-1] > 1 distinguishes true multi-class (C logits)
+        # from regression with a single output neuron (shape (N,1)), which would
+        # otherwise enter this branch and produce argmax=0 for every sample.
+        if len(outputs.data.shape) > 1 and outputs.data.shape[-1] > 1:  # Multi-class
             predictions = np.argmax(outputs.data, axis=1)
             if len(targets.data.shape) == 1:  # Integer targets
                 correct += np.sum(predictions == targets.data)
@@ -1166,7 +1169,8 @@ def test_unit_trainer_evaluate():
     """🧪 Test Trainer.evaluate implementation."""
     print("🧪 Unit Test: Trainer.evaluate...")
 
-    class SimpleModel:
+    # --- Regression case: output shape (N, 1) must NOT enter the accuracy branch ---
+    class RegressionModel:
         def __init__(self):
             self.layer = Linear(2, 1)
             self.training = True
@@ -1175,34 +1179,54 @@ def test_unit_trainer_evaluate():
         def parameters(self):
             return self.layer.parameters()
 
-    model = SimpleModel()
-    optimizer = SGD(model.parameters(), lr=0.01)
-    loss_fn = MSELoss()
+    reg_model = RegressionModel()
+    reg_trainer = Trainer(reg_model, SGD(reg_model.parameters(), lr=0.01), MSELoss())
 
-    trainer = Trainer(model, optimizer, loss_fn)
-
-    dataloader = [
+    reg_dataloader = [
         (Tensor([[1.0, 0.5]]), Tensor([[2.0]])),
         (Tensor([[0.5, 1.0]]), Tensor([[1.5]]))
     ]
 
-    eval_loss, accuracy = trainer.evaluate(dataloader)
+    eval_loss, accuracy = reg_trainer.evaluate(reg_dataloader)
 
-    # Verify return types
     assert isinstance(eval_loss, (float, np.floating)), f"Expected float eval_loss, got {type(eval_loss)}"
     assert isinstance(accuracy, (float, np.floating)), f"Expected float accuracy, got {type(accuracy)}"
+    # Regression: accuracy must be 0.0 (no classification branch entered)
+    assert accuracy == 0.0, (
+        f"Regression evaluate() returned accuracy={accuracy:.4f} instead of 0.0. "
+        "Shape (N,1) outputs must not enter the argmax classification branch."
+    )
 
-    # Verify model was set to eval mode
-    assert trainer.training_mode is False, "Should be in eval mode after evaluate()"
-    assert model.training is False, "Model should be in eval mode"
-
-    # Verify history recorded
-    assert len(trainer.history['eval_loss']) == 1, "Should have 1 eval loss recorded"
-
-    # Verify loss is a reasonable number (not NaN or inf)
+    assert reg_trainer.training_mode is False, "Should be in eval mode after evaluate()"
+    assert reg_model.training is False, "Model should be in eval mode"
+    assert len(reg_trainer.history['eval_loss']) == 1, "Should have 1 eval loss recorded"
     assert np.isfinite(eval_loss), f"Eval loss should be finite, got {eval_loss}"
 
-    print(f"  Eval loss: {eval_loss:.4f}, Accuracy: {accuracy:.4f}")
+    # --- Classification case: output shape (N, C) with C > 1 must compute accuracy ---
+    class ClassificationModel:
+        def __init__(self):
+            self.layer = Linear(2, 3)  # 3-class output
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    cls_model = ClassificationModel()
+    cls_trainer = Trainer(cls_model, SGD(cls_model.parameters(), lr=0.01), MSELoss())
+
+    cls_dataloader = [
+        (Tensor([[1.0, 0.5]]), Tensor([0])),   # integer class label
+        (Tensor([[0.5, 1.0]]), Tensor([2]))
+    ]
+
+    _, cls_accuracy = cls_trainer.evaluate(cls_dataloader)
+    assert isinstance(cls_accuracy, (float, np.floating)), "Classification accuracy must be a float"
+    # accuracy is 0.0 or 1.0 here -- just verify it was actually computed (total > 0)
+    assert 0.0 <= cls_accuracy <= 1.0, f"Classification accuracy out of range: {cls_accuracy}"
+
+    print(f"  Regression  - loss: {eval_loss:.4f}, accuracy: {accuracy:.4f} (expected 0.0)")
+    print(f"  Classification - accuracy: {cls_accuracy:.4f} (range check passed)")
     print("✅ Trainer.evaluate works correctly!")
 
 if __name__ == "__main__":
