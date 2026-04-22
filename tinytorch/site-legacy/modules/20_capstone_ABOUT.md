@@ -1,1 +1,0 @@
-../../src/20_capstone/ABOUT.md

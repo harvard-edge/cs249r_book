@@ -213,9 +213,9 @@ class ModuleWorkflowCommand(BaseCommand):
             help='Path to module source (.py)'
         )
         path_group.add_argument(
-            '--about',
+            '--guide',
             action='store_true',
-            help='Path to module ABOUT.md'
+            help='Path to module Lab Guide chapter (quarto/modules/NN_xxx.qmd)'
         )
 
     # Module mapping and normalization now imported from core.modules
@@ -1367,7 +1367,7 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def get_path(self, module_number: str, notebook: bool = False,
-                 source: bool = False, about: bool = False) -> int:
+                 source: bool = False, guide: bool = False) -> int:
         """Print the absolute path to a module file. For IDE integrations."""
         module_mapping = get_module_mapping()
         normalized = normalize_module_number(module_number)
@@ -1384,10 +1384,10 @@ class ModuleWorkflowCommand(BaseCommand):
             target = project_root / "modules" / folder / f"{slug}.ipynb"
         elif source:
             target = project_root / "src" / folder / f"{folder}.py"
-        elif about:
-            target = project_root / "src" / folder / "ABOUT.md"
+        elif guide:
+            target = project_root / "quarto" / "modules" / f"{folder}.qmd"
         else:
-            self.console.print("[red]❌ Specify --notebook, --source, or --about[/red]")
+            self.console.print("[red]❌ Specify --notebook, --source, or --guide[/red]")
             return 1
 
         print(str(target))
@@ -1608,7 +1608,7 @@ class ModuleWorkflowCommand(BaseCommand):
                     args.module_number,
                     notebook=getattr(args, 'notebook', False),
                     source=getattr(args, 'source', False),
-                    about=getattr(args, 'about', False),
+                    guide=getattr(args, 'guide', False),
                 )
 
         # Show help if no valid command

@@ -33,7 +33,7 @@ When rebranding, grep for the hex code and update each:
 - [`book/quarto/assets/styles/epub.css`](../../book/quarto/assets/styles/epub.css), `epub-vol1.css`, `epub-vol2.css`
 - [`site/landing.css`](../../site/landing.css), [`landing-v3.css`](../../site/landing-v3.css)
 - [`site/about/about.css`](../../site/about/about.css), [`site/community/community.css`](../../site/community/community.css), [`site/newsletter/newsletter.css`](../../site/newsletter/newsletter.css)
-- [`tinytorch/site/_static/custom.css`](../../tinytorch/site/_static/custom.css)
+- TinyTorch site: SCSS at [`tinytorch/quarto/assets/styles/style.scss`](../../tinytorch/quarto/assets/styles/style.scss) and [`dark-mode.scss`](../../tinytorch/quarto/assets/styles/dark-mode.scss)
 
 ### Inline CSS in `.qmd`
 
