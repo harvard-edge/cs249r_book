@@ -10,6 +10,7 @@ import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinRes
 import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
+import { ScenarioSkeleton } from "@/components/ScenarioSkeleton";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { track } from "@/lib/analytics";
 import { useToast } from "@/components/Toast";
@@ -217,7 +218,11 @@ export default function PlansPage() {
               </div>
               <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">{current.title}</h2>
               <div className="prose max-w-none">
-                <p className="text-textSecondary leading-relaxed text-base">{cleanScenario(current.scenario)}</p>
+                {current.scenario ? (
+                  <p className="text-textSecondary leading-relaxed text-base">{cleanScenario(current.scenario)}</p>
+                ) : (
+                  <ScenarioSkeleton />
+                )}
               </div>
             </motion.div>
           </div>
