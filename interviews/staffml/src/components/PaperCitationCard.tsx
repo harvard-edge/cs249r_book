@@ -35,7 +35,7 @@ function bibtex({
   const doiLine = doi ? `  doi = {${doi}},\n` : "";
   return (
 `@misc{staffml${year},
-  title = {StaffML: ML Systems Interview Preparation Question Corpus},
+  title = {StaffML: A Physics-Grounded Interview Question Bank for Machine Learning Systems Engineers},
   author = {Janapa Reddi, Vijay and contributors},
   year = {${year}},
   version = {${version}},
