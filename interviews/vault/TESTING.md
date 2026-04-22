@@ -226,10 +226,10 @@ Worker crons per ARCHITECTURE.md §10.5 table. Alert on any divergence.
 
 ## 4. CI workflow spec
 
-### 4.1 `.github/workflows/vault-ci.yml` (every PR touching `interviews/vault/` or `interviews/vault-cli/`)
+### 4.1 `.github/workflows/staffml-validate-vault.yml` (every PR touching `interviews/vault/` or `interviews/vault-cli/`)
 
 ```yaml
-name: vault-ci
+name: '🎯 StaffML · ✅ Validate (Vault)'
 on:
   pull_request:
     paths:

@@ -1175,7 +1175,7 @@ Each phase is a safe stopping point. If priorities shift, pause at a phase bound
 - Write `interviews/CONTRIBUTING.md` documenting clone → first-question-visible path. (Fixes H-17.)
 - Write `vault/schema/EVOLUTION.md` — SemVer rules, loader contract, migration mechanics. (Fixes H-1.)
 - Write `vault-cli/docs/JSON_OUTPUT.md` and `EXIT_CODES.md`.
-- CI scaffolding: `.github/workflows/vault-ci.yml` runs `vault check` placeholder (expanded in Phase 1).
+- CI scaffolding: `.github/workflows/staffml-validate-vault.yml` runs `vault check` placeholder (expanded in Phase 1).
 - **Exemplar-coverage audit** (v2.1 — Chip N-H3): `vault stats --exemplar-coverage` reports which `(track, level, zone)` cells have <3 human-reviewed questions eligible for the `vault/exemplars/` pool. Output to `vault/exemplar-gaps.yaml`. This is a READ-ONLY audit at Phase 0; filling gaps is backlog work that unblocks `vault generate` (Phase 7), not a Phase 0 blocker.
 - **Milestone**: `pip install -e vault-cli/ && vault --version` works. Skeleton CI green. Exemplar gap inventory produced.
 
@@ -1401,7 +1401,7 @@ Testing is NOT an afterthought. It's the gate between stages. This section is th
 
 ### 19.3 CI integration (v2)
 
-GitHub Actions workflow `.github/workflows/vault-ci.yml`:
+GitHub Actions workflow `.github/workflows/staffml-validate-vault.yml`:
 1. On every PR touching `interviews/vault/` or `interviews/vault-cli/`:
    - Run `pytest vault-cli/` (all unit + integration + contract tests).
    - Run `vault check --strict` on the full corpus (fast + structural tiers, <60s budget).
