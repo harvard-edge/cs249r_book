@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Nav from "@/components/Nav";
 import EcosystemBar from "@/components/EcosystemBar";
-import Footer from "@/components/Footer";
+import MaybeFooter from "@/components/MaybeFooter";
 import Providers from "@/components/Providers";
 import { QUESTION_COUNT_DISPLAY } from "@/lib/corpus";
 
@@ -92,7 +92,7 @@ export default function RootLayout({
           <EcosystemBar />
           <Nav />
           <main className="flex-1 flex flex-col">{children}</main>
-          <Footer />
+          <MaybeFooter />
         </Providers>
       </body>
     </html>
