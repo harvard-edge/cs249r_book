@@ -51,14 +51,29 @@ Branch names should reference the issue number when one exists
 ### 2. Set up pre-commit hooks (one time per clone)
 
 This repo runs ~60 pre-commit checks (BibTeX validation, figure-div syntax,
-markdown link checks, EPUB hygiene, vault corpus-guard, and more). They catch
-issues that would otherwise burn maintainer review cycles.
+markdown link checks, EPUB hygiene, vault corpus-guard, and more) defined in
+`.pre-commit-config.yaml`. They catch issues that would otherwise burn
+maintainer review cycles. Install them once per fresh clone:
 
 ```bash
-./book/binder setup
+pip install pre-commit
+pre-commit install
 ```
 
-If `pre-commit` is missing, install it (`pip install pre-commit`) and re-run.
+This is enough to contribute to **any** sub-project. Some projects also have
+their own setup step that installs project-specific tooling (and may wire up
+pre-commit for you as a convenience):
+
+| Project | Project-specific setup |
+|---|---|
+| Textbook | `./book/binder setup` (also installs Quarto / Java / epubcheck checks) |
+| TinyTorch | `pip install -r tinytorch/requirements.txt && pip install -e tinytorch/` |
+| StaffML / vault-cli | `pip install -e interviews/vault-cli/[dev]` |
+| MLSys·im | `pip install -e mlsysim/[dev]` |
+| MLPerf EDU | `pip install -e mlperf-edu/[dev]` |
+| StaffML site | `cd interviews/staffml && npm install` |
+
+See each sub-project's CONTRIBUTING / README for the full development loop.
 
 ### 3. Stage files explicitly
 

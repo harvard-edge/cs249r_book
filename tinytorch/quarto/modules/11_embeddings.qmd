@@ -1,98 +1,3 @@
-
-```{python}
-#| echo: false
-#| output: false
-
-
-# --- Embedding Dimension Trade-offs section ---
-
-# Prose: 50,000 vocab x 512 embed_dim memory (approximate)
-tradeoffs_50k_512_bytes = 50000 * 512 * 4
-tradeoffs_50k_512_mb = tradeoffs_50k_512_bytes / 1024**2
-tradeoffs_50k_512_mb = f"{tradeoffs_50k_512_mb:.0f} MB"
-
-# Prose: doubled to 1024 embed_dim
-tradeoffs_50k_1024_bytes = 50000 * 1024 * 4
-tradeoffs_50k_1024_mb = tradeoffs_50k_1024_bytes / 1024**2
-tradeoffs_50k_1024_mb = f"{tradeoffs_50k_1024_mb:.0f} MB"
-
-# GPT-3 embedding memory in prose
-gpt3_embed_bytes = 50257 * 12288 * 4
-gpt3_embed_gb = gpt3_embed_bytes / 1024**3
-tradeoffs_gpt3_embed_gb = f"{gpt3_embed_gb:.1f} GB"
-
-# --- Production table ---
-
-# Small BERT: 30,000 x 768
-table_bert_bytes = 30000 * 768 * 4
-table_bert_mb = table_bert_bytes / 1024**2
-table_bert_mb = f"{table_bert_mb:.0f} MB"
-
-# GPT-2: 50,257 x 1,024
-table_gpt2_bytes = 50257 * 1024 * 4
-table_gpt2_mb = table_gpt2_bytes / 1024**2
-table_gpt2_mb = f"{table_gpt2_mb:.0f} MB"
-
-# GPT-3: 50,257 x 12,288
-table_gpt3_bytes = 50257 * 12288 * 4
-table_gpt3_mb = table_gpt3_bytes / 1024**2
-table_gpt3_mb = f"{table_gpt3_mb:,.0f} MB"
-
-# Large Transformer: 100,000 x 1,024
-table_large_bytes = 100000 * 1024 * 4
-table_large_mb = table_large_bytes / 1024**2
-table_large_mb = f"{table_large_mb:.0f} MB"
-
-# --- Scale section ---
-
-# GPT-3 parameter count
-gpt3_params = 50257 * 12288
-scale_gpt3_params = f"{gpt3_params / 1e6:.0f} million parameters"
-scale_gpt3_gb = f"{gpt3_embed_gb:.1f} GB"
-
-# Batch lookups: 32 sequences x 2048 tokens
-batch_lookups = 32 * 2048
-scale_batch_lookups = f"{batch_lookups:,}"
-
-# --- Q1: Memory Calculation ---
-
-q1_params = 50000 * 512
-q1_bytes = q1_params * 4
-q1_mb = q1_bytes / 1024**2
-q1_total_bytes = f"{q1_bytes:,} bytes"
-q1_mb = f"{q1_mb:.1f} MB"
-q1_params = f"{q1_params:,}"
-q1_bytes_full = f"{q1_bytes:,}"
-
-# --- Q2: Positional Encoding Memory ---
-
-q2_params = 2048 * 512
-q2_bytes = q2_params * 4
-q2_mb = q2_bytes / 1024**2
-q2_bytes = f"{q2_bytes:,} bytes"
-q2_mb = f"{q2_mb:.1f} MB"
-q2_params = f"{q2_params:,}"
-
-# GPT-3 learned PE memory
-q2_gpt3_bytes = 2048 * 12288 * 4
-q2_gpt3_mb = q2_gpt3_bytes / 1024**2
-q2_gpt3_pe_mb = f"{q2_gpt3_mb:.0f} MB"
-
-# --- Q3: Lookup Complexity ---
-
-q3_total = 32 * 128
-q3_total_lookups = f"{q3_total:,}"
-
-# --- Q4: Embedding Dimension Scaling ---
-
-q4_original_bytes = 50000 * 512 * 4
-q4_original_mb = q4_original_bytes / 1024**2
-q4_doubled_bytes = 50000 * 1024 * 4
-q4_doubled_mb = q4_doubled_bytes / 1024**2
-q4_original_mb = f"{q4_original_mb:.0f} MB"
-q4_doubled_mb = f"{q4_doubled_mb:.0f} MB"
-```
-
 # Module 11: Embeddings
 
 :::{.callout-note title="Module Info"}
@@ -100,6 +5,7 @@ q4_doubled_mb = f"{q4_doubled_mb:.0f} MB"
 **ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-08, 10
 
 **Prerequisites: Modules 01-08 and 10** means you should understand:
+
 - Tensor operations (shape manipulation, matrix operations, broadcasting)
 - Training fundamentals (forward/backward, optimization)
 - Tokenization (converting text to token IDs, vocabularies)
@@ -407,9 +313,9 @@ initSlideViewer('11_embeddings', '../assets/slides/11_embeddings.pdf');
 ```
 ## Overview
 
-Embeddings are the crucial bridge between discrete tokens and continuous neural network operations. Your tokenizer from Module 10 converts text into token IDs like `[42, 7, 15]`, but neural networks operate on dense vectors of real numbers. Embeddings transform each integer token ID into a learned dense vector that captures semantic meaning. By the end of this module, you'll implement the embedding systems that power modern language models, from basic lookup tables to sophisticated positional encodings.
+Neural networks operate on vectors. Language is made of tokens. Embeddings are how the two meet: a learnable lookup table that turns each integer token ID into a dense vector, so the rest of the network can do calculus on it.
 
-Every transformer model, from BERT to GPT-4, relies on embeddings to convert language into learnable representations. You'll build the exact patterns used in production, understanding not just how they work but why they're designed this way.
+Your tokenizer from Module 10 produces IDs like `[42, 7, 15]`. By the end of this module you have built the layer that turns those IDs into geometry — the same layer sitting at the input of every transformer from BERT to GPT-4 — and the positional encodings that tell the network *where* in the sequence each token lives.
 
 ## Learning Objectives
 
@@ -545,15 +451,15 @@ Complete embedding system combining token embeddings and positional encoding.
 
 ## Core Concepts
 
-This section explores the fundamental ideas behind embeddings and positional encoding. These concepts apply to every modern language model, from small research experiments to production systems.
+Four ideas carry the rest of this chapter: lookup-as-matmul, sparse gradient updates, the learned-vs-fixed positional tradeoff, and the memory cost of embedding dimension. Every modern language model is built from them.
 
 ### From Indices to Vectors
 
-Neural networks operate on continuous vectors, but language consists of discrete tokens. After your tokenizer converts "the cat sat" to token IDs `[1, 42, 7]`, you need a way to represent these discrete integers as dense vectors that can capture semantic meaning.
+Neural networks consume continuous vectors; language arrives as discrete IDs. After the tokenizer turns "the cat sat" into `[1, 42, 7]`, you need a way to give those integers geometry.
 
-The embedding layer solves this through a simple but powerful idea: maintain a learnable table where each token ID maps to a vector. For a vocabulary of 50,000 tokens with 512-dimensional embeddings, you create a matrix of shape `(50000, 512)` initialized with small random values. During training, these vectors adjust to capture semantic relationships: similar words learn similar vectors.
+The embedding layer is that bridge: a learnable matrix where row `i` is the vector for token `i`. For a 50,000-token vocabulary with 512-dimensional embeddings, the table is shape `(50000, 512)`, initialized small. Training nudges similar words toward similar rows — semantic relationships emerge as geometric proximity.
 
-Here's the core implementation showing how efficiently this works:
+The implementation is one line of NumPy:
 
 ```python
 def forward(self, indices: Tensor) -> Tensor:
@@ -578,7 +484,7 @@ def forward(self, indices: Tensor) -> Tensor:
     return result
 ```
 
-The beauty is in the simplicity: `self.weight.data[indices.data.astype(int)]` uses NumPy's advanced indexing (also called fancy indexing) to look up multiple embeddings simultaneously. For input indices `[1, 42, 7]`, this single operation retrieves rows 1, 42, and 7 from the weight matrix in one efficient step, automatically handling batched inputs of any shape. While conceptually equivalent to creating one-hot vectors and matrix multiplication, direct indexing is orders of magnitude faster and requires no intermediate allocations.
+The work happens in `self.weight.data[indices.data.astype(int)]`. NumPy's fancy indexing pulls rows 1, 42, and 7 in a single operation, broadcasting cleanly over batched inputs of any shape. It is mathematically equivalent to multiplying a one-hot matrix against the weight table — but it is orders of magnitude faster and allocates no intermediate tensor.
 
 ### Embedding Table Mechanics
 
@@ -603,7 +509,7 @@ During training, gradients flow back through the lookup operation to update only
 
 Positional information can be added to token embeddings in two fundamentally different ways: learned position embeddings and fixed sinusoidal encodings.
 
-**Learned positional encoding** treats each position as a trainable parameter, just like token embeddings. For maximum sequence length M and embedding dimension D, you create a second embedding table of shape `(M, D)`:
+**Learned positional encoding** treats each sequence position as a unique, trainable parameter, just like token embeddings. For a maximum sequence length M and embedding dimension D, you construct an auxiliary embedding table of shape `(M, D)`:
 
 ```python
 # Initialize position embedding matrix
@@ -667,9 +573,9 @@ This creates a unique vector for each position where low-index dimensions oscill
 
 ### Positional Encodings
 
-Without positional information, embeddings have no notion of order. The sentence "cat sat on mat" would have identical representation to "mat on sat cat" because you'd sum or average the same four token embeddings regardless of order.
+Token embeddings are a bag of vectors — they carry no notion of order. Without positional information, "cat sat on mat" and "mat on sat cat" produce the same set of vectors and a downstream attention layer cannot tell them apart.
 
-Positional encodings solve this by adding position-specific information to each token's embedding. After embedding lookup, token 42 at position 0 gets different positional information than token 42 at position 5, making the model position-aware.
+Positional encodings fix this by adding a position-specific vector to each token's embedding. Token 42 at position 0 lands somewhere different in space than token 42 at position 5, and the network finally has access to *where*, not just *what*.
 
 The Transformer paper introduced sinusoidal positional encoding with a clever mathematical structure. For position `pos` and dimension `i`:
 
@@ -688,7 +594,7 @@ The trigonometric identity enables learning relative positions: `PE(pos+k)` can 
 
 The embedding dimension D controls the capacity of your learned representations. Larger D provides more expressiveness but costs memory and compute. The choice involves several interacting factors.
 
-**Memory scaling**: Embedding tables scale as `vocab_size × embed_dim × 4 bytes` (for float32). A vocabulary of 50,000 tokens with 512-dimensional embeddings requires `{python} tradeoffs_50k_512_mb`. Double the dimension to 1024, and memory doubles to `{python} tradeoffs_50k_1024_mb`. For large vocabularies, the embedding table often dominates total model memory. GPT-3's 50,257 token vocabulary with 12,288-dimensional embeddings uses approximately `{python} tradeoffs_gpt3_embed_gb` just for token embeddings.
+**Memory scaling**: Embedding tables scale as `vocab_size × embed_dim × 4 bytes` (float32). A 50,000-token vocabulary with 512-dimensional embeddings costs **98 MB**. Double the dimension to 1024 and the cost doubles to **195 MB**. For large vocabularies, the embedding table often dominates total model memory — GPT-3's 50,257-token vocabulary with 12,288-dimensional embeddings consumes **2.3 GB** for token embeddings alone.
 
 **Semantic capacity**: Higher dimensions allow finer-grained semantic distinctions. With 64 dimensions, you might capture basic categories (animals, actions, objects). With 512 dimensions, you can encode subtle relationships (synonyms, antonyms, part-of-speech, contextual variations). With 1024+ dimensions, you have capacity for highly nuanced semantic features discovered through training.
 
@@ -698,10 +604,10 @@ The embedding dimension D controls the capacity of your learned representations.
 
 | Model | Vocabulary | Embed Dim | Embedding Memory |
 |-------|-----------|-----------|------------------|
-| Small BERT | 30,000 | 768 | `{python} table_bert_mb` |
-| GPT-2 | 50,257 | 1,024 | `{python} table_gpt2_mb` |
-| GPT-3 | 50,257 | 12,288 | `{python} table_gpt3_mb` |
-| Large Transformer | 100,000 | 1,024 | `{python} table_large_mb` |
+| Small BERT | 30,000 | 768 | 88 MB |
+| GPT-2 | 50,257 | 1,024 | 196 MB |
+| GPT-3 | 50,257 | 12,288 | 2,356 MB |
+| Large Transformer | 100,000 | 1,024 | 391 MB |
 
 The embedding dimension typically matches the model's hidden dimension since embeddings feed directly into the first transformer layer. You rarely see models with embedding dimension different from hidden dimension (though it's technically possible with a projection layer).
 
@@ -866,14 +772,14 @@ Embedding lookup semantics, gradient flow patterns, and the addition of position
 
 ### Why Embeddings Matter at Scale
 
-To appreciate embedding systems, consider the scale of modern language models:
+The numbers behind a modern language model make the design pressures concrete:
 
-- **GPT-3 embeddings**: 50,257 token vocabulary × 12,288 dimensions = **`{python} scale_gpt3_params`** = `{python} scale_gpt3_gb` of memory (just for token embeddings, not counting position embeddings)
-- **Lookup throughput**: Processing 32 sequences of 2048 tokens requires **`{python} scale_batch_lookups` embedding lookups** per batch. At 1000 batches per second (typical training), that's 65 million lookups per second.
-- **Memory bandwidth**: Each lookup transfers 512-1024 dimensions × 4 bytes = **2-4 KB from RAM to cache**. At scale, memory bandwidth (not compute) becomes the bottleneck.
-- **Gradient sparsity**: In a batch with `{python} scale_batch_lookups` tokens, only a small fraction of the 50,257 vocabulary is accessed. Efficient training exploits this sparsity, updating only the accessed embeddings' gradients.
+- **GPT-3 embeddings**: 50,257 tokens × 12,288 dimensions = **618 million parameters** = **2.3 GB** for token embeddings alone (positional encodings extra).
+- **Lookup throughput**: A batch of 32 sequences × 2048 tokens demands **65,536 embedding lookups** per step. At 1,000 steps/sec, that is roughly 65 million lookups per second.
+- **Memory bandwidth**: Each lookup pulls 2–4 KB from RAM to cache (512–1024 floats × 4 bytes). At scale, bandwidth — not arithmetic — is the bottleneck.
+- **Gradient sparsity**: A batch touches only a tiny slice of the 50,257-row table. Efficient trainers exploit this and update gradients only for the rows that were accessed.
 
-Modern transformer training spends approximately **10-15% of total time** in embedding operations (lookup + position encoding). The remaining 85-90% goes to attention and feedforward layers. However, embeddings consume **30-40% of model memory** for models with large vocabularies, making them critical for deployment.
+Embeddings take only **10–15% of training time** but consume **30–40% of model memory** at large vocabularies. They are cheap to *run* and expensive to *store* — exactly the opposite profile of attention.
 
 ## Check Your Understanding
 
@@ -885,14 +791,15 @@ An embedding layer has `vocab_size=50000` and `embed_dim=512`. How much memory d
 
 :::{.callout-note collapse="true" title="Answer"}
 
-50,000 × 512 × 4 bytes = **`{python} q1_total_bytes` = `{python} q1_mb`**
+50,000 × 512 × 4 bytes = **102,400,000 bytes = 97.7 MB**
 
 Calculation breakdown:
-- Parameters: 50,000 × 512 = `{python} q1_params`
-- Memory: `{python} q1_params` × 4 bytes (float32) = `{python} q1_bytes_full` bytes
-- In MB: `{python} q1_bytes_full` / (1024 × 1024) = `{python} q1_mb`
 
-This is why vocabulary size matters for model deployment!
+- Parameters: 50,000 × 512 = 25,600,000
+- Memory: 25,600,000 × 4 bytes (float32) = 102,400,000 bytes
+- In MB: 102,400,000 / (1024 × 1024) = 97.7 MB
+
+This is why vocabulary size dominates the deployment budget for small-model, large-vocab systems.
 :::
 
 **Q2: Positional Encoding Memory**
@@ -901,11 +808,11 @@ Compare memory requirements for learned vs sinusoidal positional encoding with `
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**Learned PE**: 2,048 × 512 × 4 = **`{python} q2_bytes` = `{python} q2_mb`** (`{python} q2_params` parameters)
+**Learned PE**: 2,048 × 512 × 4 = **4,194,304 bytes = 4.0 MB** (1,048,576 parameters)
 
-**Sinusoidal PE**: **0 bytes** (0 parameters - computed mathematically)
+**Sinusoidal PE**: **0 bytes** (0 parameters — computed from a closed-form formula)
 
-For large models, learned PE adds significant memory. GPT-3 uses learned PE with 2048 positions × 12,288 dimensions = `{python} q2_gpt3_pe_mb` additional memory. Some models use sinusoidal to save this memory.
+For large models, learned PE adds real memory. GPT-3's learned PE costs an additional 96 MB (2048 × 12288 × 4 bytes). Models that need cheaper or longer-context PE often switch to sinusoidal or rotary variants.
 :::
 
 **Q3: Lookup Complexity**
@@ -914,26 +821,27 @@ What is the time complexity of looking up embeddings for a batch of 32 sequences
 
 :::{.callout-note collapse="true" title="Answer"}
 
-**O(1) per token**, or **O(batch_size × seq_len)** = O(32 × 128) = O(`{python} q3_total_lookups`) total
+**O(1) per token**, or **O(batch_size × seq_len)** = O(32 × 128) = O(4,096) total.
 
-The lookup operation is constant time per token because it's just array indexing: `weight[token_id]`. For `{python} q3_total_lookups` tokens, you perform `{python} q3_total_lookups` constant-time lookups.
+Lookup is constant time per token because it is direct array indexing: `weight[token_id]`. For 4,096 tokens you do 4,096 constant-time loads.
 
-Importantly, vocabulary size does NOT affect lookup time. Looking up tokens from a 1,000 word vocabulary is the same speed as from a 100,000 word vocabulary (assuming cache effects are comparable). The memory access is direct indexing, not search.
+Vocabulary size does **not** affect lookup time. Looking up from a 1,000-word table is the same speed as from a 100,000-word table (modulo cache effects). It is indexing, not search.
 :::
 
 **Q4: Embedding Dimension Scaling**
 
-You have an embedding layer with `vocab_size=50000, embed_dim=512` using `{python} q4_original_mb`. If you double `embed_dim` to 1024, what happens to memory?
+You have an embedding layer with `vocab_size=50000, embed_dim=512` using 98 MB. If you double `embed_dim` to 1024, what happens to memory?
 
 :::{.callout-note collapse="true" title="Answer"}
 
-Memory **doubles to `{python} q4_doubled_mb`**
+Memory **doubles to 195 MB**.
 
 Embedding memory scales linearly with embedding dimension:
-- Original: 50,000 × 512 × 4 = `{python} q4_original_mb`
-- Doubled: 50,000 × 1,024 × 4 = `{python} q4_doubled_mb`
 
-This is why you can't arbitrarily increase embedding dimensions. Each doubling doubles memory and memory bandwidth requirements. Large models carefully balance embedding dimension against available memory.
+- Original: 50,000 × 512 × 4 = 98 MB
+- Doubled: 50,000 × 1,024 × 4 = 195 MB
+
+Each doubling of `embed_dim` doubles both storage and memory bandwidth — the reason production models balance dimension against available memory rather than maxing it out.
 :::
 
 **Q5: Sinusoidal Extrapolation**
@@ -961,15 +869,15 @@ This is why many production models use sinusoidal or relative positional encodin
 
 ## Further Reading
 
-For students who want to understand the academic foundations and mathematical underpinnings of embeddings and positional encoding:
+While embedding tables may seem like simple lookup dictionaries, their architectural design profoundly impacts system-level performance, memory bandwidth constraints, and distributed training topologies. For students seeking to understand the mathematical underpinnings and the hardware-software co-design of these continuous representations, the following milestones are critical:
 
 ### Seminal Papers
 
-- **Word2Vec** - Mikolov et al. (2013). Introduced efficient learned word embeddings through context prediction. Though your implementation learns embeddings end-to-end, Word2Vec established the idea that similar words should have similar vectors. [arXiv:1301.3781](https://arxiv.org/abs/1301.3781)
+- **Word2Vec** - Mikolov et al. (2013). Introduced efficient learned word embeddings through context prediction. Though your implementation learns embeddings end-to-end, Word2Vec established the paradigm that semantic similarity should be encoded spatially. **Systems Implication:** By replacing massive, infinitely sparse one-hot encoded vectors with dense, low-dimensional continuous arrays, this shift dramatically compressed the memory footprint. It transformed textual analysis from cache-thrashing sparse lookups into dense matrix multiplications, fundamentally pushing the operations toward the compute-bound ceiling of the Roofline model. [arXiv:1301.3781](https://arxiv.org/abs/1301.3781)
 
-- **Attention Is All You Need** - Vaswani et al. (2017). Introduced sinusoidal positional encoding and demonstrated that learned embeddings combined with positional information enable powerful sequence models. Section 3.5 explains the positional encoding formula you implemented. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
+- **Attention Is All You Need** - Vaswani et al. (2017). Introduced sinusoidal positional encoding and demonstrated that learned embeddings combined with positional information enable powerful, highly parallel sequence models. **Systems Implication:** Replaced recursive token-by-token processing with self-attention over continuous embeddings, entirely breaking the sequential compute bottleneck of RNNs and allowing massive, unhindered data-parallelization across modern GPU streaming multiprocessors. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
 
-- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). Shows how embeddings combine with positional and segment encodings for language understanding tasks. BERT uses learned positional embeddings rather than sinusoidal. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
+- **BERT: Pre-training of Deep Bidirectional Transformers** - Devlin et al. (2018). Demonstrated how token embeddings perfectly fuse with positional and segment encodings for deep language understanding. **Systems Implication:** Proved the empirical value of scaling parameter counts to hundreds of millions, thereby exposing the limits of single-chip High Bandwidth Memory (HBM) and necessitating multi-GPU tensor parallel paradigms just to host the vast embedding tables and model states. [arXiv:1810.04805](https://arxiv.org/abs/1810.04805)
 
 ### Additional Resources
 
@@ -979,15 +887,33 @@ For students who want to understand the academic foundations and mathematical un
 
 ## What's Next
 
-:::{.callout-note title="Coming Up: Module 12 - Attention"}
+You now have static geometry: every token ID maps to a fixed vector in space, with positional information layered on top. But the embedding for "bank" is the same whether the next word is "river" or "loan" — the representation has no context. That is the question Module 12 answers.
 
-Implement attention mechanisms that let embeddings interact with each other. You'll build the scaled dot-product attention that enables transformers to learn which tokens should influence each other, creating context-aware representations.
+:::{.callout-note title="Coming Up: Module 12 — Attention"}
+
+You'll build scaled dot-product attention: the mechanism that lets every embedding look at every other embedding in the sequence and re-weight itself accordingly. Your static `(B, S, D)` embedding tensor becomes a *context-aware* `(B, S, D)` tensor where each position has been shaped by the rest of the sentence.
 :::
 
-**Preview - How Your Embeddings Get Used in Future Modules:**
+**Where these embeddings show up downstream:**
 
 | Module | What It Does | Your Embeddings In Action |
 |--------|--------------|--------------------------|
+| **12: Attention** | Context-aware representations | `attention(embed_layer(tokens))` produces query, key, value |
+| **13: Transformers** | Full sequence-to-sequence stack | `transformer(embed_layer(src), embed_layer(tgt))` |
+
+## Get Started
+
+:::{.callout-tip title="Interactive Options"}
+
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/11_embeddings/embeddings.ipynb)** - Run interactively in browser, no setup required
+- **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
+:::
+
+:::{.callout-warning title="Save Your Progress"}
+
+Binder sessions are temporary. Download your completed notebook when done, or clone the repository for persistent local work.
+:::
+----------------------|
 | **12: Attention** | Context-aware representations | `attention(embed_layer(tokens))` creates query, key, value |
 | **13: Transformers** | Complete sequence-to-sequence | `transformer(embed_layer(src), embed_layer(tgt))` |
 
