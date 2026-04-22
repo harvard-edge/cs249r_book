@@ -120,7 +120,7 @@ class ValidateCommand:
         refs        — inline-python, cross-refs, citations, inline patterns
         labels      — duplicate labels, orphaned/unreferenced labels
         headers     — section header IDs
-        footnotes   — placement rules, reference integrity
+        footnotes   — placement rules, reference integrity, capitalization
         figures     — captions/alt-text, float flow, image files
         rendering   — render patterns, indexes, dropcaps, parts
         all         — run every check
@@ -154,6 +154,7 @@ class ValidateCommand:
             ("placement", "_run_footnote_placement"),
             ("integrity", "_run_footnote_refs"),
             ("cross-chapter", "_run_footnote_cross_chapter"),
+            ("capitalization", "_run_footnote_capitalization"),
         ],
         "figures": [
             ("captions", "_run_figures"),
@@ -454,7 +455,7 @@ class ValidateCommand:
             "labels": "Duplicate labels, orphans, fig-label underscores",
             "headers": "Section header IDs ({#sec-...}), H1-H5 case policy (MIT Press §10.3.1)",
             "bib": "Bibliography hygiene — schema + canonical forms (§5)",
-            "footnotes": "Placement, integrity, cross-chapter duplicates",
+            "footnotes": "Placement, integrity, cross-chapter duplicates, sentence-case first letter",
             "figures": "Captions, float flow, image files",
             "markup": "Low-level markup (patterns, div-fences, dropcaps)",
             "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
@@ -3915,6 +3916,69 @@ class ValidateCommand:
         return ValidationRunResult(
             name="cross-chapter-footnotes",
             description="Detect duplicate footnote IDs across chapters",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Footnote Capitalization  (delegates to check_footnote_caps.py)
+    # ------------------------------------------------------------------
+    # MIT Press body prose lowercases concept terms ("memory wall",
+    # "scaling laws") per §10.3, but the first letter of a footnote
+    # definition must still be a sentence-case capital. A global
+    # lowercasing sweep can accidentally strip that capital; this
+    # check catches regressions. Intentional lowercase prefixes
+    # (brand names like cuDNN/gRPC/vLLM, math variables like k-Center,
+    # SI units like pJ/MAC) are declared in
+    # book/tools/scripts/mit_press/footnote_caps_allowlist.txt.
+    # The standalone script (with a --fix flag) remains the single
+    # source of truth; this method imports and reuses its core
+    # logic so the check and the fixer cannot drift apart.
+
+    def _run_footnote_capitalization(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        import importlib.util
+        import sys as _sys
+        script_path = (
+            Path(__file__).resolve().parents[2]
+            / "tools" / "scripts" / "mit_press" / "check_footnote_caps.py"
+        )
+        mod_name = "mlsys_check_footnote_caps"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script_path)
+            mod = importlib.util.module_from_spec(spec)
+            # Register before exec_module so @dataclass can resolve cls.__module__.
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        allowlist = mod.load_allowlist(mod.DEFAULT_ALLOWLIST)
+        for f in files:
+            for v in mod.scan_file(f, allowlist):
+                snippet = v.raw_line if len(v.raw_line) <= 160 else v.raw_line[:157] + "..."
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(f),
+                        line=v.line_no,
+                        code="footnote_lowercase_first_letter",
+                        message=(
+                            f"Footnote opens with lowercase {v.first_char!r}; "
+                            f"capitalize, or add the id to footnote_caps_allowlist.txt "
+                            f"if the lowercase is canonical (brand/math/SI)"
+                        ),
+                        severity="error",
+                        context=snippet,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="footnote_capitalization",
+            description="Footnote definitions must begin with a capital letter",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
