@@ -61,17 +61,17 @@ function simulate(config: SimConfig): SimResult {
   const tpCrossesNodes = tpDegree > gpusPerNode;
 
   // Memory: model params + optimizer states (14 bytes/param for mixed-precision Adam)
-  // + activation memory (approximate: 2 * layers * hidden^2 * batch * seq * bytes / TP)
+  // + activation memory (approximate: selective recompute formula 10 * L * B * S * H)
   const modelMemoryGb = FORMULAS.model_memory_gb(model.params_b, precision);
   const optimizerMemoryGb = FORMULAS.model_memory_gb(model.params_b, 12); // 12 bytes for Adam states (fp32 master + momentum + variance)
-  const activationMemoryGb = (2 * model.layers * model.hidden_dim * model.hidden_dim * (batchSize / dpDegree) * precision) / (tpDegree * 1e9);
+  const activationMemoryGb = (10 * model.layers * (batchSize / dpDegree) * seqLen * model.hidden_dim) / (tpDegree * 1e9);
   const totalMemoryPerGpu = (modelMemoryGb + optimizerMemoryGb) / (tpDegree * ppDegree) + activationMemoryGb;
   const memoryPerGpu = totalMemoryPerGpu;
   const fitsInMemory = memoryPerGpu < hardware.memory_gb * 0.8; // 80% usable
 
-  // Compute (forward + backward = 3x forward)
+  // Compute (forward + backward)
   const tokensPerIter = batchSize * seqLen;
-  const flopsPerIter = model.flops_per_token * tokensPerIter * 3; // 3x for fwd+bwd
+  const flopsPerIter = model.flops_per_token * tokensPerIter; 
   const computeTimeMs = FORMULAS.compute_time_ms(flopsPerIter, hardware.compute_tflops, numGpus, mfu);
 
   // Communication — AllReduce for data parallelism
