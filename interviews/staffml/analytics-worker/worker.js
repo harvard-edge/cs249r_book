@@ -39,10 +39,15 @@ const VALID_EVENT_TYPES = new Set([
   'page_view', 'search_query',
   'star_gate_shown', 'star_gate_verified',
   'improvement_suggested', 'progress_exported', 'progress_imported',
+  // Runtime error reports — captured by window.onerror + unhandledrejection.
+  // Stack traces can exceed the default per-event cap, so these events are
+  // sized against MAX_ERROR_EVENT_SIZE instead.
+  'client_error',
 ]);
 
 const MAX_EVENTS_PER_REQUEST = 100;
-const MAX_EVENT_SIZE = 1024; // bytes
+const MAX_EVENT_SIZE = 1024;        // bytes — default per-event cap
+const MAX_ERROR_EVENT_SIZE = 8192;  // bytes — larger cap for client_error stacks
 
 export default {
   async fetch(request, env) {
@@ -106,8 +111,9 @@ async function handleEvents(request, env, corsHeaders) {
     // Check event type
     if (!event.type || !VALID_EVENT_TYPES.has(event.type)) continue;
 
-    // Reject if event is too large (prevents abuse)
-    if (JSON.stringify(event).length > MAX_EVENT_SIZE) continue;
+    // Size cap: client_error gets a bigger envelope to fit stack traces.
+    const sizeLimit = event.type === 'client_error' ? MAX_ERROR_EVENT_SIZE : MAX_EVENT_SIZE;
+    if (JSON.stringify(event).length > sizeLimit) continue;
 
     // Reject if any value looks like PII (email pattern)
     const values = Object.values(event).map(String).join(' ');
@@ -122,7 +128,9 @@ async function handleEvents(request, env, corsHeaders) {
       'value', 'perceived', 'seconds', 'napkinGrade',
       'hadUserAnswer', 'isReturning', 'screenWidth',
       'query', 'topicResults', 'questionResults',
-      'userLevel', 'industryRole', 'yearsExperience', // Added for IRT telemetry
+      'userLevel', 'industryRole', 'yearsExperience', // IRT telemetry
+      // client_error fields
+      'message', 'stack', 'url', 'userAgent',
     ];
     for (const field of allowedFields) {
       if (event[field] !== undefined) clean[field] = event[field];

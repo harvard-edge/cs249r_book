@@ -77,21 +77,24 @@ jobs:
       - name: vault check --strict (corpus invariants)
         run: vault check --strict --vault-dir interviews/vault
 
-      - name: vault build + release_hash regression guard
+      - name: vault build (reproducibility smoke test)
+        # Historically this step also compared release_hash against a pinned
+        # value in corpus-equivalence-hash.txt. That pin was load-bearing
+        # when corpus.json was the source of truth (guarded against the
+        # committed-JSON drifting from the computed-from-YAMLs hash). Post-
+        # v1.0 the YAMLs ARE the source of truth and the build is
+        # deterministic-from-YAMLs, so the pin was a circular check that
+        # bounced every YAML-touching PR unless the contributor manually
+        # bumped the hash. Dropped 2026-04-22. The real integrity comes
+        # from vault check --strict + codegen drift check above.
         run: |
           vault build --vault-dir interviews/vault --release-id regression-ci
-          EXPECTED=$(cat interviews/vault/corpus-equivalence-hash.txt | tr -d '\n')
-          ACTUAL=$(python3 -c "
+          RELEASE_HASH=$(python3 -c "
           import sqlite3
           conn = sqlite3.connect('interviews/vault/vault.db')
           print(conn.execute(\"SELECT value FROM release_metadata WHERE key='release_hash'\").fetchone()[0])
           ")
-          if [ "$EXPECTED" != "$ACTUAL" ]; then
-            echo "::error::release_hash drift: expected=$EXPECTED actual=$ACTUAL"
-            echo "If the change is intentional, update corpus-equivalence-hash.txt in the same commit."
-            exit 1
-          fi
-          echo "release_hash stable: $ACTUAL"
+          echo "release_hash: $RELEASE_HASH"
 
       - name: vault codegen --check (LinkML/Pydantic/DDL/TS drift)
         run: vault codegen --check

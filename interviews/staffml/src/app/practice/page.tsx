@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
+import { ScenarioSkeleton } from "@/components/ScenarioSkeleton";
 import NapkinCalc from "@/components/NapkinCalc";
 import AskInterviewer from "@/components/AskInterviewer";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
@@ -784,9 +785,13 @@ function PracticePage() {
                       {current.title}
                     </h2>
                     <div className="prose max-w-none">
-                      <p className="text-textSecondary leading-relaxed text-base">
-                        {cleanScenario(current.scenario)}
-                      </p>
+                      {current.scenario ? (
+                        <p className="text-textSecondary leading-relaxed text-base">
+                          {cleanScenario(current.scenario)}
+                        </p>
+                      ) : (
+                        <ScenarioSkeleton />
+                      )}
                     </div>
 
                   </motion.div>

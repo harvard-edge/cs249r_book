@@ -41,7 +41,9 @@ export type AnalyticsEvent =
   // Feedback
   | { type: 'improvement_suggested'; questionId: string }
   | { type: 'progress_exported' }
-  | { type: 'progress_imported' };
+  | { type: 'progress_imported' }
+  // Runtime errors — captured by window.onerror + unhandledrejection
+  | { type: 'client_error'; message: string; stack?: string; url: string; userAgent: string };
 
 interface StoredEvent {
   event: AnalyticsEvent;
