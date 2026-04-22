@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: global-0066
+track: global
+level: L5
+zone: diagnosis
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Root-Causing AllToAll Tail Latency
+scenario: You are serving a Mixture of Experts (MoE) model on 64 GPUs across 8 nodes connected via a 400
+  Gbps (50 GB/s) non-blocking RoCEv2 switch. During the expert routing phase, the AllToAll collective
+  (32 MB total payload per GPU) is expected to take ~0.6-1.0 ms. Instead, profiling shows erratic tail
+  latencies of 15-20 ms. Switch telemetry indicates massive spikes in Priority Flow Control (PFC) pause
+  frames and buffer drops.
+details:
+  realistic_solution: The symptoms (high tail latency, PFC pause storms, buffer drops) point directly
+    to a network incast problem. Decomposing the AllToAll latency reveals that while propagation and nominal
+    serialization delays are sub-millisecond, the queueing delay and timeout/retransmission penalties
+    completely dominate. In a flat AllToAll, N-1 GPUs simultaneously send data to 1 target GPU. For 64
+    GPUs and a 32MB payload, each GPU sends 0.5MB to every other GPU. At the switch, 63 flows of 0.5MB
+    arrive simultaneously for each destination port, creating a massive microburst. This instantly overwhelms
+    the port's buffer capacity, triggering PFC pauses (which halt senders) or packet drops (which force
+    expensive TCP/RoCE timeouts). The root cause is the synchronized many-to-one traffic pattern. The
+    solution is to implement software-level pacing, network topology-aware routing, or a hierarchical
+    AllToAll to break up the microbursts.
+  common_mistake: Assuming the application is compute-bound and attempting to overlap communication with
+    computation without fixing the underlying network incast issue.
+  napkin_math: 'Payload M = 32 MB per GPU, N = 64 GPUs. Chunk per destination = 32 MB / 64 = 0.5 MB.
+
+    Microburst at single switch destination port = 63 senders * 0.5 MB = 31.5 MB arriving almost instantly.
+
+    Typical switch buffer per port = ~16 MB.
+
+    Overflow = 31.5 MB - 16 MB = 15.5 MB of data that cannot be buffered.
+
+    Nominal serialization time = 31.5 MB / 50 GB/s = 0.63 ms.
+
+    Queueing + PFC pause / Retransmission penalty = ~15 ms (dominating the 0.63 ms serialization time).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

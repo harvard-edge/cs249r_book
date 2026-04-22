@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-0943
+track: cloud
+level: L5
+zone: evaluation
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Mitigating Memory Fragmentation in Dynamic LLM Serving
+scenario: You are optimizing a production inference service for a 13B parameter LLM on a single A100 80GB
+  GPU. The service handles highly variable sequence lengths (128 to 2048 tokens). Despite the theoretical
+  peak memory usage for weights and KV cache being around 55GB, the system periodically crashes with 'CUDA
+  out of memory' when a 2048-token request arrives after a burst of 128-token requests. Profiling shows
+  heavy external fragmentation with hundreds of small idle blocks scattered in the framework's caching
+  allocator. Team A proposes disabling the caching allocator to manage memory manually via direct `cudaMalloc`
+  calls. Team B proposes padding all requests to 2048 tokens to standardize tensor allocation sizes. Evaluate
+  both proposals and design a better memory management strategy.
+details:
+  realistic_solution: Reject both proposals. Direct `cudaMalloc` (Team A) adds ~10-50us of CPU-GPU sync
+    latency per allocation, severely bottlenecking the CPU. Padding to 2048 (Team B) causes extreme compute
+    waste. The optimal solution is to tune the caching allocator to reduce block splitting (e.g., `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`)
+    to prevent tiny fragments, and implement PagedAttention to allocate the KV cache in fixed-size, non-contiguous
+    blocks (e.g., 16 tokens per block), structurally eliminating external fragmentation without padding
+    compute.
+  common_mistake: Candidates often accept Team B's padding strategy without calculating the massive quadratic
+    compute penalty, or agree with Team A without realizing that direct `cudaMalloc` calls introduce severe
+    CPU-GPU synchronization latency.
+  napkin_math: 'Team A latency: 1,000 allocations/step * 20us = 20ms sync overhead per step. Team B compute
+    waste: Padding an average 512-token sequence to 2048 increases attention FLOPs by (2048/512)^2 = 16x.
+    PagedAttention block size: 16 tokens * 40 heads * 128 head dim * 2 bytes = ~163KB per block for a
+    single K or V tensor, reducing external fragmentation to <4% with zero compute padding overhead.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-033
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 16 tokens * 40 heads * 128 dim * 2 bytes = 163,840 bytes. This is exactly 160 KB using standard binary
+  units (1024 bytes/KB), or ~163.8 KB using decimal units. Stating ~163KB mixes conventions.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:12:46.938288'

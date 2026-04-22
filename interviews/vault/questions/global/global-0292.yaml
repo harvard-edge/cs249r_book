@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: global-0292
+track: global
+level: L6+
+zone: mastery
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Expert Parallelism for MoE Training
+scenario: Design the parallelism strategy for training a Mixtral-style 8×7B MoE model (47B total params,
+  top-2 routing, 8 experts per layer) on 64 H100 GPUs across 8 nodes. The model has 32 transformer layers
+  with MoE FFN. Specify how to partition experts, handle the all-to-all communication for token routing,
+  and estimate communication overhead.
+details:
+  realistic_solution: 'Configuration: EP=8 (expert parallel), DP=8 (8 nodes). Each GPU in an EP group
+    holds 1 of the 8 experts per layer. Shared layers (attention, embeddings) are replicated across all
+    8 GPUs in the EP group (via DP). (1) Expert placement: within each node (8 GPUs, NVLink), each GPU
+    holds a different expert for all 32 MoE layers. The model has 47B total params: ~13B shared and 34B
+    MoE params. Each GPU holds 1/8th of the MoE params (4.25B params) = 8.5 GB. Shared attention params:
+    ~13B = 26 GB. Per-GPU: 8.5 + 26 = 34.5 GB weights + optimizer states. (2) All-to-all communication:
+    top-2 routing means each token goes to 2 of 8 experts. Tokens must be dispatched to the correct GPU.
+    For batch=32, seq=2048: 32 × 2048 = 65,536 tokens × 2 copies = 131,072 token-expert pairs. Each token''s
+    hidden state: 4096 × 2B = 8 KB. All-to-all volume per layer: 131,072 × 8 KB / 8 GPUs = 128 MB per
+    GPU sent + 128 MB received. Over NVLink (450 GB/s effective): 256 MB / 450 = 0.57ms per layer × 32
+    layers = 18.2ms per forward. (3) Cross-node DP gradient sync: shared attention params (13B × 2B =
+    26 GB) AllReduce over IB: 26 GB / 50 GB/s × 2 = 1.04s (overlapped with backward). (4) Total comm overhead:
+    ~36ms (all-to-all forward+backward) + residual DP sync. With 200ms compute per step: 36/200 = 18%
+    communication overhead for expert routing.'
+  common_mistake: Treating MoE like a dense model and using standard TP/PP. MoE requires expert parallelism
+    — distributing experts across GPUs — which introduces all-to-all communication patterns fundamentally
+    different from AllReduce.
+  napkin_math: 'All-to-all per layer: 65K tokens × 2 routes × 8KB / 8 GPUs = 128 MB/GPU. NVLink: 256 MB
+    / 450 GB/s = 0.57ms × 32 layers = 18ms forward. DP sync: 26 GB / 50 GB/s = 0.52s (overlapped). Expert
+    routing overhead: ~18%.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: global-0135
+track: global
+level: L5
+zone: evaluation
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Paged Attention Internal Fragmentation
+scenario: You are designing a high-throughput translation API. The system requires a batch size of 128
+  to meet the 2000 QPS throughput SLA. Average prompt + generation length is 80 tokens. You configure
+  PagedAttention with a block size of 512 tokens to minimize pointer overhead. The system constantly OOMs
+  at a batch size of just 32, failing the throughput requirement.
+details:
+  realistic_solution: Decompose the memory allocation latency and capacity. The architectural failure
+    is massive internal memory fragmentation. With a block size of 512 tokens, every request, regardless
+    of its actual length, reserves a minimum of one full block. Since the average request is 80 tokens,
+    432 tokens of KV cache memory per request are pre-allocated but completely wasted. This is an 84%
+    memory waste. The architecture requirement is to reduce the PagedAttention block size to 16 or 32
+    tokens. This drastically reduces internal fragmentation, freeing up enough VRAM to easily support
+    the required batch size of 128 without buying more hardware.
+  common_mistake: Adding more GPUs to increase total VRAM, or reducing the model's precision to INT4 to
+    fit the batch size.
+  napkin_math: 'KV cache per token for Llama-2 13B (40 layers, 40 KV heads, head_dim=128, FP16): 2 (K+V)
+    × 40 × 40 × 128 × 2 bytes = 819,200 bytes ≈ 800 KB per token. This already accounts for all layers.
+    Block size 512 tokens = 512 × 800 KB = 400 MB per block. For batch=128 requests (avg 80 tokens each):
+    reserved = 128 blocks × 400 MB = 50 GB. Actual needed: 128 × 80 × 800 KB = 8 GB. Wasted: 42 GB — causes
+    OOM on an 80 GB GPU (model weights ~26 GB + 50 GB reserved = 76 GB, no room for activations). Block
+    size 16: each request needs ceil(80/16) = 5 blocks × 16 × 800 KB = 64 MB. Total reserved: 128 × 64
+    MB = 8.2 GB ≈ actual usage. Problem solved without extra hardware.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The KV cache size calculation for Llama-2 13B (800 KB per token) seems significantly overestimated;
+  a 13B model's KV cache is typically in the order of ~200-300KB per token, not 800KB. This overestimation
+  leads to larger-than-expected memory usage in the napkin math.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The napkin math incorrectly multiplies the total KV cache memory by the number of layers, vastly overstating
+  the memory usage.
+- The claimed KV cache size of ~100KB per token for Llama-2 13B is factually incorrect; the actual size
+  is closer to 800KB per token.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

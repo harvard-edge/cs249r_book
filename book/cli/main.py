@@ -31,6 +31,7 @@ from cli.commands.info import InfoCommand
 from cli.commands.bib import BibCommand
 from cli.commands.render import RenderCommand
 from cli.commands.newsletter import NewsletterCommand
+from cli.commands.headings import HeadingsCommand
 
 console = Console()
 
@@ -66,6 +67,7 @@ class MLSysBookCLI:
         self.bib_command = BibCommand(self.config_manager, self.chapter_discovery)
         self.render_command = RenderCommand(self.config_manager, self.chapter_discovery)
         self.newsletter_command = NewsletterCommand(self.config_manager, verbose=verbose)
+        self.headings_command = HeadingsCommand(self.config_manager, self.chapter_discovery)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -405,6 +407,10 @@ class MLSysBookCLI:
         """Handle newsletter command group (new, list, preview, publish, fetch, status)."""
         return self.newsletter_command.run(args)
 
+    def handle_headings_command(self, args):
+        """Handle headings command group (check, dry-run, apply)."""
+        return self.headings_command.run(args)
+
 
     def handle_debug_command(self, args):
         """Handle debug command.
@@ -499,6 +505,7 @@ class MLSysBookCLI:
             "format": self.handle_format_command,
             "info": self.handle_info_command,
             "bib": self.handle_bib_command,
+            "headings": self.handle_headings_command,
             "render": self.handle_render_command,
             "newsletter": self.handle_newsletter_command,
             "setup": self.handle_setup_command,

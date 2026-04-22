@@ -1,9 +1,18 @@
 <div align="center">
   <h1>🗺️ The Blueprint — Instructor Site</h1>
-  <blockquote>
-    <b>Status: Under Active Development</b><br>
-    This site is being actively built and refined. Content, structure, and styling may change frequently. SVG diagrams are placeholder quality and will be professionally refined before launch.
-  </blockquote>
+  <!-- EARLY-RELEASE-CALLOUT:START -->
+  <table border="0" cellspacing="0" cellpadding="0" width="92%">
+  <tr><td align="center" bgcolor="#f6f8fa">
+  <table border="0" cellspacing="0" cellpadding="20" width="100%">
+  <tr><td align="center">
+  <h3>📌 Early release (2026)</h3>
+  <p align="center">This instructor site shipped with the <b>2026</b> MLSysBook refresh and is <b>actively iterated</b>: syllabi, rubrics, layouts, and diagrams (including SVGs) will keep improving as we teach from it.</p>
+  <p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+  </td></tr>
+  </table>
+  </td></tr>
+  </table>
+  <!-- EARLY-RELEASE-CALLOUT:END -->
 </div>
 
 ---
@@ -12,7 +21,15 @@
 
 "The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course.
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="20%">Area</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="80%">What you get</th>
+    </tr>
+  </thead>
   <tbody>
     <tr>
       <td width="15%" align="center"><b>📅 Syllabi</b></td>
@@ -39,7 +56,9 @@
       <td><b>FAQ</b> for adopting instructors.</td>
     </tr>
   </tbody>
+</table></td></tr>
 </table>
+</div>
 
 ---
 

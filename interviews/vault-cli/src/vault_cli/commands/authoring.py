@@ -38,11 +38,64 @@ def _short_hash(title: str) -> str:
     return hashlib.sha256(title.encode("utf-8")).hexdigest()[:6]
 
 
+def _id_hash(title: str, topic: str) -> str:
+    """ID scheme v2 hash: first 4 hex chars of sha256(title + "\\n" + topic).
+
+    Matches the recipe documented in interviews/vault/docs/ID_SCHEMES.md.
+    Including the topic defends against two unrelated questions with
+    identical titles hashing identically.
+    """
+    payload = f"{title}\n{topic}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:4]
+
+
+def _yyyymm() -> str:
+    """Current year-month as 6 digits, for the v2 ID scheme."""
+    return datetime.now(UTC).strftime("%Y%m")
+
+
 def _slug(s: str) -> str:
     keep = "".join(c if c.isalnum() or c == "-" else "-" for c in s.lower())
     while "--" in keep:
         keep = keep.replace("--", "-")
     return keep.strip("-") or "untitled"
+
+
+def _new_question_id(track: str, title: str, topic: str, existing_ids: set[str]) -> tuple[str, str]:
+    """Mint a v2 question ID: <track>-<yyyymm>-<4hex>.
+
+    On collision within the same (track, yyyymm) bucket, increment the
+    4-hex suffix to the next free hex until a free slot is found.
+    Returns (id, hex_used).
+    """
+    yyyymm = _yyyymm()
+    base_hex = _id_hash(title, topic)
+    # Increment hex on collision (65,536 slots per bucket; collisions rare).
+    n = int(base_hex, 16)
+    for _ in range(0x10000):
+        candidate_hex = f"{n:04x}"
+        qid = f"{track}-{yyyymm}-{candidate_hex}"
+        if qid not in existing_ids:
+            return qid, candidate_hex
+        n = (n + 1) & 0xFFFF
+    raise RuntimeError(f"ID-space exhausted for bucket {track}-{yyyymm}")
+
+
+def _new_chain_id(track: str, topic: str, existing_ids: set[str]) -> str:
+    """Mint a v2 chain ID: chain-<track>-<topic-slug>-<yyyymm>[-<suffix>].
+
+    On collision add a single-letter suffix (a, b, c, …) to disambiguate.
+    """
+    yyyymm = _yyyymm()
+    slug = _slug(topic)
+    base = f"chain-{track}-{slug}-{yyyymm}"
+    if base not in existing_ids:
+        return base
+    for letter in "abcdefghijklmnopqrstuvwxyz":
+        candidate = f"{base}-{letter}"
+        if candidate not in existing_ids:
+            return candidate
+    raise RuntimeError(f"Chain-ID space exhausted for bucket {base}")
 
 
 def _git_user_email() -> str | None:
@@ -135,9 +188,8 @@ def register(app: typer.Typer) -> None:
         Runs ``git pull --rebase`` on the registry first to reduce collision
         rate, per §3.3 concurrency contract.
         """
-        classification = Classification(track=track, level=level, zone=zone)
-        topic_slug = _slug(topic)
-        h = _short_hash(title)
+        # v1.0: classification lives in YAML, filesystem uses track only.
+        # v2 ID scheme: <track>-<yyyymm>-<4hex> (see docs/ID_SCHEMES.md).
 
         # §3.3: git pull --rebase on the registry before allocation.
         if not skip_rebase:
@@ -149,26 +201,26 @@ def register(app: typer.Typer) -> None:
                     check=False, capture_output=True,
                 )
 
-        # Allocate seq by scanning existing files in the cell.
-        cell_dir = path_for_question(vault_dir, classification, "").parent
+        # Build the set of existing IDs so _new_question_id can avoid collisions.
+        cell_dir = path_for_question(vault_dir, track.value, "").parent
         cell_dir.mkdir(parents=True, exist_ok=True)
-        seq = 1
-        while True:
-            filename = f"{topic_slug}-{h}-{seq:04d}.yaml"
-            candidate = cell_dir / filename
-            if not candidate.exists():
-                break
-            seq += 1
+        existing_ids: set[str] = set()
+        for p in cell_dir.glob("*.yaml"):
+            existing_ids.add(p.stem)
 
-        qid = f"{track.value}-{level.value}-{zone.value}-{topic_slug}-{h}-{seq:04d}"
+        qid, _ = _new_question_id(track.value, title, topic, existing_ids)
         now = _now()
 
         author = _git_user_email()
+        # v1.0: classification lives in the YAML body, not the path.
         payload: dict = {
-            "schema_version": 1,
+            "schema_version": "1.0",
             "id": qid,
-            "title": title,
+            "track": track.value,
+            "level": level.value,
+            "zone": zone.value,
             "topic": topic,
+            "title": title,
             "status": "draft",
             "created_at": now,
             "last_modified": now,
@@ -368,7 +420,7 @@ def register(app: typer.Typer) -> None:
                 )
                 raise typer.Exit(code=ExitCode.VALIDATION_FAILURE)
 
-        target = path_for_question(vault_dir, classification, match.path.name)
+        target = path_for_question(vault_dir, classification.track.value, match.path.name)
         target.parent.mkdir(parents=True, exist_ok=True)
 
         if dry_run:

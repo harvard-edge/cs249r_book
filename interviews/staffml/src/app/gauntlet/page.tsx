@@ -10,7 +10,8 @@ import clsx from "clsx";
 import Link from "next/link";
 import {
   getTracks, getLevels, selectGauntletQuestions,
-  getQuestionsByFilter, Question, cleanScenario
+  getQuestionsByFilter, Question, cleanScenario,
+  getQuestionFullDetail,
 } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
 import { buildReportUrl } from "@/lib/issue-url";
@@ -161,25 +162,6 @@ export default function GauntletPage() {
     }
   }, [timeRemaining, phase]);
 
-  // Keyboard shortcuts: Cmd+Enter to reveal, 1-4 for scoring
-  useEffect(() => {
-    if (phase !== "active") return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLTextAreaElement) {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !showAnswer) {
-          e.preventDefault();
-          revealAnswer();
-        }
-        return;
-      }
-      if (showAnswer && ['1', '2', '3', '4'].includes(e.key)) {
-        scoreAndNext(parseInt(e.key) - 1);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [phase, showAnswer]);
-
   const isDesignMode = selectedDuration === 3; // "Design (1 deep)"
 
   const startGauntlet = useCallback(() => {
@@ -213,6 +195,13 @@ export default function GauntletPage() {
     setTimeRemaining(dur.minutes * 60);
     setPhase("active");
     track({ type: 'gauntlet_started', track: selectedTrack, level: selectedLevel, questionCount: selected.length });
+    // Hydrate scenario/details for the whole session in parallel. When the
+    // worker responses come back, swap the questions state to the hydrated
+    // copies. Until then the UI shows summaries (empty scenario/details).
+    Promise.all(selected.map(q => getQuestionFullDetail(q.id))).then(results => {
+      const hydrated = results.filter((q): q is Question => q !== undefined);
+      if (hydrated.length === selected.length) setQuestions(hydrated);
+    });
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
   const revealAnswer = () => {
@@ -228,7 +217,7 @@ export default function GauntletPage() {
     setShowAnswer(true);
   };
 
-  const scoreAndNext = (score: number) => {
+  const scoreAndNext = useCallback((score: number) => {
     const q = questions[currentIdx];
     const attempt: AttemptRecord = {
       questionId: q.id,
@@ -276,7 +265,27 @@ export default function GauntletPage() {
       track({ type: 'gauntlet_completed', track: selectedTrack, level: selectedLevel, pct: pctScore, questionCount: questions.length });
       setPhase("results");
     }
-  };
+  }, [questions, currentIdx, scores, timeRemaining, selectedDuration, selectedTrack, selectedLevel]);
+
+  // Keyboard shortcuts: Cmd+Enter to reveal, 1-4 for scoring.
+  // Placed after scoreAndNext so the stable callback reference is in scope.
+  useEffect(() => {
+    if (phase !== "active") return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLTextAreaElement) {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !showAnswer) {
+          e.preventDefault();
+          revealAnswer();
+        }
+        return;
+      }
+      if (showAnswer && ['1', '2', '3', '4'].includes(e.key)) {
+        scoreAndNext(parseInt(e.key) - 1);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [phase, showAnswer, scoreAndNext]);
 
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);

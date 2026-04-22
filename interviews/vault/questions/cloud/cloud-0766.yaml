@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: cloud-0766
+track: cloud
+level: L6+
+zone: mastery
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: create
+phase: training
+title: The Split-Brain Checkpoint
+scenario: You're training a 175B model across 512 GPUs spanning two data center buildings connected by
+  a 400 Gbps WAN link. During a checkpoint at step 100,000, the WAN link goes down for 8 seconds. Building
+  A's 256 GPUs complete their checkpoint writes. Building B's 256 GPUs detect the partition and also write
+  a checkpoint — but their gradient AllReduce was incomplete when the link dropped. Both buildings think
+  they have a valid step-100,000 checkpoint. How do you recover without losing more than 1,000 steps of
+  work?
+details:
+  realistic_solution: 'This is a distributed consensus problem applied to ML training. During the AllReduce
+    at step 100,000, each GPU contributes its local gradients. The WAN failure means the AllReduce was
+    partitioned: Building A''s GPUs reduced among themselves (256-GPU partial reduce), and Building B''s
+    GPUs did the same. Both partitions applied a *partial* gradient update — each building''s model diverged
+    from the other at step 100,000. Neither checkpoint is valid for the full 512-GPU training run. Recovery
+    requires: (1) **Identify the last consistent checkpoint** — step 99,000 (the previous checkpoint,
+    completed before the partition). (2) **Validate consistency** — compare the model weight checksums
+    from both buildings at step 99,000; they must be bit-identical. (3) **Replay from step 99,000** —
+    lose 1,000 steps but guarantee consistency. Prevention: (1) implement a **two-phase checkpoint protocol**
+    — Phase 1: all ranks write to local storage; Phase 2: a global barrier confirms all ranks completed;
+    only then is the checkpoint marked valid. If the barrier fails, the checkpoint is discarded. (2) Use
+    **asynchronous checkpointing** that snapshots model state *between* AllReduce calls, when the model
+    is in a globally consistent state.'
+  common_mistake: '"Just use Building A''s checkpoint — it completed first" or "Average the two checkpoints."
+    Building A''s checkpoint may also be inconsistent (it completed the write but the AllReduce that preceded
+    it was interrupted), and averaging inconsistent optimizer states produces garbage.'
+  napkin_math: '**Cost of losing 1,000 steps:** 512 GPUs × ~4 s/step × 1000 steps = **2,048,000 GPU-seconds**
+    = **569 GPU-hours**. At $3.50/hr: **$1,992** of lost compute. **Cost of using an inconsistent checkpoint**
+    (if not caught): Building A''s model diverges from Building B''s by one full gradient step computed
+    on half the data. The effective learning rate doubled (each building applied the full LR to a half-batch
+    gradient). Over subsequent steps, the inconsistency compounds — within ~500 steps, the model may diverge
+    to an unrecoverable state, wasting all compute from step 100,000 onward. If caught at step 110,000:
+    lost = 10,000 steps = **$19,920**. **Two-phase checkpoint overhead:** Global barrier across WAN: ~**50
+    ms** (one round-trip). Checkpoint write: ~**60 s** for 175B model. Overhead: $50\text{ ms} / 60\text{
+    s} = 0.08\%$ — negligible. The $0.08\%$ overhead prevents a potential $20K loss.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: cloud-chain-151
+  position: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

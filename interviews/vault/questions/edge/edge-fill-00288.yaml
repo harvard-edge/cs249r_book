@@ -1,0 +1,86 @@
+schema_version: '1.0'
+id: edge-fill-00288
+track: edge
+level: L5
+zone: specification
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: 'Jetson Orin: Real-time 4K Video Object Detection Data Movement Strategy'
+scenario: You are tasked with designing an embedded ML inference pipeline for real-time object detection
+  on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W). The system needs to process a 4K video
+  stream (3840x2160) at 30 FPS. Each frame undergoes CPU pre-processing, followed by INT8 inference on
+  the GPU, and finally, CPU post-processing and display. Outline a comprehensive data movement strategy
+  that minimizes end-to-end latency and maximizes throughput, ensuring the system operates within the
+  60W power budget. Detail how you would leverage DMA transfers, zero-copy techniques, and pinned memory.
+  Quantify the expected data transfer rates and discuss the potential latency reductions achieved by your
+  proposed techniques.
+details:
+  realistic_solution: 'The optimal solution involves a multi-pronged approach:
+
+    1.  **Pinned Memory:** Allocate all host-side buffers (for input frames and output results) as pinned
+    memory (`cudaHostAlloc`). This guarantees direct memory access (DMA) transfers and prevents page faults,
+    improving transfer efficiency.
+
+    2.  **Asynchronous Transfers & Streams:** Utilize CUDA streams to perform asynchronous DMA transfers
+    (`cudaMemcpyAsync`). This allows the CPU to continue pre-processing one frame while the GPU performs
+    inference on a previous frame and/or transfers data for the next. Two or more streams can be used
+    to overlap computation and communication.
+
+    3.  **Zero-Copy (if applicable):** For smaller data portions or if memory permits, explore CUDA Unified
+    Memory with `cudaManaged` to enable potential zero-copy access where the GPU can directly access host
+    memory. On Jetson, physical memory is unified, making explicit zero-copy techniques (like `cudaHostRegister`
+    for larger buffers) highly effective for avoiding explicit data duplication between CPU and GPU memory
+    spaces.
+
+    4.  **Batching:** If possible, batch multiple frames for GPU inference to amortize the kernel launch
+    and data transfer overheads. This would require buffering several frames on the CPU side.
+
+    5.  **Optimized Pre/Post-processing:** Ensure CPU pre-processing (e.g., scaling, normalization) and
+    post-processing (e.g., NMS, drawing bounding boxes) are highly optimized to minimize their contribution
+    to overall latency.'
+  common_mistake: A common mistake is to rely on standard synchronous CPU-GPU memory copies (`cudaMemcpy`),
+    leading to significant pipeline stalls. Neglecting to use pinned (page-locked) host memory can incur
+    additional page-swapping overhead. Furthermore, failing to overlap data transfers with computation,
+    or making many small, inefficient transfers instead of larger, batched operations, can severely bottleneck
+    throughput and increase latency on resource-constrained edge devices like the Jetson Orin.
+  napkin_math: '1.  **Input Data Size per Frame:** 3840 * 2160 pixels * 3 channels * 1 byte/pixel (for
+    INT8 inference after conversion) = 24,883,200 bytes ≈ 23.73 MB.
+
+    2.  **Input Data Transfer Rate:** 23.73 MB/frame * 30 FPS = 711.9 MB/s.
+
+    3.  **Output Data Size per Frame:** Assuming object detection output (e.g., 100 bounding boxes, each
+    with 6 floats = 24 bytes) results in ~24KB per frame. Let''s conservatively estimate 1 MB/frame for
+    complex results/metadata for display: 1 MB/frame * 30 FPS = 30 MB/s.
+
+    4.  **Total Required Data Transfer Rate:** 711.9 MB/s (input) + 30 MB/s (output) ≈ 741.9 MB/s.
+
+    5.  **Jetson Orin LPDDR5 Bandwidth:** NVIDIA Jetson Orin AGX models feature LPDDR5 with bandwidths
+    up to 204.8 GB/s (Orin AGX 64GB/32GB). While the theoretical peak is very high, effective bandwidth
+    will be lower due to system contention. However, 741.9 MB/s is well within effective bandwidth limits.
+
+    6.  **Latency Impact of Basic Copy:** If a 23.73 MB transfer takes 1ms (at an effective 23.73 GB/s,
+    which is very fast, but serves as an example), this 1ms consumes ~3% of the 33.3ms frame budget. Without
+    zero-copy or async operations, this 1ms adds directly to pipeline latency. Using zero-copy and asynchronous
+    DMA can reduce this explicit transfer latency to near zero by overlapping it or avoiding the copy
+    altogether, effectively hiding the data movement cost behind computation.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Reasoning Competency, Knowledge Area, and Mode are missing. Napkin Math calculation is incomplete.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

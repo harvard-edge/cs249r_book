@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-2086
+track: cloud
+level: L3
+zone: fluency
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: MoE AllToAll Communication Cost
+scenario: You are training a Mixture-of-Experts (MoE) model with 8 experts distributed across 8 GPUs (one
+  expert per GPU). Each token is routed to top-2 experts. With a batch of 4096 tokens and hidden dimension
+  4096 in BF16, estimate the AllToAll communication volume per MoE layer.
+details:
+  realistic_solution: 'Each token: 4096 dims * 2 bytes (BF16) = 8 KB. With top-2 routing, each token is
+    sent to 2 experts. Forward AllToAll: 4096 tokens * 2 routes * 8 KB = 64 MB total dispatched. Return
+    AllToAll: same 64 MB back. Total: 128 MB per MoE layer (both directions). Per-GPU view: each GPU holds
+    4096/8 = 512 local tokens. Each token routed to 2 experts; with uniform routing, 1/8 of routes stay
+    local, 7/8 go remote. Per-GPU send volume: 512 * 2 * (7/8) * 8 KB = 7 MB. All 8 GPUs send in parallel,
+    so the network must handle 7 MB per GPU concurrently.'
+  common_mistake: Forgetting that AllToAll is bidirectional — tokens must be sent TO experts and results
+    sent BACK. Also forgetting the top-2 routing doubles the volume vs top-1.
+  napkin_math: 'Per token: 4096 * 2B = 8 KB. | Top-2 * 4096 tokens = 8192 token-expert pairs. | Forward
+    dispatch total: 8192 * 8 KB = 64 MB. | Return combine: 64 MB. | Grand total: ~128 MB per layer. |
+    Per-GPU send: 512 tokens * 2 * (7/8) * 8 KB = 7 MB (parallel across all GPUs). | At 200 GB/s NVLink
+    per GPU: 7 MB / 200 GB/s = ~0.035 ms per layer.'
+  options:
+  - ~8 MB — each GPU only sends tokens it can't process locally.
+  - ~64 MB — tokens dispatched once to the selected experts.
+  - ~128 MB — tokens dispatched to top-2 experts and results returned.
+  - ~512 MB — all tokens are broadcast to all 8 GPUs.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-452
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- The per-GPU send volume is calculated incorrectly as 56 MB; it should be the total volume divided by
+  the number of GPUs (64MB / 8 = 8MB sent per GPU, with 7MB going over the network).
+- The latency calculation incorrectly divides the total communication volume by the link bandwidth, ignoring
+  that communication happens in parallel.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

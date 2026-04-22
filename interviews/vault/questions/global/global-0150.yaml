@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: global-0150
+track: global
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: The Phantom Coherency Bug
+scenario: A sensor fusion model samples an IMU at 1kHz via DMA to a 4KB SRAM buffer to save power. Inference
+  runs every 100ms. The model periodically outputs random garbage. Adding a basic printf logging statement
+  to debug the input buffer magically fixes the accuracy.
+details:
+  realistic_solution: The root cause is a D-Cache coherency failure, a classic locality issue on Cortex-M7.
+    The DMA controller writes sensor data directly to the physical SRAM, bypassing the CPU's L1 Data Cache.
+    When the CPU runs inference, it reads stale data from the local D-Cache instead of the fresh DMA data.
+    Adding a printf introduces enough delay, stack activity, or context switching to naturally evict the
+    stale cache lines. The correct fix is to use SCB_InvalidateDCache_by_Addr() before reading the buffer
+    or placing the DMA buffer in a non-cacheable MPU memory region.
+  common_mistake: Assuming the DMA controller is dropping samples or that there is a timing race condition
+    in the interrupt handler.
+  napkin_math: 1kHz IMU sampling = 1ms/sample. In 100ms, 100 samples. Buffer size = 100 * 6 axes * 2B
+    = 1.2KB. Cortex-M4 has 256KB total SRAM, L1 caches aren't standard but let's assume tight SRAM coupling.
+    The DMA writes to SRAM asynchronously. The CPU reads stale cache if not invalidated. Adding printf
+    slows execution or calls memory fences, coincidentally syncing the buffer.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The Napkin Math for the IMU buffer size (1.2KB) is inconsistent with the provided buffer size in the
+  scenario (4KB SRAM buffer), which can confuse the reader. Additionally, Cortex-M4 is mentioned in the
+  Napkin Math, but the scenario specifies Cortex-M7, which can have L1 caches and a different memory hierarchy.
+- The explanation that 'adding printf slows execution or calls memory fences, coincidentally syncing the
+  buffer' is generally true but could be more explicit about *how* `printf` might introduce memory fences
+  or cache invalidation, such as flushing I/O buffers or context switching, as a more direct mechanism.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

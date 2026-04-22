@@ -23,6 +23,7 @@ import {
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { getQuestionById } from "@/lib/corpus";
+import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
@@ -96,7 +97,12 @@ function PracticePage() {
   const [napkinOnly, setNapkinOnly] = useState(false);
 
   const [pool, setPool] = useState<Question[]>([]);
-  const [current, setCurrent] = useState<Question | null>(null);
+  // `currentSummary` holds the lightweight record from the bundled summary
+  // (no scenario/details). `current` is hydrated from the worker via
+  // useFullQuestion — same shape, but scenario + details populated.
+  const [currentSummary, setCurrentSummary] = useState<Question | null>(null);
+  const current = useFullQuestion(currentSummary) ?? currentSummary;
+  const setCurrent = setCurrentSummary;
   const skipFilterCount = useRef(0);
   const questionShownAt = useRef(Date.now());
   const [showAnswer, setShowAnswer] = useState(false);

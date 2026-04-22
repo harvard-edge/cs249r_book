@@ -33,6 +33,12 @@ on:
     branches: [dev]
     paths:
       - 'interviews/staffml/**'
+      # Also redeploy when YAMLs or chains change — the workflow
+      # regenerates corpus.json + corpus-summary.json from YAMLs before
+      # building, so the dev site always reflects current vault state.
+      - 'interviews/vault/questions/**'
+      - 'interviews/vault/chains.json'
+      - 'interviews/vault/schema/**'
 
 permissions:
   contents: read
@@ -62,6 +68,21 @@ jobs:
         working-directory: interviews/staffml
         run: npm ci
 
+      - name: 🐍 Setup Python (for vault-cli)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 🛠️ Install vault-cli
+        run: pip install -e interviews/vault-cli/
+
+      - name: 🔄 Regenerate corpus from YAMLs (vault build --legacy-json)
+        # Emits interviews/staffml/src/data/corpus.json (full) +
+        # corpus-summary.json (site bundle) from the committed YAMLs.
+        # Guarantees the built site reflects current vault state even if
+        # the committed JSON artifacts drift from YAMLs.
+        run: vault build --vault-dir interviews/vault --release-id preview-dev --legacy-json
+
       - name: 🔍 Type check
         working-directory: interviews/staffml
         run: npx tsc --noEmit
@@ -82,7 +103,9 @@ jobs:
           # same global budget as production. The CORS allowlist on the
           # worker already includes localhost plus the production origins.
           NEXT_PUBLIC_INTERVIEWER_ENDPOINT: https://mlsysbook.ai/api/staffml-interviewer
+          # Preview shares the production worker (same D1 data).
           NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
+          NEXT_PUBLIC_VAULT_RELEASE: "1.0.2"
         run: npm run build
 
       - name: 📁 Inject paper and figures into build

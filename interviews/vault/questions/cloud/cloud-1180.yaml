@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-1180
+track: cloud
+level: L4
+zone: diagnosis
+topic: mlops-lifecycle
+competency_area: optimization
+bloom_level: analyze
+phase: both
+title: Diagnosing Low GPU Utilization in Dynamic Dispatch
+scenario: You are debugging a PyTorch training pipeline for a custom autoregressive sequence model on
+  a single NVIDIA A100 (80GB). Despite having a batch size that fills 90% of VRAM, `nvidia-smi` shows
+  GPU utilization fluctuating between 15-25%. The PyTorch profiler indicates that the GPU is frequently
+  idle, while the CPU is pegged at 100% on a single thread. The model's custom attention block is implemented
+  dynamically using over 150 sequential native PyTorch scalar and vector operations per layer. Why is
+  the GPU starved, and how do you analyze this bottleneck?
+details:
+  realistic_solution: Analyze the profiling trace to identify kernel launch overhead. In eager execution,
+    each of the 150+ tiny operations triggers a separate `cudaLaunchKernel` call from the Python interpreter.
+    The CPU simply cannot enqueue kernels fast enough to keep the A100's SMs busy. The solution is to
+    trace the dynamic operations into a static graph using `torch.compile` (or JIT), allowing the compiler
+    to perform operator fusion and reduce the total number of kernel launches.
+  common_mistake: Candidates often assume the bottleneck is host-to-device PCIe bandwidth for the training
+    data, or they attempt to use Distributed Data Parallel (DDP) to speed up training, completely missing
+    the CPU dispatch overhead caused by eager execution.
+  napkin_math: Assume 150 operations per layer, 24 layers, and a conservative 10µs CUDA kernel launch
+    overhead per operation. Total CPU dispatch time per forward pass = 150 * 24 * 10µs = 36ms. If the
+    massive A100 can execute the actual matrix math for these tiny operations in just 5ms, the GPU will
+    spend roughly 31ms idling while waiting for the CPU to dispatch the next kernel, capping maximum GPU
+    utilization at 5ms / 36ms ≈ 13.8%.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:05:35.959336'

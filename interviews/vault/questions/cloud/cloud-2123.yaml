@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2123
+track: cloud
+level: L4
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: BatchNorm Breaks in Distributed Training
+scenario: 'Your team is scaling a ResNet-50 training job from 1 GPU to 64 GPUs using data parallelism.
+  After scaling, validation accuracy drops by 2.3% despite identical hyperparameters. The only difference:
+  the effective local batch size per GPU dropped from 256 to 4 (global batch 256 preserved). A senior
+  engineer suspects BatchNorm. Explain the root cause and two solutions.'
+details:
+  realistic_solution: 'Root cause: BatchNorm computes mean and variance over the local batch dimension.
+    With batch size 4 per GPU, these statistics have high variance (standard error of mean ~ 1/sqrt(4)
+    = 0.5), causing noisy normalization during training and a mismatch with the running statistics accumulated
+    for inference. Solutions: (1) SyncBatchNorm: compute mean/variance across all 64 GPUs before normalizing.
+    This restores the effective batch size to 256 for statistics, but adds an AllReduce per BatchNorm
+    layer per forward pass. Cost: 2 AllReduces (mean and variance) per BN layer. For ResNet-50 with 53
+    BN layers: 106 AllReduces per forward pass + 106 per backward pass, adding ~5-10ms per step on NVLink.
+    (2) Replace BatchNorm with LayerNorm or GroupNorm: these compute statistics per-sample, so they are
+    invariant to batch size. No communication overhead. Trade-off: slightly different convergence behavior
+    requiring hyperparameter retuning.'
+  common_mistake: Blaming the optimizer or learning rate schedule for the accuracy drop. The root cause
+    is that BatchNorm statistics computed over a local batch of 4 samples are extremely noisy, degrading
+    normalization quality.
+  napkin_math: 'Scaling to 64 GPUs keeping global batch 256 means local batch drops to 4. Batch Norm standard
+    error scales as 1/sqrt(B). Moving from B=256 to B=4 increases local batch mean/variance noise by sqrt(256/4)
+    = 8x. This noise causes the 2.3% accuracy drop. Solution: SyncBN. ResNet-50 has 53 BN layers * 2 AllReduces
+    (fwd/bwd) = 106 AllReduces. On NVLink (600GB/s), overhead is ~1ms/step.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

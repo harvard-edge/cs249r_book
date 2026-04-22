@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: edge-0527
+track: edge
+level: L4
+zone: diagnosis
+topic: safety-certification
+competency_area: power
+bloom_level: analyze
+phase: inference
+title: The GPU Power Gating Latency
+scenario: Your battery-powered drone runs a Jetson Orin Nano (15W TDP) for obstacle avoidance. During
+  straight-line flight (80% of mission time), the GPU is idle — only the CPU runs a lightweight IMU fusion
+  algorithm. Your power engineer enables GPU power gating to save battery. On the next test flight, the
+  drone clips a tree branch during a sudden turn. Investigation reveals the obstacle detection model took
+  180ms to produce its first detection after the turn began, instead of the expected 25ms. What happened?
+details:
+  realistic_solution: 'GPU power gating doesn''t just idle the GPU — it **removes power from the GPU''s
+    transistors** to eliminate leakage current. When the obstacle detection model is needed, the GPU must
+    go through a full power-on sequence: (1) **Rail ramp-up (5-10ms):** The PMIC (Power Management IC)
+    ramps the GPU voltage rail from 0V to operating voltage. This is slew-rate limited to prevent current
+    inrush that could cause voltage droop on shared rails (affecting the CPU). (2) **Clock stabilization
+    (2-5ms):** The PLL must lock to the target frequency. (3) **Context restoration (10-20ms):** GPU register
+    state, memory controller configuration, and TensorRT engine context must be reloaded from DRAM. (4)
+    **First inference cold penalty (50-100ms):** TensorRT''s first inference after context restore is
+    slower due to instruction cache misses, TLB misses, and CUDA context initialization. Total: 67-135ms
+    of wake latency before the first useful detection. The fix: use **clock gating** instead of power
+    gating — keep the GPU powered but stop the clock. Wake latency drops to ~2ms (just PLL relock). The
+    power savings are less (clock gating saves ~60% vs power gating''s ~95% of idle power), but for a
+    safety-critical system, 2ms wake beats 135ms wake.'
+  common_mistake: '"The model is slow on first inference — just warm it up." Warm-up explains part of
+    the delay, but the root cause is deeper: the GPU silicon was physically powered off.'
+  napkin_math: 'GPU power gating savings: Orin Nano GPU idle leakage ~1.5W. Power gating saves 1.5W. Clock
+    gating saves ~0.9W (60% of leakage). Difference: 0.6W. Over a 20-minute straight-line flight segment:
+    power gating saves 0.6W × 0.33hr = 0.2 Wh extra vs clock gating. Drone battery: ~100 Wh. The 0.2 Wh
+    savings (0.2% of battery) bought 155ms of detection delay — a terrible trade-off for a safety-critical
+    system. At 15 m/s flight speed, 155ms of blindness = 2.3 meters of undetected travel — exactly enough
+    to hit that tree branch.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

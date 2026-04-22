@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: cloud-2344
+track: cloud
+level: L4
+zone: design
+topic: collective-communication
+competency_area: networking
+bloom_level: create
+phase: both
+title: Hybrid Interconnect MoE Routing
+scenario: 'You are architecting the deployment for an 8x100B Mixture-of-Experts model on a cloud instance
+  with 8 GPUs. The GPUs are connected via a hybrid topology: pairs of GPUs have NVLink bridges (100 GB/s
+  bidirectional), but pairs connect to each other via a central PCIe Gen4 switch (32 GB/s). The MoE token
+  routing requires an All-to-All collective of 2 GB per layer. The training throughput is currently degraded
+  by 60% compared to dense models of similar FLOPs.'
+details:
+  realistic_solution: 'The architectural requirement is to map the logical MoE token routing to the physical
+    asymmetric interconnect. A standard, flat All-to-All treats all links equally, causing severe congestion
+    on the slower PCIe switch while underutilizing the NVLink bridges. The solution is to architect a
+    Hierarchical All-to-All algorithm: Phase 1 involves a local exchange within the NVLink-connected pairs
+    to aggregate tokens destined for other pairs. Phase 2 performs a reduced exchange across the PCIe
+    switch. Phase 3 distributes the tokens locally again. This drastically minimizes the volume of data
+    crossing the oversubscribed PCIe links, optimizing for the 3.1x bandwidth asymmetry.'
+  common_mistake: Using a standard NCCL All-to-All collective, which assumes a uniform bandwidth topology
+    and treats all peer-to-peer links as equal.
+  napkin_math: 'Flat All-to-All on 8 GPUs: each GPU sends 7/8 of its data to peers. For 2 GB total, each
+    GPU sends 1.75 GB. 6/8 of this (1.5 GB) goes over the PCIe switch. 1.5 GB / 32 GB/s = ~47ms per layer.
+    With hierarchical routing, messages are aggregated, and the total data traversing the slow PCIe bottleneck
+    is reduced, improving the time spent in communication by up to the asymmetry ratio (~3x).'
+  options:
+  - Larger batch sizes always improve both throughput and convergence proportionally; there is no concept
+    of 'critical batch size' — more data per step always helps the model learn faster
+  - Batch size only affects memory usage, not training speed or convergence; doubling the batch size doubles
+    memory but has no effect on throughput or final model quality
+  - The optimal batch size for all models is 32; this has been empirically validated across thousands
+    of experiments and is the default in every major training framework
+  - 'Batch size directly affects throughput, convergence, and hardware utilization. Throughput: larger
+    batches amortize fixed overheads (kernel launch, AllReduce latency). Convergence: above the critical
+    batch size, larger batches waste compute (diminishing returns per sample). Hardware: batch size must
+    be large enough to saturate GPU Tensor Cores (typically ≥8 per GPU for GEMM efficiency). The critical
+    batch size is model-specific and determines the maximum useful parallelism.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

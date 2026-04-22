@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: tinyml-0618
+track: tinyml
+level: L5
+zone: evaluation
+topic: safety-certification
+competency_area: reliability
+bloom_level: evaluate
+phase: inference
+title: The Watchdog Reboot Loop
+scenario: Your team has deployed a fleet of battery-powered acoustic sensors to detect pest infestations
+  in crops. The devices use a Cortex-M7 and a small CNN. To prevent freezes, an aggressive 20ms hardware
+  watchdog timer is enabled. Field reports show that devices at one specific farm are getting stuck in
+  a reboot loop, draining their batteries in hours. Your on-call playbook suggests the first step is to
+  'remotely update the watchdog timeout to 50ms'. Evaluate this playbook action. Why might the system
+  be failing in this non-linear way, and why is the playbook's recommendation likely wrong for this specific
+  failure? Justify your reasoning with a quantitative analysis.
+details:
+  realistic_solution: The playbook action is a temporary patch that masks the real problem and should
+    be rejected. The reboot loop is likely caused by 'hard' audio inputs from this specific farm (e.g.,
+    sounds of irrigation equipment, which have a very different frequency profile than pests) that trigger
+    a pathological inference case. This corner case's inference time exceeds the 20ms watchdog timeout,
+    causing a reset. Upon reboot, the device re-reads the same 'hard' sample from its audio buffer, triggering
+    the same long inference, leading to another reset. The correct solution is not to lengthen the timeout,
+    but to make the boot-up logic more robust. The device should use a few bytes of flash or RTC backup
+    RAM to implement a boot counter. If the counter exceeds a threshold (e.g., 3 reboots in 1 minute),
+    on the next boot it should discard the problematic sample from the buffer, send a diagnostic packet
+    with the corrupted input, and then resume normal operation. This prevents the reboot loop and captures
+    the causal data for debugging.
+  common_mistake: The playbook is right; there must be a software bug causing an infinite loop, so a longer
+    timeout will let it finish. This ignores that inference time itself can be data-dependent, especially
+    with certain hardware accelerations or complex audio features.
+  napkin_math: 'M7@480MHz=960 MFLOPS. CNN: 1.5M FLOPs, normal inference=1.56ms (under 20ms WDT). Hard
+    audio triggers worst-case path: inference spikes to ~25ms>20ms → WDT reboot. Same audio in buffer
+    → repeat. Lengthening WDT to 50ms: next hard input at 55ms = same failure. Fix: boot counter in RTC
+    RAM; 3 reboots in 60s → discard buffer, log diagnostic, resume.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: tinyml-chain-048
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

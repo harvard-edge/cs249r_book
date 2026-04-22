@@ -1,18 +1,40 @@
-import corpusData from '../data/corpus.json';
+import corpusData from '../data/corpus-summary.json';
 
+/**
+ * Question shape matching vault schema v1.0.
+ *
+ * As of 2026-04-22 the bundle is SUMMARY-ONLY: the heavy `scenario` and
+ * `details` fields live on the Cloudflare Worker at
+ * https://staffml-vault.mlsysbook-ai-account.workers.dev and are fetched
+ * lazily via `getQuestionFullDetail()` (async) or the `useFullQuestion()`
+ * React hook. This took the bundled data from 20.5 MiB to 2.9 MiB.
+ *
+ * For callers that access `scenario` or `details.*` synchronously, the
+ * fields are defined as optional on this interface — they will be `undefined`
+ * until the worker fetch resolves. Use the `useFullQuestion` hook to get
+ * a hydrated record as a drop-in replacement for the summary.
+ */
 export interface Question {
   id: string;
   track: string;
-  scope?: string;
   level: string;
   title: string;
   topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones
   competency_area: string;  // one of 13 canonical areas
   bloom_level?: string;     // remember | understand | apply | analyze | evaluate | create
-  scenario: string;
+  phase?: string;           // training | inference | both
+  status?: string;          // draft | published | flagged | archived | deleted
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
+
+  // ── Heavy fields (bundled as empty stubs; hydrated from worker) ──
+  // The summary bundle ships scenario: "" and details with empty strings
+  // for common_mistake / realistic_solution / napkin_math. Hydration via
+  // `useFullQuestion(q)` or `getQuestionFullDetail(q.id)` fills them with
+  // real content from the worker. MCQ options/correct_index ARE bundled
+  // (scoring uses them synchronously).
+  scenario: string;
   details: {
     common_mistake: string;
     realistic_solution: string;
@@ -20,6 +42,18 @@ export interface Question {
     resources?: Resource[];
     options?: string[];
     correct_index?: number;
+  };
+
+  // ── Trust signals (bundled; populated when YAMLs are regenerated) ──
+  /** LLM validation pass (Gemini). */
+  validated?: boolean;
+  /** Second-pass LLM math check. */
+  math_verified?: boolean;
+  /** Human verification, distinct from LLM stamps. */
+  human_reviewed?: {
+    status: string;         // not-reviewed | verified | flagged | needs-rework
+    by?: string | null;
+    date?: string | null;
   };
 }
 
@@ -96,7 +130,13 @@ export function getQuestionsByFilter(filters: {
   });
 }
 
-/** Full-text search across question titles, scenarios, answers, and napkin math */
+/**
+ * Fallback full-text search — used only when the Worker `/search` endpoint
+ * (FTS5, via `corpus-provider.vaultSearch`) is unreachable. Because the
+ * bundle is now summary-only (no scenario/details), this fallback searches
+ * titles + topics only. The worker path is always preferred and gives
+ * real FTS5 ranking over all fields.
+ */
 export function searchQuestions(query: string, limit = 50): Question[] {
   const q = query.toLowerCase().trim();
   if (!q) return [];
@@ -109,18 +149,11 @@ export function searchQuestions(query: string, limit = 50): Question[] {
   for (const question of questions) {
     let score = 0;
     const title = question.title.toLowerCase();
-    const scenario = question.scenario.toLowerCase();
-    const answer = question.details.realistic_solution?.toLowerCase() || '';
-    const napkin = question.details.napkin_math?.toLowerCase() || '';
-    const mistake = question.details.common_mistake?.toLowerCase() || '';
+    const topic = question.topic.toLowerCase();
 
     for (const term of terms) {
-      // Title matches are most valuable
       if (title.includes(term)) score += 10;
-      if (scenario.includes(term)) score += 5;
-      if (answer.includes(term)) score += 3;
-      if (napkin.includes(term)) score += 2;
-      if (mistake.includes(term)) score += 1;
+      if (topic.includes(term)) score += 3;
     }
 
     if (score > 0) {
@@ -346,4 +379,56 @@ export function getChainForQuestion(questionId: string): ChainInfo | null {
     total: chain.length,
     questions: chain,
   };
+}
+
+// ─── Async worker fetchers (for scenario/details, post-bundle-shrink) ──────
+
+/** URL of the Cloudflare Worker that serves full question data. */
+const VAULT_API = process.env.NEXT_PUBLIC_VAULT_API
+  ?? "https://staffml-vault.mlsysbook-ai-account.workers.dev";
+
+// In-memory cache for hydrated questions during one session.
+const _detailsCache = new Map<string, Question>();
+
+/**
+ * Fetch the FULL question (with `scenario` and `details.*`) from the
+ * Cloudflare Worker. Returns the summary-only record on network failure
+ * so the UI can still render id/title/level/zone.
+ */
+export async function getQuestionFullDetail(id: string): Promise<Question | undefined> {
+  const cached = _detailsCache.get(id);
+  if (cached?.scenario && cached.details?.realistic_solution) return cached;
+
+  const summary = questions.find(q => q.id === id);
+  if (!summary) return undefined;
+
+  try {
+    const res = await fetch(`${VAULT_API}/questions/${encodeURIComponent(id)}`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return summary;
+    const full = await res.json() as Question & {
+      scenario?: string;
+      details?: Question["details"];
+    };
+    const merged: Question = {
+      ...summary,
+      scenario: full.scenario,
+      details: full.details,
+    };
+    _detailsCache.set(id, merged);
+    return merged;
+  } catch {
+    // Worker unreachable → serve summary. Callers should handle missing
+    // scenario/details gracefully (skeleton UI, hide sections, etc.).
+    return summary;
+  }
+}
+
+/**
+ * Pre-warm the details cache for a batch of IDs (e.g., gauntlet session).
+ * Fires fetches in parallel, resolves when all complete (or time out).
+ */
+export async function prefetchQuestionDetails(ids: string[]): Promise<void> {
+  await Promise.all(ids.map(id => getQuestionFullDetail(id)));
 }

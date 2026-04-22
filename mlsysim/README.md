@@ -1,18 +1,27 @@
-<!-- DEV-BANNER-START -->
+<!-- EARLY-RELEASE-CALLOUT:START -->
 <div align="center">
-<table>
-<tr><td>
-<h3>🚧 Under Active Development</h3>
-<p>This component is being built on the <code>dev</code> branch and is <b>not yet available</b> on the live site.<br>
-Content may be incomplete or change without notice. The published curriculum lives at <a href="https://mlsysbook.ai"><b>mlsysbook.ai</b></a>.</p>
-<p>
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">MLSys·im shipped with the <b>2026</b> MLSysBook refresh. The modeling platform, APIs, and lab integrations are <b>actively iterated</b> as we harden the simulator and teaching workflows.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+<p align="center">
 <a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
+&nbsp;
 <a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
 </p>
+
+</td></tr>
+</table>
+
 </td></tr>
 </table>
 </div>
-<!-- DEV-BANNER-END -->
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 <div align="center">
   <h1>🚀 MLSys·im: The Modeling Platform</h1>
@@ -132,14 +141,28 @@ MLSysim is an **analytical hardware calculator**, not a production deployment si
 The 22 walls model physical and economic constraints that bound ML system performance.
 Several critical production concerns are deliberately **out of scope**:
 
-| Concern | Why It Matters | Where to Learn More |
-|---------|---------------|-------------------|
-| **Data drift / distribution shift** | The #1 cause of production ML failures — model accuracy degrades silently as input distributions change | Sculley et al. (2015), "Hidden Technical Debt in ML Systems" |
-| **Model versioning & rollback** | Production requires running multiple versions, A/B testing, and safe rollback | Huyen (2022), *Designing Machine Learning Systems* |
-| **Monitoring & observability** | You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates | Google SRE Book (2016); Huyen (2022) |
-| **Feature store freshness** | Stale features silently degrade real-time models (recommendations, fraud detection) | Uber Michelangelo (2017) |
-| **Software bugs & misconfigurations** | Most outages are caused by software, not hardware | Barroso et al. (2018) |
-| **Human factors** | Team velocity, on-call burden, and organizational alignment often dominate outcomes | Brooks (1975), *The Mythical Man-Month* |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="22%">Concern</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="38%">Why it matters</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Where to learn more</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td><b>Data drift / distribution shift</b></td><td>The #1 cause of production ML failures — model accuracy degrades silently as input distributions change</td><td>Sculley et al. (2015), &quot;Hidden Technical Debt in ML Systems&quot;</td></tr>
+    <tr><td><b>Model versioning &amp; rollback</b></td><td>Production requires running multiple versions, A/B testing, and safe rollback</td><td>Huyen (2022), <i>Designing Machine Learning Systems</i></td></tr>
+    <tr bgcolor="#fafbfc"><td><b>Monitoring &amp; observability</b></td><td>You cannot manage what you cannot measure — prediction distributions, latency percentiles, error rates</td><td>Google SRE Book (2016); Huyen (2022)</td></tr>
+    <tr><td><b>Feature store freshness</b></td><td>Stale features silently degrade real-time models (recommendations, fraud detection)</td><td>Uber Michelangelo (2017)</td></tr>
+    <tr bgcolor="#fafbfc"><td><b>Software bugs &amp; misconfigurations</b></td><td>Most outages are caused by software, not hardware</td><td>Barroso et al. (2018)</td></tr>
+    <tr><td><b>Human factors</b></td><td>Team velocity, on-call burden, and organizational alignment often dominate outcomes</td><td>Brooks (1975), <i>The Mythical Man-Month</i></td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 **Passing all 22 walls is necessary but not sufficient for a successful production deployment.**
 
@@ -205,14 +228,28 @@ print(evaluation.scorecard())
 
 The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
 
-| Scenario | Efficiency | Rationale |
-|----------|-----------|-----------|
-| Training (Megatron-LM, large Transformer) | 0.40–0.55 | Well-optimized GEMM + FlashAttention |
-| Training (PyTorch eager, small model) | 0.08–0.15 | Kernel launch overhead dominates |
-| Inference decode, batch=1 | 0.01–0.05 | Memory-bound; compute nearly idle |
-| Inference decode, batch=32+ | 0.15–0.35 | Batch amortizes weight loading |
-| Inference prefill, long context | 0.30–0.50 | Compute-bound GEMM + attention |
-| TinyML (TFLite Micro on ESP32) | 0.05–0.15 | Interpreter overhead, no tensor cores |
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
+  <thead>
+    <tr>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="40%">Scenario</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="18%">Efficiency</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="42%">Rationale</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr bgcolor="#fafbfc"><td>Training (Megatron-LM, large Transformer)</td><td align="center">0.40–0.55</td><td>Well-optimized GEMM + FlashAttention</td></tr>
+    <tr><td>Training (PyTorch eager, small model)</td><td align="center">0.08–0.15</td><td>Kernel launch overhead dominates</td></tr>
+    <tr bgcolor="#fafbfc"><td>Inference decode, batch=1</td><td align="center">0.01–0.05</td><td>Memory-bound; compute nearly idle</td></tr>
+    <tr><td>Inference decode, batch=32+</td><td align="center">0.15–0.35</td><td>Batch amortizes weight loading</td></tr>
+    <tr bgcolor="#fafbfc"><td>Inference prefill, long context</td><td align="center">0.30–0.50</td><td>Compute-bound GEMM + attention</td></tr>
+    <tr><td>TinyML (TFLite Micro on ESP32)</td><td align="center">0.05–0.15</td><td>Interpreter overhead, no tensor cores</td></tr>
+  </tbody>
+</table>
+</td></tr>
+</table>
+</div>
 
 ---
 
@@ -228,7 +265,7 @@ Thanks to these wonderful people for helping improve MLSys·im!
 <table>
   <tbody>
     <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️ 🤔 🚧</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧠 maintenance</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🧑‍💻</td>

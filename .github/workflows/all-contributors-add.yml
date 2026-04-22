@@ -457,6 +457,7 @@ jobs:
             }
 
       - name: Update contributor config
+        id: update_config
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         env:
           PROJECTS: ${{ env.PROJECTS }}
@@ -465,6 +466,7 @@ jobs:
           python3 << 'EOF'
           import json
           import os
+          import sys
 
           projects = json.loads('${{ steps.parse.outputs.projects }}')
           username = "${{ steps.parse.outputs.username }}"
@@ -487,11 +489,13 @@ jobs:
 
           config_paths = {p: f'{project_dirs[p]}/.all-contributorsrc' for p in valid_projects}
           updated_paths = []
+          updated_project_keys = []
+          missing = []
 
           for project in projects:
               config_path = config_paths.get(project)
               if not config_path or not os.path.isfile(config_path):
-                  print(f"Skipping {project}: no config at {config_path}")
+                  missing.append((project, config_path or f'{project}/.all-contributorsrc'))
                   continue
 
               with open(config_path, 'r') as f:
@@ -529,20 +533,33 @@ jobs:
 
               print(f"Updated {config_path}")
               updated_paths.append(config_path)
+              if project not in updated_project_keys:
+                  updated_project_keys.append(project)
+
+          if missing:
+              for proj, path in missing:
+                  print(f"ERROR: Missing contributor config for project '{proj}' (expected {path})")
+              print("Add or restore .all-contributorsrc for each project listed in .github/workflows/contributors/projects.json.")
+              sys.exit(1)
 
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"updated_configs={json.dumps(updated_paths)}\n")
+              f.write(f"updated_projects={json.dumps(updated_project_keys)}\n")
           EOF
 
       - name: Generate README tables
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         run: |
-          # Generate tables for each project we updated
-          PROJECTS_JSON='${{ steps.parse.outputs.projects }}'
-          for project in $(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
+          set -euo pipefail
+          UPDATED_JSON='${{ steps.update_config.outputs.updated_projects }}'
+          N=$(echo "$UPDATED_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+          if [ "$N" -eq 0 ]; then
+            echo "No contributor configs were updated; skipping README regeneration."
+            exit 0
+          fi
+          for project in $(echo "$UPDATED_JSON" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
             python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project "$project" --update
           done
-          # Also regenerate the main README
           python3 ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
 
       - name: Configure Git
@@ -556,7 +573,7 @@ jobs:
         env:
           PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
         run: |
-          PROJECTS_JSON='${{ steps.parse.outputs.projects }}'
+          PROJECTS_JSON='${{ steps.update_config.outputs.updated_projects }}'
           USERNAME="${{ steps.parse.outputs.username }}"
           TYPES=$(echo '${{ steps.parse.outputs.types }}' | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
           PROJECTS_LIST=$(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
@@ -607,7 +624,7 @@ jobs:
             });
 
             const username = '${{ steps.parse.outputs.username }}';
-            const projects = JSON.parse('${{ steps.parse.outputs.projects }}');
+            const projects = JSON.parse('${{ steps.update_config.outputs.updated_projects }}');
             const projectSource = '${{ steps.parse.outputs.project_source }}';
             const types = JSON.parse('${{ steps.parse.outputs.types }}');
             const triggerLine = `${{ steps.extract.outputs.trigger_line }}`;

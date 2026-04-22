@@ -1,0 +1,69 @@
+schema_version: '1.0'
+id: cloud-0765
+track: cloud
+level: L6+
+zone: mastery
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: create
+phase: training
+title: The Cosmic Ray Divergence
+scenario: You're 45 days into a 90-day pre-training run on 4,096 H100 GPUs. The loss curve looks smooth
+  — no spikes, no NaNs. But your weekly eval on a 10k-sample benchmark shows accuracy plateaued 2 weeks
+  ago and is now *decreasing*, diverging from the scaling law prediction by 6 points. Every software check
+  passes. A hardware engineer suggests a cosmic ray bit flip corrupted a weight weeks ago. How is that
+  even possible, and how do you find which of 70 billion parameters is wrong?
+details:
+  realistic_solution: 'Silent Data Corruption (SDC) bypasses ECC because the error occurs in logic (ALU,
+    Tensor Core) or in unprotected SRAM, not in HBM. A bit flip in a BF16 weight''s exponent bits can
+    change a value from 0.5 to 128.0 (flipping bit 14 shifts the exponent by 7, multiplying the value
+    by $2^7 = 128$). If this happens in a query/key projection weight, every token''s attention distribution
+    is corrupted, biasing the head toward or away from certain positions. The training loss may still
+    decrease because the other 79 layers and 31 heads compensate, but the model''s *capability* degrades
+    — visible only on eval benchmarks that test specific reasoning. Finding the corrupted parameter: (1)
+    compare the current checkpoint''s weight statistics (per-layer mean, std, max) against the checkpoint
+    from 2 weeks ago when eval was still on-track; (2) look for any single parameter whose magnitude is
+    an outlier (>10σ from its layer''s distribution); (3) use the scaling law prediction to estimate *when*
+    the corruption occurred by finding the eval inflection point, then diff checkpoints around that date.'
+  common_mistake: '"ECC memory would catch any bit flip" or "A single corrupted weight out of 70 billion
+    can''t matter — SGD would just train past it." ECC catches *most* single-bit errors in HBM, but not
+    errors in register files, SRAM caches, or during computation (Silent Data Corruption). And a single
+    flipped bit in a high-magnitude weight can permanently bias an entire attention head.'
+  napkin_math: 'BF16 format: 1 sign bit, 8 exponent bits (bits 7–14), 7 mantissa bits (bits 0–6). A flip
+    in bit 14 (the most significant exponent bit) changes the exponent by ±128. Since the stored exponent
+    uses a bias of 127, flipping this bit changes the actual exponent by 128, multiplying or dividing
+    the value by **2^128 ≈ 3.4 × 10^38**. A weight of 0.01 could become 0.01 × 2^128 ≈ 3.4 × 10^36 — effectively
+    infinity in the context of neural network computations. Even a flip in a lower exponent bit (e.g.,
+    bit 10, changing exponent by 8) multiplies the value by 2^8 = 256×, turning 0.01 into 2.56. In a query
+    projection matrix of shape [8192, 128], one corrupted weight at 2.56 (vs normal ~0.01) biases every
+    token''s query vector by +2.56 in one dimension. Attention logits shift by ~2.56 × typical_key_value
+    ≈ **1–5 nats** — enough to redirect 50–90% of attention mass to wrong positions. **SDC rate at scale:**
+    At 4,096 GPUs with 80 GB HBM each: total HBM = 327 TB. Google/Meta report SDC rates of ~1–2 per 1,000
+    GPU-days. Over 45 days: expected SDC events = 4,096 × 45 / 1,000 × 1.5 ≈ **276 events**. Most corrupt
+    activations (transient, overwritten next step). But ~1% corrupt *weights* (persistent) = **~3 weight
+    corruptions**. Detection: per-layer weight norm monitoring adds <0.01% overhead. Weekly checkpoint
+    diffing: compare `torch.max(abs(ckpt_new - ckpt_old))` per layer — a corrupted weight shows as a single
+    outlier of 100× the normal per-step delta.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- The napkin math incorrectly states a BF16 exponent bit flip multiplies the value by 2^7; it actually
+  multiplies/divides by 2^128.
+- The reasoning mode 'requirements-to-architecture' is incorrect for a question asking 'how is that possible,
+  and how do you find it?'.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

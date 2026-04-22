@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-r2-42013
+track: cloud
+level: L4
+zone: diagnosis
+topic: tail-latency
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: NUMA Effects on Inference Tail Latency
+scenario: 'Your dual-socket inference server with 2 A100s shows bimodal latency: 50% of requests complete
+  in 30ms, 50% in 90ms. Both GPUs are identical and equally loaded. What hardware topology issue explains
+  this bimodal distribution, and how do you fix it?'
+details:
+  realistic_solution: 'Each A100 is attached via PCIe Gen4 to one CPU socket. When the inference process
+    allocates host memory on NUMA node 0 but the GPU is on NUMA node 1, every CPU-GPU transfer traverses
+    the UPI link (Intel) or Infinity Fabric (AMD), adding ~50ns per cache line and causing 2-3× slowdown
+    for data staging. The 50/50 split occurs because the OS scheduler randomly assigns threads to either
+    NUMA node. Fix: (1) Pin each inference process to the correct NUMA node: `numactl --cpunodebind=0
+    --membind=0 ./server --gpu=0`. (2) Set CUDA_VISIBLE_DEVICES per process. (3) Use `nvidia-smi topo
+    -m` to identify GPU-to-NUMA affinity. After pinning: bimodal distribution collapses to unimodal 30ms.'
+  common_mistake: Assuming the GPUs are the bottleneck. In a dual-socket system, each GPU is physically
+    closer to one CPU socket. If the inference process runs on the wrong NUMA node, PCIe transfers cross
+    the QPI/UPI interconnect, adding 40-60ms of latency.
+  napkin_math: 'Local NUMA: PCIe Gen4 x16 = 32 GB/s, latency = 30ms. Remote NUMA: crosses UPI at 10.4
+    GT/s, effective bandwidth halved to ~16 GB/s, latency = 30ms × 2 + UPI overhead = ~90ms. After NUMA
+    pinning: all requests at 30ms. P99 drops from 90ms to 35ms.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

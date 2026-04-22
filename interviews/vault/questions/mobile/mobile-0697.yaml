@@ -1,0 +1,77 @@
+schema_version: '1.0'
+id: mobile-0697
+track: mobile
+level: L6+
+zone: mastery
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: create
+phase: inference
+title: The Custom Allocator Architect
+scenario: You are developing a high-throughput, low-latency ML inference engine for an always-on mobile
+  service. You've identified that the standard system `malloc`/`free` calls are causing significant performance
+  variability, increased memory fragmentation over long runs, and non-deterministic latency due to OS-level
+  memory management overheads. How would you design and implement a custom memory allocator specifically
+  optimized for the unique characteristics of ML inference workloads on a mobile device?
+details:
+  realistic_solution: "A custom memory allocator for ML inference workloads would typically leverage memory\
+    \ pooling or arena allocation strategies, tailored to the predictable nature of tensor allocations.\n\
+    \  1.  Workload Analysis:\n      *   Allocation Patterns: Most ML inference involves allocating a\
+    \ fixed set of intermediate tensors (activations) and model weights. Their sizes are often known at\
+    \ graph compilation time.\n      *   Lifespans: Intermediate tensors have well-defined, often short,\
+    \ lifespans (e.g., within an operator, or a layer, or an inference cycle). Model weights are allocated\
+    \ once and live for the app's duration.\n      *   Alignment: Tensors often require specific memory\
+    \ alignment (e.g., 64-byte for SIMD, cache line boundaries) for optimal performance on CPU/NPU.\n\
+    \  2.  Design Strategy: Memory Pool / Arena Allocator:\n      *   Pre-allocation: At engine initialization,\
+    \ request a large, contiguous block of memory from the OS (e.g., using mmap or a single large malloc).\
+    \ This minimizes OS calls during inference and reduces virtual memory fragmentation.\n      *   Tensor\
+    \ Lifetime Management:\n          *   Static Tensors (Weights): Allocate model weights from a dedicated,\
+    \ read-only memory region within the pre-allocated pool.\n          *   Dynamic Tensors (Activations):\n\
+    \              *   Arena Allocator: For intermediate activations, an arena allocator is highly effective.\
+    \ It allocates memory sequentially from a large pre-allocated chunk. When an inference pass is complete,\
+    \ the arena pointer is simply reset, effectively \"freeing\" all memory in O(1) time without actual\
+    \ deallocations. This completely avoids fragmentation and has minimal overhead.\n              * \
+    \  Slab Allocator (for fixed-size tensors): If there are many small, frequently allocated tensors\
+    \ of specific sizes, a slab allocator can manage pools of fixed-size blocks, reducing internal fragmentation.\n\
+    \      *   Graph-Aware Allocation (Memory Reuse): Perform a liveness analysis on the computational\
+    \ graph. Identify tensors that are no longer needed (e.g., an input to a layer whose output has been\
+    \ computed). The memory occupied by these \"dead\" tensors can be immediately reused by subsequent\
+    \ tensor allocations within the same inference pass. This minimizes the total memory footprint.\n\
+    \      *   Alignment Awareness: The custom allocator must ensure all allocated tensor buffers meet\
+    \ the required alignment constraints (e.g., posix_memalign or custom alignment logic within the pool).\n\
+    \      *   Zero-Copy Integration: If dealing with camera frames or other inputs, integrate with platform-specific\
+    \ zero-copy mechanisms (e.g., AHardwareBuffer on Android) to avoid copying data into the custom pool\
+    \ where possible, instead mapping external buffers directly.\n  3.  Benefits:\n      *   Reduced Latency\
+    \ Variability: Fewer system calls, no complex OS-level heap management during inference. O(1) allocation/deallocation\
+    \ for most cases.\n      *   No Fragmentation: Arena allocators inherently prevent fragmentation for\
+    \ transient tensors. Memory reuse strategies further optimize this.\n      *   Improved Cache Performance:\
+    \ More predictable memory layouts can lead to better cache utilization.\n      *   Deterministic Memory\
+    \ Footprint: The peak memory usage can be precisely determined and controlled."
+  common_mistake: '"Just use std::vector and hope for the best." This avoids raw malloc but doesn''t solve
+    the underlying issues with the system allocator for high-performance, specialized workloads.'
+  napkin_math: 'A typical ML graph might generate 100 intermediate tensors. Each malloc/free can take
+    100-500ns. Total overhead per inference: $200 \times 200ns = 40 \mu s$. | With a custom arena allocator,
+    allocation is a pointer increment (e.g., 10ns), and deallocation for the whole inference is 0ns (pointer
+    reset). Total overhead per inference: $100 \times 10ns = 1 \mu s$. This is a significant reduction
+    in overhead. | If peak memory for intermediate tensors is 200MB, a custom allocator can ensure this
+    memory is a single contiguous block, avoiding fragmentation issues.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: mobile-chain-012
+  position: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

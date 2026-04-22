@@ -13,6 +13,8 @@ import argparse
 import json
 import os
 import re
+import subprocess
+import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -134,6 +136,7 @@ class ValidateCommand:
             ("citations", "_run_citations"),
             ("inline", "_run_inline_refs"),
             ("self-ref", "_run_self_referential"),
+            ("capitalized", "_run_mitpress_capitalized_refs"),  # "chapter 12" lowercase in prose
         ],
         "labels": [
             ("duplicates", "_run_duplicate_labels"),
@@ -142,6 +145,10 @@ class ValidateCommand:
         ],
         "headers": [
             ("ids", "_run_headers"),
+            ("case", "_run_heading_case"),
+        ],
+        "bib": [
+            ("hygiene", "_run_bib_hygiene"),
         ],
         "footnotes": [
             ("placement", "_run_footnote_placement"),
@@ -154,35 +161,62 @@ class ValidateCommand:
             ("flow", "_run_float_flow"),
             ("files", "_run_images"),
         ],
-        "rendering": [
-            ("patterns", "_run_rendering"),
-            ("python-echo", "_run_python_echo"),
-            ("indexes", "_run_indexes"),
-            ("dropcaps", "_run_dropcaps"),
-            ("parts", "_run_parts"),
-            ("heading-levels", "_run_heading_levels"),
-            ("duplicate-words", "_run_duplicate_words"),
-            ("grid-tables", "_run_grid_tables"),
-            ("tables", "_run_table_content"),
-            ("ascii", "_run_ascii"),
-            ("percent-spacing", "_run_percent_spacing"),
-            ("unit-spacing", "_run_unit_spacing"),
-            ("binary-units", "_run_binary_units"),
-            ("contractions", "_run_contractions"),
-            ("unblended-prose", "_run_unblended_prose"),
-            ("times-spacing", "_run_times_spacing"),
-            ("times-product-spacing", "_run_times_product_spacing"),
-            ("purpose-unnumbered", "_run_purpose_unnumbered"),
-            ("div-fences", "_run_div_fences"),
-            ("mitpress-percent-in-captions", "_run_mitpress_percent_in_captions"),
-            ("mitpress-spaced-emdash", "_run_mitpress_spaced_emdash"),
-            ("mitpress-vs-period", "_run_mitpress_vs_period"),
-            ("mitpress-eg-ie-comma", "_run_mitpress_eg_ie_comma"),
-            ("mitpress-acknowledgements", "_run_mitpress_acknowledgements"),
-            ("mitpress-capitalized-refs", "_run_mitpress_capitalized_refs"),
-            ("mitpress-above-below", "_run_mitpress_above_below"),
-            ("mitpress-hyphen-range", "_run_mitpress_hyphen_range"),
+        # ------------------------------------------------------------------
+        # Semantic check groups: classify checks by WHAT is validated
+        # (markup patterns, prose style, punctuation, numbers, math, etc.),
+        # not by where-the-rule-came-from. A rule's provenance belongs in
+        # a comment, not a command name — hence no `mitpress-` prefix on
+        # scopes. See .claude/rules/book-prose.md for style provenance.
+        # ------------------------------------------------------------------
+        "markup": [
+            ("patterns", "_run_rendering"),       # low-level markup patterns (backticks, dollar signs, asterisks)
+            ("div-fences", "_run_div_fences"),    # ::: / :::: balance + form
+            ("dropcaps", "_run_dropcaps"),        # drop-cap compatibility
         ],
+        "prose": [
+            ("contractions", "_run_contractions"),           # no "can't", "it's" in body prose
+            ("duplicate-words", "_run_duplicate_words"),     # consecutive dup words
+            ("unblended-prose", "_run_unblended_prose"),     # space after period
+            ("above-below", "_run_mitpress_above_below"),    # no "above"/"below" spatial refs
+            ("ascii", "_run_ascii"),                         # non-ASCII chars
+            ("acknowledgements", "_run_mitpress_acknowledgements"),  # American spelling
+        ],
+        "punctuation": [
+            ("emdash", "_run_mitpress_spaced_emdash"),        # word—word, no spaces
+            ("slash", "_run_mitpress_spaced_slash"),          # training/inference, no spaces
+            ("vs-period", "_run_mitpress_vs_period"),         # vs. not vs
+            ("eg-ie-comma", "_run_mitpress_eg_ie_comma"),     # comma after e.g./i.e.
+            ("hyphen-range", "_run_mitpress_hyphen_range"),   # en-dash for number ranges
+        ],
+        "numbers": [
+            ("unit-spacing", "_run_unit_spacing"),                          # 100 ms, not 100ms
+            ("binary-units", "_run_binary_units"),                          # GB/TB not GiB/TiB
+            ("percent-spacing", "_run_percent_spacing"),                    # no space before %
+            ("percent-in-captions", "_run_mitpress_percent_in_captions"),   # spell out in captions
+        ],
+        "math": [
+            ("times-spacing", "_run_times_spacing"),                 # space after $\times$
+            ("times-product-spacing", "_run_times_product_spacing"), # space before $\times$ after inline code
+            ("attr-leaks", "_run_attr_latex_leaks"),                 # LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt — won't render or leaks to lightbox
+            ("render-audit", "_run_math_render_audit"),              # full HTML build + leak scan (slow; manual stage)
+        ],
+        "structure": [
+            ("heading-levels", "_run_heading_levels"),    # H1→H2→H3 hierarchy
+            ("parts", "_run_parts"),                       # part keys valid
+            ("purpose-unnumbered", "_run_purpose_unnumbered"),  # Purpose sections unnumbered
+        ],
+        "code": [
+            ("python-echo", "_run_python_echo"),           # echo: false on python blocks
+            ("str-latex-leak", "_run_str_latex_leak"),     # *_str exports must not contain raw LaTeX (use md()/md_math())
+        ],
+        "tables": [
+            ("grid-tables", "_run_grid_tables"),           # prefer pipe tables
+            ("content", "_run_table_content"),             # bare pipes, fracs, HTML entities
+        ],
+        "index": [
+            ("placement", "_run_indexes"),                 # \index{} not inline with headings/callouts
+        ],
+
         "images": [
             ("formats", "_run_image_formats"),
             ("external", "_run_external_images"),
@@ -265,6 +299,7 @@ class ValidateCommand:
         parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
         parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
         parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
+        parser.add_argument("--include-lightbox", action="store_true", default=False, help="math --scope attr-leaks: also surface fig-cap/tbl-cap math that leaks into HTML lightbox tooltips (warning, opt-in; ~70 pre-existing instances on dev)")
         parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
         parser.add_argument("--tables", action="store_true", help="labels: filter to tables")
         parser.add_argument("--sections", action="store_true", help="labels: filter to sections")
@@ -384,6 +419,8 @@ class ValidateCommand:
             elif method_name == "_run_inline_refs":
                 results.append(method(root, check_patterns=ns.check_patterns,
                                       check_scope=getattr(ns, 'check_scope', False)))
+            elif method_name == "_run_attr_latex_leaks":
+                results.append(method(root, include_lightbox=getattr(ns, 'include_lightbox', False)))
             elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
@@ -415,10 +452,19 @@ class ValidateCommand:
         descriptions = {
             "refs": "References, citations, inline Python, self-ref",
             "labels": "Duplicate labels, orphans, fig-label underscores",
-            "headers": "Section header IDs ({#sec-...})",
+            "headers": "Section header IDs ({#sec-...}), H1-H5 case policy (MIT Press §10.3.1)",
+            "bib": "Bibliography hygiene — schema + canonical forms (§5)",
             "footnotes": "Placement, integrity, cross-chapter duplicates",
             "figures": "Captions, float flow, image files",
-            "rendering": "Patterns, indexes, dropcaps, headings, typos, tables, ASCII",
+            "markup": "Low-level markup (patterns, div-fences, dropcaps)",
+            "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
+            "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
+            "numbers": "Units + percent spacing, binary units, percent-in-captions",
+            "math": "\\times spacing, attribute-string LaTeX leaks, optional render audit",
+            "structure": "Heading levels, parts, Purpose-unnumbered",
+            "code": "Python code blocks (echo: false, _str/_math export hygiene)",
+            "tables": "Grid tables → pipe, table content hygiene",
+            "index": "Index placement (\\index{} outside headings/callouts)",
             "images": "Image file formats, external URLs",
             "json": "JSON file syntax validation",
             "units": "Physics engine unit conversion tests",
@@ -2951,6 +2997,427 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # Math: LaTeX leaks inside attribute strings (titles + captions + alt text)
+    # ------------------------------------------------------------------
+    #
+    # WHY THIS EXISTS
+    #
+    # Quarto runs Pandoc's math parser only on document body prose. Attribute
+    # values — callout `title="..."`, `fig-cap`, `tbl-cap`, `lst-cap`,
+    # `fig-alt`, `tbl-alt` — are extracted as plain strings and reused by
+    # downstream consumers (HTML lightbox `<img title="...">` tooltip, EPUB
+    # bookmarks, screen readers, PDF outline). Any LaTeX inside them either
+    # renders as literal `\command` / `^{N}` / `$..$` or, in the lightbox
+    # case, leaks raw LaTeX into the hover tooltip. See the audit retrospective
+    # in `.claude/rules/book-prose.md` ("Anti-pattern: LaTeX inside attribute
+    # strings"). Fix by switching to Unicode (×, ³, α, β, ρ, ≤, ≥, →, ∞, …).
+    #
+    # FAILURE MODES CAUGHT
+    #   1. Callout `title="..."` containing $...$, \command, or ^{...}/_{N}
+    #      → ERROR (never renders correctly, in any output format)
+    #   2. fig-cap/tbl-cap/etc. with bare `^{N}` or `_{N}` outside `$...$`
+    #      → ERROR (LaTeX-only syntax; renders literally without delimiters)
+    #   3. fig-cap/tbl-cap with inline `$\command$` math fragments
+    #      → WARNING (caption renders fine, but lightbox tooltip leaks raw
+    #      LaTeX). Reserve $...$ for genuinely complex math; prefer Unicode
+    #      for short fragments like ρ, ≤, ×.
+
+    # Backslash-LaTeX commands commonly seen leaking. Kept conservative —
+    # adding new commands here is safe (more catches), but any addition that
+    # introduces false positives in legitimate prose should be reviewed.
+    _ATTR_LATEX_COMMANDS = (
+        r"times|frac|approx|alpha|beta|gamma|delta|epsilon|zeta|eta|theta|"
+        r"iota|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|upsilon|phi|chi|psi|"
+        r"omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Phi|Psi|Omega|"
+        r"sqrt|sum|int|cdot|leq|geq|neq|partial|nabla|infty|"
+        r"log|ln|exp|min|max|pm|mp|forall|exists|in|notin|to|gets|"  # codespell:ignore notin
+        r"mapsto|rightarrow|Rightarrow|prod|equiv|sim|propto|"
+        r"land|lor|neg|text|mathbf|mathit|mathcal|mathbb"
+    )
+    _ATTR_LATEX_CMD_RE = re.compile(rf"\\(?:{_ATTR_LATEX_COMMANDS})\b")
+    # Candidate `$...$` span. We post-filter the captured inner content with
+    # _looks_like_math() to reject currency false positives like
+    # `$500 outweighs ... ($100)` where two unescaped `$` digit-prefixes
+    # bracket a sentence that is not math at all.
+    _ATTR_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$([^\s$][^$\n]*?)(?<!\\)\$")
+    _ATTR_CARET_BRACE_RE = re.compile(r"(?<![A-Za-z0-9_])\^\{[^}\n]{1,40}\}")
+    _ATTR_UNDER_BRACE_RE = re.compile(r"(?<![A-Za-z0-9_])_\{[^}\n]{1,40}\}")
+
+    @classmethod
+    def _looks_like_math(cls, content: str) -> bool:
+        """True iff a `$...$` span's inner content is plausibly math.
+
+        Distinguishes real math from unescaped-currency false positives like
+        `$500 outweighs ... ($100)`. Heuristic:
+
+          - Anything with a backslash command, `^{...}` superscript, or
+            `_{...}` subscript is math.
+          - A span whose first character is a digit AND that contains no
+            LaTeX-y signals (backslash / ^ / _) is treated as currency
+            (false positive: `$500 outweighs ... ($100)` matches the
+            outer regex but is two adjacent dollar-prefixed amounts).
+          - Otherwise (single symbols like `$B$`, equations like `$T=0.5$`,
+            short mixes like `$y < 0$`) — math.
+        """
+        if not content:
+            return False
+        if "\\" in content or "^{" in content or "_{" in content:
+            return True
+        if content[0].isdigit():
+            return False
+        return True
+
+    @classmethod
+    def _has_attr_math(cls, value: str) -> bool:
+        """True iff *value* contains a `$...$` math span (after currency
+        false-positive filtering)."""
+        return any(cls._looks_like_math(m.group(1))
+                   for m in cls._ATTR_DOLLAR_MATH_RE.finditer(value))
+
+    # Callout open fence with title= attribute (single line; multi-line attr
+    # values are rare in this codebase and intentionally out of scope here).
+    _CALLOUT_TITLE_RE = re.compile(
+        r"""^:::+\s*\{[^}]*\btitle\s*=\s*"([^"]*)"[^}]*\}\s*$"""
+    )
+    # YAML caption-like keys at top of a chunk options block or block YAML.
+    # Match e.g. `fig-cap: "..."`, `fig-cap: '...'`, `fig-cap: bare text`.
+    _YAML_CAP_KEYS = ("fig-cap", "tbl-cap", "lst-cap", "fig-alt", "tbl-alt")
+    _YAML_CAP_RE = re.compile(
+        r"""^(?P<indent>\s*)(?:\#\|\s*)?(?P<key>fig-cap|tbl-cap|lst-cap|fig-alt|tbl-alt)\s*:\s*(?P<value>.*?)\s*$"""
+    )
+    # Inline div attribute: `{#fig-x ... fig-cap="..." fig-alt="..."}` or
+    # similar single-line attribute blocks. Match any of the cap/alt keys.
+    _INLINE_CAP_RE = re.compile(
+        r"""\b(?P<key>fig-cap|tbl-cap|lst-cap|fig-alt|tbl-alt)\s*=\s*"(?P<value>[^"]*)\""""
+    )
+
+    @classmethod
+    def _strip_quotes(cls, raw: str) -> str:
+        s = raw.strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            return s[1:-1]
+        return s
+
+    @classmethod
+    def _strip_inline_math(cls, value: str) -> str:
+        """Remove `$...$` math spans so we can scan the *non-math* remainder
+        for bare `^{}`/`_{}` that should have been wrapped in dollars.
+
+        Only strips spans that pass the math heuristic — currency false
+        positives (`$500 ... $100`) are left in place because they're
+        not math zones we want to ignore for the bare-brace scan.
+        """
+        def _sub(m: re.Match) -> str:
+            return " " if cls._looks_like_math(m.group(1)) else m.group(0)
+        return cls._ATTR_DOLLAR_MATH_RE.sub(_sub, value)
+
+    def _scan_title_value(self, value: str) -> List[tuple]:
+        """Return list of (code, severity, message_suffix) for issues in a
+        callout `title=` value. Math NEVER renders inside title; flag any."""
+        out: list[tuple] = []
+        if self._has_attr_math(value):
+            out.append(("attr_title_math", "error",
+                        "callout title= contains $...$ — math is not parsed in attribute values; use Unicode (×, ³, α, β, ρ, …)"))
+        elif self._ATTR_LATEX_CMD_RE.search(value):
+            out.append(("attr_title_latex", "error",
+                        "callout title= contains a LaTeX command — markdown is not parsed in attribute values; use Unicode"))
+        if self._ATTR_CARET_BRACE_RE.search(value) or self._ATTR_UNDER_BRACE_RE.search(value):
+            out.append(("attr_title_brace", "error",
+                        "callout title= contains ^{...} or _{...} — use Unicode superscript/subscript (³, ₂, …)"))
+        return out
+
+    # Lightbox tooltip leak applies to fig-cap only — Quarto's lightbox is
+    # image-specific. Listing captions (lst-cap), table captions (tbl-cap),
+    # and alt text (fig-alt/tbl-alt) do not get a lightbox tooltip and so
+    # cannot leak through that channel. Math in those caps still renders
+    # correctly; warning about a non-existent leak there is just noise.
+    _LIGHTBOX_AFFECTED_KEYS = frozenset({"fig-cap"})
+
+    def _scan_caption_value(self, key: str, value: str, include_lightbox: bool = False) -> List[tuple]:
+        """Return list of (code, severity, message_suffix) for issues in a
+        fig-cap/tbl-cap/lst-cap/fig-alt/tbl-alt value.
+
+        Math IS parsed inside the body of these captions, so `$...$` is
+        valid markup. Two failure modes:
+
+          - Bare `^{}/_{}` outside `$...$` is an error (LaTeX-only syntax;
+            won't render without delimiters). Applies to all caption-like
+            attribute keys.
+          - Inline `$...$` math in fig-cap renders fine in the caption
+            itself but Quarto's lightbox plugin extracts the caption string
+            for the `<img title>` hover tooltip with markdown stripped,
+            leaking raw LaTeX. Hover-only HTML cosmetic artifact; surfaces
+            only when *include_lightbox=True* (opt-in) and only for
+            fig-cap (other keys don't drive a lightbox).
+        """
+        out: list[tuple] = []
+        non_math = self._strip_inline_math(value)
+        if self._ATTR_CARET_BRACE_RE.search(non_math) or self._ATTR_UNDER_BRACE_RE.search(non_math):
+            out.append((f"{key.replace('-', '_')}_bare_brace", "error",
+                        f"{key} contains bare `^{{...}}` / `_{{...}}` outside `$...$` — wrap in `$...$` or use Unicode (³, ₂, …)"))
+        if (include_lightbox and key in self._LIGHTBOX_AFFECTED_KEYS
+                and self._has_attr_math(value)):
+            out.append((f"{key.replace('-', '_')}_lightbox_leak", "warning",
+                        f"{key} contains `$...$` math — the caption renders fine, but Quarto's lightbox copies this string into the `<img title>` tooltip with markdown stripped, leaking raw LaTeX. Prefer Unicode for short fragments."))
+        return out
+
+    def _run_attr_latex_leaks(self, root: Path, include_lightbox: bool = False) -> ValidationRunResult:
+        """LaTeX leakage inside Quarto attribute strings.
+
+        ``include_lightbox`` (default False) opts into surfacing the
+        warning class for fig-cap/tbl-cap math fragments that leak into
+        the HTML lightbox tooltip. Off by default so pre-commit only
+        blocks on true rendering errors.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            text = self._read_text(file)
+            lines = text.splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                # Track fenced code blocks so we don't scan code samples
+                # that legitimately contain `title="..."` or `fig-cap=...`.
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                # 1. Callout title= attribute
+                m = self._CALLOUT_TITLE_RE.match(line)
+                if m:
+                    value = m.group(1)
+                    for code, severity, message in self._scan_title_value(value):
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code=code,
+                            message=message,
+                            severity=severity,
+                            context=stripped[:160],
+                        ))
+
+                # 2. YAML-style caption / alt key (chunk options or block YAML)
+                ym = self._YAML_CAP_RE.match(line)
+                if ym and not stripped.startswith(":::") and not stripped.startswith("{"):
+                    key = ym.group("key")
+                    value = self._strip_quotes(ym.group("value"))
+                    if value:
+                        for code, severity, message in self._scan_caption_value(key, value, include_lightbox):
+                            issues.append(ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code=code,
+                                message=message,
+                                severity=severity,
+                                context=stripped[:160],
+                            ))
+
+                # 3. Inline div attribute: {... fig-cap="..." ...}
+                for im in self._INLINE_CAP_RE.finditer(line):
+                    key = im.group("key")
+                    value = im.group("value")
+                    for code, severity, message in self._scan_caption_value(key, value, include_lightbox):
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code=code,
+                            message=message,
+                            severity=severity,
+                            context=stripped[:160],
+                        ))
+
+        return ValidationRunResult(
+            name="attr-leaks",
+            description="LaTeX inside attribute strings (callout title=, fig-cap, tbl-cap, fig-alt, tbl-alt)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Code: LaTeX inside *_str Python exports (the original bug)
+    # ------------------------------------------------------------------
+    #
+    # WHY THIS EXISTS
+    #
+    # The `_str` suffix is the project's convention for "this Python value is
+    # plain text destined for an inline `{python}` substitution". Inline
+    # `{python}` substitutions happen AFTER Pandoc's math parser runs, so any
+    # raw LaTeX (`$...$`, `\\command`, `^{...}`) embedded in a `_str` export
+    # survives into the rendered output as literal text. The fix is either:
+    #   - Wrap the export in md_math() / md() — and rename it `_math` so the
+    #     suffix tells the next reader "this is a Markdown-wrapped LaTeX
+    #     object, not a plain string."
+    #   - Or compute and emit the value as plain text / Unicode.
+    # See `.claude/rules/book-prose.md` ("Anti-pattern: bare LaTeX inside a
+    # `_str` export").
+
+    # `_str` assignments inside Python code blocks. Capture the variable name
+    # so we can include it in the error message and skip `_math`/other names.
+    _STR_ASSIGN_RE = re.compile(
+        r"""^\s*(?P<lhs>[A-Za-z_][A-Za-z0-9_.]*_str)\s*=\s*(?P<rhs>[fFrR]{0,2}["'].*)$"""
+    )
+    # Common LaTeX commands likely to appear inside an f-string. Pre-compiled
+    # with the leading backslash already escaped for the Python source.
+    _STR_LATEX_CMD_RE = re.compile(rf"\\\\(?:{_ATTR_LATEX_COMMANDS})\b")
+    # `$...$` math span inside a Python string. Conservative on two axes:
+    #   1. Requires a non-space char immediately after the opening `$` to
+    #      avoid matching legitimate uses of `$` for currency in plain prose.
+    #   2. Excludes `$` immediately followed by `{` — that is f-string
+    #      substitution syntax for currency formatting (`f"${rate:.0f}"`),
+    #      which writes a literal `$` followed by the substituted value.
+    #      Math spans never have `${`-form openings.
+    _STR_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$(?!\{)[^\s$][^$\n]{0,80}?(?<!\\)\$")
+    # `^{...}` inside a Python string — LaTeX-only syntax, never legitimate
+    # in a plain `_str` value.
+    _STR_CARET_BRACE_RE = re.compile(r"\^\{[^}\n]{1,40}\}")
+    # Comment / docstring discriminator: skip lines that are obviously
+    # docstrings or comments (these don't affect rendering).
+    _PY_COMMENT_RE = re.compile(r"^\s*#")
+
+    def _run_str_latex_leak(self, root: Path) -> ValidationRunResult:
+        """`*_str` exports must be plain text — no embedded LaTeX."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start = re.compile(r"^```\{python\}")
+        block_end = re.compile(r"^```\s*$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_python = False
+            for idx, line in enumerate(lines, 1):
+                if block_start.match(line):
+                    in_python = True
+                    continue
+                if block_end.match(line):
+                    in_python = False
+                    continue
+                if not in_python:
+                    continue
+                if self._PY_COMMENT_RE.match(line):
+                    continue
+
+                m = self._STR_ASSIGN_RE.match(line)
+                if not m:
+                    continue
+                lhs = m.group("lhs")
+                rhs = m.group("rhs")
+
+                hits: list[tuple] = []
+                if self._STR_DOLLAR_MATH_RE.search(rhs):
+                    hits.append(("str_export_dollar_math",
+                                 f"`{lhs}` contains `$...$` math — `_str` exports must be plain text. "
+                                 f"Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)` (or `md(...)` for mixed prose+math)."))
+                if self._STR_LATEX_CMD_RE.search(rhs):
+                    hits.append(("str_export_latex_cmd",
+                                 f"`{lhs}` contains a LaTeX command (`\\\\times`, `\\\\frac`, `\\\\alpha`, …) — "
+                                 f"`_str` exports must be plain text. Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)`."))
+                if self._STR_CARET_BRACE_RE.search(rhs):
+                    hits.append(("str_export_caret_brace",
+                                 f"`{lhs}` contains `^{{...}}` / `_{{...}}` — `_str` exports must be plain text. "
+                                 f"Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)`, or emit Unicode (³, ₂, …)."))
+
+                for code, message in hits:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code=code,
+                        message=message,
+                        severity="error",
+                        context=line.strip()[:160],
+                    ))
+
+        return ValidationRunResult(
+            name="str-latex-leak",
+            description="*_str Python exports must not contain raw LaTeX (use md()/md_math())",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Math: full HTML render audit (delegates to tools/audit/audit_math_rendering.py)
+    # ------------------------------------------------------------------
+    #
+    # WHY THIS EXISTS
+    #
+    # The static `attr-leaks` and `str-latex-leak` checks catch the source-
+    # level patterns we know about. The render audit is the empirical fallback:
+    # it actually builds each chapter's HTML and scans the *rendered* output
+    # for any LaTeX that escaped MathJax — including failure modes we haven't
+    # written a static check for yet. It is also the source of truth for the
+    # lightbox-tooltip leak class.
+    #
+    # SLOW. Wired through `binder check math --scope render-audit` so it can
+    # be run interactively or in CI, and registered as a `manual`-stage hook
+    # in `.pre-commit-config.yaml` (do not let it block routine commits).
+
+    def _run_math_render_audit(self, root: Path) -> ValidationRunResult:
+        """Build each chapter's HTML and scan for unrendered LaTeX leakage.
+
+        Delegates to `tools/audit/audit_math_rendering.py`. This is slow
+        (~10 minutes for the full book) and is registered as a manual-stage
+        pre-commit hook; it is NOT run on every commit.
+        """
+        start = time.time()
+        script = root / "tools" / "audit" / "audit_math_rendering.py"
+        issues: List[ValidationIssue] = []
+        if not script.exists():
+            issues.append(ValidationIssue(
+                file=str(script.relative_to(root)) if script.is_absolute() else str(script),
+                line=0,
+                code="render_audit_missing",
+                message="Render-audit script not found — expected tools/audit/audit_math_rendering.py",
+                severity="error",
+                context="",
+            ))
+            return ValidationRunResult(
+                name="render-audit",
+                description="Full HTML build + leak scan (delegates to tools/audit/)",
+                files_checked=0,
+                issues=issues,
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        proc = subprocess.run(
+            [sys.executable, str(script)],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        # The audit script writes audit-math-report.json; surface the summary
+        # line + nonzero exit as a single issue if there was leakage.
+        if proc.returncode != 0:
+            tail = (proc.stdout or "").strip().splitlines()
+            summary = next((line for line in reversed(tail)
+                            if "leaky" in line.lower() or "fail" in line.lower()),
+                           tail[-1] if tail else "render audit reported leaks")
+            issues.append(ValidationIssue(
+                file="audit-math-report.json",
+                line=0,
+                code="render_audit_leaks",
+                message=f"Render audit found leaks (exit {proc.returncode}): {summary}. "
+                        f"See audit-math-report.md for details.",
+                severity="error",
+                context="",
+            ))
+
+        return ValidationRunResult(
+            name="render-audit",
+            description="Full HTML build + leak scan (delegates to tools/audit/)",
+            files_checked=0,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Purpose sections must be unnumbered
     # ------------------------------------------------------------------
 
@@ -3117,6 +3584,46 @@ class ValidateCommand:
         return ValidationRunResult(
             name="mitpress-spaced-emdash",
             description="No spaced em dashes in prose — use word—word (MIT Press §1)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_spaced_slash(self, root: Path) -> ValidationRunResult:
+        """Flag spaced slashes (word / word) in prose — should be closed (word/word)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        spaced_slash = re.compile(r"[a-zA-Z0-9]\s+/\s+[a-zA-Z0-9]")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("#|") or stripped.startswith("# "):
+                    continue
+                for m in spaced_slash.finditer(line):
+                    context = line[max(0, m.start() - 5) : min(len(line), m.end() + 15)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="mitpress_spaced_slash",
+                            message="Close up slash: word/word not word / word (§1)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="mitpress-spaced-slash",
+            description="No spaced slashes in prose — use word/word (MIT Press §1)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -4181,6 +4688,54 @@ class ValidateCommand:
         if not qmd_files:
             return ValidationRunResult(name="grid-tables", issues=[])
         return self._delegate_script(script, ["--check"] + qmd_files, "grid-tables")
+
+    def _run_heading_case(self, root: Path) -> ValidationRunResult:
+        """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
+
+        Native implementation: imports from cli.commands.headings directly.
+        Emits one ValidationIssue per violation with the offending current
+        form and the expected sentence-case form.
+        """
+        from cli.commands.headings import find_violations
+        t0 = time.time()
+        qmd_files = [str(f) for f in sorted(root.rglob("*.qmd"))]
+        violations = find_violations(qmd_files)
+        issues: List[ValidationIssue] = []
+        for v in violations:
+            rel = v.path.replace(str(root) + "/", "")
+            issues.append(ValidationIssue(
+                file=rel, line=v.line, code="heading-case",
+                message=f"expected: {v.expected.strip()}",
+                severity="error", context=v.current.strip(),
+            ))
+        return ValidationRunResult(
+            name="heading-case",
+            description="H1/H2 headline + H3+ sentence case (§10.3.1)",
+            files_checked=len(qmd_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
+        """Validate .bib files against §5 Bibliography Hygiene schema.
+
+        Delegates to `book/tools/bib_lint.py --check`, which enforces the
+        canonical schema: required fields per entry type, canonical field
+        order, quoting style, author-list rules, journal spell-out,
+        publisher canonical forms. Violations against the pre-existing
+        baseline (`book/tools/bib_lint_baseline.json`) are grandfathered;
+        only NEW violations block.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "bib_lint.py"
+        )
+        bib_files = [str(f) for f in sorted(root.rglob("*.bib"))]
+        if not bib_files:
+            return ValidationRunResult(
+                name="bib-hygiene", description="bib-hygiene",
+                files_checked=0, issues=[], elapsed_ms=0,
+            )
+        return self._delegate_script(script, ["--check"] + bib_files, "bib-hygiene")
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
         """Validate image file formats using Pillow."""

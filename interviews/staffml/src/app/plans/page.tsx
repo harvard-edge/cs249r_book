@@ -7,6 +7,7 @@ import clsx from "clsx";
 import Link from "next/link";
 import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan } from "@/lib/plans";
 import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinResult } from "@/lib/corpus";
+import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
@@ -51,7 +52,8 @@ export default function PlansPage() {
     setRubricItems([]);
   };
 
-  const current = questions[currentIdx];
+  const currentSummary = questions[currentIdx];
+  const current = useFullQuestion(currentSummary) ?? currentSummary;
   const maxScore = napkinResult?.maxSelfScore ?? 3;
 
   const handleReveal = () => {

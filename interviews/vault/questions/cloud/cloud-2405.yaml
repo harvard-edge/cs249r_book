@@ -1,0 +1,88 @@
+schema_version: '1.0'
+id: cloud-2405
+track: cloud
+level: L5
+zone: design
+topic: compound-ai-systems
+competency_area: latency
+bloom_level: create
+phase: both
+title: Pipelined Guardrails in Compound Systems
+scenario: 'You are deploying a financial compliance RAG API that must return a complete JSON payload.
+  The SLA for P90 latency is 1000ms. Current sequential pipeline: Embedding & Vector Retrieval (250ms)
+  -> Main LLM Generation for avg 150 tokens (600ms) -> Output Compliance Guardrail evaluating the full
+  text (300ms). Total P90 is 1150ms. You cannot change the models, replace the guardrail, or return partial/streamed
+  responses to the client. The guardrail latency scales linearly with token count (i.e., 50 tokens = 100ms).
+  Design an orchestration architecture to meet the 1000ms SLA.'
+details:
+  realistic_solution: 'Implement a Pipelined/Chunked Guardrail architecture (a core Compound System Pattern).
+    Instead of waiting for the main LLM to emit all 150 tokens before starting the 300ms guardrail check,
+    orchestrate the system to evaluate chunks asynchronously via an internal stream.
+
+
+    1. Decomposition: The LLM generates 150 tokens in 600ms (4ms/token). Assuming chunks of 50 tokens
+    (approx. one sentence), a chunk is completed every 200ms.
+
+    2. Pipelining: Stream the LLM output to an internal orchestrator. Once Chunk 1 (50 tokens) is generated
+    at T=450ms (250ms retrieval + 200ms generation), dispatch it to a Guardrail worker node.
+
+    3. Concurrency: The Guardrail model latency scales linearly, taking 100ms per 50-token chunk. By overlapping
+    the generation of Chunk N+1 with the guardrail evaluation of Chunk N, the critical path becomes bounded
+    by the generation of the final chunk and its subsequent evaluation. The final payload is assembled
+    and returned instantly after the last chunk passes, meeting the SLA without compromising safety.'
+  common_mistake: Suggesting to stream the response directly to the client to reduce perceived latency,
+    which violates the strict requirement to return a complete JSON payload.
+  napkin_math: 'Sequential Critical Path: 250ms (DB) + 600ms (LLM) + 300ms (Guardrail) = 1150ms.
+
+
+    Pipelined Critical Path:
+
+    - T=0: Start Retrieval
+
+    - T=250: Retrieval done, Start LLM Gen
+
+    - T=450: LLM yields Chunk 1. Start Guardrail(C1).
+
+    - T=550: Guardrail(C1) finishes.
+
+    - T=650: LLM yields Chunk 2. Start Guardrail(C2).
+
+    - T=750: Guardrail(C2) finishes.
+
+    - T=850: LLM yields Chunk 3 (Final). Start Guardrail(C3).
+
+    - T=950: Guardrail(C3) finishes. All checks passed.
+
+
+    Total latency = 950ms. This yields a 200ms reduction, safely fitting within the 1000ms SLA.'
+  options:
+  - 'Model compression for edge deployment: (1) Quantization — INT8 weight quantization reduces model
+    size by 2× from FP16, with <1% accuracy loss for well-calibrated models. (2) Pruning — remove up to
+    50-80% of weights (structured pruning for actual speedup, unstructured for size). (3) Knowledge distillation
+    — train a smaller student model to match the teacher''s output distribution. (4) Architecture search
+    — find efficient architectures (MobileNet, EfficientNet) optimized for the target hardware (ARM, NPU).
+    Combined: 10-50× model size reduction.'
+  - Edge deployment only requires INT4 quantization; pruning, distillation, and architecture search are
+    redundant once quantization is applied because INT4 already provides maximum compression
+  - Model compression always degrades accuracy by >10%, making it unsuitable for production edge applications;
+    instead, use cloud inference with edge caching for latency-sensitive use cases
+  - Edge hardware (ARM, Cortex-M) can run unmodified FP32 models at acceptable speed; compression is only
+    needed for models larger than 10B parameters
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

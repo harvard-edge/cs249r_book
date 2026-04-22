@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-fill2-32031
+track: cloud
+level: L4
+zone: design
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'PagedAttention: Virtual Memory for KV Cache'
+scenario: You serve a 13B model on an H100 (80 GB HBM3). Each request's KV cache for a 4096-token context
+  consumes 2 GB. With contiguous memory allocation, you can serve 20 concurrent requests (40 GB KV cache
+  + 26 GB weights + overhead). Many requests use less than 4096 tokens, wasting allocated but unused memory.
+  How does PagedAttention (vLLM) improve utilization, and what is the throughput gain?
+details:
+  realistic_solution: 'Without PagedAttention, each request pre-allocates a contiguous 2 GB buffer for
+    max context length (4096 tokens), even if the actual context is 500 tokens. Fragmentation and over-allocation
+    waste ~60-80% of KV cache memory. PagedAttention divides KV cache into fixed-size blocks (e.g., 16
+    tokens per block). Blocks are allocated on demand as the sequence grows, stored non-contiguously in
+    GPU memory (like OS page tables). A block table maps logical positions to physical blocks. Benefits:
+    (1) No internal fragmentation — only the last block has waste (≤15 tokens). (2) No external fragmentation
+    — any free block can be used by any request. (3) Memory sharing — common prefixes between requests
+    can share the same physical blocks (copy-on-write). Typical utilization improves from 20-40% to >95%.
+    Throughput gain: with average 1000-token contexts, actual KV memory per request = 0.5 GB vs 2 GB allocated.
+    Serving capacity: 80-90 concurrent requests vs 20. A 4× throughput improvement.'
+  common_mistake: Thinking PagedAttention changes the attention computation itself. It is a memory management
+    technique — it applies virtual memory concepts (paging) to KV cache allocation, not to the attention
+    algorithm.
+  napkin_math: 'Without paging: 20 requests × 2 GB (pre-allocated) = 40 GB. Average actual use: 20 × 0.5
+    GB = 10 GB. Waste: 30 GB (75%). With paging: 80+ requests × 0.5 GB actual = 40 GB. No waste. Throughput:
+    4× improvement in concurrent requests.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,18 +1,27 @@
-<!-- DEV-BANNER-START -->
+<!-- EARLY-RELEASE-CALLOUT:START -->
 <div align="center">
-<table>
-<tr><td>
-<h3>🚧 Under Active Development</h3>
-<p>This component is being built on the <code>dev</code> branch and is <b>not yet available</b> on the live site.<br>
-Content may be incomplete or change without notice. The published curriculum lives at <a href="https://mlsysbook.ai"><b>mlsysbook.ai</b></a>.</p>
-<p>
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">These Beamer decks ship with the <b>2026</b> MLSysBook refresh. Slides, figures, and speaker notes are <b>actively iterated</b> as the textbook evolves.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> (teaching notes, errata, and requests).</p>
+<p align="center">
 <a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
+&nbsp;
 <a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
 </p>
+
+</td></tr>
+</table>
+
 </td></tr>
 </table>
 </div>
-<!-- DEV-BANNER-END -->
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 # ML Systems Lecture Slides
 
@@ -27,12 +36,14 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
 
 ## Coverage
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="25%">Volume</th>
-      <th width="15%">Chapters</th>
-      <th width="60%">Topics</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Volume</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="15%">Chapters</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="60%">Topics</th>
     </tr>
   </thead>
   <tbody>
@@ -48,6 +59,9 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ## Structure
 

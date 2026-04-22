@@ -150,7 +150,7 @@ Storage is the least glamorous component of the ML infrastructure stack. Acceler
 
 ## *How* ML Workloads Invert Storage Assumptions {#sec-storage-workload-inversion}
 
-\index{storage!workload inversion}A database administrator moving to an ML infrastructure team would find that nearly every storage design principle they relied on produces the wrong answer. To see *why*, return to our 175B model training on 1.5 trillion tokens. Each training epoch reads every token, in shuffled order, exactly once. The next epoch shuffles again and reads them all once more. There is no "hot data" in the traditional sense and no 80/20 rule where a small fraction of data accounts for most accesses. The standard storage optimizations fail precisely because they assume the opposite.
+\index{Storage!workload inversion}A database administrator moving to an ML infrastructure team would find that nearly every storage design principle they relied on produces the wrong answer. To see *why*, return to our 175B model training on 1.5 trillion tokens. Each training epoch reads every token, in shuffled order, exactly once. The next epoch shuffles again and reads them all once more. There is no "hot data" in the traditional sense and no 80/20 rule where a small fraction of data accounts for most accesses. The standard storage optimizations fail precisely because they assume the opposite.
 
 Traditional storage systems evolved to serve transactional databases, workloads characterized by small random accesses, strong consistency, and moderate bandwidth. A database server might issue thousands of 4 KB reads per second to serve user queries. The industry optimized for this pattern over decades, developing sophisticated caching algorithms, write-ahead logs, and RAID[^fn-raid-storage] configurations tuned for small-block random access. Each optimization assumed that the most recently accessed data would likely be accessed again soon.
 
@@ -203,7 +203,7 @@ class ShardContention:
 **The Math**:
 This is a variant of the "Birthday Problem" in probability.
 
-1. **Probability of No Collision**: $\approx e^{-n^2 / 2N} = e^{-32^2 / 2000} \approx 0.60$.
+1. **Probability of No Collision**: $\approx e^{-n^2/2N} = e^{-32^2/2000} \approx 0.60$.
 2. **Probability of Contention**: $1 - 0.60 = \mathbf{40\%}$.
 
 **The Systems Insight**: Even with a large number of shards, there is a **`{python} ShardContention.sc_collision_prob_str` percent chance** that the storage system will experience a "Hot Spot" in any given epoch. In a distributed fleet, these collisions create **Tail Latency**: the entire cluster waits for the two GPUs sharing a disk to finish. To solve this, production data loaders use **Global Shuffling** and **Deterministic Shard Assignment** to ensure that workers are perfectly distributed across the storage fabric, eliminating the "Thundering Herd" effect.
@@ -1033,7 +1033,7 @@ where $T_{\text{step}} = \max(T_{\text{compute}}, T_{I/O})$ when I/O and compute
 
 ::: {.callout-notebook title="The Data Stall Ratio"}
 
-\index{data stall ratio!GPU utilization}**Scenario**: Your GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
+\index{Data Stall Ratio!GPU utilization}**Scenario**: Your GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
 
 **Without pipelining** (sequential I/O then compute):
 
@@ -1245,7 +1245,7 @@ The prefetch depth equation (@eq-prefetch-depth) tells us how many batches must 
 
 If I/O at the 99th percentile takes 500 ms and compute takes 200 ms, then $D_{min} = 3$ batches, with a safety margin of 5. In practice, data loaders like PyTorch's `DataLoader` use `prefetch_factor` and `num_workers` parameters to control this depth. Setting `prefetch_factor=2` with 4 workers creates a buffer of 8 batches, which is typically sufficient for NVMe-backed pipelines but may be inadequate for object-storage-backed pipelines where P99 latency can exceed 500 ms.
 
-\index{prefetch buffer!depth calculation}To illustrate with our running example: the 175B model on 256 GPUs processes each batch in roughly 200 ms. Reading from local NVMe, the P99 I/O latency for a batch of tokenized text (roughly 40 MB per GPU) is approximately 50 ms. The minimum prefetch depth is $\lceil 50 / 200 \rceil = 1$ batch, and a safety margin of 2 is adequate. Reading from a parallel file system, the P99 I/O latency rises to roughly 200 ms due to network jitter and contention, requiring a minimum depth of $\lceil 200 / 200 \rceil = 1$, with a safety margin of 3 to account for occasional multi-hundred-millisecond outliers. Reading from object storage, the P99 latency can exceed 500 ms, requiring a depth of at least 3, with a safety margin of 5 or more. These numbers translate directly into host DRAM consumption: at 40 MB per batch, a depth-5 prefetch buffer per GPU consumes 200 MB, and 8 GPUs per node consume 1.6 GB. At 40 MB per batch with a depth of 1, the same node needs only 320 MB. The storage tier directly determines the memory cost of the prefetch buffer.
+\index{Prefetch Buffer!depth calculation}To illustrate with our running example: the 175B model on 256 GPUs processes each batch in roughly 200 ms. Reading from local NVMe, the P99 I/O latency for a batch of tokenized text (roughly 40 MB per GPU) is approximately 50 ms. The minimum prefetch depth is $\lceil 50/200 \rceil = 1$ batch, and a safety margin of 2 is adequate. Reading from a parallel file system, the P99 I/O latency rises to roughly 200 ms due to network jitter and contention, requiring a minimum depth of $\lceil 200/200 \rceil = 1$, with a safety margin of 3 to account for occasional multi-hundred-millisecond outliers. Reading from object storage, the P99 latency can exceed 500 ms, requiring a depth of at least 3, with a safety margin of 5 or more. These numbers translate directly into host DRAM consumption: at 40 MB per batch, a depth-5 prefetch buffer per GPU consumes 200 MB, and 8 GPUs per node consume 1.6 GB. At 40 MB per batch with a depth of 1, the same node needs only 320 MB. The storage tier directly determines the memory cost of the prefetch buffer.
 
 The cost of deep prefetching is memory: each buffered batch occupies host DRAM. A batch of 256 images at 224$\times$ $224\times3$ bytes (after decoding) occupies roughly 37 MB. A prefetch buffer of 8 such batches consumes 300 MB, which is negligible for a node with 512 GB of DRAM. For large-batch language model training where each batch contains millions of tokens, however, the prefetch buffer can grow to several gigabytes, competing with embedding tables and other DRAM consumers.
 
@@ -1272,7 +1272,7 @@ In PyTorch's `DataLoader`, each worker is a separate process with its own file d
 
 The interaction between multi-worker loading and the storage hierarchy matters. When reading from local NVMe, workers can issue concurrent reads to the same RAID array without contention, because NVMe's deep command queues (up to 64K outstanding commands) handle parallelism in hardware. When reading from a parallel file system, workers distribute their reads across different OSS nodes, naturally aggregating bandwidth. When reading from object storage, workers issue concurrent GET requests, each to a different shard, achieving parallelism at the HTTP level.
 
-A subtle pitfall in multi-worker loading is **shuffle quality vs. I/O efficiency**. \index{data shuffling!shard-level}Perfect shuffling requires that each batch contain samples drawn uniformly from the entire dataset, which implies random access across all shards. Random access, however, defeats the sequential I/O patterns that storage systems optimize for. The practical compromise is *shard-level shuffling* combined with *within-shard shuffling*: the loader shuffles the list of shards at epoch start, assigns contiguous groups of shards to each worker, and then shuffles samples within each shard's local buffer. This approach provides sufficient randomness for training convergence while maintaining sequential I/O at the storage level. Empirical studies confirm that shard-level shuffling produces training loss curves indistinguishable from full random shuffling for most workloads, as long as the shard size is large enough (typically 256 MB or more) to provide adequate within-shard diversity.
+A subtle pitfall in multi-worker loading is **shuffle quality vs. I/O efficiency**. \index{Data Shuffling!shard-level}Perfect shuffling requires that each batch contain samples drawn uniformly from the entire dataset, which implies random access across all shards. Random access, however, defeats the sequential I/O patterns that storage systems optimize for. The practical compromise is *shard-level shuffling* combined with *within-shard shuffling*: the loader shuffles the list of shards at epoch start, assigns contiguous groups of shards to each worker, and then shuffles samples within each shard's local buffer. This approach provides sufficient randomness for training convergence while maintaining sequential I/O at the storage level. Empirical studies confirm that shard-level shuffling produces training loss curves indistinguishable from full random shuffling for most workloads, as long as the shard size is large enough (typically 256 MB or more) to provide adequate within-shard diversity.
 
 The shuffle buffer size creates a memory-randomness tradeoff. A larger buffer provides better randomness (because samples are drawn from a larger pool) but consumes more host DRAM. For our running example with text data, a shuffle buffer of 10,000 sequences at 2,048 tokens each, with each token represented as a 4-byte integer, consumes roughly 80 MB. This is negligible relative to the 512 GB of host DRAM. For image data, where each decoded image occupies 150 KB, a shuffle buffer of 10,000 images consumes 1.5 GB, still manageable but a non-trivial fraction of the prefetch budget. The data loader designer must balance shuffle buffer size against prefetch depth, since both compete for the same host DRAM capacity.
 
@@ -1584,7 +1584,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 1. **Per-node write to local NVMe** (4 drives at 3.5 GB/s each = 14 GB/s): $4 \text{ GB} \div 14 \text{ GB/s} = 0.29$ seconds.
 2. **Async copy to PFS**: 256 nodes$\times$ 4 GB = 1,024 GB total. If the PFS provides 1 TB/s aggregate, the storm completes in roughly 1 second.
-3. **Per-node PFS bandwidth**: If all 256 nodes write simultaneously, each gets $1000 / 256 = 3.9$ GB/s. Per-node async copy: $4 / 3.9 = 1.03$ seconds.
+3. **Per-node PFS bandwidth**: If all 256 nodes write simultaneously, each gets $1000/256 = 3.9$ GB/s. Per-node async copy: $4/3.9 = 1.03$ seconds.
 4. **Training pause**: only 0.29 seconds (the local NVMe write). The PFS copy overlaps with the next training iteration.
 5. **Overhead**: 0.29 s pause every 600 s = **0.05 percent** training time lost to checkpointing.
 
@@ -1647,7 +1647,7 @@ Prefetching hides *average* latency, not *tail* latency. Object storage P99 late
 
 Storing each training sample as an individual file (one JPEG per image, one JSON per text sample) is natural for data collection but catastrophic for training at scale. Each file requires metadata operations (`open()`, `stat()`, `close()`) that serialize on the metadata server. At 10,000 concurrent workers, metadata operations become the bottleneck long before data bandwidth saturates. The solution is to aggregate samples into large sequential shards (TFRecord, WebDataset tar, Parquet) during preprocessing. This reduces metadata operations by 10,000 to 100,000$\times$ and transforms random access patterns into sequential streaming.
 
-### Retrieval infrastructure: vector indexes and hybrid search {#sec-data-storage-retrieval-infrastructure}
+### Retrieval infrastructure: Vector indexes and hybrid search {#sec-data-storage-retrieval-infrastructure}
 
 While model training relies heavily on streaming sequential blobs via formats like TFRecord or Parquet, modern inference architectures—particularly those leveraging Retrieval-Augmented Generation (RAG)—introduce a fundamentally different storage profile. Machine learning data in this context is not just sequential bytes, but rather high-dimensional vector graphs representing semantic embeddings.
 

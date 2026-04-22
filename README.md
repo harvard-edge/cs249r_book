@@ -719,6 +719,19 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
 <!-- INSTRUCTORS-CONTRIBUTORS-END -->
+
+---
+
+### ⚗️ Periodic Table of ML Systems Contributors
+
+<!-- PERIODICTABLE-CONTRIBUTORS-START -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<p><em>Coming soon!</em></p>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+<!-- PERIODICTABLE-CONTRIBUTORS-END -->
 ---
 
 <div align="center">

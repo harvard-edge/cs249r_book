@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-1414
+track: cloud
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Debugging End-to-End Visual Search Latency
+scenario: 'An e-commerce platform serves a PyTorch-based visual search model on an AWS g4dn.xlarge instance
+  (1 T4 GPU, 4 vCPUs). The TensorRT inference latency is a consistent 8ms per image at batch size 1. However,
+  at a moderate load of 150 QPS, the P90 end-to-end API latency spikes to 120ms, violating the 50ms SLA.
+  The inference pipeline is built with Python FastAPI and sequentially performs: base64 decode, PIL image
+  resize (1080p to 224x224), host-to-device transfer, GPU inference, and JSON serialization. Diagnose
+  the root cause of this latency degradation.'
+details:
+  realistic_solution: The bottleneck is CPU starvation and queueing delay from synchronous image preprocessing.
+    PIL resize takes ~15ms per 1080p image, consuming 2.25 CPU cores at 150 QPS, plus base64 decode and
+    HTTP overhead consuming another 0.75 cores. Total CPU demand is ~3.0 of 4 available vCPUs. Under the
+    Python GIL, this drives utilization above 75%, causing exponential queueing delays (M/M/c queue behavior)
+    that explain the 120ms P90 latency. Fix by using async preprocessing with OpenCV/libjpeg-turbo or
+    offloading resize to GPU.
+  common_mistake: Focusing solely on GPU optimizations like dynamic batching or model quantization, ignoring
+    the CPU-bound preprocessing steps and Python GIL contention that are the actual source of the P90
+    latency spike.
+  napkin_math: PIL 1080p resize takes ~15ms. At 150 QPS, total CPU resize time is 150 * 15ms = 2250ms
+    per second (requires 2.25 cores). Base64 decode (2ms) + HTTP (3ms) adds 300ms/sec + 450ms/sec = 0.75
+    cores. Total CPU demand = 3.0 cores. On a 4 vCPU instance running Python (GIL), CPU utilization approaches
+    75%+. High utilization in an M/M/c queue drives exponential wait times, causing the 120ms P90 latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-200
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:54:57.159242'

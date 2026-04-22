@@ -241,17 +241,18 @@ tags:
 - `vault check --strict` fails if the registry lists an ID whose file doesn't exist, OR whose file's `id:` field doesn't match the registry entry. This is the structural check that catches bad manual edits.
 - **Birthday-collision math** (v2.1 — Chip bound-correction): within a single `(track, level, zone, topic)` bucket of ~100 titles, the probability of any 6-hex collision is ~100² / 2 / 16^6 ≈ 1/3,350. At 9,200 total questions distributed across ~400 cells, the per-cell rate is low, and per-bucket per-title collision is rarer still (1/16M for pairwise identical), but within-bucket collisions do happen at corpus scale — hence the dedup suffix. The 4-digit suffix gives 10,000 slots per `(topic, 6-hex)` bucket, far above anything we'll see.
 
-*Path-as-classification (hardened — fixes H-9):*
-- Filesystem path is authoritative for track/level/zone. YAML has no `track:` etc. fields.
-- **All path components must be lowercase**. Fast-tier invariant rejects non-lowercase.
-- Each component is enum-validated against `taxonomy.yaml`, the level enum, and `zones.yaml`.
-- `vault move` is the **only** supported reclassification path. CI rejects direct `git mv` by checking that every file's ID-registry entry matches its current path prefix.
-- Under `vault move`, the filename (`<topic-kebab>-<hash>-<seq>.yaml`) is preserved so git follows the rename.
+*YAML-as-classification (v1.0 — reverses the earlier H-9 decision):*
+- **The YAML is authoritative for every classification axis**: `track`, `level`, `zone`, `topic`, `competency_area`, `bloom_level`, `phase` are all required fields on every question.
+- Filesystem carries **only `track`** for navigability: `questions/<track>/<id>.yaml`. Moving a file between tracks is a `git mv` + YAML edit; moving between levels or zones is a YAML edit alone.
+- Loader enforces one structural invariant: the directory under `questions/` must match `yaml.track`. No invariant is placed on the filename beyond `<id>.yaml`, because several legitimate questions have historical ID prefixes that no longer match their current track.
+- All enum values are validated against [`schema/enums.py`](./schema/enums.py), which mirrors [`schema/question_schema.yaml`](./schema/question_schema.yaml) (LinkML, the authoritative schema).
 
-*Chain reference (structured — fixes H-4):*
-- `chain` is a mapping `{id: ..., position: ...}`, never a compact `<id>@<pos>` string.
-- Loader accepts the legacy compact form during migration, but always writes structured form on save.
-- Chain positions form a contiguous `[1..N]` (already invariant-checked).
+> **Why this reverses the earlier "H-9 hardening" decision (v0.1 → v1.0, 2026-04-21):** the path-as-classification design could not represent the paper's full 11-zone × 6-level taxonomy — only 4 of 11 zones and 6 of 6 levels had directories, and `L6+` was missing entirely. The pre-v1.0 migration script silently collapsed questions with unrepresentable `(level, zone)` pairs into `l1/recall/` and dropped 86 questions whose target cell did not exist. Reclassification also required a file move, which actively discouraged corrections. v1.0 treats classification as data and the filesystem as a shallow addressing scheme.
+
+*Chain reference (plural — fixes v0.1 multi-chain data loss):*
+- `chains` is a **list** of `{id, position}` mappings. A question may belong to zero, one, or many chains (~101 corpus questions belong to more than one).
+- Position is integer, non-negative. Multiple questions in the same chain must have distinct positions, but positions need not be contiguous.
+- The singular `chain:` field from v0.1 is not accepted; pre-v1.0 YAMLs are regenerated from `corpus.json` via the migration script.
 
 *Provenance (closed enum — fixes H-5):*
 - `provenance` is one of `{human, llm-draft, llm-then-human-edited, imported}`.
@@ -1498,16 +1499,6 @@ Autonomous execution is complete when:
 7. Paper and site agree on all counts by construction
 8. CUTOVER_QA.md all items checked
 9. Monitoring dashboards report healthy for 48 hours post-cutover
-
----
-
-## 21. Kickoff Prompt (copy-paste into new session)
-
-The exact text the user pastes to launch the next session is maintained in a separate file for ease of copying:
-
-**`interviews/vault/KICKOFF.md`**
-
-Keep that file in sync with this architecture doc. When the plan changes in a way that alters the kickoff instructions, update both.
 
 ---
 

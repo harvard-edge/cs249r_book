@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-cell-10000
+track: cloud
+level: L3
+zone: analyze
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Estimating Activation Memory for a Transformer Layer on H100
+scenario: You are profiling a 72-layer GPT-style Transformer with hidden size 8192, sequence length 4096,
+  and batch size 8 running on an H100 (80 GB HBM3). Before enabling gradient checkpointing, you need to
+  know how much activation memory the forward pass will consume across all layers so you can decide whether
+  it fits alongside a 70B parameter model in fp16.
+details:
+  realistic_solution: 'Per layer: residual stream 2×B×S×H bytes (fp16), attention QKV projections 3×2×B×S×H,
+    softmax scores 2×B×H×S×S (with H_heads heads), MLP intermediate 2×2×B×S×4H. For 72 layers at B=8,
+    S=4096, H=8192: residual alone is 2×8×4096×8192×2≈1 GB per layer. Full activation budget across 72
+    layers is roughly 150-200 GB, forcing at minimum 4× gradient checkpointing to fit in 80 GB alongside
+    model weights.'
+  common_mistake: Counting only the attention weight matrix activations and ignoring MLP intermediate
+    tensors, layer-norm inputs, and residual stream copies, which together often account for 60-70% of
+    activation memory.
+  napkin_math: 'Single layer residual: 2 × 8 × 4096 × 8192 × 2 B = 1.07 GB. MLP intermediate: 2 × 8 ×
+    4096 × 32768 × 2 B = 4.29 GB. Attention scores: 8 × 64 × 4096² × 2 B = 16.0 GB. Total per layer ≈
+    22 GB × 72 layers ≈ 1584 GB raw; checkpointing every 4 layers drops stored activations to ~22 GB ×
+    72/4 = 396 GB, still exceeding 80 GB, meaning segment-level checkpointing is required.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Total per layer exact sum is 21.36 GB (1.07 + 4.29 + 16.0), slightly overapproximated to 22 GB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

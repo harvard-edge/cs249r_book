@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: edge-0415
+track: edge
+level: L3
+zone: fluency
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: The AV Training Bottleneck
+scenario: You are an ML Systems Engineer at an autonomous vehicle company, optimizing the in-car training
+  loop for a 500M parameter perception model. The prototype compute unit has two identical accelerators
+  on a single board, connected by a 50 GB/s interconnect. Each accelerator is rated for 50 TFLOPS (FP16).
+  When using a standard data parallel strategy, you only achieve a 1.2x speedup over a single accelerator,
+  far from the ideal 2x. A profiler identifies the gradient `AllReduce` step as a 20ms bottleneck in every
+  training step. Given this data, diagnose the scaling problem and propose a solution.
+details:
+  realistic_solution: The diagnosis is a communication bottleneck that creates a serial bottleneck, limiting
+    parallel efficiency. The time to synchronize 1GB of gradients (20ms) is a substantial fraction of
+    the parallelized compute time (30ms). The total time per step is `T_compute + T_sync`, not `T_compute
+    / 2`. The correct solution is to change the parallelism strategy to one that communicates less data.
+    **Pipeline Parallelism** is the best choice here. By splitting the model's layers across the two accelerators,
+    the large `AllReduce` operation is replaced by a much smaller activation transfer between the two
+    chips only at the layer(s) where they meet. This dramatically reduces the communication overhead,
+    allowing for much better scaling.
+  common_mistake: Engineers often default to data parallelism without analyzing the communication-to-compute
+    ratio. A common mistake is to blame an unrelated component like the data input pipeline (CPU starvation)
+    or to assume the hardware is simply flawed. Another incorrect path is attempting to brute-force the
+    problem with larger batches, which fails to fix the underlying ratio of serial communication to parallel
+    compute governed by Amdahl's Law.
+  napkin_math: 'Gradients (FP16) for 500M parameters: 500,000,000 * 2 bytes = 1 GB. Transfer time over
+    50 GB/s interconnect: 1 GB / 50 GB/s = 0.02 seconds (20ms) per step. If local compute takes 30ms,
+    total step time is 30ms + 20ms = 50ms. The 20ms synchronization overhead is 40% of the total time,
+    creating a severe serial bottleneck.'
+  options:
+  - The data input pipeline is starving the accelerators. Increase the number of CPU data loader workers.
+  - The interconnect is insufficient for data parallelism. The hardware is flawed and a faster version
+    (>200 GB/s) is needed.
+  - The `AllReduce` communication is a serial bottleneck. Switch to Pipeline Parallelism to reduce cross-accelerator
+    data transfer.
+  - The batch size is too small, leading to low arithmetic intensity. Double the batch size to better
+    saturate the hardware.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

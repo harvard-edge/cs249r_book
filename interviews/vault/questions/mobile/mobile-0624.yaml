@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: mobile-0624
+track: mobile
+level: L5
+zone: evaluation
+topic: graph-compilation
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: The Quantization Slowdown Paradox
+scenario: Your team is optimizing a new generative text model for an on-device summarization feature.
+  To reduce memory and accelerate inference, you apply post-training INT8 quantization using CoreML/TFLite.
+  A microbenchmark running only the core model shows a 2x speedup per token. However, when integrated
+  into the app, the total time to generate a 100-token summary is now 50% *slower* than the original FP16
+  model. The quantization seems to have backfired. Evaluate the potential causes of this system-level
+  slowdown, despite the core operation getting faster.
+details:
+  realistic_solution: The most likely cause is a 'Delegation Mismatch' or 'Graph-Splitting Overhead.'
+    The NPU (like Apple's ANE or Qualcomm's Hexagon) can only execute operations it supports. If the model
+    contains even a few unsupported ops (e.g., a specific attention variant, a novel activation function),
+    the execution graph is split. The system runs the supported ops on the NPU, but then must copy the
+    intermediate activation tensors to the CPU or GPU to run the unsupported op, and then copy the result
+    back to the NPU to continue. This CPU-NPU round trip (2 copies for a single CPU segment) involves
+    driver calls, memory copies, and context switching. If each copy takes 2.5ms, these 2 copies add 5ms
+    of overhead. If the model graph is split multiple times, the cumulative overhead from these round
+    trips can easily overwhelm the 2x speedup gained from the INT8 compute itself, leading to a net slowdown.
+  common_mistake: Engineers often focus solely on the compute speedup of the quantized operations, assuming
+    the whole model benefits equally. They might blame 'Python overhead' or 'the OS scheduler,' which
+    are orders of magnitude too small to explain such a large regression.
+  napkin_math: 'Let''s model a single token generation. The original FP16 model runs entirely on the mobile
+    GPU at 12ms/token. The quantized INT8 model splits the graph into 3 segments: 2 run on the NPU (taking
+    4ms and 2ms), and 1 unsupported op runs on the CPU (taking 2ms). Total compute is 8ms (a 1.5x speedup).
+    However, the graph splitting forces 2 memory copies between NPU and CPU (one NPU→CPU copy, one CPU→NPU
+    copy). If each copy takes 2.5ms of driver overhead and memory bandwidth, the total transfer time is
+    5ms. Final latency: 8ms compute + 5ms transfer = 13ms/token — slightly slower than the original 12ms,
+    making this near break-even, not a 50% regression.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Graph splitting into 3 segments (NPU->CPU->NPU) introduces 2 memory copies between NPU and CPU, not
+  4.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -18,14 +18,25 @@ import unicodedata
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-CANON_VERSION = 1
+CANON_VERSION = 2
 
 # Fields included in per-question content_hash. Metadata fields that can change
 # without altering meaning (last_modified, file_path, authors list ordering,
-# prompt_cost_usd) are deliberately excluded.
-WHITELIST_TOP: frozenset[str] = frozenset(
-    {"id", "title", "topic", "chain", "status", "scenario", "details", "tags", "provenance"}
-)
+# prompt_cost_usd, review stamps) are deliberately excluded.
+#
+# CANON_VERSION=2 (2026-04-21) adds track/level/zone/competency_area/bloom_level/phase:
+# these classification axes live in the YAML body in schema v1.0. Under v0.1
+# they lived in the filesystem path and were implicitly part of the merkle
+# tree via path-derived leaves, but in v1.0 they must be whitelisted explicitly
+# so reclassifications produce a visibly different release_hash.
+# `chain` (singular) replaced by `chains` (plural) per schema v1.0.
+WHITELIST_TOP: frozenset[str] = frozenset({
+    "id", "title",
+    "track", "level", "zone",           # v1.0: classification now in YAML
+    "topic", "competency_area", "bloom_level", "phase",
+    "chains",                            # v1.0: plural chain refs
+    "status", "scenario", "details", "tags", "provenance",
+})
 WHITELIST_GEN_META: frozenset[str] = frozenset({"model", "prompt_hash"})
 
 

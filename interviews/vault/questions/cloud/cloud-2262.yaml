@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-2262
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The Tensor Core Codegen Gap
+scenario: You profile a compiled transformer training job on H100 GPUs and find that Tensor Core utilization
+  is only 35% despite the workload being compute-bound. The compiler's generated SASS shows that many
+  matrix multiplies are using FFMA (FP32 fused multiply-add) instructions instead of HMMA (half-precision
+  matrix multiply-accumulate on Tensor Cores). Diagnose why the compiler's target-specific code generation
+  is failing to use the Tensor Cores and identify at which compilation stage the fix must be applied.
+details:
+  realistic_solution: 'Tensor Cores have strict shape and alignment requirements: matrix dimensions must
+    be multiples of 16 (for FP16 HMMA) or 8 (for FP8), input tensors must be in specific memory layouts
+    (row-major A, column-major B for `mma.sync`), and data must be aligned to 128-byte boundaries in shared
+    memory. The compiler''s code generation is falling back to FFMA because one or more of these preconditions
+    fails. Common causes: (1) The tiling pass chose tile sizes that are not multiples of 16 — this is
+    a mid-level IR problem (affine/SCF dialect). (2) The memory layout pass did not insert the required
+    transpose to get operand B into column-major — this is a lowering pass problem. (3) Padding was not
+    inserted for non-aligned dimensions (e.g., hidden_dim=768 is fine, but sequence_length=513 is not
+    a multiple of 16). The fix must be applied at the tiling and layout passes in the mid-level IR, not
+    at the final code generation. By the time the compiler reaches NVVM/PTX emission, the tile shapes
+    and layouts are already locked in.'
+  common_mistake: '"Add `--use-tensor-cores` to the compiler flags." There is no such flag. Tensor Core
+    usage depends on specific preconditions being met during code generation.'
+  napkin_math: 'HMMA throughput on H100: 989 TFLOPS (FP16). FFMA throughput: 67 TFLOPS (FP32). Ratio:
+    $989/67 \approx 14.8\times$. At 35% Tensor Core utilization, effective throughput = $0.35 \times 989
+    + 0.65 \times 67 = 346 + 44 = 390$ TFLOPS. After fixing alignment to achieve 90% Tensor Core utilization:
+    $0.90 \times 989 + 0.10 \times 67 = 890 + 7 = 897$ TFLOPS. Speedup: $897/390 = 2.3\times$ — purely
+    from fixing the code generation pipeline.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-466
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

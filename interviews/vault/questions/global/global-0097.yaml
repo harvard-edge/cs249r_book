@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: global-0097
+track: global
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Asymmetric Quantization Throughput Collapse
+scenario: You quantize a recommendation model's MLP layers to INT8 to deploy on Intel Xeon CPUs. Model
+  size drops from 4GB to 1GB. However, CPU inference throughput drops from 12,000 QPS (FP32) to 5,500
+  QPS (INT8). Profiling shows the CPU is 100% utilized and not memory-bound. You used asymmetric per-tensor
+  quantization (min/max). Why is the smaller INT8 model slower than FP32?
+details:
+  realistic_solution: 'The root cause is the computational overhead of asymmetric quantization zero-points.
+    CPU SIMD instructions (like AVX-512 VNNI) are optimized for INT8 dot products. However, with asymmetric
+    quantization, the matrix multiplication expands: (W - Zw) * (X - Zx) = W*X - W*Zx - X*Zw + Zw*Zx.
+    While Zw*Zx can be precomputed, the cross terms (W*Zx and X*Zw) require a reduction across the rows/columns
+    at runtime. This forces the CPU to execute multiple additional instructions (accumulations and broadcasts)
+    per MAC, destroying the throughput. Switching to symmetric quantization (zero-point = 0) eliminates
+    these cross terms, allowing direct use of high-throughput VNNI DP4A instructions, restoring QPS to
+    >20,000.'
+  common_mistake: Assuming the CPU lacks INT8 vector instructions (VNNI) or that memory bandwidth is the
+    bottleneck due to cache thrashing.
+  napkin_math: 'Symmetric MAC: 1 instruction (VPMADDUBSW). Asymmetric MAC: W*X (1 inst) + row_sum(W)*Zx
+    (1 inst) + col_sum(X)*Zw (1 inst) + precomputed_term. Execution time per layer increases by roughly
+    ~3x in instruction count, turning a 1ms FP32 layer into a 0.33ms (INT8 sym) or a 1.2ms (INT8 asym)
+    layer.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

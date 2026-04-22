@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-0173
+track: cloud
+level: L5
+zone: specification
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: The TTFT vs. TPOT Tug-of-War
+scenario: You are designing the inference engine for a new AI code completion product. The product manager's
+  primary requirement is 'instantaneous suggestions that stream out quickly.' You are serving a 70B parameter
+  model on H100s. After initial tests, you report that you can achieve a very low Time-To-First-Token
+  (TTFT) with a batch size of 1, but the Time-Per-Output-Token (TPOT) is poor, making the code stream
+  slowly. Conversely, with a large batch size, TPOT is excellent, but requests get stuck in a queue, making
+  TTFT unacceptable. The PM pushes back, 'This is a flagship product, we can't compromise. Justify with
+  physics why we can't have both, and propose a system design that can satisfy this seemingly impossible
+  requirement.'
+details:
+  realistic_solution: The trade-off is rooted in the Roofline Model and the changing arithmetic intensity
+    of the workload. TTFT is dominated by the prefill step, which for a single request (batch size 1)
+    is latency-bound and has minimal queue wait. However, the subsequent decode step (TPOT) becomes memory-bandwidth-bound
+    at batch size 1, as the GPU spends most of its time waiting to read the 140GB of model weights from
+    HBM, leading to poor utilization and slow token generation. Conversely, a large batch size makes the
+    decode step compute-bound, maximizing GPU utilization and leading to excellent TPOT. However, this
+    large batch introduces queueing delays, which kills TTFT.
+  common_mistake: Suggesting a hardware-only solution like 'use a B200'. While faster hardware improves
+    all metrics, it does not change the fundamental, underlying physics of the trade-off. Another is simply
+    'use a smaller model,' which evades the core systems challenge of optimizing for conflicting requirements
+    with the given model.
+  napkin_math: 'Let''s analyze the decode step for a 70B model (140GB weights) on an H100 (3.35 TB/s HBM
+    bandwidth). For each token at batch size 1, the GPU does `2 * 70B = 140 GFLOPs` of compute but must
+    read `140 GB` of weights. The arithmetic intensity is `140e9 FLOPs / 140e9 Bytes = 1 FLOP/Byte`. This
+    is far below the H100''s ridge point (~295 Ops/Byte), making it severely memory-bound. The time is
+    dominated by the weight read: `140 GB / 3.35 TB/s ≈ 42 ms` per token. With a large batch size of 64,
+    the math becomes `64 * 140 GFLOPs` for the same `140 GB` weight read. The intensity is now `64 FLOPs/Byte`,
+    pushing the operation towards being compute-bound and achieving much better hardware efficiency and
+    a lower per-token generation time (better TPOT).'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

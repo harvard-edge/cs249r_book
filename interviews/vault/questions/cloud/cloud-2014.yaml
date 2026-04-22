@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2014
+track: cloud
+level: L4
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: CPU Bottleneck in Tensor Format Transformation
+scenario: You are serving a TensorRT-optimized Vision Transformer on an NVIDIA A10G using a Python FastAPI
+  inference server. The GPU compute takes only 1.5ms per image. However, under peak load (batch size 16),
+  end-to-end latency spikes to 45ms. Profiling reveals the GPU utilization is at 15%, while the single
+  CPU core handling the Python worker is pegged at 100%. Clients are sending image pixels as JSON arrays
+  in NHWC (Height-Width-Channel) format. The server uses `numpy.array(json_data).transpose(0, 3, 1, 2).astype(np.float16)`
+  to convert the incoming data to the contiguous NCHW FP16 memory layout expected by the TensorRT engine.
+details:
+  realistic_solution: Switch the payload transport from JSON to a binary format like gRPC/Protobuf. More
+    importantly, offload the format transformation (NHWC to NCHW transpose and uint8 to FP16 cast) to
+    the GPU by either exporting the model to accept NHWC directly or using NVIDIA DALI for GPU-accelerated
+    tensor layout transformation.
+  common_mistake: Candidates often suggest scaling up the number of CPU nodes, adding more GPU workers,
+    or switching web frameworks, failing to realize that JSON string parsing and cache-unfriendly memory
+    transpositions on the CPU are the mathematical root cause of the latency.
+  napkin_math: 1 image (224x224x3) = ~150K integers. In JSON (e.g., '255, '), this is ~750KB. Batch 16
+    = 12MB text payload. Python `json.loads` on 12MB takes ~15-20ms. `np.transpose` on NHWC creates a
+    strided, non-contiguous memory view. The subsequent `.astype(np.float16)` forces a cache-unfriendly
+    copy across 12MB of non-contiguous RAM, adding another ~15ms. Total CPU tax is >30ms, completely dwarfing
+    the 1.5ms GPU inference.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-416
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:43:52.196504'

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0212
+track: cloud
+level: L4
+zone: optimization
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Continuous Batching Scheduler
+scenario: 'We serve a 13B model with static batching: we collect 32 requests, run them together, and return
+  all results when the longest sequence finishes. Average latency is 4 seconds, but P99 is 12 seconds.
+  The team wants to try vLLM''s continuous batching. Explain the systems mechanism and quantify the improvement.'
+details:
+  realistic_solution: 'In static batching, all requests in a batch must wait for the longest sequence
+    to finish generating. If 31 requests finish in 2 seconds but one request generates a 500-token response
+    taking 10 seconds, all 31 completed requests sit in memory waiting — wasting both GPU cycles (padding
+    with no-ops) and user time. Continuous batching (also called iteration-level scheduling) operates
+    at the granularity of individual decode steps. After each token generation step, the scheduler can:
+    (1) evict completed requests immediately (freeing their KV-cache memory); (2) admit new requests from
+    the queue into the freed slots. The GPU is never idle and never wasting cycles on completed requests.
+    The result: short requests return immediately upon completion (latency improvement), and the freed
+    memory slots are instantly reused for new requests (throughput improvement).'
+  common_mistake: '"Continuous batching just means we use a bigger batch size, so throughput goes up."
+    This misses the fundamental scheduling innovation — it''s not about batch *size*, it''s about batch
+    *dynamics*.'
+  napkin_math: '**Static batching (batch=32):** Sequence lengths vary: 20% generate 50 tokens (~1 s),
+    60% generate 200 tokens (~4 s), 20% generate 500 tokens (~10 s). All 32 requests wait for the slowest:
+    **10 s** per batch. Throughput: 32 requests / 10 s = **3.2 req/s**. GPU utilization: after 1 s, 6
+    requests are done but still occupying slots → 19% waste. After 4 s, 26 requests done → 81% waste.
+    Average utilization: ~**40%**. **Continuous batching:** Short requests (50 tokens) complete in **1
+    s** and exit immediately. Their slots are filled by new requests from the queue. Medium requests complete
+    in **4 s**. Long requests complete in **10 s**. Average latency: $0.2 \times 1 + 0.6 \times 4 + 0.2
+    \times 10 = $ **4.6 s** (vs 10 s static). But crucially, the GPU processes new requests in freed slots:
+    effective throughput ≈ 32 slots × continuous fill ≈ **7-8 req/s** — a **2-2.5× throughput improvement**.
+    P99 drops from 12 s to ~10 s (the inherent generation time), and P50 drops from 4 s to ~2 s.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

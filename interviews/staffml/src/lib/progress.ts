@@ -338,33 +338,47 @@ export function importProgress(json: string): boolean {
     const data = JSON.parse(json);
     if (!data.version || typeof data.version !== 'number') return false;
 
-    // Validate shapes before writing
-    if (data.attempts) {
+    // Validate all shapes before touching storage.
+    if (data.attempts !== undefined) {
       if (!Array.isArray(data.attempts)) return false;
-      // Verify first item has expected shape (if array is non-empty)
       if (data.attempts.length > 0) {
         const first = data.attempts[0];
         if (typeof first.questionId !== 'string' || typeof first.selfScore !== 'number') return false;
       }
-      setStorage(STORAGE_KEY, data.attempts);
     }
-    if (data.gauntlets) {
-      if (!Array.isArray(data.gauntlets)) return false;
-      setStorage(GAUNTLET_KEY, data.gauntlets);
+    if (data.gauntlets !== undefined && !Array.isArray(data.gauntlets)) return false;
+    if (data.sr !== undefined && (typeof data.sr !== 'object' || Array.isArray(data.sr))) return false;
+    if (data.streak !== undefined && (typeof data.streak !== 'object' || Array.isArray(data.streak))) return false;
+
+    // Snapshot existing values so we can roll back on any write failure.
+    const KEYS = [STORAGE_KEY, GAUNTLET_KEY, SR_KEY, STREAK_KEY, 'staffml_daily', 'staffml_plan_progress', 'staffml_analytics'] as const;
+    const snapshot: Record<string, string | null> = {};
+    for (const k of KEYS) {
+      try { snapshot[k] = window.localStorage.getItem(k); } catch { snapshot[k] = null; }
     }
-    if (data.sr && typeof data.sr === 'object' && !Array.isArray(data.sr)) {
-      setStorage(SR_KEY, data.sr);
+
+    const rollback = () => {
+      for (const k of KEYS) {
+        try {
+          if (snapshot[k] === null) window.localStorage.removeItem(k);
+          else window.localStorage.setItem(k, snapshot[k]!);
+        } catch { /* best-effort */ }
+      }
+    };
+
+    try {
+      if (data.attempts !== undefined) setStorage(STORAGE_KEY, data.attempts);
+      if (data.gauntlets !== undefined) setStorage(GAUNTLET_KEY, data.gauntlets);
+      if (data.sr !== undefined) setStorage(SR_KEY, data.sr);
+      if (data.streak !== undefined) setStorage(STREAK_KEY, data.streak);
+      if (data.daily !== undefined) setStorage('staffml_daily', data.daily);
+      if (data.planProgress !== undefined) setStorage('staffml_plan_progress', data.planProgress);
+      if (data.analytics !== undefined && Array.isArray(data.analytics)) setStorage('staffml_analytics', data.analytics);
+    } catch {
+      rollback();
+      return false;
     }
-    if (data.streak && typeof data.streak === 'object' && !Array.isArray(data.streak)) {
-      setStorage(STREAK_KEY, data.streak);
-    }
-    if (data.daily) setStorage('staffml_daily', data.daily);
-    if (data.planProgress && typeof data.planProgress === 'object') {
-      setStorage('staffml_plan_progress', data.planProgress);
-    }
-    if (data.analytics && Array.isArray(data.analytics)) {
-      setStorage('staffml_analytics', data.analytics);
-    }
+
     return true;
   } catch {
     return false;

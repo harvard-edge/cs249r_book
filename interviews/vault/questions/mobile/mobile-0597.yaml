@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: mobile-0597
+track: mobile
+level: L4
+zone: analyze
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: The Fusion Illusion
+scenario: A junior engineer on your team has applied 50% unstructured weight pruning to a MobileNetV2
+  model, reducing its theoretical FLOPs by half. However, when they deploy it to an iPhone with an A17
+  Pro chip using CoreML, the end-to-end latency only improves by 10%. They are confused, as they expected
+  a speedup closer to 2x. Analyze the interaction between the CoreML runtime, the A17 Pro's hardware,
+  and the pruned model to explain this disappointing result.
+details:
+  realistic_solution: The root cause is the trade-off between computation and memory access overhead,
+    a classic roofline problem. Unstructured pruning, while reducing FLOPs, breaks the dense, regular
+    structure of convolutions that CoreML's compiler is heavily optimized to fuse. The original, dense
+    model allowed CoreML to fuse multiple layers (e.g., Conv-BN-ReLU) into a single, highly efficient
+    kernel. This minimizes memory roundtrips to the much slower LPDDR5 RAM. The pruned model, with its
+    sparse weight matrices, forces CoreML to use generic, unfused operators. This results in many more
+    individual kernel launches and significantly more data movement between the ANE's SRAM and the device's
+    main memory, making the model memory-bound. The small latency improvement comes from the reduced compute
+    time, but it's almost entirely negated by the massive increase in memory access overhead.
+  common_mistake: Believing that FLOPs are the primary driver of latency on mobile NPUs. Engineers often
+    ignore the fact that unstructured pruning creates sparse, irregular memory access patterns that are
+    hostile to the hardware's architecture and the compiler's optimizations.
+  napkin_math: Let's analyze this using the Roofline model. The A17 Pro's ridge point is ~683 Ops/Byte.
+    This is the Arithmetic Intensity (AI) required to be compute-bound. A dense MobileNetV2 has an AI
+    of around 15-20 Ops/Byte, making it heavily memory-bound. When you apply 50% unstructured pruning,
+    you halve the FLOPs (Ops) but keep the memory footprint (Bytes) roughly the same because unstructured
+    sparsity requires reading the sparse indices and uncompressed weights or using dense memory access
+    patterns for unstructured zeros. Thus, the pruned model's AI drops to ~7.5-10 Ops/Byte. Since both
+    are far below 683 Ops/Byte, the latency is dominated by memory bandwidth, not compute. Halving the
+    compute (FLOPs) provides very little end-to-end speedup.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: mobile-chain-019
+  position: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

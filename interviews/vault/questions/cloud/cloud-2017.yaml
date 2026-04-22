@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2017
+track: cloud
+level: L5
+zone: evaluation
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Evaluating TP Topology Across Network Boundaries
+scenario: 'You are serving a 175B parameter LLM (FP16, ~350GB weights) on a cluster of 8-GPU A100 (40GB)
+  nodes. NVLink provides 600 GB/s intra-node bandwidth, while InfiniBand provides 200 Gbps (25 GB/s) inter-node
+  bandwidth. To fit the model and an active KV cache, you must distribute the deployment across 16 GPUs
+  (2 nodes). You must evaluate two serving strategies: Tensor Parallelism of 16 (TP=16) spanning both
+  nodes, or Tensor Parallelism of 8 (TP=8) within each node combined with Pipeline Parallelism of 2 (PP=2)
+  across the nodes. Justify your architectural choice for maximizing serving throughput while keeping
+  tail latency low.'
+details:
+  realistic_solution: Choose TP=8 and PP=2. Tensor Parallelism must be confined within a single node to
+    leverage the 600 GB/s NVLink, as it requires blocking All-Reduce operations inside every transformer
+    layer. Pipeline Parallelism is ideal across nodes because it only requires point-to-point communication
+    of activation tensors at layer boundaries, perfectly matching the lower-bandwidth InfiniBand link.
+  common_mistake: Candidates often choose TP=16 to maximize aggregate memory bandwidth and minimize per-device
+    compute, failing to evaluate the severe latency penalty of executing high-frequency All-Reduce operations
+    over the slow 25 GB/s inter-node network.
+  napkin_math: For a hidden size of 12288 and batch size of 64, an activation tensor is 64 * 12288 * 2
+    bytes ≈ 1.5 MB. TP requires 2 All-Reduces per layer. Across 96 layers, TP=16 requires 192 All-Reduces.
+    Using the Ring All-Reduce formula `2*(N-1)/N * data`, this transfers `192 * 1.5 MB * 1.875 ≈ 540 MB`
+    per step over the network. At 25 GB/s inter-node bandwidth, network wait time is `540 MB / 25 GB/s
+    ≈ 21.6ms` per token. PP=2 only transfers the 1.5 MB activation once between nodes per step, taking
+    < 0.1ms.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-417
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:44:45.086803'

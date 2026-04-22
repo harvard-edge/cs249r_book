@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-2362
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Diagnosing CXL Cache Thrashing
+scenario: A 1TB embedding table is hosted on a CXL 2.0 Type 3 memory expansion module (32 GB/s bandwidth).
+  A batch of 1 million random sparse lookups takes 120ms. When the same table is temporarily forced into
+  local DDR5 (acting as a cache), the lookups take 5ms. The CXL link monitoring shows only 2 GB/s utilization.
+details:
+  realistic_solution: 'The root cause is latency-bound cache thrashing due to random sparse lookups. CXL
+    memory has higher latency (~250ns) compared to local DDR5 (~80ns). Because the 1 million lookups are
+    completely random (e.g., 64-byte fetches), the CPU cache miss rate is near 100%. The system becomes
+    bottlenecked by the round-trip latency of serial memory fetches before it can saturate the 32 GB/s
+    bandwidth. The solution requires software-managed batching and prefetching: gather the required embedding
+    indices, sort them to improve spatial locality, and issue wide asynchronous fetches (e.g., AVX-512
+    gather instructions or software prefetch `__builtin_prefetch`) to overlap the CXL latency and saturate
+    the link.'
+  common_mistake: Assuming the CXL hardware is defective because it isn't reaching 32 GB/s, and requesting
+    a motherboard swap.
+  napkin_math: '1 million fetches of 64 bytes = 64MB total data. Theoretical CXL transfer time = 64MB
+    / 32 GB/s = 2ms. However, if fetches are partially serial (e.g., Memory Level Parallelism = 2): 1M
+    fetches * 250ns latency = 250ms total serial time. MLP of ~2 yields 125ms, matching the 120ms observed.
+    For DDR5: 1M * 80ns / 16 (higher MLP) = 5ms.'
+  options:
+  - Embedding tables should be replicated on every GPU for fastest lookup speed; at 51.2 TB this requires
+    many GPUs, but replication eliminates all communication overhead during lookups
+  - Embedding parallelism is unnecessary because embeddings can be stored on CPU and looked up via PCIe;
+    the sparse lookup pattern means only a few KB per batch needs to transfer from CPU to GPU
+  - 'Embedding table parallelism splits large embedding tables across GPUs when they exceed single-GPU
+    memory. For a 100B-entry table with 256-dim FP16 (51.2 TB): (1) Row-wise sharding — partition rows
+    across N GPUs by hash(ID) % N. Lookup requires a scatter-gather: each GPU looks up its local rows,
+    then AllToAll collects results. (2) Column-wise sharding — split embedding dimensions across GPUs.
+    Each lookup returns a partial embedding, concatenated via AllGather. Communication per batch: B ×
+    topk × d × 2 bytes for AllToAll.'
+  - Use model distillation to compress the 100B-entry embedding table to a 1M-entry table; this reduces
+    memory by 100,000× with only minor accuracy loss from the hash collision
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

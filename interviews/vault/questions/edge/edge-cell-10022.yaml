@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-cell-10022
+track: edge
+level: L4
+zone: optimization
+topic: activation-memory
+competency_area: memory
+bloom_level: evaluate
+phase: training
+title: Optimizing Peak Activation Memory via Layer Fusion on Jetson Orin TensorRT
+scenario: A TensorRT-optimized ResNet-50 on Jetson Orin (32 GB LPDDR5) uses 1.8 GB peak activation memory
+  at batch size 32. An unfused PyTorch baseline uses 4.2 GB. Your team wants to further reduce TensorRT
+  activation memory to under 1 GB to allow concurrent pipeline stages. Profile the key sources of the
+  remaining 1.8 GB and identify what additional fusions or optimizations can reduce it.
+details:
+  realistic_solution: 'Profile TensorRT layer memory with `trtexec --dumpProfile --separateProfileRun`.
+    Key remaining sources: (1) Residual addition inputs: both branches must exist simultaneously — 2 ×
+    batch × C × H × W × dtype. For the 4th residual stage at 14×14×2048 with B=32: 2 × 32 × 2048 × 14
+    × 14 × 2 B = 0.8 GB. (2) Unfused BN layers: each adds C × 4 parameters stored as activation workspace
+    — minor. Fix: use INT8 precision for residual tensors (saves 50%) and enable `builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)`
+    to enforce INT8 throughout residual paths. INT8 residual: 0.8 GB → 0.4 GB. Total drops from 1.8 GB
+    to ~1.4 GB. Further: reduce batch to 24 → 1.05 GB < 1 GB target.'
+  common_mistake: Assuming TensorRT's automatic layer fusion has already found all opportunities, and
+    that the remaining memory is irreducible. In practice, TensorRT's default optimization level (OPT=3)
+    may not fuse all eligible Conv+BN+ReLU chains across skip connections, and residual addition tensors
+    must be explicitly sized.
+  napkin_math: 'Stage 4 residual: 2 × 32 × 2048 × 14 × 14 × 2 B (fp16) = 2 × 32 × 2048 × 196 × 2 = 51.4
+    MB per layer pair. 3 bottlenecks in stage 4: 154 MB. All stages combined: ~800 MB residual tensors.
+    INT8: 400 MB. Non-residual activations: 1000 MB. With INT8 residual: 1000 + 400 = 1400 MB. At batch
+    24: 1400 × 24/32 = 1050 MB ≈ 1.05 GB — just above target. Use batch 22: 1400 × 22/32 = 963 MB < 1
+    GB.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,40 +1,51 @@
 /**
- * Vault-API-backed corpus data source (Phase-4 cutover path).
+ * Vault-API-backed corpus data source.
  *
  * Mirror of the public surface of ``corpus.ts`` but sourced from the
  * staffml-vault Worker via ``vault-api.ts`` instead of the bundled
- * ``corpus.json``. Not wired into any component until cutover day —
- * the switch happens via ``corpus-source.ts``.
+ * ``corpus.json``. Not wired into any component until cutover — the
+ * switch happens via ``corpus-source.ts``.
  *
- * This is the Phase-4 load-bearing file. Review it against ``corpus.ts``
- * for API parity before flipping the switch.
+ * Post-v1.0 (2026-04-21): the vault schema now carries track/level/zone
+ * as YAML fields and uses plural `chains: [{id, position}]`, so this
+ * adapter's job shrinks considerably. The defaulting to
+ * `track='global'`/`level='l1'`/`zone='recall'` that existed here was
+ * exactly the silent-mis-classification pattern that hid the v0.1
+ * migration bug; those defaults are gone.
  */
 
 import type { Question as VaultQuestion } from "@staffml/vault-types";
 import { makeClientFromEnv, VaultApiClient } from "./vault-api";
 
-// The vault worker enriches each Question with track/level/zone derived from
-// the source filesystem path (classification is path-encoded per vault_cli
-// models.py). These fields are not on the schema itself.
+// v1.0: classification lives on the Question itself.
 type EnrichedVaultQuestion = VaultQuestion & {
-  track?: string;
-  level?: string;
-  zone?: string;
+  track: string;
+  level: string;
+  zone: string;
+  competency_area: string;
+  bloom_level?: string;
+  phase?: string;
+  chains?: Array<{ id: string; position: number }>;
+  validated?: boolean;
+  math_verified?: boolean;
+  human_reviewed?: {
+    status: string;
+    by?: string | null;
+    date?: string | null;
+  };
 };
 
-// The legacy corpus.ts exports a specific Question shape; this vault-backed
-// module adapts the @staffml/vault-types Question to that shape so callers
-// don't need to change.
+// Shape the UI already expects (see corpus.ts).
 export interface Question {
   id: string;
   track: string;
-  scope?: string;
   level: string;
   title: string;
   topic: string;
   zone: string;
   competency_area: string;
   bloom_level?: string;
+  phase?: string;
   scenario: string;
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
@@ -42,30 +53,45 @@ export interface Question {
     common_mistake: string;
     realistic_solution: string;
     napkin_math?: string;
-    deep_dive_title?: string;
-    deep_dive_url?: string;
+  };
+  validated?: boolean;
+  math_verified?: boolean;
+  human_reviewed?: {
+    status: string;
+    by?: string | null;
+    date?: string | null;
   };
 }
 
 function adapt(v: EnrichedVaultQuestion): Question {
+  // Rebuild legacy chain_ids + chain_positions from the plural `chains` list.
+  const chainIds: string[] = [];
+  const chainPositions: Record<string, number> = {};
+  for (const c of v.chains ?? []) {
+    chainIds.push(c.id);
+    chainPositions[c.id] = c.position;
+  }
   return {
     id: v.id,
-    track: v.track ?? "global",
-    level: v.level ?? "l1",
+    track: v.track,
+    level: v.level,
     title: v.title,
     topic: v.topic,
-    zone: v.zone ?? "recall",
-    competency_area: v.topic,
+    zone: v.zone,
+    competency_area: v.competency_area,
+    bloom_level: v.bloom_level,
+    phase: v.phase,
     scenario: v.scenario,
-    chain_ids: v.chain ? [v.chain.id] : undefined,
-    chain_positions: v.chain ? { [v.chain.id]: v.chain.position } : undefined,
+    chain_ids: chainIds.length ? chainIds : undefined,
+    chain_positions: chainIds.length ? chainPositions : undefined,
     details: {
       common_mistake: v.details.common_mistake ?? "",
       realistic_solution: v.details.realistic_solution,
       napkin_math: v.details.napkin_math,
-      deep_dive_title: v.details.deep_dive?.title,
-      deep_dive_url: v.details.deep_dive?.url,
     },
+    validated: v.validated,
+    math_verified: v.math_verified,
+    human_reviewed: v.human_reviewed,
   };
 }
 

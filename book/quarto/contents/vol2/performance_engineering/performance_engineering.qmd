@@ -616,7 +616,7 @@ The continuous batching systems introduced in @sec-inference-scale manage batch 
 
 A critical enabler for large batch sizes is **paged KV cache management**[^fn-paged-attention-os], introduced by vLLM [@kwon2023vllm]. Traditional KV cache implementations pre-allocate contiguous memory for each request's maximum possible sequence length.
 
-[^fn-paged-attention-os]: **Paged Attention**: Named by direct analogy to OS virtual memory paging, where the OS maps non-contiguous physical pages to contiguous virtual addresses. The insight, presented at SOSP 2023, was that the same mechanism eliminates internal fragmentation in KV caches, recovering the 60--80 percent of GPU memory wasted by worst-case pre-allocation. This single abstraction transformed LLM serving economics by enabling 2--4$\times$ larger batch sizes without any change to model weights or precision. \index{Paged Attention!memory management}
+[^fn-paged-attention-os]: **Paged Attention**: Named by direct analogy to OS virtual memory paging, where the OS maps non-contiguous physical pages to contiguous virtual addresses. The insight, presented at SOSP 2023, was that the same mechanism eliminates internal fragmentation in KV caches, recovering the 60--80 percent of GPU memory wasted by worst-case pre-allocation. This single abstraction transformed LLM serving economics by enabling 2--4$\times$ larger batch sizes without any change to model weights or precision. \index{PagedAttention!memory management}
 
 If the maximum is 4,096 tokens but the average is 500, approximately 88 percent of the allocated memory is wasted. Paged attention divides the KV cache into fixed-size blocks (pages), allocated on demand as the sequence grows. This eliminates memory fragmentation and enables near-100 percent utilization of the KV cache memory budget. The performance impact is indirect but substantial: by reducing memory waste, paged attention enables 2--4$\times$ larger effective batch sizes, which in turn improve throughput and GPU utilization through the batch size mechanism described earlier.
 
@@ -626,7 +626,7 @@ Paged attention and KV cache quantization interact multiplicatively. Paged atten
 
 Modern LLM serving systems decompose each request into two distinct phases with fundamentally different performance characteristics. The distinction between these phases drives system architecture and optimization strategy.
 
-The **prefill phase** processes the entire input prompt in parallel. If the prompt contains $P$ tokens, the prefill phase executes a single forward pass over all $P$ tokens simultaneously. The GEMM operations have shape [$P$, $d$]$\times$ [$d$, $d$], making the batch dimension equal to $P$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024 / 2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
+The **prefill phase** processes the entire input prompt in parallel. If the prompt contains $P$ tokens, the prefill phase executes a single forward pass over all $P$ tokens simultaneously. The GEMM operations have shape [$P$, $d$]$\times$ [$d$, $d$], making the batch dimension equal to $P$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024/2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
 
 The **decode phase** generates output tokens one at a time, autoregressively. Each step has a batch dimension of 1 (for a single request) or the number of concurrent requests (for batched serving). At batch size 1, decode is deeply memory-bound as analyzed in @sec-performance-engineering-workload-placement.
 
@@ -857,7 +857,7 @@ A concrete numerical example clarifies the memory savings. Consider one attentio
 
 The na\"ive algorithm computes $S = QK^T$, a matrix of shape $8192 \times 8192$. In FP16, this score matrix occupies $8192 \times 8192 \times 2 = 128$ MB per head. After applying softmax, the result $P = \text{softmax}(S)$ is also $128$ MB. Computing $PV$ requires reading $P$ again. In total, the na\"ive algorithm reads $Q$, $K$, $V$ from HBM (6 MB), writes $S$ (128 MB), reads $S$ for softmax (128 MB), writes $P$ (128 MB), reads $P$ for the final multiply (128 MB), and writes $O$ (2 MB). The total HBM traffic is approximately 520 MB per head, dominated by the quadratic intermediates.
 
-FlashAttention processes the computation in tiles of size $B_r \times B_c$ (typically $128\times128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192 / 128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
+FlashAttention processes the computation in tiles of size $B_r \times B_c$ (typically $128\times128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
 
 FlashAttention-2 (Dao, 2023) further optimizes the algorithm for modern GPU architectures by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy on GPUs with many streaming multiprocessors. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
@@ -1127,15 +1127,15 @@ class KVCacheAnalysis:
 
 - Weights: 35 GB/GPU
 - Available for KV cache: $80 - 35 =$ `{python} KVCacheAnalysis.avail_fp16_gb_str` GB/GPU
-- KV cache per request: `{python} KVCacheAnalysis.kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_fp16_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_fp16_str` requests
+- KV cache per request: `{python} KVCacheAnalysis.kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/4:.1f}"` GB/GPU
+- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_fp16_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_fp16_str` requests
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
 - Weights: 35 GB $\times$ (4/16) = `{python} KVCacheAnalysis.weight_int4_gb_str` GB/GPU (INT4)
 - Available for KV cache: $80 -$ `{python} KVCacheAnalysis.weight_int4_gb_str` $=$ `{python} KVCacheAnalysis.avail_int8_gb_str` GB/GPU
-- KV cache per request (INT8): `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2 / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_int8_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val / 2 / 4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_int8_str` requests
+- KV cache per request (INT8): `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/2/4:.1f}"` GB/GPU
+- Maximum batch size: $\lfloor$ `{python} KVCacheAnalysis.avail_int8_gb_str` $/$ `{python} f"{KVCacheAnalysis.kv_fp16_gb_val/2/4:.1f}"` $\rfloor \approx$ `{python} KVCacheAnalysis.max_batch_int8_str` requests
 
 **The Systems Insight**: Precision engineering changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} KVCacheAnalysis.batch_ratio_str`$\times$ or more.
 
@@ -1217,7 +1217,7 @@ For TPU hardware specifically, XLA performs layout optimizations unavailable on 
 
 The trade-off for XLA's performance is compilation latency and rigidity. Because XLA must analyze the full static graph, initial compilation can take minutes for large models, compared to seconds for `torch.compile`. Any change in input shape triggers a full recompilation. This makes XLA excellent for steady-state production workloads where the graph is static and the model runs for days or weeks, but challenging for research environments involving dynamic shapes or rapid experimental iteration. The choice between `torch.compile` and XLA often depends on the deployment context: organizations using NVIDIA GPUs predominantly use PyTorch with `torch.compile`, while organizations using Google TPUs use JAX with XLA.
 
-### TensorRT: inference optimization {#sec-performance-engineering-tensorrt}
+### TensorRT: Inference optimization {#sec-performance-engineering-tensorrt}
 
 NVIDIA TensorRT is a specialized inference compiler that treats the model not as a flexible program but as a rigid global optimization problem. Because inference requires no backward pass and no gradient storage, TensorRT applies aggressive transformations that would be mathematically invalid or impractically slow for training. It performs a calibration pass where it runs the model on representative data to determine the numerical range of every activation tensor.
 
@@ -1253,7 +1253,7 @@ The `max-autotune` mode triggers extensive kernel autotuning, benchmarking multi
 
 The choice of backend also matters. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, Open Neural Network Exchange (ONNX) Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
 
-### The Triton language {#sec-performance-engineering-triton}
+### The triton language {#sec-performance-engineering-triton}
 
 Between hand-written CUDA and fully automated graph compilers sits **Triton**[^fn-triton-tiling], a Python-based language for writing GPU kernels. Triton occupies a middle ground: the programmer specifies the algorithm (tiling strategy, fusion pattern) while Triton handles low-level concerns (thread block scheduling, memory coalescing, shared memory management).
 
@@ -1743,7 +1743,7 @@ The resulting trace, viewable in TensorBoard or Chrome's trace viewer, shows:
 - **CPU-GPU synchronization**: Points where the CPU waits for the GPU (or vice versa). Excessive synchronization often indicates that the CPU is not launching kernels fast enough to keep the GPU busy.
 - **Communication events**: NCCL collective operations and their duration relative to compute kernels. Short compute between long communications indicates poor overlap.
 
-### Nsight Systems: Reading the timeline {#sec-performance-engineering-nsight-systems}
+### Nsight systems: Reading the timeline {#sec-performance-engineering-nsight-systems}
 
 NVIDIA Nsight Systems is the primary tool for trace-level profiling. Understanding how to read its timeline view is an essential skill for performance engineers. The tool captures every GPU kernel launch, CUDA memory operation, NCCL communication, and CPU thread activity onto a unified timeline.
 
@@ -1851,7 +1851,7 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 
 ::: {.callout-definition title="Model FLOPs Utilization (MFU)"}
 
-***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the fraction of the hardware's theoretical peak throughput ($R_{\text{peak}}$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The formula and fleet-scale application appear in @sec-performance-engineering-efficiency-frontier.
+***Model FLOPs Utilization (MFU)***\index{Model FLOPS Utilization!definition} is the fraction of the hardware's theoretical peak throughput ($R_{\text{peak}}$) consumed by FLOPs that directly advance model training or inference, excluding overhead from recomputation, padding, and synchronization. The formula and fleet-scale application appear in @sec-performance-engineering-efficiency-frontier.
 
 1.  **Significance (Quantitative):** At fleet scale, MFU aggregates across all nodes: communication overhead, load imbalance, and pipeline bubbles each compound the utilization loss, so fleet MFU is consistently below single-node MFU. It is the primary diagnostic for whether hardware investment is translating into model progress, and a 1 percent improvement in MFU across a 10,000-GPU cluster reduces cost by the equivalent of 100 GPUs.
 2.  **Distinction (Durable):** Unlike **Hardware Utilization** (which reports how often the accelerator is "busy"), MFU reports how much of that activity contributes to **Model Convergence** or inference, excluding waste FLOPs from recomputation, padding, and gradient checkpointing overhead.

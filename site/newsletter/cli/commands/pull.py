@@ -168,8 +168,19 @@ def _email_to_markdown(email: dict[str, Any], default_category: str) -> tuple[st
     if image_url and "image-generator.buttondown.email" in image_url:
         image_url = ""
 
-    # Clean description from body text.
-    plain = _strip_html(body) if _is_html(body) else body
+    # Strip HTML comments unconditionally before any derived field uses the
+    # body. Buttondown editor metadata (the `<!-- buttondown-editor-mode:
+    # fancy -->` banner, draft-status annotations, etc.) is never renderable
+    # content, and a multiline comment containing `---` or Setext underlines
+    # will confuse Pandoc's YAML frontmatter parser — the whole file fails to
+    # render with a cryptic "multiline key may not be an implicit key" error.
+    # We also want the generated `description:` field to be real prose, not
+    # editor metadata leaked from the first 200 characters of the raw body.
+    comment_stripped = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL)
+
+    # Clean description from comment-stripped body text.
+    plain = _strip_html(comment_stripped) if _is_html(comment_stripped) else comment_stripped
+    plain = plain.strip()
     if len(plain) > 200:
         description = plain[:200].rsplit(" ", 1)[0] + "..."
     else:
@@ -178,10 +189,9 @@ def _email_to_markdown(email: dict[str, Any], default_category: str) -> tuple[st
 
     # Buttondown fancy bodies are HTML; wrap for Quarto.
     if _is_html(body):
-        clean_body = re.sub(r"<!--.*?-->", "", body, flags=re.DOTALL).strip()
-        body_block = f"\n```{{=html}}\n{clean_body}\n```\n"
+        body_block = f"\n```{{=html}}\n{comment_stripped.strip()}\n```\n"
     else:
-        body_block = f"\n{body}\n"
+        body_block = f"\n{comment_stripped}\n"
 
     image_line = f'\nimage: "{image_url}"' if image_url else ""
     content = (

@@ -1,18 +1,27 @@
-<!-- DEV-BANNER-START -->
+<!-- EARLY-RELEASE-CALLOUT:START -->
 <div align="center">
-<table>
-<tr><td>
-<h3>🚧 Under Active Development</h3>
-<p>This component is being built on the <code>dev</code> branch and is <b>not yet available</b> on the live site.<br>
-Content may be incomplete or change without notice. The published curriculum lives at <a href="https://mlsysbook.ai"><b>mlsysbook.ai</b></a>.</p>
-<p>
+<table border="0" cellspacing="0" cellpadding="0" width="92%">
+<tr><td align="center" bgcolor="#f6f8fa">
+
+<table border="0" cellspacing="0" cellpadding="20" width="100%">
+<tr><td align="center">
+
+<h3>📌 Early release (2026)</h3>
+<p align="center">Co-Labs shipped with the <b>2026</b> MLSysBook refresh. Lab notebooks, WASM builds, and scoring flows are <b>actively iterated</b> as we refine the hands-on curriculum.</p>
+<p align="center"><b>Feedback</b> — <a href="https://github.com/harvard-edge/cs249r_book/issues">GitHub issues</a> or pull requests.</p>
+<p align="center">
 <a href="https://github.com/harvard-edge/cs249r_book/tree/dev"><img src="https://img.shields.io/badge/branch-dev-orange?logo=git&logoColor=white" alt="dev branch"></a>
+&nbsp;
 <a href="https://mlsysbook.ai"><img src="https://img.shields.io/badge/live_site-mlsysbook.ai-blue?logo=safari&logoColor=white" alt="live site"></a>
 </p>
+
+</td></tr>
+</table>
+
 </td></tr>
 </table>
 </div>
-<!-- DEV-BANNER-END -->
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 <div align="center">
   <h1>Co-Labs</h1>
@@ -46,12 +55,14 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
 
 ### Volume I: Foundations (17 labs · Single-machine ML systems)
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="5%">#</th>
-      <th width="25%">Slug</th>
-      <th width="70%">Title</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="5%">#</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Slug</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Title</th>
     </tr>
   </thead>
   <tbody>
@@ -142,15 +153,20 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ### Volume II: At Scale (16 labs · Distributed ML systems)
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="5%">#</th>
-      <th width="25%">Slug</th>
-      <th width="70%">Title</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="5%">#</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="25%">Slug</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Title</th>
     </tr>
   </thead>
   <tbody>
@@ -236,6 +252,9 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ## The Design Ledger
 
@@ -270,11 +289,13 @@ pytest tests/test_static.py -v
 
 ## Related Resources
 
-<table>
+<div align="center">
+<table width="98%" border="0" cellspacing="0" cellpadding="1" bgcolor="#cfd6dd" role="presentation"><tr><td bgcolor="#ffffff" align="left">
+<table width="100%" border="0" cellspacing="0" cellpadding="14" bgcolor="#ffffff">
   <thead>
     <tr>
-      <th width="30%">Resource</th>
-      <th width="70%">Description</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="30%">Resource</th>
+      <th bgcolor="#eef2f7" align="left" valign="top" width="70%">Description</th>
     </tr>
   </thead>
   <tbody>
@@ -292,6 +313,9 @@ pytest tests/test_static.py -v
     </tr>
   </tbody>
 </table>
+</td></tr>
+</table>
+</div>
 
 ---
 

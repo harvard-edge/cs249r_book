@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-fill2-32032
+track: cloud
+level: L5
+zone: design
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: Ring Attention for Million-Token Contexts
+scenario: You need to process a 1M token context on 8 MI300X GPUs (192 GB HBM3 each). Even with FlashAttention,
+  the KV cache for 1M tokens at 128 head_dim × 96 heads × 80 layers × 2 (K+V) × 2 bytes = ~3.9 TB, far
+  exceeding any single GPU. Explain how Ring Attention distributes this computation and its communication
+  pattern.
+details:
+  realistic_solution: 'Ring Attention partitions the 1M sequence into 8 chunks of 125K tokens each. Each
+    GPU holds Q for its chunk and computes attention against K,V blocks from all chunks. The ring protocol:
+    (1) Each GPU starts with its local K,V chunk. (2) Compute FlashAttention between local Q and the current
+    K,V chunk. (3) While computing, asynchronously send K,V to the next GPU in the ring and receive from
+    the previous GPU. (4) After computation, switch to the newly received K,V chunk. (5) Repeat for 8
+    rounds. Communication volume per GPU per round: K,V for 125K tokens = 125K × 128 × 2 × 2 bytes = 64
+    MB per head × 96 heads = 6.1 GB per round. At 400 Gbps IB: 6.1 GB / 50 GB/s = 122ms. Compute per round:
+    FlashAttention on 125K×125K block ≈ 200ms. Since compute > communication, the overlap is nearly perfect
+    (communication is hidden). Total: ~8 rounds × 200ms = 1.6 seconds for 1M context attention, vs impossible
+    on a single GPU.'
+  common_mistake: Thinking Ring Attention simply shards the KV cache and does AllReduce. It uses a ring
+    topology where each GPU holds a chunk of the sequence and rotates KV blocks around the ring, overlapping
+    communication with computation.
+  napkin_math: 'KV cache total: 1M × 128 × 96 × 80 × 2 × 2B = 3.9 TB. Per GPU: 3.9 TB / 8 = 490 GB. Fits
+    in 192 GB? No — but Ring Attention doesn''t store all KV simultaneously. Each GPU stores only 2 chunks
+    at a time: current + receiving = 2 × 490/8 = 122 GB. Fits in 192 GB.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

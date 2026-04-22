@@ -67,6 +67,21 @@ jobs:
         working-directory: interviews/staffml
         run: npm ci
 
+      - name: 🐍 Setup Python (for vault-cli)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 🛠️ Install vault-cli
+        run: pip install -e interviews/vault-cli/
+
+      - name: 🔄 Regenerate corpus from YAMLs (vault build --legacy-json)
+        # Ships interviews/staffml/src/data/corpus.json (full) +
+        # corpus-summary.json (bundled by the site) straight from the
+        # committed YAMLs. The site always deploys with current YAML state,
+        # even if the committed JSON artifacts drifted on the last commit.
+        run: vault build --vault-dir interviews/vault --release-id publish-live --legacy-json
+
       - name: 🔍 Type check
         working-directory: interviews/staffml
         run: npx tsc --noEmit
@@ -86,7 +101,12 @@ jobs:
           # live site at mlsysbook.ai/staffml/ so no CORS preflight is
           # required on /ask calls from the AskInterviewer panel.
           NEXT_PUBLIC_INTERVIEWER_ENDPOINT: https://mlsysbook.ai/api/staffml-interviewer
+          # Vault cutover (PRs #1433, #1434): site reads live data from the
+          # Cloudflare Worker in production; bundled corpus.json is the
+          # offline fallback. NEXT_PUBLIC_VAULT_FALLBACK is intentionally
+          # unset so vault-fallback.ts defaults to 'vault-api'.
           NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
+          NEXT_PUBLIC_VAULT_RELEASE: "1.0.2"
         run: npm run build
 
       - name: 📁 Inject paper and figures into build
@@ -210,3 +230,27 @@ jobs:
           publish_branch: gh-pages
           keep_files: false
           commit_message: '🔀 Update /interviews/ redirect to /staffml/'
+
+      # ── Cloudflare (D1 data + Worker code) ─────────────────────────
+      # After the static site ships to GH Pages, sync the Cloudflare side:
+      # 1. Push the fresh vault.db data to D1 (vault contents match the
+      #    site's bundled summary; users get identical answers whether they
+      #    hit the bundle or the worker).
+      # 2. Deploy the worker code if interviews/staffml-vault-worker/** changed
+      #    (wrangler is idempotent — no-op if the upload is identical).
+      #
+      # Requires CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID secrets.
+      - name: 🚢 Ship vault data to D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 interviews/vault-cli/scripts/ship_d1.py --skip-build
+
+      - name: 📦 Install worker deps + deploy
+        working-directory: interviews/staffml-vault-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npm ci
+          npx wrangler deploy

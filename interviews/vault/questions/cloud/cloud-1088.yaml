@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-1088
+track: cloud
+level: L4
+zone: diagnosis
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Diagnosing DDP Network Bottlenecks
+scenario: You are training a 2-billion parameter model using PyTorch Distributed Data Parallel (DDP) across
+  4 nodes (8x A100 80GB GPUs per node), connected via 100 Gbps Ethernet. Single-node GPU utilization is
+  98%, but drops to 42% when scaling to 4 nodes. Profiling shows GPUs are stalling during the backward
+  pass synchronization. Diagnose the root cause of this sub-linear scaling and propose a software-only
+  solution without changing the model architecture.
+details:
+  realistic_solution: The root cause is the 100 Gbps inter-node network bottlenecking the AllReduce of
+    FP16 gradients. Ring AllReduce transfers 6GB per node at 12.5 GB/s, taking 0.48s vs 0.2s compute —
+    yielding only 29.4% GPU utilization. Implement gradient accumulation (e.g., 4 steps using PyTorch's
+    `no_sync()` context) to increase effective compute time to 0.8s, raising serial utilization to ~62.5%.
+    Combined with gradient-communication overlap, effective utilization approaches 80-90%.
+  common_mistake: Candidates often misdiagnose this as a CPU dataloader bottleneck or immediately suggest
+    transitioning to Tensor Parallelism without calculating the exact communication-to-computation ratio
+    that reveals the network as the binding constraint.
+  napkin_math: 2B params in FP16 = 4GB gradients. Ring AllReduce transfers 2*(N-1)/N * Size = 2*(3/4)*4GB
+    = 6GB per node. At 100 Gbps (12.5 GB/s), communication takes 6 / 12.5 = 0.48s. If compute takes 0.2s
+    per step, max utilization is 0.2 / (0.2 + 0.48) = 29.4%. Accumulating 4 steps increases compute time
+    to 0.8s. Serial utilization improves to 0.8 / (0.8 + 0.48) = 62.5%. With gradient-communication overlap
+    (using DDP's bucketed all-reduce during backward), effective utilization can approach ~80-90%.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Logical contradiction in math description: The solution claims that accumulating 4 steps ''completely
+  hides'' the 0.48s network communication, but calculates a utilization of 62.5%, which corresponds to
+  serial execution (0.8s / (0.8s + 0.48s) = 62.5%). If communication were completely hidden, utilization
+  would be 100%.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:44:55.607713'

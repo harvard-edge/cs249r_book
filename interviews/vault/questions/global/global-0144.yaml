@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: global-0144
+track: global
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: The Poisoned Prefix Cache
+scenario: A multi-turn customer support chatbot on 4xA100s uses RadixAttention (prefix caching). The average
+  conversation has 10 turns, accumulating up to 8k tokens. You expect a high KV cache hit rate (~80%)
+  because the massive 2k-token system prompt and previous history are reused. However, metrics show the
+  prefix cache hit rate is stuck at 0%, and VRAM is exhausted at just 20 concurrent chats.
+details:
+  realistic_solution: The root cause is 'prefix poisoning' due to dynamic header injection. RadixAttention
+    (and prefix caching in general) relies on strict, exact token-by-token prefix matching starting from
+    the very first token (index 0). If the application layer prepends a unique identifier—such as a UUID,
+    timestamp, or unique user ID—at the very beginning of the prompt for logging or tracing, it instantly
+    breaks the prefix match for the entire sequence. Because the first token differs, the Radix tree branches
+    immediately, and none of the subsequent 2000 tokens of the system prompt or history can be shared.
+    Moving the dynamic UUID to the end of the prompt, or keeping it out of the prompt entirely, restores
+    the 80% hit rate.
+  common_mistake: Assuming RadixAttention is evicting the cache too early due to a small LRU cache size.
+  napkin_math: 'Without prefix caching (assuming 70B model, GQA with 8 KV heads, 80 layers, 128 head dim,
+    FP16): KV per token = 2 * 80 * 8 * 128 * 2 bytes = 327 KB/token. 20 concurrent chats * 8000 tokens
+    * 327 KB/token = 52.3 GB of KV cache. Model weights (70B FP16) = 140 GB. On 4xA100 (320 GB total),
+    KV + weights = 192.3 GB — fits but leaves little headroom for activations. At 0% cache hit, every
+    new turn recomputes the full 8K context. With successful prefix caching (UUID moved to end): the 2000-token
+    system prompt is stored once = 2000 * 327 KB = 654 MB. Unique portions = 20 * 6000 * 327 KB = 39.2
+    GB. Total = 39.9 GB (vs 52.3 GB), saving 12.4 GB — enough headroom to serve 30+ concurrent chats instead
+    of 20.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The KV per token calculation (327 KB/token) in the Napkin Math seems accurate for Llama-3 70B, but then
+  the calculation for 20 concurrent chats * 8000 tokens * 327 KB/token = 52.3 GB of KV cache. This 52.3
+  GB + 140 GB (model weights) = 192.3 GB which would not fit on '4xA100 (320 GB total)' as it leaves very
+  little room for activations and other buffers, and also assumes full 8000 token KV cache for all concurrent
+  users, which is not realistic for a system that OOMs quickly. Also, the solution discusses Llama-3 70B
+  which typically uses Grouped Query Attention (GQA) reducing the KV cache size, but the calculation doesn't
+  seem to account for it, as 327KB/token is more typical for non-GQA models.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- caching
+- prompt-engineering
