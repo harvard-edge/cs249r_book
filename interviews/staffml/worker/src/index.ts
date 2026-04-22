@@ -433,7 +433,7 @@ async function callGemini(
 ): Promise<string> {
   const apiKey = env[adapter.apiKeyEnv!] as string;
   const model = getModel(adapter, env);
-  const url = `${getBaseUrl(adapter, env)}/models/${model}:generateContent?key=${apiKey}`;
+  const url = `${getBaseUrl(adapter, env)}/models/${model}:generateContent`;
 
   // Gemini also expects alternating user/model turns. Filter out 'system'
   // (it goes in systemInstruction) and coalesce same-role runs.
@@ -450,7 +450,7 @@ async function callGemini(
 
   const res = await timedFetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: system }] },
       contents: coalesced.map((m) => ({
