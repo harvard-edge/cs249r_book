@@ -4,18 +4,19 @@ name: '🔥 TinyTorch · 🔨 Build PDFs'
 # TinyTorch — Build PDF Artifacts
 # =============================================================================
 #
-# Builds the TinyTorch Course Guide (XeLaTeX) and Research Paper (LuaLaTeX),
-# then uploads both as workflow artifacts. PDFs are injected into the site
-# during deployment (not committed to repo).
+# Builds the TinyTorch Lab Guide (Quarto → XeLaTeX) and the Research Paper
+# (LuaLaTeX), then uploads both as workflow artifacts. PDFs are injected
+# into the site during deployment (not committed to repo).
 #
-# NOTE: The Course Guide is still built from the legacy Jupyter Book tree
-# (tinytorch/site-legacy/) via jupyter-book + XeLaTeX. The live HTML site
-# has moved to Quarto (tinytorch/site-quarto/); a follow-up migrates the
-# Guide PDF to a Quarto book project so site-legacy/ can be deleted.
-# The Research Paper is independent (built from tinytorch/paper/).
+# The Guide PDF is produced by the Quarto book project at
+# tinytorch/site-quarto/pdf/, which reuses the website's .qmd chapter
+# sources (one directory up) and emits TinyTorch-Guide.pdf. The legacy
+# jupyter-book pipeline under tinytorch/site-legacy/ is retired and no
+# longer consumed. The Research Paper build is independent (from
+# tinytorch/paper/).
 #
 # Flow:
-#   1. BUILD_GUIDE  — Jupyter Book LaTeX export + XeLaTeX compile
+#   1. BUILD_GUIDE  — Quarto book render (XeLaTeX via TinyTeX)
 #   2. BUILD_PAPER  — LuaLaTeX compile of research paper
 #   3. SUMMARY      — Build status report
 #
@@ -59,7 +60,7 @@ permissions:
 
 jobs:
   build-pdf-guide:
-    name: '📚 Build Course Guide'
+    name: '📚 Build Lab Guide'
     runs-on: ubuntu-latest
 
     steps:
@@ -68,12 +69,13 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v6
+      - name: 📝 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 📚 Setup TinyTeX
+        uses: quarto-dev/quarto-actions/setup@v2
         with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'tinytorch/site-legacy/requirements.txt'
+          tinytex: true
 
       - name: 🟢 Setup Node.js (for Mermaid)
         uses: actions/setup-node@v6
@@ -83,34 +85,66 @@ jobs:
       - name: 📦 Install Mermaid CLI
         run: npm install -g @mermaid-js/mermaid-cli
 
-      - name: 📦 Install dependencies
-        working-directory: tinytorch
+      - name: 📚 Install LaTeX packages
+        # Explicit tlmgr install so the book render does not depend on
+        # Quarto's on-the-fly auto-install (which occasionally stalls
+        # on cold CI runners). The list covers everything the preamble
+        # and cover page actually need: TeX Gyre font family, custom
+        # header/chapter/section formatting, TikZ + tcolorbox for the
+        # cover and callouts, microtype, and adjustbox for the global
+        # \includegraphics size cap.
         run: |
-          pip install --upgrade pip
-          pip install -r site-legacy/requirements.txt
-          pip install -e .
+          tlmgr update --self
+          tlmgr install \
+            tex-gyre \
+            fontspec \
+            xetex \
+            microtype \
+            adjustbox \
+            collectbox \
+            titlesec \
+            fancyhdr \
+            tcolorbox \
+            pgf \
+            environ \
+            trimspaces \
+            newunicodechar \
+            fontawesome5 \
+            koma-script \
+            booktabs \
+            xcolor \
+            hyperref \
+            caption \
+            etoolbox \
+            svg \
+            transparent
 
-      - name: 📚 Generate LaTeX
-        working-directory: tinytorch/site-legacy
+      - name: 📚 Render Guide PDF (Quarto + XeLaTeX)
+        # Quarto's post-render cleanup fails (non-fatal) because this
+        # book project reads chapters at ../ — outside its project
+        # root — so Quarto refuses to remove their auxiliary _files/
+        # directories. XeLaTeX still writes the PDF successfully; we
+        # verify explicitly below and treat the cleanup error as benign.
+        working-directory: tinytorch/site-quarto
         run: |
-          jupyter-book build . --builder latex --config _config_pdf.yml --toc _toc_pdf.yml
-          python3 scripts/latex_postprocessor.py
-          cp _static/logos/fire-emoji.png _build/latex/
-          cp _static/logos/logo-mlsysbook.png _build/latex/
-          cp _static/images/tito.png _build/latex/
-
-      - name: 📚 Compile PDF with XeLaTeX
-        uses: xu-cheng/latex-action@v4
-        with:
-          root_file: tinytorch-course.tex
-          working_directory: tinytorch/site-legacy/_build/latex
-          latexmk_use_xelatex: true
+          set +e
+          quarto render pdf/
+          quarto_exit=$?
+          set -e
+          if [ ! -f pdf/TinyTorch-Guide.pdf ]; then
+            echo "::error::PDF missing — Quarto exit $quarto_exit and no TinyTorch-Guide.pdf was produced"
+            exit 1
+          fi
+          echo "PDF produced at pdf/TinyTorch-Guide.pdf ($(du -h pdf/TinyTorch-Guide.pdf | cut -f1))"
+          if [ $quarto_exit -ne 0 ]; then
+            echo "::notice::Quarto exit $quarto_exit (post-render cleanup) — PDF still produced successfully"
+          fi
 
       - name: 📤 Upload PDF Guide
         uses: actions/upload-artifact@v6
         with:
           name: TinyTorch-Guide
-          path: tinytorch/site-legacy/_build/latex/tinytorch-course.pdf
+          path: tinytorch/site-quarto/pdf/TinyTorch-Guide.pdf
           retention-days: 90
 
   build-pdf-paper:
@@ -150,7 +184,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📚 Course Guide | ${{ needs.build-pdf-guide.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📚 Lab Guide | ${{ needs.build-pdf-guide.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📑 Research Paper | ${{ needs.build-pdf-paper.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Usage" >> $GITHUB_STEP_SUMMARY
