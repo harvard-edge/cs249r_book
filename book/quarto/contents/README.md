@@ -4,8 +4,8 @@
 
 ## Directory structure
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="25%">Path</th>
       <th width="75%">Purpose</th>

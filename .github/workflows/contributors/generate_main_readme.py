@@ -111,7 +111,7 @@ def generate_contributor_table(contributors: list, show_badges: bool = True, col
     if row_cells:
         rows.append("    <tr>\n" + "\n".join(row_cells) + "\n    </tr>")
 
-    return f'''<table>
+    return f'''<table width="100%">
   <tbody>
 {chr(10).join(rows)}
   </tbody>

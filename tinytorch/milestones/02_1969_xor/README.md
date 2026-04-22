@@ -16,8 +16,8 @@ A demonstration of perceptron limitations and the multi-layer solution:
 
 **Run after Module 08** (Training capability)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Module</b></th>
 <th width="25%">Component</th>
@@ -77,8 +77,8 @@ The hidden layer learns to transform the space so XOR becomes linearly separable
 
 ## Expected Results
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Script</b></th>
 <th width="10%">Layers</th>

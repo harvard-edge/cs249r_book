@@ -132,8 +132,8 @@ model = Sequential([
 
 **MLP vs CNN comparison** (fair setup):
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="20%"><b>Architecture</b></th>
 <th width="15%">Batch Size</th>
@@ -291,8 +291,8 @@ pytest tests/milestones/test_learning_verification.py::test_transformer_learning
 
 ## 📊 What Each Test Verifies
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="20%"><b>Milestone</b></th>
 <th width="15%">Loss ↓</th>

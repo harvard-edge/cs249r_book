@@ -12,8 +12,8 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
 
 ## Available Milestones
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="5%">ID</th>
       <th width="15%">Name</th>

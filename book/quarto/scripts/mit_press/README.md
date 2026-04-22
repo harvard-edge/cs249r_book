@@ -20,8 +20,8 @@ python3 scripts/mit_press/figure_list_for_press.py --vol 1 --format csv -o scrip
 
 ### Output Fields
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Field</b></th>
 <th width="75%">Description</th>

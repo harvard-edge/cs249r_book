@@ -19,8 +19,8 @@ Multi-layer perceptrons (MLPs) on real image classification tasks:
 
 **Run after Module 08** (Full training pipeline with data loading)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Module</b></th>
 <th width="25%">Component</th>
@@ -69,8 +69,8 @@ This milestone uses **progressive scaling** with 2 scripts:
 
 ## Expected Results
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="18%"><b>Script</b></th>
 <th width="12%">Dataset</th>

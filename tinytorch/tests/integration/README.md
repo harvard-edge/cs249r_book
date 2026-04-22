@@ -18,8 +18,8 @@ This pattern catches the most common and frustrating bugs students encounter.
 
 ### 🔥 Critical (Must Pass)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="35%"><b>Test File</b></th>
 <th width="45%">What It Catches</th>
@@ -36,8 +36,8 @@ This pattern catches the most common and frustrating bugs students encounter.
 
 ### 📋 Standard (Should Pass)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="45%"><b>Test File</b></th>
 <th width="35%">What It Catches</th>
@@ -143,8 +143,8 @@ def test_profiling_does_not_break_training():
 
 ### Currently Missing
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="30%"><b>Module</b></th>
 <th width="70%">Integration Test Needed</th>

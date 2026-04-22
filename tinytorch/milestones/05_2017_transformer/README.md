@@ -21,8 +21,8 @@ Transformers didn't just improve NLP - they unified vision, language, and multim
 
 **Run after Module 13** (Complete transformer stack)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Module</b></th>
 <th width="25%">Component</th>

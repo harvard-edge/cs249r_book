@@ -18,8 +18,8 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
 
 ## What You Will Learn
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="20%">Part</th>
       <th width="20%">Focus</th>
@@ -52,8 +52,8 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
 
 ## Chapter Map
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="5%">#</th>
       <th width="20%">Chapter</th>
@@ -173,8 +173,8 @@ If you spot an error, find an explanation that could be clearer, or have a sugge
 
 ## Links
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="25%">Resource</th>
       <th width="75%">Link</th>

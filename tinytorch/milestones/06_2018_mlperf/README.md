@@ -12,8 +12,8 @@ A complete MLPerf-style optimization pipeline that takes YOUR networks from prev
 
 ## Required Modules
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Module</b></th>
 <th width="25%">Component</th>
@@ -62,8 +62,8 @@ Networks from:
 ## Expected Results
 
 ### Static Model Optimization (01)
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Optimization</b></th>
 <th width="15%">Size</th>
@@ -79,8 +79,8 @@ Networks from:
 </table>
 
 ### Generation Speedup (02)
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="40%"><b>Mode</b></th>
 <th width="30%">Time/Token</th>

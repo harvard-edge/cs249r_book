@@ -18,8 +18,8 @@ A single-layer perceptron for binary classification, demonstrating:
 - **Part 1 (Forward Only):** Run after Module 04 (building blocks)
 - **Part 2 (Trained):** Run after Module 08 (training capability)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Module</b></th>
 <th width="25%">Component</th>
@@ -63,8 +63,8 @@ This milestone uses **progressive revelation** with 2 scripts:
 
 ## Expected Results
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="30%"><b>Script</b></th>
 <th width="20%">Accuracy</th>

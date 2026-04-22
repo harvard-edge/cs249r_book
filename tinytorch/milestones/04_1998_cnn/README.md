@@ -21,8 +21,8 @@ CNNs that exploit spatial structure in images:
 
 **Run after Module 09** (Convolutions: Conv2d + Pooling)
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Module</b></th>
 <th width="25%">Component</th>
@@ -83,8 +83,8 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 
 ## Expected Results
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="18%"><b>Script</b></th>
 <th width="12%">Dataset</th>

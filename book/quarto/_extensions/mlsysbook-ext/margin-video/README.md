@@ -30,8 +30,8 @@ A Quarto extension for embedding YouTube videos as margin notes with automatic n
 
 ## Supported Options
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="20%"><b>Option</b></th>
 <th width="35%">Description</th>

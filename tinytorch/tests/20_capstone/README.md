@@ -63,8 +63,8 @@ For capstone tests to pass, students must have:
 
 ## What This Tests That Unit Tests Don't
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="25%"><b>Aspect</b></th>
 <th width="35%">Unit Tests</th>

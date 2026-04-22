@@ -17,8 +17,8 @@ Where Volume I teaches you to optimize a single node (one to eight accelerators,
 
 ## What You Will Learn
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="25%">Part</th>
       <th width="20%">Focus</th>
@@ -51,8 +51,8 @@ Where Volume I teaches you to optimize a single node (one to eight accelerators,
 
 ## Chapter Map
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="5%">#</th>
       <th width="22%">Chapter</th>
@@ -172,8 +172,8 @@ If you notice an error, have a suggestion, or want to propose a topic, please [o
 
 ## Links
 
-<table>
-  <thead>
+<table width="100%">
+    <thead>
     <tr>
       <th width="25%">Resource</th>
       <th width="75%">Link</th>

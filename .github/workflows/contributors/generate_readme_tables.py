@@ -57,7 +57,7 @@ def generate_table(contributors: list[dict], per_line: int = 7, image_size: int 
     if not contributors:
         return ""
     
-    lines = ["<table>", "  <tbody>"]
+    lines = ['<table width="100%">', "  <tbody>"]
     
     for i in range(0, len(contributors), per_line):
         row = contributors[i:i + per_line]

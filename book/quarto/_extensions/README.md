@@ -15,8 +15,8 @@ Before installing or updating any extension, **ALWAYS** check for:
 
 ### 📋 Extension Inventory
 
-<table>
-<thead>
+<table width="100%">
+  <thead>
 <tr>
 <th width="40%"><b>Extension</b></th>
 <th width="35%">Status</th>
