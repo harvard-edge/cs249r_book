@@ -10,7 +10,7 @@ interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: "dark",
+  theme: "light",
   toggleTheme: () => {},
 });
 
@@ -26,22 +26,24 @@ export function useTheme() {
 const QUARTO_KEY = "quarto-color-scheme";
 
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   const stored = localStorage.getItem("staffml_theme") as Theme | null;
   if (stored === "light" || stored === "dark") return stored;
   // Secondary source: pick up the choice last set on a sibling subsite.
   const fromQuarto = localStorage.getItem(QUARTO_KEY) as Theme | null;
   if (fromQuarto === "light" || fromQuarto === "dark") return fromQuarto;
-  // Dark is the site-wide default. OS preference is intentionally NOT
-  // honored — users can opt into light via the theme toggle.
-  return "dark";
+  // Light is the ecosystem-wide default (matches the book, labs, kits,
+  // slides, etc.). OS preference is intentionally NOT honored here — users
+  // opt into dark via the theme toggle; the choice persists in
+  // localStorage and mirrors to Quarto sites via quarto-color-scheme.
+  return "light";
 }
 
 export default function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // SSR/first-paint defaults to dark to match the inline script in layout.tsx.
+  // SSR/first-paint defaults to light to match the inline script in layout.tsx.
   // The useEffect below reconciles with the DOM value the inline script set,
-  // which may be "light" if the user has an OS preference or stored choice.
-  const [theme, setTheme] = useState<Theme>("dark");
+  // which may be "dark" if the user has a stored choice.
+  const [theme, setTheme] = useState<Theme>("light");
 
   // Sync with actual DOM on mount (inline script already set data-theme)
   useEffect(() => {
