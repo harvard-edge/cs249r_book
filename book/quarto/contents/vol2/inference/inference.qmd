@@ -39,12 +39,12 @@ Optimizations that shave milliseconds from inference latency or percentage point
 ::: {.callout-tip title="Learning Objectives"}
 
 - Quantify why serving cost dominates training cost over a model's lifetime using the **total cost of serving equation**
-- Design batching strategies matched to model architectures, distinguishing **static batching** for vision models from **continuous batching** for LLMs and **feature-parallel batching** for recommendation systems
+- Design batching strategies matched to model architectures, distinguishing **static batching**\index{Static Batching} for vision models from **continuous batching** for LLMs and **feature-parallel batching** for recommendation systems
 - Apply the **serving hierarchy framework** (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
-- Compare model sharding strategies (**tensor parallelism**, **pipeline parallelism**, **expert parallelism**, **embedding sharding**) by their communication patterns and latency-memory tradeoffs
-- Analyze load balancing algorithms using **queuing theory** to explain why **power-of-two-choices** achieves exponentially better performance than random assignment
+- Compare model sharding strategies (**tensor parallelism**\index{Tensor Parallelism}, **pipeline parallelism**\index{Pipeline Parallelism}, **expert parallelism**\index{Expert Parallelism}, **embedding sharding**) by their communication patterns and latency-memory tradeoffs
+- Analyze load balancing algorithms using **queuing theory**\index{Queuing Theory} to explain why **power-of-two-choices** achieves exponentially better performance than random assignment
 - Recognize **KV cache** memory challenges in LLM serving and understand how techniques like continuous batching and memory management enable high GPU utilization
-- Design **autoscaling** policies that account for **GPU cold start** latency and balance cost optimization with SLO guarantees
+- Design **autoscaling**\index{Autoscaling} policies that account for **GPU cold start** latency and balance cost optimization with SLO guarantees
 
 :::
 
@@ -145,17 +145,17 @@ Beyond memory constraints, throughput limitations emerge when request volume exc
 
 Finally, strict latency requirements drive distribution when model execution time exceeds latency budgets even at batch size one. Large language models generating responses token by token face this constraint acutely. A 70-billion parameter model requires approximately 140 GB of memory and achieves roughly 30 tokens per second on a single GPU due to memory bandwidth limitations. Sharding the model across multiple GPUs enables parallel computation that reduces time-to-first-token below acceptable thresholds.
 
-| **Constraint** | **Single-Machine Limit** | **Example Workload** | **Distribution Strategy**   |
-|:---------------|:-------------------------|---------------------:|:----------------------------|
-| **Memory**     | 80 GB (H100)             |      GPT-4 (400 GB+) | Tensor/pipeline parallelism |
-| **Throughput** | ~10K QPS (vision)        |      100K QPS RecSys | Horizontal replication      |
-| **Latency**    | Model execution time     |  500 ms LLM **TTFT** | Model sharding              |
+| **Constraint**                   | **Single-Machine Limit** | **Example Workload** | **Distribution Strategy**   |
+|:---------------------------------|:-------------------------|---------------------:|:----------------------------|
+| **Memory**\index{Memory}         | 80 GB (H100)             |      GPT-4 (400 GB+) | Tensor/pipeline parallelism |
+| **Throughput**\index{Throughput} | ~10K QPS (vision)        |      100K QPS RecSys | Horizontal replication      |
+| **Latency**\index{Latency}       | Model execution time     |  500 ms LLM **TTFT** | Model sharding              |
 
 : **Triggers for Distributed Inference**. Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
 
 The perceived responsiveness of interactive systems depends on both **Time to First Token (TTFT)**[^fn-ttft-tpot] and **Time Per Output Token (TPOT)**.
 
-[^fn-ttft-tpot]: **TTFT vs. TPOT**: **Time to First Token** (prefill) determines the perceived responsiveness; **Time Per Output Token** (decode) determines the perceived reading speed. Humans read at 5--10 tokens/sec; if TPOT exceeds 50 ms, the user perceives the system as "stuttering," even if TTFT was fast. This dual service level agreement (SLA) requirement forces schedulers to prioritize decode tokens over new prefill prompts. \index{TTFT!responsiveness}\index{TPOT!reading speed}
+[^fn-ttft-tpot]: **TTFT vs. TPOT**\index{TTFT vs. TPOT}: **Time to First Token** (prefill) determines the perceived responsiveness; **Time Per Output Token** (decode) determines the perceived reading speed. Humans read at 5--10 tokens/sec; if TPOT exceeds 50 ms, the user perceives the system as "stuttering," even if TTFT was fast. This dual service level agreement (SLA) requirement forces schedulers to prioritize decode tokens over new prefill prompts. \index{TTFT!responsiveness}\index{TPOT!reading speed}
 
 ::: {.callout-checkpoint title="Distribution Strategy Selection"}
 
@@ -172,14 +172,14 @@ Verify your understanding of when to move from single-machine to distributed inf
 
 The contrast between training and inference optimization extends beyond the basic throughput-vs.-latency distinction. Training optimizes for samples processed per hour and tolerates latency variations. Inference optimizes for response time and must meet strict latency bounds. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities. @tbl-training-inference-inversion details six key system aspects where these differences emerge.
 
-| **Aspect**              | **Distributed Training**      | **Distributed Inference**    |
-|:------------------------|:------------------------------|:-----------------------------|
-| **Primary metric**      | Throughput (samples/hour)     | Latency (P99 ms)             |
-| **Acceptable variance** | Hours                         | Milliseconds                 |
-| **State management**    | Checkpoints (periodic)        | Session state (continuous)   |
-| **Batch formation**     | Large, controlled             | Request-driven, variable     |
-| **Failure tolerance**   | Restart from checkpoint       | Redirect without user impact |
-| **Cost structure**      | Fixed duration, variable rate | Variable duration, fixed SLO |
+| **Aspect**              | **Distributed Training**\index{Distributed Training} | **Distributed Inference**    |
+|:------------------------|:-----------------------------------------------------|:-----------------------------|
+| **Primary metric**      | Throughput (samples/hour)                            | Latency (P99 ms)             |
+| **Acceptable variance** | Hours                                                | Milliseconds                 |
+| **State management**    | Checkpoints (periodic)                               | Session state (continuous)   |
+| **Batch formation**     | Large, controlled                                    | Request-driven, variable     |
+| **Failure tolerance**   | Restart from checkpoint                              | Redirect without user impact |
+| **Cost structure**      | Fixed duration, variable rate                        | Variable duration, fixed SLO |
 
 : **Training vs. Inference System Requirements**. The fundamental inversion from throughput to latency optimization ripples through every aspect of system design. {#tbl-training-inference-inversion}
 
@@ -197,7 +197,7 @@ Network communication adds latency for every cross-machine interaction. Within a
 
 Serialization overhead compounds the problem by converting in-memory tensors to network-transmittable formats. While modern serialization libraries like FlatBuffers and Cap'n Proto[^fn-serialization-zerocopy] minimize this cost, large activation tensors still require meaningful time to serialize and deserialize. A 1 GB activation tensor takes approximately 100 milliseconds to serialize, even with optimized libraries.
 
-[^fn-serialization-zerocopy]: **Zero-Copy Serialization**: FlatBuffers (Google, 2014) and Cap'n Proto access wire-format data in place, eliminating the parse-allocate-copy cycle of Protocol Buffers or JavaScript Object Notation (JSON). For distributed inference with large activation tensors, this drops per-hop serialization overhead from milliseconds to microseconds, reclaiming latency budget that would otherwise consume 5--10 percent of a tight SLO. \index{Serialization!zero-copy}
+[^fn-serialization-zerocopy]: **Zero-Copy Serialization**\index{Zero-Copy Serialization}: FlatBuffers (Google, 2014) and Cap'n Proto access wire-format data in place, eliminating the parse-allocate-copy cycle of Protocol Buffers or JavaScript Object Notation (JSON). For distributed inference with large activation tensors, this drops per-hop serialization overhead from milliseconds to microseconds, reclaiming latency budget that would otherwise consume 5--10 percent of a tight SLO. \index{Serialization!zero-copy}
 
 Load balancer latency adds another layer. Requests must be routed to appropriate replicas, which requires examining request metadata, consulting routing tables, and forwarding to selected backends. Well-optimized load balancers add 100–500 microseconds; poorly configured ones can add milliseconds.
 
@@ -234,16 +234,16 @@ class ServingCostSimple:
 
 ::: {.callout-notebook title="The Serving Cost Multiplier"}
 
-**Problem**: You spent **\$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
+**Problem**\index{Problem}: You spent **\$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
 
 **The Math**:
 
-1.  **Training Cost**: \$2,000,000 (One-time).
-2.  **Inference Volume**: $1M \text{ users} \times 50 \text{ reqs} \times 365 \text{ days}$ $\approx$ `{python} ServingCostSimple.annual_reqs_b_str` Billion requests/year.
-3.  **Cost per Request**: Assume a 70B model on H100 costs $\approx \$0.001$ per request (input + output).
-4.  **Annual Serving Cost**: $18 \times 10^9 \times \$0.001 = \mathbf{\$18{,}000{,}000}$.
+1.  **Training Cost**\index{Training Cost}: \$2,000,000 (One-time).
+2.  **Inference Volume**\index{Inference Volume}: $1M \text{ users} \times 50 \text{ reqs} \times 365 \text{ days}$ $\approx$ `{python} ServingCostSimple.annual_reqs_b_str` Billion requests/year.
+3.  **Cost per Request**\index{Cost Per Request}: Assume a 70B model on H100 costs $\approx \$0.001$ per request (input + output).
+4.  **Annual Serving Cost**\index{Annual Serving Cost}: $18 \times 10^9 \times \$0.001 = \mathbf{\$18{,}000{,}000}$.
 
-**The Systems Conclusion**: Serving costs **9$\times$** more than training in just the first year. A 10 percent optimization in inference latency saves **\$1.8M**—paying for the entire training run almost immediately.
+**The Systems Conclusion**: Serving costs **9$\times$** more than training in just the first year. A 10 percent optimization in inference latency saves **\$1.8M**\index{\$1.8M}—paying for the entire training run almost immediately.
 
 :::
 
