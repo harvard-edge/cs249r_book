@@ -77,7 +77,11 @@ export async function checkRateLimit(
   // abusive scraper blowing D1 budget" goal. Tight enforcement requires
   // Durable Objects; deferred to Phase-4 follow-up if KV-level leakage is
   // observed in telemetry.
-  const ttl = 60 - (nowSec % 60) + 10;
+  // Cloudflare KV rejects expirationTtl < 60. The intended value here is
+  // "remainder-of-minute + 10s grace"; floor at 60 so we never ship an
+  // illegal TTL. A slightly-longer-than-needed TTL on the tail end of a
+  // minute is harmless (key naturally expires on the NEXT minute's rotation).
+  const ttl = Math.max(60, 60 - (nowSec % 60) + 10);
   await env.RATE_LIMIT_KV.put(key, String(count + 1), { expirationTtl: ttl });
   return { ok: true };
 }
