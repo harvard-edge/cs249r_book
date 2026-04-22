@@ -1,1 +1,0 @@
-../../src/02_activations/ABOUT.md

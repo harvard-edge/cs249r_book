@@ -128,7 +128,7 @@ def build_source_index(site_root: Path) -> dict[tuple[int, int], list[Path]]:
     for img in site_root.rglob("*"):
         if img.suffix.lower() not in exts:
             continue
-        if "_build" in img.parts or "site-legacy" in img.parts:
+        if "_build" in img.parts:
             continue
         dims = read_image_dims(img)
         if dims:
@@ -172,7 +172,6 @@ def build_qmd_index(site_root: Path) -> dict[str, list[QmdRef]]:
     qmd_files = [
         q for q in site_root.rglob("*.qmd")
         if "_build" not in q.parts
-        and "site-legacy" not in q.parts
         and "quarto/pdf" not in str(q).replace("\\", "/")
     ]
     for qmd in qmd_files:

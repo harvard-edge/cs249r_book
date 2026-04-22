@@ -1,1 +1,0 @@
-../../milestones/06_2018_mlperf/ABOUT.md
