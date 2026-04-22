@@ -108,11 +108,50 @@ def emit_legacy_corpus(
         encoding="utf-8",
     )
 
+    # Also emit a summary-only companion next to the full corpus for
+    # callers that only need classification axes (~80% smaller). The
+    # site bundles this file instead of the full corpus.json; scenario
+    # and details are fetched on demand from the worker via
+    # useFullQuestion() / getQuestionFullDetail().
+    summary_output = output.with_name(output.stem + "-summary" + output.suffix)
+    summary_items = [_to_summary(item) for item in legacy_items]
+    summary_output.write_text(
+        json.dumps(summary_items, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
     return {
         "output": str(output),
+        "summary_output": str(summary_output),
         "count": len(legacy_items),
         "mode": "published-only" if publish_only else "all-states",
     }
+
+
+def _to_summary(item: dict[str, Any]) -> dict[str, Any]:
+    """Return the summary form of a legacy corpus item.
+
+    Keeps every classification axis and chain membership. Replaces the
+    heavy scenario + details.{common_mistake,realistic_solution,napkin_math}
+    with empty-string stubs so the TypeScript Question interface stays
+    backward-compatible. MCQ options + correct_index are PRESERVED
+    (scoring logic reads them synchronously).
+    """
+    drop_fields = {"scenario", "details"}
+    summary: dict[str, Any] = {k: v for k, v in item.items() if k not in drop_fields}
+    summary["scenario"] = ""
+    original_details = item.get("details", {}) or {}
+    details_stub: dict[str, Any] = {
+        "common_mistake": "",
+        "realistic_solution": "",
+        "napkin_math": "",
+    }
+    if original_details.get("options") is not None:
+        details_stub["options"] = original_details["options"]
+    if original_details.get("correct_index") is not None:
+        details_stub["correct_index"] = original_details["correct_index"]
+    summary["details"] = details_stub
+    return summary
 
 
 __all__ = ["emit_legacy_corpus"]
