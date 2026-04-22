@@ -23,7 +23,7 @@
 
 `mlsysim` implements a "Progressive Lowering" architecture, separating high-level workloads from the physical infrastructure that executes them.
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="20%">Layer</th>
@@ -127,7 +127,7 @@ MLSysim is an **analytical hardware calculator**, not a production deployment si
 The 22 walls model physical and economic constraints that bound ML system performance.
 Several critical production concerns are deliberately **out of scope**:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="22%">Concern</th>
@@ -209,7 +209,7 @@ print(evaluation.scorecard())
 
 The `efficiency` parameter (0.0–1.0) captures the gap between peak hardware performance and what your software stack actually achieves. Use these guidelines:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="40%">Scenario</th>
@@ -238,7 +238,7 @@ Thanks to these wonderful people for helping improve MLSys·im!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧠 maintenance</td>

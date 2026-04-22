@@ -51,7 +51,7 @@ python scripts/compliance_checker.py \
 > [!NOTE]
 > **Source of truth** — Row counts and targets stay in sync with `workloads.yaml`. When you change a workload, update the YAML; this table is regenerated from it.
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="10%">Division</th>
@@ -148,7 +148,7 @@ python examples/lab3_arch_comparison.py
 
 ## Dataset Strategy
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="22%">Strategy</th>

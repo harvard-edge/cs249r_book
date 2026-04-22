@@ -33,7 +33,7 @@
 
 StaffML is a free, open-source interview prep platform for ML systems engineers. Browse a curated vault of questions organized by competency area, difficulty level (Bloom's Taxonomy L1–L6+), and deployment track. Built by [Prof. Vijay Janapa Reddi](https://github.com/profvjreddi), Harvard University.
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="22%">Feature</th>
@@ -60,7 +60,7 @@ StaffML is a free, open-source interview prep platform for ML systems engineers.
 
 Each track targets a different deployment regime — different physics, different constraints, different interview questions.
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="18%">Track</th>
@@ -82,7 +82,7 @@ Each track targets a different deployment regime — different physics, differen
 
 Every question is tagged with a mastery level mapped to [Bloom's taxonomy](https://en.wikipedia.org/wiki/Bloom%27s_taxonomy):
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="10%">Level</th>
@@ -109,7 +109,7 @@ Questions are organized into **chains** — sequences that deepen understanding 
 
 **Example: GPU Memory Hierarchy Chain (6 questions)**
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="10%">Step</th>
@@ -134,7 +134,7 @@ Questions are organized into **chains** — sequences that deepen understanding 
 
 ## Vault Stats
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="45%">Metric</th>
@@ -372,7 +372,7 @@ Thanks to these wonderful people who have helped build StaffML!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🎨 ✍️ 🧠</td>

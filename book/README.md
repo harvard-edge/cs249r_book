@@ -30,7 +30,7 @@ This directory contains the textbook source and build system for contributors.
 
 ## What You Will Learn
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="50%">ML Concepts</th>
@@ -63,7 +63,7 @@ This directory contains the textbook source and build system for contributors.
 
 ### The ML ↔ Systems Bridge
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="50%">You know...</th>
@@ -98,7 +98,7 @@ This directory contains the textbook source and build system for contributors.
 
 This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="20%">Volume</th>
@@ -122,7 +122,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 #### Volume I: Build, Optimize, Deploy
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="20%">Part</th>
@@ -156,7 +156,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 #### Volume II: Scale, Distribute, Govern
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="25%">Part</th>
@@ -265,7 +265,7 @@ book/
 
 ## Documentation
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="20%">Audience</th>
@@ -308,7 +308,7 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
 
 ## Related
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="30%">Component</th>
@@ -346,7 +346,7 @@ Thanks to these wonderful people who helped improve the book!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>

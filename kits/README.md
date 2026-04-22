@@ -29,7 +29,7 @@ This is where AI systems meet the physical world.
 
 ## 🎓 What You Will Learn
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="25%">Concept</th>
@@ -66,7 +66,7 @@ This is where AI systems meet the physical world.
 
 ### 🛠️ Hardware Platforms
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="25%">Platform</th>
@@ -129,7 +129,7 @@ This is where AI systems meet the physical world.
 
 Each platform includes progressive labs:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="25%">Lab</th>
@@ -190,7 +190,7 @@ kits/
 
 ## 📚 Documentation
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="20%">Who</th>
@@ -224,7 +224,7 @@ We welcome contributions to the hardware labs! To contribute:
 
 ## 🔗 Related
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="25%">Component</th>
@@ -262,7 +262,7 @@ Thanks to these wonderful people who helped improve the hardware kits!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪 🛠️</td>

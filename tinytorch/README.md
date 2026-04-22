@@ -89,7 +89,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ## Current Status
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="33%">Ready</th>
@@ -131,7 +131,7 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 Build your framework through four progressive parts:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="20%">Part</th>
@@ -173,7 +173,7 @@ Each module asks: **"Can I build this capability from scratch?"**
 
 As you progress, unlock recreations of landmark ML achievements:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="15%">Year</th>
@@ -243,7 +243,7 @@ model.fit(X, y)  # Magic happens
 
 ## Documentation
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="25%">Audience</th>
@@ -370,7 +370,7 @@ Thanks to these wonderful people who helped improve TinyTorch!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>

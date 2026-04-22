@@ -86,7 +86,7 @@ Every component connects. The textbook gives you the mental models. The labs let
 
 ### For Students
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
@@ -137,7 +137,7 @@ Every component connects. The textbook gives you the mental models. The labs let
 
 ### For Educators
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
@@ -174,7 +174,7 @@ Every component connects. The textbook gives you the mental models. The labs let
 
 This textbook teaches you to think at the intersection of machine learning and systems engineering. Each chapter bridges algorithmic concepts with the infrastructure that makes them work in practice.
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="45%">You know...</th>
@@ -215,7 +215,7 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 The textbook follows the Hennessy & Patterson pedagogical model across two volumes:
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
@@ -244,7 +244,7 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 
 ## Quick Start
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td width="7%" align="center"><h3>①</h3></td>
@@ -272,7 +272,7 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 > [!NOTE]
 > **You are on the `dev` branch.** Active development happens here. For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
@@ -318,7 +318,7 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 
 </div>
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td width="50%" align="center">
@@ -340,7 +340,7 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 
 ## Contributing
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th width="5%"></th>
@@ -390,7 +390,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- BOOK-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>
@@ -547,7 +547,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- TINYTORCH-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>
@@ -603,7 +603,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- MLSYSIM-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧠 </td>
@@ -625,7 +625,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- STAFFML-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🎨 ✍️ 🧠</td>
@@ -644,7 +644,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- KITS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪 🛠️</td>
@@ -666,7 +666,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- LABS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
@@ -689,7 +689,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- SLIDES-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
@@ -708,7 +708,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- INSTRUCTORS-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.29%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=50" width="50px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>

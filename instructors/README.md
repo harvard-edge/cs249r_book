@@ -17,7 +17,7 @@
 
 "The Blueprint" is the instructor-facing companion site for the [ML Systems textbook](https://mlsysbook.ai). It provides everything needed to teach AI Engineering as a university course.
 
-<table width="100%">
+<table width="100%" style="width:100%">
   <thead>
     <tr>
       <th align="left" width="20%">Area</th>
@@ -105,7 +105,7 @@ Thanks to these wonderful people who have helped build the Instructor Site!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table width="100%">
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
