@@ -31,9 +31,12 @@
     } catch (_) {
       /* localStorage unavailable (privacy mode, sandboxed iframe). */
     }
-    // SSR markup is rendered with `data-theme="dark"`, so default to dark
-    // here too — keeps first paint consistent.
-    return "dark";
+    // Ecosystem-wide default is light (book, labs, kits, slides, etc.).
+    // StaffML matches so users don't get visual whiplash crossing between
+    // the book and the interview prep. Users who want dark toggle once,
+    // the choice persists in localStorage AND mirrors to the Quarto sites
+    // via quarto-color-scheme.
+    return "light";
   }
   document.documentElement.dataset.theme = pick();
 })();
