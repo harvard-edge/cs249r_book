@@ -486,10 +486,14 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     min_val = float(np.min(data))
     max_val = float(np.max(data))
 
-    # Step 2: Handle edge case (constant tensor)
+    # Step 2: Handle edge case (constant tensor).
+    # All elements have the same value, so there is no range to map.
+    # We still need dequantize(quantize(c)) ≈ c, so we encode every element
+    # as q=0 and set zero_point so that (0 - zero_point) * scale = c.
+    # With scale=1.0 that means zero_point = -round(c), clamped to INT8 range.
     if abs(max_val - min_val) < EPSILON:
         scale = 1.0
-        zero_point = 0
+        zero_point = int(np.clip(np.round(-min_val), INT8_MIN_VALUE, INT8_MAX_VALUE))
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
@@ -544,10 +548,25 @@ def test_unit_quantize_int8():
     # Using slightly higher tolerance to account for numerical precision variations
     assert error < 0.25, f"Quantization error too high: {error:.4f} (expected < 0.25 for INT8, range=5.0)"
 
-    # Test edge case: constant tensor
+    # Test edge case: constant tensor -- dequantize must recover the original value,
+    # not zero. Previously zero_point was hardcoded to 0, so (0 - 0) * 1.0 = 0.0
+    # for every element regardless of what the constant was.
     constant_tensor = Tensor([[2.0, 2.0], [2.0, 2.0]])
     q_const, scale_const, zp_const = quantize_int8(constant_tensor)
     assert scale_const == 1.0
+    restored_const = (q_const.data.astype(np.float32) - zp_const) * scale_const
+    assert np.allclose(restored_const, 2.0), (
+        f"Constant tensor dequantized to {restored_const} instead of 2.0. "
+        "zero_point must encode the constant value, not default to 0."
+    )
+
+    # Negative constant
+    neg_tensor = Tensor([[-3.0, -3.0]])
+    q_neg, scale_neg, zp_neg = quantize_int8(neg_tensor)
+    restored_neg = (q_neg.data.astype(np.float32) - zp_neg) * scale_neg
+    assert np.allclose(restored_neg, -3.0, atol=0.01), (
+        f"Negative constant tensor dequantized to {restored_neg} instead of -3.0."
+    )
 
     print("INT8 quantization works correctly!")
 
