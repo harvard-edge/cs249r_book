@@ -121,6 +121,26 @@ function PracticePage() {
   // Chain tracking — update when current question changes
   const chainInfo = current ? getChainForQuestion(current.id) : null;
 
+  // Pre-reveal chain sibling preview. Off by default; toggled open by
+  // ChainBadge so the badge's "view chain siblings" affordance does
+  // something visible without forcing answer reveal. Reset per question
+  // so a new question starts clean.
+  const [chainPreviewOpen, setChainPreviewOpen] = useState(false);
+  useEffect(() => {
+    setChainPreviewOpen(false);
+  }, [current?.id]);
+
+  const handleChainNavigate = useCallback((qId: string) => {
+    const q = getQuestionById(qId);
+    if (!q) return;
+    skipFilterCount.current = 3;
+    setCurrent(q);
+    setShowAnswer(false);
+    setUserAnswer("");
+    setNapkinResult(null);
+    setRubricItems([]);
+  }, []);
+
   const tracks = getTracks().filter(t => t !== "global");
   const levels = getLevels();
   const areas = getCompetencyAreas();
@@ -782,6 +802,7 @@ function PracticePage() {
                           chainId={chainInfo.chainId}
                           position={chainInfo.position + 1}  /* 1-indexed for display */
                           total={chainInfo.total}
+                          onClick={() => setChainPreviewOpen((v) => !v)}
                         />
                       </div>
                     )}
@@ -797,6 +818,11 @@ function PracticePage() {
                         <ScenarioSkeleton />
                       )}
                     </div>
+                    {chainInfo && !showAnswer && chainPreviewOpen && (
+                      <div className="mt-6" data-testid="chain-preview-prereveal">
+                        <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
+                      </div>
+                    )}
 
                   </motion.div>
                 </AnimatePresence>
@@ -1035,20 +1061,7 @@ function PracticePage() {
 
                       {/* Chain navigation — go deeper */}
                       {chainInfo && (
-                        <ChainStrip
-                          chain={chainInfo}
-                          onNavigate={(qId) => {
-                            const q = getQuestionById(qId);
-                            if (q) {
-                              skipFilterCount.current = 3;
-                              setCurrent(q);
-                              setShowAnswer(false);
-                              setUserAnswer("");
-                              setNapkinResult(null);
-                              setRubricItems([]);
-                            }
-                          }}
-                        />
+                        <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
                       )}
                     </div>
                   </motion.div>
