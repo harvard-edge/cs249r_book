@@ -136,9 +136,10 @@ site: ## Build the website (HTML).
 # ── Maintenance ───────────────────────────────────────────────────────
 clean: ## Remove Quarto caches + generated diagram PDFs + any stray top-level PDF.
 	@rm -rf _tmp pdf/_build pdf/index_files modules/*_files pdf/.quarto
+	@rm -rf *_files
 	@rm -f $(DIAGRAM_DIR)/*.pdf
 	@rm -f pdf/TinyTorch-Guide.pdf pdf/index.tex pdf/index.log pdf/index.aux pdf/index.toc pdf/index.out
-	@echo "  cleaned caches, generated diagram PDFs, and any stray PDF copies"
+	@echo "  cleaned caches, generated diagram PDFs, stray *_files dirs, and stray PDF copies"
 
 distclean: clean ## Also remove website output. (clean already removes pdf/_build/.)
 	@rm -rf _site
