@@ -278,14 +278,14 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--site", type=Path, default=Path.cwd())
     p.add_argument("--pdf", type=Path, default=None,
-                   help="rendered PDF (default: pdf/TinyTorch-Guide.pdf)")
+                   help="rendered PDF (default: pdf/_build/TinyTorch-Guide.pdf)")
     p.add_argument("--verbose", "-v", action="store_true",
                    help="include OK rows")
     p.add_argument("--json", action="store_true")
     args = p.parse_args()
 
     site = args.site
-    pdf_f = args.pdf or site / "pdf/TinyTorch-Guide.pdf"
+    pdf_f = args.pdf or site / "pdf/_build/TinyTorch-Guide.pdf"
     if not pdf_f.exists():
         print(f"error: PDF not found at {pdf_f}. Run `quarto render pdf/` first.",
               file=sys.stderr)
