@@ -96,14 +96,15 @@ figures: $(PDFS) ## Convert all SVG diagrams to PDF (for LaTeX embedding).
 # the _build/ path; there is no duplicate copy.
 PDF_OUT := pdf/_build/TinyTorch-Guide.pdf
 
+# Self-heal note: when Quarto's post-render cleanup errors (trying to
+# remove ../modules/*_files dirs outside the project root), Quarto skips
+# the move-to-output-dir step and leaves the PDF at the top-level pdf/
+# working dir instead of pdf/_build/. The `mv` below recovers.
 pdf: figures ## Build the TinyTorch Lab Guide PDF (at pdf/_build/TinyTorch-Guide.pdf).
 	@set +e; \
 	  cd pdf && $(QUARTO) render; \
 	  quarto_exit=$$?; \
 	  cd ..; \
-	  # When the post-render cleanup fails (see note below), Quarto skips \
-	  # the move-to-output-dir step and leaves the PDF at the top-level \
-	  # pdf/ working dir instead of pdf/_build/. Self-heal by moving it. \
 	  if [ ! -f "$(PDF_OUT)" ] && [ -f "pdf/TinyTorch-Guide.pdf" ]; then \
 	    mkdir -p pdf/_build; \
 	    mv pdf/TinyTorch-Guide.pdf "$(PDF_OUT)"; \
