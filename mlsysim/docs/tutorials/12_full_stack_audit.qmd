@@ -1,0 +1,475 @@
+---
+title: "Full-Stack Audit: LLaMA-70B Training"
+subtitle: "One model, six domains, twelve walls --- a complete systems analysis in 60 seconds."
+description: "Compose 6+ solvers across all six taxonomy domains to produce a holistic training analysis. Discover that the binding constraint is compute, but checkpoint overhead is the hidden cost."
+categories: ["capstone", "advanced"]
+---
+
+## The Question
+
+What does a **complete** systems analysis look like? No single solver captures the full
+picture. Training a 70B-parameter model on 512 H100 GPUs involves compute walls, memory
+walls, communication overhead, checkpoint I/O, energy costs, and carbon emissions ---
+simultaneously. This tutorial traces all six taxonomy domains and exercises 12 of the 22
+systems walls through a single workload.
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd),
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd),
+[Tutorial 6: Scaling to 1000 GPUs](06_scaling_1000_gpus.qmd), and
+[Tutorial 9: Sensitivity Analysis](09_sensitivity.qmd). You should understand
+roofline analysis, distributed training, and binding constraint identification.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Compose** six solver families across all taxonomy domains into a holistic analysis
+- **Identify** which of the 22 systems walls bind for a real training workload
+- **Quantify** the hidden costs: checkpoint overhead, carbon, water, and TCO
+- **Produce** a summary table mapping domain -> solver -> binding wall
+:::
+
+::: {.callout-tip}
+## Solver Quick Reference
+
+This capstone uses solvers from all six domains. If you arrived via an accelerated
+learning path, here is what each solver does:
+
+| Solver | Domain | What It Computes |
+|:-------|:-------|:-----------------|
+| `SingleNodeModel` | Node | Roofline bottleneck, latency, throughput |
+| `DataModel` | Data | Whether the data pipeline can sustain GPU demand |
+| `ScalingModel` | Algorithm | Compute-optimal training budget (Chinchilla) |
+| `DistributedModel` | Fleet | Communication overhead and scaling efficiency |
+| `ReliabilityModel` | Fleet | Cluster MTBF and optimal checkpoint intervals |
+| `EconomicsModel` | Ops | CapEx, OpEx, and total cost of ownership (TCO) |
+| `SustainabilityModel` | Ops | Energy, carbon footprint, and water usage |
+| `SensitivitySolver` | Analysis | Partial derivatives identifying the binding constraint |
+| `SynthesisSolver` | Analysis | Minimum hardware specs from a latency target |
+:::
+
+::: {.callout-tip}
+## Background: The Six Taxonomy Domains
+
+The MLSys wall taxonomy organizes 22 systems walls into six domains:
+
+| Domain | Walls | What It Covers |
+|:-------|:------|:---------------|
+| Node | 1--3 | Compute, memory capacity, memory bandwidth |
+| Data | 8--10 | Storage throughput, data pipeline stalls |
+| Algorithm | 11--13 | Scaling laws, compute-optimal training |
+| Fleet | 14--16 | Communication, synchronization, reliability |
+| Ops | 17--20 | TCO, energy, carbon, water, safety |
+| Analysis | 21--22 | Sensitivity, inverse synthesis |
+
+No single solver spans all six. The insight emerges from **composition**.
+:::
+
+---
+
+## 1. Setup: Build the Fleet
+
+We construct a 512-GPU training cluster: 64 DGX H100 nodes, 8 GPUs per node,
+NVLink intra-node, InfiniBand NDR inter-node, powered by Quebec's hydroelectric grid.
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+import mlsysim
+```
+
+```python
+import mlsysim
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
+from mlsysim.core.constants import Q_
+```
+
+```{python}
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
+from mlsysim.infra.registry import Grids
+from mlsysim.core.constants import Q_, NVLINK_H100_BW, INFINIBAND_NDR_BW
+
+model = mlsysim.Models.Language.Llama3_70B
+h100 = mlsysim.Hardware.Cloud.H100
+
+# Build the DGX H100 node: 8 GPUs connected by NVLink 4.0
+node = Node(
+    name="DGX H100",
+    accelerator=h100,
+    accelerators_per_node=8,
+    intra_node_bw=NVLINK_H100_BW
+)
+
+# Build the cluster fabric: InfiniBand NDR (400 Gbps)
+fabric = NetworkFabric(
+    name="InfiniBand NDR",
+    topology="fat-tree",
+    bandwidth=INFINIBAND_NDR_BW
+)
+
+# Build the fleet: 64 nodes = 512 GPUs, Quebec grid
+fleet = Fleet(
+    name="Training Cluster",
+    node=node,
+    count=64,
+    fabric=fabric,
+    region=Grids.Quebec
+)
+
+from mlsysim.show import table, info, banner
+
+info("Fleet Configuration",
+     Model=f"{model.name} ({model.parameters.to('Bparam'):.1f~})",
+     Fleet=f"{fleet.count} nodes x {node.accelerators_per_node} GPUs = {fleet.total_accelerators} GPUs",
+     Intra_node=f"NVLink 4.0 ({NVLINK_H100_BW.to('GB/s'):.0f~})",
+     Inter_node=f"IB NDR ({INFINIBAND_NDR_BW.to('Gbps'):.0f~})",
+     Region=Grids.Quebec.name)
+```
+
+---
+
+## 2. Node (Walls 1--3): Single-GPU Roofline
+
+First, classify the per-GPU forward-backward pass. Is each GPU compute-bound or
+memory-bound during training?
+
+```{python}
+from mlsysim import SingleNodeModel
+
+node_solver = SingleNodeModel()
+node_result = node_solver.solve(
+    model=model, hardware=h100,
+    batch_size=4, precision="fp16"
+)
+
+banner("Domain: Node (Walls 1-3)")
+info(Bottleneck=node_result.bottleneck,
+     Per_GPU_latency=node_result.latency.to('ms'),
+     Throughput=f"{node_result.throughput:.0f} samples/s")
+```
+
+Training at batch size 4 per GPU puts us in the compute-bound regime --- unlike inference,
+training has high arithmetic intensity due to the backward pass. Wall 1 (Compute) is the
+binding constraint at the node level.
+
+Compute-bound is good news --- it means the GPU is doing useful work, not waiting for data.
+But can the data pipeline actually keep up with 512 GPUs demanding training samples?
+
+---
+
+## 3. Data (Walls 8--10): Can the Pipeline Keep Up?
+
+The roofline tells us each GPU can consume data at a certain rate. But can the storage and
+preprocessing pipeline actually deliver data that fast? If not, the GPUs stall --- and
+"compute-bound" becomes a meaningless label.
+
+```{python}
+from mlsysim import DataModel
+
+# Estimate data demand per step: 4 samples/GPU * 512 GPUs * 2048 tokens * 2 bytes ≈ 8 MB/step
+# At ~1 step/sec, this is ~8 MB/s — tokenized text is compact
+data_demand = Q_("8 MB/s")
+
+data_solver = DataModel()
+data_result = data_solver.solve(
+    workload_data_rate=data_demand,
+    hardware=h100
+)
+
+banner("Domain: Data (Walls 8-10)")
+info(Data_demand=data_result.demand_bw,
+     Data_supply=data_result.supply_bw,
+     Utilization=f"{data_result.utilization:.1%}",
+     Stalled=data_result.is_stalled,
+     Bottleneck=data_result.bottleneck)
+```
+
+For text-based training, the data pipeline is rarely the bottleneck --- tokenized text
+is compact. But for image or video training, this wall can dominate.
+
+The data pipeline can keep up. The GPUs are compute-bound and well-fed. But are we
+spending our compute budget wisely? A 30-day run on 512 GPUs is an enormous investment
+--- the scaling laws tell us whether we are allocating it optimally.
+
+---
+
+## 4. Algorithm (Walls 11--13): Compute-Optimal Budget
+
+Is our training budget compute-optimal? The Chinchilla scaling law says
+D = 20P (tokens = 20x parameters) for optimal allocation.
+
+```{python}
+from mlsysim import ScalingModel
+
+# MFU (Model FLOP Utilization): the fraction of peak hardware FLOP/s that goes
+# to useful model computation (excluding communication, idle time, overhead).
+# MFU = 0.4 means 40% of theoretical peak -- typical for large-scale LLM training.
+# Published values: 0.30-0.45 (Llama-2/3), up to 0.50 (highly optimized runs).
+# Compute budget: 512 GPUs * 989 TFLOPs * 30 days * 86400s * 0.4 MFU
+gpu_flops = h100.compute.peak_flops.to("flop/s").magnitude
+total_flops = 512 * gpu_flops * 30 * 86400 * 0.4
+compute_budget = Q_(total_flops, "flop")
+
+scaling_solver = ScalingModel()
+scaling_result = scaling_solver.solve(
+    compute_budget=compute_budget,
+    target_model_size=model.parameters
+)
+
+banner("Domain: Algorithm (Walls 11-13)")
+info(Compute_budget=compute_budget.to('EFLOP'),
+     Optimal_tokens=f"{scaling_result.optimal_tokens.magnitude:.2e}",
+     Tokens_per_parameter=f"{scaling_result.tokens_per_parameter:.1f}",
+     Chinchilla_ratio=f"{'OVER' if scaling_result.tokens_per_parameter > 20 else 'UNDER'}-trained")
+```
+
+If the tokens-per-parameter ratio is significantly above or below 20, the training
+budget is not optimally allocated. Over-training wastes compute; under-training wastes
+model capacity.
+
+So far, everything looks manageable: compute-bound GPUs, adequate data pipeline,
+reasonable training budget. If we throw 512 GPUs at this, we should scale linearly,
+right? The fleet-level analysis reveals what single-node reasoning misses.
+
+---
+
+## 5. Fleet (Walls 14--16): Communication and Reliability
+
+The distributed solver models AllReduce overhead and pipeline bubbles.
+The reliability solver computes cluster MTBF and optimal checkpoint intervals.
+
+```{python}
+from mlsysim import DistributedModel, ReliabilityModel
+
+# 3D parallelism: TP=8 (within node), PP=1, DP=64
+dist_solver = DistributedModel()
+dist_result = dist_solver.solve(
+    model=model, fleet=fleet,
+    batch_size=2048, precision="fp16",
+    tp_size=8, pp_size=1,
+    overlap_comm=True, seq_len=2048
+)
+
+banner("Domain: Fleet (Walls 14-16)")
+info(Scaling_efficiency=f"{dist_result.scaling_efficiency:.2%}",
+     Step_latency=dist_result.step_latency_total.to('ms'),
+     DP_comm_latency=dist_result.dp_communication_latency.to('ms'),
+     TP_comm_latency=dist_result.tp_communication_latency.to('ms'),
+     Bubble_fraction=f"{dist_result.bubble_fraction:.2%}")
+```
+
+```{python}
+# Reliability: 30-day training job
+rel_solver = ReliabilityModel()
+rel_result = rel_solver.solve(
+    fleet=fleet,
+    job_duration_hours=30*24,
+    checkpoint_time_s=120
+)
+
+info(Fleet_MTBF=rel_result.fleet_mtbf.to('hour'),
+     Failure_probability=f"{rel_result.failure_probability:.2%}",
+     Expected_failures=f"{rel_result.expected_failures:.1f}",
+     Optimal_ckpt_interval=rel_result.optimal_checkpoint_interval.to('minute'))
+```
+
+At 512 GPUs, the cluster MTBF shrinks significantly. Checkpoint overhead becomes a
+non-trivial fraction of wall-clock time --- this is the "hidden cost" that single-node
+analysis misses entirely.
+
+The reliability analysis tells us HOW OFTEN the cluster fails. But failures cost money ---
+and so does the energy to keep 512 GPUs running for 30 days. The operational domain
+quantifies these costs.
+
+---
+
+## 6. Ops (Walls 17--20): TCO, Energy, Carbon, Water
+
+The economics solver combines CapEx, OpEx, and sustainability into a single financial model.
+
+```{python}
+from mlsysim import EconomicsModel, SustainabilityModel
+
+# 30-day training run
+econ_solver = EconomicsModel()
+econ_result = econ_solver.solve(
+    fleet=fleet,
+    duration_days=30,
+    grid=Grids.Quebec,
+    mfu=0.4
+)
+
+banner("Domain: Ops (Walls 17-20)")
+info(CapEx=f"${econ_result.capex_usd:,.0f}",
+     OpEx_energy=f"${econ_result.opex_energy_usd:,.0f}",
+     OpEx_maintenance=f"${econ_result.opex_maintenance_usd:,.0f}",
+     Total_TCO=f"${econ_result.tco_usd:,.0f}")
+```
+
+```{python}
+sust_solver = SustainabilityModel()
+sust_result = sust_solver.solve(
+    fleet=fleet,
+    duration_days=30,
+    datacenter=Grids.Quebec,
+    mfu=0.4
+)
+
+info(IT_Energy=sust_result.it_energy_kwh.to('MWh'),
+     Total_Energy_PUE=sust_result.total_energy_kwh.to('MWh'),
+     Carbon_footprint=f"{sust_result.carbon_footprint_kg:.0f} kg CO2",
+     Water_usage=f"{sust_result.water_usage_liters:.0f} liters",
+     PUE=sust_result.pue,
+     Region=sust_result.region_name)
+```
+
+Quebec's hydroelectric grid makes this one of the lowest-carbon training locations in the
+world. The same run in Poland (coal-heavy grid) would produce dramatically more CO2 ---
+infrastructure geography is a first-class engineering variable.
+
+---
+
+## 7. Analysis (Walls 21--22): Sensitivity and Synthesis
+
+Finally, confirm the binding constraint and derive minimum hardware for a 14-day completion target.
+
+```{python}
+from mlsysim import SensitivitySolver, SynthesisSolver
+
+# Sensitivity: confirm compute is the binding constraint for training
+sens_solver = SensitivitySolver()
+sens_result = sens_solver.solve(
+    model=model, hardware=h100, precision="fp16"
+)
+
+banner("Domain: Analysis (Walls 21-22)")
+info(Binding_constraint=sens_result.binding_constraint)
+
+sens_rows = [[param, f"{val:+.4f}"] for param, val in sens_result.sensitivities.items()]
+table(["Parameter", "Sensitivity"], sens_rows)
+```
+
+```{python}
+# Synthesis: what per-GPU step latency is needed to finish in 14 days?
+# Total training FLOPs / (N_GPUs * MFU * peak_FLOPS) = wall_clock_seconds
+target_days = 14
+target_seconds = target_days * 86400
+# Per-GPU step target: total_steps * step_latency = target_seconds
+# Approximate: we need each step to complete within a target latency
+synth_solver = SynthesisSolver()
+synth_result = synth_solver.solve(
+    model=model,
+    target_latency=Q_("200 ms"),   # per-GPU training step target
+    precision="fp16"
+)
+
+info("Synthesis (200ms per-GPU training step target)",
+     Required_BW=synth_result.required_bw.to('TB/s'),
+     Required_FLOPS=synth_result.required_flops.to('TFLOPs/s'),
+     Required_memory=synth_result.required_memory.to('GB'))
+```
+
+---
+
+## 8. Summary Table: The Complete Picture
+
+We have now traced a single workload through all six domains. Each solver answered one
+question in isolation. But the systems engineer's job is synthesis: seeing the complete
+picture at once. The table below is that picture --- and its most important property is
+that no single row captures the full story.
+
+```{python}
+mtbf_hours = rel_result.fleet_mtbf.to('hour').magnitude
+summary_rows = [
+    ["Node",      "SingleNodeModel",      f"Bottleneck: {node_result.bottleneck}",              "Wall 1: Compute"],
+    ["Data",      "DataModel",            f"Util: {data_result.utilization:.0%}",                "Not binding"],
+    ["Algorithm", "ScalingModel",         f"Tok/param: {scaling_result.tokens_per_parameter:.0f}","Wall 11"],
+    ["Fleet",     "DistributedModel",     f"Efficiency: {dist_result.scaling_efficiency:.0%}",   "Wall 14: Comm"],
+    ["Fleet",     "ReliabilityModel",     f"MTBF: {mtbf_hours:.0f}h",                           "Wall 19: Ckpt"],
+    ["Ops",       "EconomicsModel",       f"TCO: ${econ_result.tco_usd:,.0f}",                  "Wall 17: Cost"],
+    ["Ops",       "SustainabilityModel",  f"CO2: {sust_result.carbon_footprint_kg:.0f} kg",     "Wall 18: Energy"],
+    ["Analysis",  "SensitivitySolver",     f"Binding: {sens_result.binding_constraint}",         "Wall 21"],
+]
+
+table(["Domain", "Solver", "Key Metric", "Binding Wall"], summary_rows, "<<>>")
+```
+
+::: {.callout-important}
+## Key Insight
+
+**No single solver captures the full picture --- the systems view emerges from composition.**
+This end-to-end trace exercises 12 of 22 walls through a single model. The per-GPU binding
+constraint is compute (Wall 1), but the **hidden costs** only appear at fleet scale:
+checkpoint overhead (Wall 19) consumes wall-clock time proportional to the MTBF-driven
+checkpoint frequency, and infrastructure geography (Quebec vs. Poland) can change the
+carbon footprint by 40x (as [Tutorial 7](07_geography.qmd) demonstrated). A complete
+systems analysis is not one solver run --- it is the composition of all six domains.
+:::
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+What if you train in Poland instead of Quebec? Before running code, predict how the
+TCO and carbon footprint will change. (Hint: Poland's grid is coal-heavy with ~800 g
+CO2/kWh vs. Quebec's ~20 g CO2/kWh, and Poland has a higher PUE.) Then re-run the
+economics and sustainability solvers with `Grids.Poland` and compare. How close was
+your prediction?
+
+**Exercise 2: Double the cluster.**
+Scale the fleet to 1024 GPUs (128 nodes). Re-run the distributed solver and reliability
+solver. Does scaling efficiency hold? How does the MTBF change? At what cluster size does
+the checkpoint overhead exceed 5% of wall-clock time?
+
+**Exercise 3: Minimum viable cluster.**
+What is the minimum cluster size to complete Llama-3 70B training in 14 days? Use the
+scaling result to determine the required total FLOPS, then work backward to find the
+number of H100 GPUs needed at 40% MFU. Verify with the distributed solver that the
+communication overhead is acceptable at that scale.
+
+**Exercise 4: Propose a design change.**
+Using the full-stack analysis, identify the single highest-leverage change — hardware
+upgrade, parallelism strategy, region change, or precision change — that would reduce
+TCO by at least 20%. Re-run the relevant solvers with your proposed change and compute
+the new TCO. *Write one paragraph justifying why this change has the largest impact,
+referencing at least two domains from the summary table.*
+
+**Self-check:** If the fleet MTBF is 4 hours and each checkpoint takes 2 minutes, what
+fraction of wall-clock time is spent checkpointing? (Use the Young-Daly formula:
+optimal interval = sqrt(2 * delta * MTBF).)
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **Composition is the method**: no single solver spans all six taxonomy domains; the
+  systems view emerges only from composing 6+ solvers
+- **Compute binds at the node level**, but checkpoint overhead and communication are the
+  hidden costs at fleet scale
+- **Infrastructure geography matters**: Quebec vs. Poland can change carbon footprint by
+  40x and TCO by 20--30%
+- **The summary table** is the deliverable: one row per domain, solver, key metric, and
+  binding wall
+- **12 of 22 walls** are exercised through a single model-fleet pair --- this is what a
+  complete analysis looks like
+:::
+
+---
+
+## Next Steps
+
+- **[Sensitivity Analysis](09_sensitivity.qmd)** --- Dive deeper into the Analysis domain solvers
+- **[GPU vs. Wafer-Scale](10_gpu_vs_wafer.qmd)** --- See how architecture shifts the binding wall
+- **[Geography of AI](07_geography.qmd)** --- Explore how datacenter location changes sustainability
+- **[The \$9 Million GPU](08_nine_million_dollar.qmd)** --- Deep dive into TCO modeling

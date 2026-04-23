@@ -1,0 +1,64 @@
+schema_version: '1.0'
+id: cloud-2200
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The Power Measurement Trap
+scenario: Your team measures inference power consumption by reading nvidia-smi power draw during a 60-second
+  benchmark run. They report 350W average for an H100 running Llama-70B inference. The data center team
+  uses this to plan cooling capacity for a 1,000-GPU deployment. Three months after deployment, the cooling
+  system is overwhelmed during peak load. What went wrong with the power measurement methodology?
+details:
+  realistic_solution: 'Three methodological failures: (1) nvidia-smi reports GPU board power at ~1 Hz
+    sampling rate, missing sub-second power spikes during prefill bursts. The H100''s TDP is 700W, and
+    compute-heavy prefill operations can briefly draw 650W+ before DVFS throttles. The 350W average blends
+    low-power decode phases (200W) with high-power prefill phases (600W+). (2) Average power is the wrong
+    metric for cooling. You need sustained peak power (the P95 or P99 of rolling 10-second windows) because
+    thermal mass has a time constant of ~30 seconds — the cooling system must handle sustained peaks,
+    not averages. (3) The measurement excluded system-level power: CPU, DRAM, NVLink, PCIe, fans, and
+    power supply inefficiency (PSU at 94% efficiency adds 6% overhead). Total system power is typically
+    1.3-1.5x GPU-only power. MLPerf Power requires external power analyzers (Yokogawa WT310E) measuring
+    at the wall with >=1 kHz sampling, specifically to avoid these errors.'
+  common_mistake: Trusting nvidia-smi as an accurate power measurement tool and using average power for
+    capacity planning. Both are wrong for different reasons.
+  napkin_math: 'Measured: 350W avg GPU power x 1,000 GPUs = 350 kW. Reality: System power = 350W x 1.4
+    (system overhead) = 490W avg. Peak sustained (P95 over 10s windows) = 490W x 1.5 (prefill bursts)
+    = 735W per system. Total peak = 735 kW — 2.1x the planned 350 kW. Cooling deficit = 385 kW, equivalent
+    to 110 tons of cooling capacity.'
+  options:
+  - Gradient compression (top-k sparsification) is the primary method to reduce communication overhead;
+    overlapping communication with computation is not possible because AllReduce requires all gradients
+    before it can start
+  - Use asynchronous AllReduce that returns immediately without waiting for completion; read stale gradients
+    from the previous step, which is mathematically equivalent to synchronous training
+  - Reduce communication by using FP8 gradients instead of FP16; this halves AllReduce volume with negligible
+    accuracy impact, and is more effective than any overlapping strategy
+  - 'Overlap gradient AllReduce with backward computation: bucket small gradient tensors into ~25 MB chunks,
+    launch AllReduce for each bucket as soon as its backward pass completes (while deeper layers are still
+    computing). This hides most communication behind compute. PyTorch DDP implements this automatically
+    with configurable bucket sizes.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-460
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

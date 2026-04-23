@@ -16,6 +16,7 @@ This ensures backpropagation works correctly end-to-end.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 
 # Add project root to path
@@ -101,7 +102,7 @@ def test_mlp_gradient_flow():
     optimizer = SGD(layer1.parameters() + layer2.parameters(), lr=0.01)
 
     # Input and target
-    x = Tensor(np.random.randn(3, 4), requires_grad=True)
+    x = Tensor(rng.standard_normal((3, 4)), requires_grad=True)
     target = Tensor(np.array([[1, 0], [0, 1], [1, 0]]))
 
     print(f"Input shape: {x.shape}")
@@ -220,7 +221,7 @@ def test_cnn_gradient_flow():
     activation = ReLU()
 
     # Input: batch=2, channels=1, height=8, width=8
-    x = Tensor(np.random.randn(2, 1, 8, 8), requires_grad=True)
+    x = Tensor(rng.standard_normal((2, 1, 8, 8)), requires_grad=True)
 
     print(f"Input shape: {x.shape}")
     print(f"Conv weight shape: {conv.weight.shape}")
@@ -290,7 +291,7 @@ def test_cnn_training_updates():
     activation = ReLU()
 
     # Simple data: 4 samples, 1 channel, 4x4 images
-    X = Tensor(np.random.randn(4, 1, 4, 4), requires_grad=False)
+    X = Tensor(rng.standard_normal((4, 1, 4, 4)), requires_grad=False)
 
     # After conv: (4, 2, 4, 4) -> flatten to (4, 32)
     conv_out_size = 2 * 4 * 4  # channels * height * width

@@ -6,6 +6,7 @@ LayerNorm, MLP) properly propagate gradients during backpropagation.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -33,7 +34,7 @@ def test_multihead_attention_gradient_flow():
         param.requires_grad = True
 
     # Forward pass
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = mha.forward(x)
 
     # Backward pass
@@ -71,7 +72,7 @@ def test_layernorm_gradient_flow():
         param.requires_grad = True
 
     # Forward pass
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = ln.forward(x)
 
     # Backward pass
@@ -103,7 +104,7 @@ def test_mlp_gradient_flow():
         param.requires_grad = True
 
     # Forward pass
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = mlp.forward(x)
 
     # Backward pass
@@ -145,8 +146,8 @@ def test_full_gpt_gradient_flow():
     # Create input and targets
     batch_size = 2
     seq_len = 8
-    tokens = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_len)))
-    targets = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_len)))
+    tokens = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
+    targets = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
 
     # Forward pass
     logits = model.forward(tokens)
@@ -227,7 +228,7 @@ def test_attention_mask_gradient_flow():
     mask = Tensor(-1e9 * np.triu(np.ones((seq_len, seq_len)), k=1))
 
     # Forward pass
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = mha.forward(x, mask)
 
     # Backward pass

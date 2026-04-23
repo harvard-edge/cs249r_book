@@ -14,6 +14,7 @@ DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers → 04_losses → 0
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -82,8 +83,8 @@ class TestTrainingCore:
             trainer = Trainer(model=model, optimizer=optimizer, loss_fn=loss_fn)
             
             # Create batch
-            batch_x = Tensor(np.random.randn(4, 5))
-            batch_y = Tensor(np.random.randn(4, 2))
+            batch_x = Tensor(rng.standard_normal((4, 5)))
+            batch_y = Tensor(rng.standard_normal((4, 2)))
             
             # Run training step
             if hasattr(trainer, 'train_step'):
@@ -116,8 +117,8 @@ class TestTrainingCore:
             loss_fn = MSELoss()
             
             # Create dataloader
-            data = Tensor(np.random.randn(20, 5))
-            targets = Tensor(np.random.randn(20, 2))
+            data = Tensor(rng.standard_normal((20, 5)))
+            targets = Tensor(rng.standard_normal((20, 2)))
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=4)
             
@@ -167,7 +168,7 @@ class TestManualTrainingLoop:
             optimizer = SGD(params, lr=0.1)
             
             # Create data
-            data = Tensor(np.random.randn(40, 5))
+            data = Tensor(rng.standard_normal((40, 5)))
             targets = Tensor(np.zeros((40, 2)))  # Simple target
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=8)
@@ -212,14 +213,14 @@ class TestManualTrainingLoop:
             from tinytorch.core.optimizers import SGD
             
             # Simple problem: learn to output zeros
-            np.random.seed(42)
+            rng = np.random.default_rng(7)
             
             layer = Linear(4, 2)
             loss_fn = MSELoss()
             optimizer = SGD(layer.parameters(), lr=0.1)
             
             # Fixed data
-            x = Tensor(np.random.randn(8, 4))
+            x = Tensor(rng.standard_normal((8, 4)))
             target = Tensor(np.zeros((8, 2)))
             
             # Train for several steps
@@ -265,8 +266,8 @@ class TestTrainingUtilities:
             # Track losses
             losses = []
             for _ in range(5):
-                x = Tensor(np.random.randn(2, 3))
-                y = Tensor(np.random.randn(2, 1))
+                x = Tensor(rng.standard_normal((2, 3)))
+                y = Tensor(rng.standard_normal((2, 1)))
                 
                 pred = layer(x)
                 loss = loss_fn(pred, y)
@@ -291,8 +292,8 @@ class TestTrainingUtilities:
             layer = Linear(10, 5)
             
             # Create batched data
-            data = Tensor(np.random.randn(100, 10))
-            targets = Tensor(np.random.randn(100, 5))
+            data = Tensor(rng.standard_normal((100, 10)))
+            targets = Tensor(rng.standard_normal((100, 5)))
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=16)
             
@@ -350,7 +351,7 @@ class TestRegressionPrevention:
             from tinytorch.core.layers import Linear
             
             layer = Linear(4, 2)
-            x = Tensor(np.random.randn(2, 4))
+            x = Tensor(rng.standard_normal((2, 4)))
             y = layer(x)
             
             assert y.shape == (2, 2), "Linear broken"
@@ -380,7 +381,7 @@ class TestRegressionPrevention:
             from tinytorch.core.tensor import Tensor
             from tinytorch.core.dataloader import TensorDataset, DataLoader
             
-            data = Tensor(np.random.randn(10, 3))
+            data = Tensor(rng.standard_normal((10, 3)))
             targets = Tensor(np.arange(10).astype(float))
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=2)
@@ -456,8 +457,8 @@ class TestModule08Completion:
             # Test 1: Loss computation
             layer = Linear(4, 2)
             loss_fn = MSELoss()
-            x = Tensor(np.random.randn(2, 4))
-            y = Tensor(np.random.randn(2, 2))
+            x = Tensor(rng.standard_normal((2, 4)))
+            y = Tensor(rng.standard_normal((2, 2)))
             pred = layer(x)
             loss = loss_fn(pred, y)
             if loss.data.size == 1:
@@ -469,8 +470,8 @@ class TestModule08Completion:
                 capabilities["Optimizer step"] = True
             
             # Test 3: Batch iteration
-            data = Tensor(np.random.randn(10, 4))
-            targets = Tensor(np.random.randn(10, 2))
+            data = Tensor(rng.standard_normal((10, 4)))
+            targets = Tensor(rng.standard_normal((10, 2)))
             dataset = TensorDataset(data, targets)
             dataloader = DataLoader(dataset, batch_size=2)
             if sum(1 for _ in dataloader) == 5:

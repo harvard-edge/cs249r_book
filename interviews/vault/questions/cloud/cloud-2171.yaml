@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-2171
+track: cloud
+level: L4
+zone: analyze
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: The Flash Attention Tiling Insight
+scenario: Standard attention computes $\text{Softmax}(QK^T)V$ by first materializing the full $N \times
+  N$ attention matrix in HBM (where $N$ is sequence length), then applying softmax, then multiplying by
+  $V$. Flash Attention achieves 2-4x speedup without approximation. It never materializes the full attention
+  matrix. Explain the tiling strategy that makes this possible — specifically, how does Flash Attention
+  compute an exact softmax without having the full row of scores available at once? What memory hierarchy
+  level does it exploit?
+details:
+  realistic_solution: 'Flash Attention tiles the attention computation along the key/value sequence dimension.
+    For each tile of K and V loaded into SRAM (shared memory), it computes partial QK^T scores and partial
+    softmax statistics (running max and running sum of exponentials). The key algorithmic insight is the
+    ''online softmax'' (Milakov & Gimelshein, 2018): you can compute softmax incrementally by maintaining
+    a running maximum $m$ and a running normalizer $\ell$. When processing a new tile, you rescale previous
+    partial results by $e^{m_{old} - m_{new}}$ and accumulate. This produces the mathematically exact
+    softmax without ever needing the full row in memory simultaneously. The tiling exploits SRAM (shared
+    memory, ~200 KB per SM, ~19 TB/s effective bandwidth) instead of HBM (80 GB, ~3.35 TB/s). The attention
+    matrix ($N^2$ elements) stays in SRAM tiles and is never written to HBM.'
+  common_mistake: Thinking Flash Attention is an approximation (like sparse attention or linear attention).
+    It computes the exact same result. Another common mistake is saying it just 'uses shared memory' without
+    explaining the online softmax trick that makes tiling possible.
+  napkin_math: 'For sequence length N=8192, head dim d=128, FP16: Standard attention HBM traffic: write
+    $N^2$ = 67M entries x 2 bytes = 128 MB for the attention matrix alone, plus reads for softmax and
+    V multiply. Total: ~384 MB per head. Flash Attention HBM traffic: read Q, K, V once each = 3 x 8192
+    x 128 x 2 bytes = 6 MB, write O once = 2 MB. Total: ~8 MB per head. Reduction: 384/8 = 48x less HBM
+    traffic. At 3.35 TB/s: standard = 115 microseconds (memory alone); Flash = 2.4 microseconds. The kernel
+    is now compute-bound rather than memory-bound.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-458
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -38,7 +38,6 @@ By the end of this module, you will:
 
 Let's add intelligence to your tensors!
 """
-
 # %% [markdown]
 """
 ## 📦 Where This Code Lives in the Final Package
@@ -91,7 +90,9 @@ If you see import errors, ensure you've run `tito export` after completing Modul
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 from typing import Optional
+import warnings
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -192,12 +193,16 @@ Output: [0.05, 0.27, 0.5, 0.73, 0.95]
 ### ASCII Visualization
 ```
 Sigmoid Curve:
-    1.0 ┤     ╭─────
+
+    1.0 ┤          ╭───────
+        │        ╱
+        │      ╱
+    0.5 ┤─────●──────────
         │    ╱
-    0.5 ┤   ╱
         │  ╱
-    0.0 ┤─╱─────────
-       -3  0  3
+    0.0 ┤╱────────────────
+       -3      0       3
+
 ```
 
 **Why Sigmoid matters**: In binary classification, we need outputs between 0 and 1 to represent probabilities. Sigmoid gives us exactly that!
@@ -277,10 +282,15 @@ def test_unit_sigmoid():
     assert np.all(result.data > 0) and np.all(result.data < 1), "All sigmoid outputs should be in (0, 1)"
 
     # Test specific values
+    # Temporarily suppress overflow warning, expected
+    warnings.filterwarnings('ignore', category=RuntimeWarning)
+    print("Suppressed expected warning about exp overflow...")
+
     x = Tensor([-1000, 1000])  # Extreme values
     result = sigmoid.forward(x)
     assert np.allclose(result.data[0], 0, atol=TOLERANCE), "sigmoid(-∞) should approach 0"
     assert np.allclose(result.data[1], 1, atol=TOLERANCE), "sigmoid(+∞) should approach 1"
+    warnings.filterwarnings('default', category=RuntimeWarning)
 
     print("✅ Sigmoid works correctly!")
 
@@ -609,7 +619,7 @@ class GELU:
         >>> x = Tensor([-1, 0, 1])
         >>> result = gelu(x)
         >>> print(result.data)
-        [-0.159, 0.0, 0.841]  # Smooth, like ReLU but differentiable everywhere
+        [-0.15, 0.0, 0.85]  # Smooth, like ReLU but differentiable everywhere
 
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
@@ -1036,7 +1046,7 @@ def analyze_activation_performance():
 
     # Create test data (realistic hidden layer size)
     size = 1000000  # 1 million elements (like a large hidden layer)
-    test_data = Tensor(np.random.randn(size).astype(np.float32))
+    test_data = Tensor(rng.standard_normal(size).astype(np.float32))
 
     print(f"\nTesting with {size:,} elements (simulating large hidden layer)")
     print("-" * 60)
@@ -1160,7 +1170,7 @@ Congratulations! You've built the intelligence engine of neural networks!
 - **Built 5 core activation functions** with distinct behaviors and use cases
 - **Implemented forward passes** for Sigmoid, ReLU, Tanh, GELU, and Softmax
 - **Discovered computational cost differences** between activations (ReLU fastest)
-- **Handled numerical stability** with clipping and max subtraction techniques
+- **Handled numerical stability** with max subtraction techniques
 - **All tests pass** (validated by `test_module()`)
 
 ### Systems Insights Discovered

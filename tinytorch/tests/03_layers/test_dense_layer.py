@@ -4,6 +4,7 @@ Tests for Module 04: Linear/Networks
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -35,7 +36,7 @@ class TestLinearForward:
         from tinytorch.core.tensor import Tensor
 
         layer = Linear(10, 5)
-        x = Tensor(np.random.randn(32, 10))
+        x = Tensor(rng.standard_normal((32, 10)))
         output = layer(x)
 
         assert output.shape == (32, 5)
@@ -90,7 +91,7 @@ class TestLinearIntegration:
         relu = ReLU()
         sigmoid = Sigmoid()
 
-        x = Tensor(np.random.randn(16, 10))
+        x = Tensor(rng.standard_normal((16, 10)))
         h = layer(x)
         h_relu = relu(h)
         h_sigmoid = sigmoid(h)
@@ -108,7 +109,7 @@ class TestLinearIntegration:
         layer2 = Linear(128, 64)
         layer3 = Linear(64, 10)
 
-        x = Tensor(np.random.randn(32, 784))
+        x = Tensor(rng.standard_normal((32, 784)))
         h1 = layer1(x)
         h2 = layer2(h1)
         output = layer3(h2)

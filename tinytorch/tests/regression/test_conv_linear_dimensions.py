@@ -37,6 +37,7 @@ and match Linear layer input expectations.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -69,7 +70,7 @@ def test_conv_to_linear_dimension_match():
     conv2 = Conv2d(32, 64, kernel_size=3, stride=1, padding=0)
 
     # Create dummy CIFAR-10 batch
-    x = Tensor(np.random.randn(batch_size, input_channels, input_height, input_width))
+    x = Tensor(rng.standard_normal((batch_size, input_channels, input_height, input_width)))
 
     # Forward pass with dimension tracking
     print(f"Input shape: {x.shape}")
@@ -154,7 +155,7 @@ def test_typical_cnn_architectures():
     batch_size = 16
 
     # LeNet on 32x32 images (CIFAR-10)
-    x = Tensor(np.random.randn(batch_size, 3, 32, 32))
+    x = Tensor(rng.standard_normal((batch_size, 3, 32, 32)))
 
     # Conv block 1: 3->6 channels
     conv1 = Conv2d(3, 6, kernel_size=5)

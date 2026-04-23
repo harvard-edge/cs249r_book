@@ -26,6 +26,7 @@ CONNECTION TO OTHER MODULES:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -98,12 +99,12 @@ class TestLatencyMeasurement:
         """
         class SimpleModel:
             def __init__(self):
-                self.weight = Tensor(np.random.randn(10, 10))
+                self.weight = Tensor(rng.standard_normal((10, 10)))
             def forward(self, x):
                 return x.matmul(self.weight)
 
         model = SimpleModel()
-        x = Tensor(np.random.randn(1, 10))
+        x = Tensor(rng.standard_normal((1, 10)))
         profiler = Profiler()
 
         latency = profiler.measure_latency(model, x, warmup=1, iterations=3)

@@ -1,0 +1,73 @@
+schema_version: '1.0'
+id: edge-0817
+track: edge
+level: L6+
+zone: mastery
+topic: 3d-parallelism
+competency_area: compute
+bloom_level: create
+phase: training
+title: The Multi-Model Memory Tetris
+scenario: 'A robotics platform runs 5 concurrent models on a Jetson Orin (32 GB LPDDR5, 204.8 GB/s): SLAM
+  (3.2 GB, 40ms), object detection (1.8 GB, 15ms), path planning (0.5 GB, 8ms), speech recognition (0.8
+  GB, 25ms), and gesture recognition (0.6 GB, 12ms). All models must run within a 50ms window. The total
+  memory for weights is 6.9 GB, but with activations and workspace the total peaks at 18 GB. Design a
+  scheduling strategy that respects both the memory ceiling and the 50ms deadline. What happens if you
+  add a 6th model (4 GB weights, 20ms)?'
+details:
+  realistic_solution: 'Phase 1 (0-15ms): Run detection (1.8 GB, 15ms) and path planning (0.5 GB, 8ms)
+    and gesture (0.6 GB, 12ms) concurrently on GPU = 2.9 GB weights + ~4 GB activations = ~7 GB. Phase
+    2: SLAM (3.2 GB, 40ms) and speech (0.8 GB, 25ms). Peak memory: max(7, 9) + 2 GB system overhead =
+    11 GB — fits in 32 GB. Total wall time: 15 + 40 = 55ms > 50ms deadline. Must optimize: overlap Phase
+    1 tail with Phase 2 start (speech can begin at t=12ms when gesture finishes), and reduce SLAM to ~25ms
+    via TensorRT INT8 optimization. Revised schedule: Phase 1 (0-15ms): detection + path + gesture. Phase
+    2: speech starts at t=12, SLAM starts at t=15. Both finish by max(15+25, 12+25) = 40ms < 50ms deadline.
+    Adding a 6th model (4 GB, 20ms): schedule alongside path planning and gesture in Phase 1, move detection
+    to Phase 2. Phase 1 = max(20, 8, 12) = 20ms, Phase 2 = max(40, 25, 15) = 40ms. Total = 60ms > 50ms.
+    Need to aggressively pipeline across frames or prune models.'
+  common_mistake: Only budgeting model weights without accounting for activation memory, TensorRT workspace,
+    and CUDA context overhead. Also, assuming all 5 models can start simultaneously — memory fragmentation
+    and concurrent allocation peaks can push well beyond the sum of static weights.
+  napkin_math: '32 GB LPDDR5 total. 5 models: 3.2+1.8+0.5+0.8+0.6 = 6.9 GB weights. Activations ~ 1.5x
+    weights = 10.4 GB. Peak if all concurrent: 6.9+10.4+2 (system) = 19.3 GB — fits, but deadline violated
+    (SLAM alone = 40ms). Two-phase schedule: Phase 1 = 15ms, Phase 2 = 40ms, total = 55ms. Exceeds 50ms
+    by 5ms. Fix: overlap speech (starts at t=12ms after gesture) with Phase 2 SLAM (starts t=15ms). Effective
+    wall time = max(15+40, 12+25) = max(55, 37) = 55ms. Still tight — apply TensorRT INT8 to SLAM (typically
+    1.5-2x speedup, reducing to ~25ms): max(15+25, 12+25) = max(40, 37) = 40ms. Peak memory per phase:
+    ~11 GB. 6th model pushes total to 60ms — must optimize SLAM further.'
+  options:
+  - Graph-level optimizations are always superior to kernel-level optimizations because they capture global
+    data flow patterns.
+  - The issue stems from OS-level scheduling interference; pinning the inference thread to a dedicated
+    core will eliminate the performance variance.
+  - 'Phase 1 (0-15ms): Run detection (1.8 GB, 15ms) and path planning (0.5 GB, 8ms) and gesture (0.6 GB,
+    12ms) concurrently on GPU = 2.9 GB weights + ~4 GB activations = ~7 GB. Phase 2: SLAM (3.2 GB, 40ms)
+    and speech (0.8 GB, 25ms). Peak memory: max(7, 9) + 2 GB system overhead = 11 GB — fits in 32 GB.'
+  - Only budgeting model weights without accounting for activation memory, TensorRT workspace, and CUDA
+    context overhead. Also, assuming all 5 models can start simultaneously — memory fragmentation and
+    concurrent allocation peaks can push well beyond the sum of static weights.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
+- The 'Napkin Math' section incorrectly calculates the total wall time for the two-phase schedule as 55ms
+  based on 15ms + 40ms, despite overlapping the speech model, and then makes a different (and inconsistent)
+  calculation for the effective wall time with overlap.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The total wall time calculation is incorrect; a 15ms phase followed by a 40ms phase results in a total
+  time of 55ms, which exceeds the 50ms deadline.
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

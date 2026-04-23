@@ -1,3 +1,4 @@
+import time
 #!/usr/bin/env python3
 """
 Update contributors from GitHub API.
@@ -185,10 +186,25 @@ def main(_):
     last_page = None
     while next_page != last_page:
         print(f"Fetching page: {next_page}")
-        res = requests.get(next_page, headers=headers)
+        
+        # Add retry logic for 502/503/504 errors
+        max_retries = 3
+        retry_delay = 5
+        for attempt in range(max_retries):
+            res = requests.get(next_page, headers=headers)
+            if res.status_code == 200:
+                break
+            elif res.status_code in [502, 503, 504]:
+                logging.warning(f"GitHub API request failed with status {res.status_code} (Attempt {attempt+1}/{max_retries}). Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                break
+                
         if res.status_code != 200:
             logging.error(f"GitHub API request failed with status {res.status_code}: {res.text}")
             raise RuntimeError(f"Failed to fetch commits: {res.status_code}")
+            
         data.extend(res.json())
         next_page = res.links.get("next", {}).get("url", None)
         last_page = res.links.get("last", {}).get("url", None)

@@ -1,0 +1,468 @@
+---
+title: "Contributing to MLSYSIM"
+subtitle: "Add hardware specs, write solvers, build tutorials, and grow the MLSys Zoo."
+---
+
+MLSYSIM grows stronger with every new hardware spec, solver, tutorial, and bug report. This
+guide explains how to contribute -- whether you are a student who spotted a wrong datasheet
+number, an instructor designing a teaching scenario, or a researcher who needs a new
+analytical solver.
+
+::: {.callout-note}
+## Before you start
+
+MLSYSIM is maintained as part of the [ML Systems textbook](https://mlsysbook.ai) project.
+All contributions go through GitHub. If you are not familiar with Git and pull requests,
+[GitHub's guide](https://docs.github.com/en/get-started/quickstart/contributing-to-projects)
+is a good starting point.
+
+**Repository:** [harvard-edge/cs249r_book](https://github.com/harvard-edge/cs249r_book)
+:::
+
+---
+
+## At a Glance
+
+| Contribution | Difficulty | Impact | Where it lives |
+|:---|:---:|:---|:---|
+| Report a bug or wrong spec | Beginner | High -- specs affect all users | GitHub Issues |
+| Add hardware to the Silicon Zoo | Intermediate | High -- expands coverage | `hardware/` |
+| Add a model to the Model Zoo | Intermediate | Medium -- new workloads | `models/` |
+| Add a fleet or fabric | Intermediate | Medium -- new topologies | `systems/` |
+| Add a grid or rack profile | Intermediate | Medium -- new infra | `infra/` |
+| Write a tutorial | Intermediate | High -- improves learning | `docs/tutorials/` |
+| Add or improve a solver | Advanced | High -- new analysis capabilities | `core/solver.py` |
+
+---
+
+## 1. Reporting Issues
+
+The fastest way to contribute: open an issue on GitHub.
+
+**Good bug reports include:**
+
+- Which spec is wrong (e.g., "A100 peak TFLOP/s in `core/constants.py`")
+- The correct value and your source (official datasheet URL preferred)
+- The version of MLSYSIM you are using (`python -c "import mlsysim; print(mlsysim.__version__)"`)
+
+**Good feature requests include:**
+
+- What hardware, model, or solver you want added and why
+- A link to the official specification or paper
+
+---
+
+## 2. Adding Hardware to the Silicon Zoo {#sec-hardware}
+
+Every chip in the Silicon Zoo lives in one of five categories: `Cloud`, `Workstation`,
+`Mobile`, `Edge`, or `Tiny`. Each entry follows a strict format with mandatory provenance
+metadata.
+
+::: {.callout-tip}
+## Background reading
+The [Hardware Acceleration](../../slides/vol1/11_hw_acceleration/) and
+[Compute Infrastructure](../../slides/vol2/02_compute_infrastructure/) slide decks cover
+the accelerator landscape and datasheet specs that feed into MLSYSIM's hardware registry.
+:::
+
+### Step 1: Define constants in `core/constants.py`
+
+Every numerical spec gets a named constant with pint units. Never hardcode values in the
+registry.
+
+```python
+# In mlsysim/core/constants.py
+A100_MEM_BW            = Q_(2000, "GB/s")     # HBM2e, SXM4 form factor
+A100_FLOPS_FP16_TENSOR = Q_(312, "TFLOP/s")   # Tensor Core, sparsity OFF
+A100_FLOPS_FP32        = Q_(19.5, "TFLOP/s")  # CUDA cores
+A100_FLOPS_TF32        = Q_(156, "TFLOP/s")   # Tensor Core
+A100_FLOPS_INT8        = Q_(624, "TOPS")       # Tensor Core
+A100_MEM_CAPACITY      = Q_(80, "GB")          # SXM4 variant
+A100_TDP               = Q_(400, "W")          # SXM4 variant
+```
+
+### Step 2: Register the node in `hardware/registry.py`
+
+Import your constants and add a `HardwareNode` to the appropriate category.
+
+```python
+# In mlsysim/hardware/registry.py
+A100 = HardwareNode(
+    name="NVIDIA A100",
+    release_year=2020,
+    compute=ComputeCore(
+        peak_flops=A100_FLOPS_FP16_TENSOR,
+        precision_flops={
+            "fp32": A100_FLOPS_FP32,
+            "tf32": A100_FLOPS_TF32,
+            "int8": A100_FLOPS_INT8,
+        },
+    ),
+    memory=MemoryHierarchy(
+        capacity=A100_MEM_CAPACITY,
+        bandwidth=A100_MEM_BW,
+    ),
+    tdp=A100_TDP,
+    dispatch_tax=0.015 * ureg.ms,
+    metadata={
+        "source_url": "https://...",    # REQUIRED: official datasheet
+        "last_verified": "2025-03-06",  # REQUIRED: date you checked
+    },
+)
+```
+
+For mobile and edge devices, include `battery_capacity` when applicable (e.g.,
+`battery_capacity=15 * ureg.Wh` for a smartphone).
+
+### Step 3: Add a top-level alias (optional)
+
+If the device is commonly referenced, add a convenience alias in the `Hardware` class at
+the bottom of `hardware/registry.py`:
+
+```python
+class Hardware(Registry):
+    # ...
+    MyNewChip = CloudHardware.MyNewChip  # convenient shortcut
+```
+
+### Provenance rules
+
+1. Link to an **official primary source** (manufacturer datasheet, not a blog post)
+2. Include a `last_verified` date -- specs change across chip revisions and firmware updates
+3. State **which variant** (e.g., SXM5 vs. PCIe, different memory configs)
+4. When a spec varies across SKUs, use the **most conservative published value** unless the
+   variant is specified in the node name
+
+---
+
+## 3. Adding Models to the Model Zoo {#sec-models}
+
+Models live in one of four families: `LanguageModels`, `VisionModels`, `TinyModels`, or
+`RecommendationModels`. Transformer-based models use `TransformerWorkload`; CNNs use
+`CNNWorkload`.
+
+::: {.callout-tip}
+## Background reading
+The [Network Architectures](../../slides/vol1/06_nn_architectures/) and
+[Neural Network Computation](../../slides/vol1/05_nn_computation/) slide decks explain the
+architectural parameters (layers, heads, hidden dimensions) that define each workload.
+:::
+
+### Transformer workloads
+
+```python
+# In mlsysim/models/registry.py
+Llama3_8B = TransformerWorkload(
+    name="Llama-3.1-8B",
+    architecture="Transformer",
+    parameters=LLAMA3_8B_PARAMS,      # defined in core/constants.py
+    layers=32,
+    hidden_dim=4096,
+    heads=32,
+    kv_heads=8,                        # GQA: fewer KV heads than query heads
+    inference_flops=2 * LLAMA3_8B_PARAMS.magnitude * ureg.flop,
+)
+```
+
+For `inference_flops`, the standard approximation is $2P$ FLOPs per token for transformer
+forward passes (multiply-accumulate counted as 2 operations). When a more precise count
+is available from the paper, use it and note the source in a comment.
+
+### CNN workloads
+
+```python
+ResNet50 = CNNWorkload(
+    name="ResNet-50",
+    architecture="CNN",
+    parameters=RESNET50_PARAMS,
+    layers=50,
+    inference_flops=RESNET50_FLOPs,
+)
+```
+
+---
+
+## 4. Adding Systems and Infrastructure {#sec-systems}
+
+MLSYSIM models the full deployment stack: individual accelerators compose into **nodes**,
+nodes form **fleets**, and fleets connect via **network fabrics**. Infrastructure captures
+the **grid** (carbon, PUE, WUE) and **rack** profiles underneath.
+
+::: {.callout-tip}
+## Background reading
+The [Network Fabrics](../../slides/vol2/03_network_fabrics/) and
+[Fleet Orchestration](../../slides/vol2/08_fleet_orchestration/) slide decks explain the
+network topologies and cluster compositions that MLSYSIM models analytically.
+:::
+
+### Adding a fleet or fabric (`systems/registry.py`)
+
+```python
+# A new reference node
+DGX_B200 = Node(
+    name="DGX B200",
+    accelerator=Hardware.B200,
+    accelerators_per_node=8,
+    intra_node_bw=1800 * ureg.GB / ureg.second,
+    nics_per_node=8,
+)
+
+# A new cluster built from that node
+Training_2K = Fleet(
+    name="Training Cluster (2048 GPUs)",
+    node=DGX_B200,
+    count=256,  # 256 nodes x 8 GPUs = 2048
+    fabric=Fabrics.InfiniBand_NDR,
+)
+```
+
+### Adding a grid profile (`infra/registry.py`)
+
+Grid profiles capture the carbon intensity, cooling efficiency (PUE), and water usage
+(WUE) of a datacenter region.
+
+```python
+Iceland = GridProfile(
+    name="Iceland (Geothermal)",
+    carbon_intensity_g_kwh=28,            # gCO2/kWh
+    pue=PUE_LIQUID_COOLED,
+    wue=WUE_LIQUID,
+    primary_source="geothermal",
+    metadata={
+        "source_url": "https://...",
+        "last_verified": "2025-06-01",
+    },
+)
+```
+
+::: {.callout-tip}
+## Background reading
+The [Sustainable AI](../../slides/vol2/15_sustainable_ai/) slide deck covers PUE, WUE, and
+carbon intensity -- the exact quantities that `GridProfile` captures.
+:::
+
+---
+
+## 5. Writing a Tutorial {#sec-tutorials}
+
+The best tutorials teach **one insight** through **one concrete example**. Before writing,
+answer three questions:
+
+1. **What is the one thing the reader will understand after this tutorial?**
+2. **What would they have guessed incorrectly before reading it?**
+3. **What surprising number will they compute?**
+
+### Tutorial structure
+
+Follow the pattern established in [Hello, Roofline](tutorials/00_hello_roofline.qmd),
+[Geography is a Systems Variable](tutorials/07_geography.qmd),
+[Two Phases of Inference](tutorials/02_two_phases.qmd), and
+[Scaling to 1000 GPUs](tutorials/06_scaling_1000_gpus.qmd):
+
+```markdown
+---
+title: "Short, specific title"
+subtitle: "Payoff sentence: what you learn in 10 words."
+---
+
+[2-3 sentence hook: what problem does this solve?]
+
+By the end of this tutorial you will understand:
+- [Concept 1]
+- [Concept 2]
+- [Concept 3]
+
+::: {.callout-tip}
+## Background concept
+[1-paragraph intuition before any code]
+:::
+
+## 1. Setup
+[import block -- path hack MUST be hidden with #| echo: false]
+
+## 2. First Example
+[minimal working code + output]
+
+## 3-N. Build Understanding
+[progressive complexity, callouts explaining surprising results]
+
+## What You Learned
+[bullet list recap]
+
+## Next Steps
+[2-3 links to related content]
+```
+
+### Code style in tutorials
+
+- **Use clean imports**: Start with `import mlsysim`. The package is `pip install`-ed in the docs build environment (see `.github/workflows/mlsysim-preview-dev.yml`), so no path manipulation is needed.
+- **Use Zoo entries**: Pull from `mlsysim.Hardware.Cloud.A100`, `mlsysim.Models.Language.Llama3_70B`, etc. -- no hardcoded constants in tutorial code
+- **Print with units**: Always use pint's `~` format spec: `f"{value.to('ms'):~.2f}"`
+- **Comment sparingly**: Code should be readable without comments; add a callout if explanation is needed
+
+### Linking to slide decks
+
+When your tutorial covers a topic with an existing slide deck, link to it so readers can
+deepen their understanding. Relevant slide decks for common tutorial topics:
+
+| Tutorial topic | Slide deck |
+|:---|:---|
+| Roofline analysis | [Hardware Acceleration](../../slides/vol1/11_hw_acceleration/) |
+| Benchmarking & MFU | [Benchmarking](../../slides/vol1/12_benchmarking/), [Performance Engineering](../../slides/vol2/10_performance_engineering/) |
+| LLM serving (TTFT/ITL) | [Model Serving](../../slides/vol1/13_model_serving/), [Inference at Scale](../../slides/vol2/09_inference/) |
+| Distributed training | [Model Training](../../slides/vol1/08_training/), [Distributed Training](../../slides/vol2/05_distributed_training/) |
+| Collective communication | [Collective Communication](../../slides/vol2/06_collective_communication/) |
+| Fault tolerance | [Fault Tolerance](../../slides/vol2/07_fault_tolerance/) |
+| Sustainability & carbon | [Sustainable AI](../../slides/vol2/15_sustainable_ai/) |
+| Model compression | [Model Compression](../../slides/vol1/10_model_compression/) |
+| Network architectures | [Network Architectures](../../slides/vol1/06_nn_architectures/) |
+
+---
+
+## 6. Adding or Improving a Solver {#sec-solvers}
+
+MLSYSIM ships six analytical solvers, each grounded in peer-reviewed literature. All
+inherit from `BaseSolver` and implement `solve(**kwargs)`.
+
+| Solver | What it computes | Key references |
+|:---|:---|:---|
+| `SingleNodeModel` | Roofline bounds, MFU/HFU | Williams et al. (2009) |
+| `DistributedModel` | 3D/4D parallelism, all-reduce, pipeline bubbles | Shoeybi et al. (2019), Narayanan et al. (2019) |
+| `ReliabilityModel` | MTBF, failure probability, Young-Daly checkpointing | Young (1974), Daly (2006) |
+| `SustainabilityModel` | Energy, carbon, water (PUE, WUE) | Patterson et al. (2021) |
+| `EconomicsModel` | CapEx, OpEx, TCO | Barroso et al. (2018) |
+| `ServingModel` | TTFT, ITL, KV-cache pressure | Pope et al. (2023), Aminabadi et al. (2022) |
+
+::: {.callout-tip}
+## Background reading
+The [Performance Engineering](../../slides/vol2/10_performance_engineering/) and
+[Distributed Training](../../slides/vol2/05_distributed_training/) slide decks cover
+the analytical models (roofline, all-reduce cost, pipeline bubbles) that the solvers
+implement.
+:::
+
+### Solver contribution checklist
+
+1. **Place canonical equations in `core/formulas.py`** -- every solver equation must be
+   independently callable and unit-tested
+2. **Inherit from `BaseSolver`** and implement `solve(**kwargs) -> dict`
+3. **Use pint units throughout** -- all inputs and outputs must carry physical units
+4. **Cite the source paper** in a docstring on the solver class
+5. **Add tests in `tests/test_solvers.py`** covering at least one known-good result from the paper
+6. **Document the solver** by adding a page under `docs/api/`
+
+### Example: extending a solver
+
+All formulas live in `core/formulas.py` so they can be tested in isolation:
+
+```python
+# In mlsysim/core/formulas.py
+def ring_allreduce_time(message_bytes, num_nodes, bandwidth):
+    """Ring all-reduce latency: 2(N-1)/N * M/B.
+
+    Reference: Thakur et al. (2005), "Optimization of Collective
+    Communication Operations in MPICH."
+    """
+    return 2 * (num_nodes - 1) / num_nodes * message_bytes / bandwidth
+```
+
+---
+
+## 7. Running Tests
+
+Before submitting a pull request, ensure the test suite passes:
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run the full test suite
+pytest mlsysim/tests/ -v
+
+# Run a specific test file
+pytest mlsysim/tests/test_solvers.py -v
+```
+
+The test suite covers four areas:
+
+| Test file | What it validates |
+|:---|:---|
+| `test_engine.py` | Single-node inference, OOM exceptions, precision switching |
+| `test_hardware.py` | Registry access, ridge point calculation, JSON serialization |
+| `test_solvers.py` | Distributed, reliability, and economics solvers |
+| `test_empirical.py` | Empirical validation against published numbers |
+
+---
+
+## 8. Submitting a Pull Request
+
+1. **Fork** the repository on GitHub
+2. **Create a branch** with a descriptive name: `git checkout -b feat/add-b200-hardware`
+3. **Make your changes** following the patterns in this guide
+4. **Run tests** to confirm nothing is broken
+5. **Open a PR** against the `dev` branch with:
+   - A clear description of what changed and why
+   - A link to the source document for any new spec values
+   - Output showing your change working (`python -c "..."` snippet)
+
+### Branch naming conventions
+
+| Type | Pattern | Example |
+|:---|:---|:---|
+| New feature | `feat/<scope>` | `feat/add-mi300x-hardware` |
+| Bug fix | `fix/<scope>` | `fix/a100-bandwidth-typo` |
+| Documentation | `docs/<scope>` | `docs/tutorial-kv-cache` |
+| Tests | `test/<scope>` | `test/reliability-solver` |
+
+---
+
+## 9. Architecture Overview
+
+Understanding the module layout helps you find the right file to edit.
+
+```
+mlsysim/
+  core/
+    constants.py    # Single source of truth for all specs (pint units)
+    formulas.py     # 40+ canonical equations (roofline, all-reduce, TCO, ...)
+    solver.py       # 6 analytical solvers (BaseSolver subclasses)
+    engine.py       # Roofline engine (Engine.solve())
+    scenarios.py    # Scenario bundles + 3-tier evaluation
+    evaluation.py   # Feasibility / Performance / Macro scorecard
+    config.py       # YAML/JSON configuration loader
+    types.py        # Quantity type alias, Metadata
+    registry.py     # Base Registry pattern
+    exceptions.py   # OOMError, SLAViolation, ThermalThrottleWarning
+  hardware/
+    types.py        # ComputeCore, MemoryHierarchy, HardwareNode
+    registry.py     # 5 categories, 18+ devices
+  models/
+    types.py        # Workload, TransformerWorkload, CNNWorkload
+    registry.py     # 4 families, 15+ models
+  systems/
+    types.py        # DeploymentTier, Node, Fleet, NetworkFabric
+    registry.py     # Tiers, Nodes, Fabrics, Clusters
+  infra/
+    types.py        # GridProfile, RackProfile, Datacenter
+    registry.py     # Grids (carbon/PUE/WUE), Racks
+  sim/              # Simulation support (Persona, SystemLedger)
+  viz/              # Visualization (roofline plots, scorecards)
+  tests/            # pytest suite
+  examples/         # Standalone scripts
+  docs/             # Quarto documentation site
+```
+
+---
+
+## Community Standards
+
+MLSYSIM is a pedagogical tool used in courses at Harvard and beyond. Contributions should:
+
+- **Prioritize accuracy over completeness** -- a wrong spec is worse than a missing one
+- **Cite sources** -- every number needs a URL to an official datasheet or peer-reviewed paper
+- **Explain the analytical reasoning** -- a tutorial that teaches *why* is better than one
+  that shows *how*
+- **Use units everywhere** -- pint prevents dimensional errors; do not bypass it with raw floats
+
+Thank you for helping make MLSYSIM more accurate and useful for the next generation of
+ML systems engineers.

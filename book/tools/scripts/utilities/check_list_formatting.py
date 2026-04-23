@@ -1,226 +1,163 @@
 #!/usr/bin/env python3
 """
-Check and fix markdown list formatting issues.
+Ensure markdown lists are preceded by a blank line.
 
-This script ensures that bullet lists in markdown files are preceded by an empty line,
-which is required for proper markdown rendering.
+Markdown requires a blank line before the first item of a list for it to
+render as a proper list block.  Without it, Quarto / Pandoc treat the items
+as continuation of the preceding paragraph.
 
-Usage:
-    # Check files without fixing
-    python check_list_formatting.py --check path/to/file.qmd
+Detected patterns
+-----------------
+1. A non-blank, non-list line immediately followed by ``1. `` (numbered list start).
+2. A non-blank, non-list line immediately followed by ``- `` (bullet list start).
 
-    # Fix issues automatically
-    python check_list_formatting.py --fix path/to/file.qmd
+Lines that are themselves list items, blank lines, code fences, Quarto
+divs (``:::``), table rows (``|``), and YAML front-matter are excluded
+from triggering a violation.
 
-    # Check all .qmd files in a directory
-    python check_list_formatting.py --check --recursive quarto/contents/core/
+Usage (from book/):
+    python3 tools/scripts/utilities/check_list_formatting.py --check quarto/contents/vol2/
+    python3 tools/scripts/utilities/check_list_formatting.py --fix   file.qmd
+    python3 tools/scripts/utilities/check_list_formatting.py --fix   --recursive quarto/contents/
+
+Pre-commit (configured in .pre-commit-config.yaml):
+    entry: python tools/scripts/utilities/check_list_formatting.py --fix
+
+Exit codes:
+    0  No issues (or all fixed in --fix mode)
+    1  Issues found (--check mode only)
 """
 
+from __future__ import annotations
+
 import argparse
-import os
+import re
 import sys
 from pathlib import Path
 
+# ── Patterns ────────────────────────────────────────────────────────────────
 
-def find_list_formatting_issues(filepath):
+# First item of a numbered list (must start with "1." to be a list start)
+RE_NUMBERED_START = re.compile(r"^\s*1\.\s")
+# Any numbered continuation (2., 3., …)
+RE_NUMBERED_ANY = re.compile(r"^\s*\d+\.\s")
+# Bullet list item
+RE_BULLET = re.compile(r"^\s*- \S")
+
+# Lines that should never trigger a "missing blank line" violation
+RE_SKIP = re.compile(
+    r"^\s*$"          # blank
+    r"|^\s*\d+\.\s"   # numbered list item
+    r"|^\s*- "         # bullet list item
+    r"|^```"           # code fence
+    r"|^:::"           # Quarto div
+    r"|^\s*\|"         # table row
+    r"|^---"           # YAML delimiter / horizontal rule
+    r"|^#"             # heading or YAML comment
+    r"|^\[\^fn-"       # footnote definition
+)
+
+
+def _in_code_block(lines: list[str], idx: int) -> bool:
+    """Return True if *idx* falls inside a fenced code block."""
+    fences = 0
+    for i in range(idx):
+        if lines[i].startswith("```"):
+            fences += 1
+    return fences % 2 == 1
+
+
+def check_file(path: Path, *, fix: bool = False) -> list[tuple[int, str]]:
+    """Return list of (line_number, offending_line) violations.
+
+    If *fix* is True, rewrite the file with blank lines inserted.
     """
-    Find lines ending with : followed immediately by bullet lists without empty line.
+    text = path.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    violations: list[tuple[int, str]] = []
+    insert_before: set[int] = set()
 
-    Args:
-        filepath: Path to the markdown file to check
+    for i in range(1, len(lines)):
+        prev = lines[i - 1]
+        curr = lines[i]
 
-    Returns:
-        List of tuples (line_number, line_content) for each issue found
-    """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-    except Exception as e:
-        print(f"Error reading {filepath}: {e}", file=sys.stderr)
-        return []
+        # Current line must be the *start* of a list
+        is_list_start = bool(RE_NUMBERED_START.match(curr) or RE_BULLET.match(curr))
+        if not is_list_start:
+            continue
 
-    issues = []
-    for i in range(len(lines) - 1):
-        current = lines[i].rstrip()
-        next_line = lines[i + 1].rstrip()
+        # Previous line must NOT be skippable
+        if RE_SKIP.match(prev):
+            continue
 
-        # Check if current line ends with : (not within code blocks or other special contexts)
-        # and next line is a bullet list
-        if (current and
-            current.endswith(':') and
-            not current.startswith('```') and
-            not current.startswith(':::') and
-            not current.startswith('#') and
-            not current.startswith('|') and  # Skip tables
-            next_line.startswith('- ')):
-            issues.append((i + 1, current))
+        # Don't flag inside code blocks
+        if _in_code_block(lines, i):
+            continue
 
-    return issues
+        violations.append((i + 1, prev.strip()))  # 1-indexed
+        insert_before.add(i)
 
+    if fix and insert_before:
+        new_lines: list[str] = []
+        for i, line in enumerate(lines):
+            if i in insert_before:
+                new_lines.append("")
+            new_lines.append(line)
+        path.write_text("\n".join(new_lines), encoding="utf-8")
 
-def fix_list_formatting(filepath, dry_run=False):
-    """
-    Add empty line before bullet lists that follow lines ending with colon.
-
-    Args:
-        filepath: Path to the markdown file to fix
-        dry_run: If True, only report issues without fixing
-
-    Returns:
-        Number of fixes made
-    """
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-    except Exception as e:
-        print(f"Error reading {filepath}: {e}", file=sys.stderr)
-        return 0
-
-    fixed_lines = []
-    fixes_made = 0
-    i = 0
-
-    while i < len(lines):
-        current = lines[i].rstrip()
-
-        # Look ahead to see if next line is a bullet without empty line before it
-        if i < len(lines) - 1:
-            next_line = lines[i + 1].rstrip()
-
-            if (current and
-                current.endswith(':') and
-                not current.startswith('```') and
-                not current.startswith(':::') and
-                not current.startswith('#') and
-                not current.startswith('|') and
-                next_line.startswith('- ')):
-
-                # Add current line and an empty line
-                fixed_lines.append(lines[i])
-                fixed_lines.append('\n')
-                fixes_made += 1
-                i += 1
-                continue
-
-        fixed_lines.append(lines[i])
-        i += 1
-
-    if fixes_made > 0 and not dry_run:
-        try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                f.writelines(fixed_lines)
-        except Exception as e:
-            print(f"Error writing {filepath}: {e}", file=sys.stderr)
-            return 0
-
-    return fixes_made
+    return violations
 
 
-def process_file(filepath, check_only=True):
-    """
-    Process a single file.
-
-    Args:
-        filepath: Path to the file to process
-        check_only: If True, only check for issues. If False, fix them.
-
-    Returns:
-        Tuple of (issues_found, issues_fixed)
-    """
-    issues = find_list_formatting_issues(filepath)
-
-    if issues:
-        print(f"\n{filepath}: {len(issues)} issue(s)")
-        for line_num, content in issues[:5]:  # Show first 5
-            print(f"  Line {line_num}: {content}")
-        if len(issues) > 5:
-            print(f"  ... and {len(issues) - 5} more")
-
-        if not check_only:
-            fixes = fix_list_formatting(filepath, dry_run=False)
-            if fixes > 0:
-                print(f"  ✅ Fixed {fixes} issue(s)")
-            return len(issues), fixes
-
-        return len(issues), 0
-
-    return 0, 0
+def collect_files(paths: list[str], recursive: bool) -> list[Path]:
+    """Expand CLI paths into a list of .qmd files."""
+    result: list[Path] = []
+    for p in paths:
+        pp = Path(p)
+        if pp.is_file():
+            result.append(pp)
+        elif pp.is_dir():
+            glob = "**/*.qmd" if recursive else "*.qmd"
+            result.extend(sorted(pp.glob(glob)))
+    return result
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(
-        description='Check and fix markdown list formatting issues',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        description="Check / fix blank lines before markdown lists in QMD files."
     )
-    parser.add_argument(
-        'paths',
-        nargs='+',
-        help='Files or directories to check'
-    )
-    parser.add_argument(
-        '--fix',
-        action='store_true',
-        help='Fix issues automatically (default: only check)'
-    )
-    parser.add_argument(
-        '--check',
-        action='store_true',
-        help='Only check for issues without fixing (default behavior)'
-    )
-    parser.add_argument(
-        '--recursive', '-r',
-        action='store_true',
-        help='Recursively process directories'
-    )
-
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="Report without fixing (exit 1 if issues)")
+    mode.add_argument("--fix", action="store_true", help="Auto-insert blank lines")
+    parser.add_argument("--recursive", "-r", action="store_true", help="Recurse into directories")
+    parser.add_argument("files", nargs="*", default=[], help="Files or directories to scan")
     args = parser.parse_args()
 
-    check_only = not args.fix or args.check
+    # Default to --check if neither flag given
+    do_fix = args.fix
 
-    files_to_process = []
-    for path_str in args.paths:
-        path = Path(path_str)
-        if path.is_file():
-            if path.suffix == '.qmd':
-                files_to_process.append(path)
-        elif path.is_dir():
-            if args.recursive:
-                files_to_process.extend(path.rglob('*.qmd'))
-            else:
-                files_to_process.extend(path.glob('*.qmd'))
-        else:
-            print(f"Warning: {path} not found", file=sys.stderr)
+    files = collect_files(args.files, recursive=args.recursive or do_fix)
+    if not files:
+        return 0
 
-    if not files_to_process:
-        print("No .qmd files found to process", file=sys.stderr)
-        return 1
+    total = 0
+    for f in files:
+        violations = check_file(f, fix=do_fix)
+        if violations:
+            total += len(violations)
+            rel = f
+            for lineno, context in violations:
+                action = "Fixed" if do_fix else "Missing blank line before list"
+                print(f"{rel}:{lineno}: {action} — after: {context[:80]}")
 
-    total_issues = 0
-    total_fixed = 0
-
-    for filepath in sorted(files_to_process):
-        issues, fixed = process_file(str(filepath), check_only)
-        total_issues += issues
-        total_fixed += fixed
-
-    print(f"\n{'=' * 60}")
-    if check_only:
-        if total_issues == 0:
-            print("✅ No list formatting issues found!")
+    if total:
+        if do_fix:
+            print(f"\n✅ Fixed {total} list formatting issue(s).")
             return 0
         else:
-            print(f"❌ Found {total_issues} issue(s) across {len(files_to_process)} file(s)")
-            print("\nRun with --fix to automatically fix these issues")
+            print(f"\n❌ Found {total} list formatting issue(s). Run with --fix to auto-repair.")
             return 1
-    else:
-        if total_fixed > 0:
-            print(f"✅ Fixed {total_fixed} issue(s) across {len(files_to_process)} file(s)")
-            return 0
-        else:
-            print("✅ No issues to fix")
-            return 0
+    return 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

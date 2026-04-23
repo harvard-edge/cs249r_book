@@ -1,0 +1,162 @@
+name: '🌐 Landing Site · 👁️ Preview (Dev)'
+
+# =============================================================================
+# Unified Site — Dev Preview
+# =============================================================================
+#
+# Builds the unified site (landing + about + community + newsletter) as a
+# single Quarto project and deploys to the dev preview site.
+#
+# Flow:
+#   1. SYNC      — Fetch latest newsletter posts from Buttondown API
+#   2. BUILD     — Quarto render entire site
+#   3. REWRITE   — Adjust URLs for dev site path prefix
+#   4. DEPLOY    — SSH push to dev preview repo
+#
+# Triggers:
+#   - Push to dev: When site/** or shared/** files change
+#   - Manual: workflow_dispatch
+#
+# Deploys to: DEV_REPO_URL (SSH)
+# Secrets:    BUTTONDOWN_API_KEY, SSH_DEPLOY_KEY
+# Vars:       DEV_REPO_URL
+#
+# Related:
+#   - site-publish-live.yml    — Same site, deployed to mlsysbook.ai
+#   - sync-newsletter.yml      — Dedicated newsletter sync (also deploys here)
+#
+# =============================================================================
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [dev]
+    paths:
+      - 'site/**'
+      - 'shared/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: site-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '🔨 Build & Deploy Landing Site'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📬 Sync newsletter from Buttondown
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+        run: |
+          pip install -r site/newsletter/requirements.txt
+          python3 site/newsletter/bin/news pull
+          echo "✅ Newsletter posts synced"
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build unified site
+        working-directory: site
+        run: |
+          quarto render
+          touch _build/.nojekyll
+          echo "✅ Site rendered: $(find _build -name '*.html' | wc -l) pages"
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: |
+          # Rewrite each subsite directory with correct relative prefix
+          for subsite in about community newsletter; do
+            bash .github/scripts/rewrite-dev-urls.sh "$subsite" "site/_build/$subsite"
+          done
+          # Rewrite root-level files (landing page) — shallow to avoid re-processing subdirs
+          bash .github/scripts/rewrite-dev-urls.sh root site/_build --shallow
+
+      - name: 🔍 Validate build
+        run: |
+          for page in index.html about/index.html community/index.html newsletter/index.html; do
+            if [ ! -f "site/_build/$page" ]; then
+              echo "❌ CRITICAL: $page missing from build. Aborting."
+              exit 1
+            fi
+          done
+          echo "✅ All site pages validated"
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          echo "🔧 Modifying announcement banner for development preview..."
+          COMMIT_HASH="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_HASH:0:8}"
+
+          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            site/_build \
+            --verbose \
+            --commit-hash "$COMMIT_HASH" \
+            --commit-short "$COMMIT_SHORT"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+          cd target-repo
+
+          BUILD_DIR="${{ github.workspace }}/site/_build"
+
+          # Copy build output, preserving directories managed by other workflows
+          for item in "$BUILD_DIR"/*; do
+            basename="$(basename "$item")"
+            # Skip Quarto's site_libs (handled separately below)
+            [[ "$basename" == "site_libs" ]] && continue
+            # Skip directories managed by other workflows
+            if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|staffml)$ ]]; then
+              continue
+            fi
+            cp -r "$item" .
+          done
+
+          # Copy shared site_libs for CSS/JS
+          cp -r "$BUILD_DIR/site_libs" . 2>/dev/null || true
+          touch .nojekyll
+
+          [ -f "index.html" ] || { echo "❌ CRITICAL: Landing index.html missing."; exit 1; }
+
+          echo "📦 Committing and pushing..."
+          git add .
+          git commit -m "🌐 Deploy site dev preview from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ Site deployed to dev preview"

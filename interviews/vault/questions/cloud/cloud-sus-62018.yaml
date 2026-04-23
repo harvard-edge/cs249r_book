@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-sus-62018
+track: cloud
+level: L6+
+zone: mastery
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Multi-Model Disaggregated Serving Isolation
+scenario: 'You run a platform serving 5 different LLM models (7B, 13B, 34B, 70B, 140B) to thousands of
+  tenants with different SLOs. Design the full disaggregated serving architecture: how do you partition
+  prefill and decode pools across models, handle model loading, manage KV-cache isolation between tenants,
+  and set capacity allocation rules that prevent one model''s load spike from impacting SLOs of others?'
+details:
+  realistic_solution: 'Use a two-level architecture: (1) Physical pools: prefill pool (H100s optimized
+    for compute) and decode pool (MI300X for memory capacity). Both pools are shared across models. (2)
+    Logical isolation via virtual queues per model with reserved + burstable capacity. Each model gets
+    a reserved capacity slice (e.g., 20% for each of 5 models) and can burst into unused capacity. (3)
+    Model loading: maintain all models hot on decode nodes using fractional GPU allocation. 140B requires
+    TP=2 on MI300X (140 GB < 192 GB each, 2 GPUs for safety margin). 7B fits in 14 GB — multiplex 6 instances
+    per MI300X GPU. (4) KV-cache isolation: per-tenant KV namespaces with HBM quotas enforced by the PagedAttention
+    block allocator. Blocks are tagged with tenant ID; cross-tenant block reuse is disabled. (5) Capacity
+    allocation: weighted fair queuing at the prefill scheduler; decode assignments respect per-model KV
+    quotas. A load spike on the 70B model can consume up to 150% of its reserved capacity (burst) but
+    triggers autoscaling before consuming 200%.'
+  common_mistake: Statically partitioning pools per model — 5 dedicated pools waste capacity when models
+    have non-simultaneous peaks. The answer involves dynamic pool multiplexing with priority-based isolation.
+  napkin_math: 'MI300X decode node (192 GB): 140B model TP=2 (280 GB across 2 GPUs, 140 GB each) + KV
+    pool = 192-140 = 52 GB KV per GPU. 70B model on 1 GPU: 140 GB fits, 52 GB KV. 34B: 68 GB, 124 GB KV.
+    13B: 26 GB, 166 GB KV. 7B: 14 GB, 178 GB KV. 6 × 7B models on one GPU: 84 GB weights + shared KV pool
+    of 108 GB. Total GPU count for baseline reserved capacity: 70B needs 10 decode GPUs at 500 RPS; scaling
+    linearly, full 5-model platform ≈ 35 decode GPUs + 15 prefill H100s.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

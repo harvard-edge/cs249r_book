@@ -62,6 +62,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -157,7 +158,7 @@ Manual composition:
                                # Total: 203,530 params
 ```
 
-Memory usage: 4 bytes/param × 203,530 = ~814KB for weights alone
+Memory usage: 4 bytes/param × 203,530 = ~795 KB for weights alone
 """
 
 # %% [markdown]
@@ -268,12 +269,12 @@ Example: MNIST Digit Recognition
 Linear(784, 256) Parameters:
 ┌─────────────────────────────┐
 │ Weight Matrix W             │  784 × 256 = 200,704 params
-│ [784, 256] float32          │  × 4 bytes = 802.8 KB
+│ [784, 256] float32          │  × 4 bytes = ~784 KB
 ├─────────────────────────────┤
 │ Bias Vector b               │  256 params
-│ [256] float32               │  × 4 bytes = 1.0 KB
+│ [256] float32               │  × 4 bytes = ~1 KB
 └─────────────────────────────┘
-                Total: 803.8 KB for one layer
+                Total: ~785 KB for one layer
 ```
 """
 
@@ -307,7 +308,7 @@ class Linear(Layer):
 
         HINTS:
         - LeCun-style init: scale = sqrt(1/in_features)
-        - Use np.random.randn() for normal distribution
+        - Use rng.standard_normal() for normal distribution
         - bias=None when bias=False
         """
         ### BEGIN SOLUTION
@@ -316,7 +317,7 @@ class Linear(Layer):
 
         # LeCun-style initialization for stable gradients
         scale = np.sqrt(INIT_SCALE_FACTOR / in_features)
-        weight_data = np.random.randn(in_features, out_features) * scale
+        weight_data = rng.standard_normal((in_features, out_features)) * scale
         self.weight = Tensor(weight_data)
 
         # Initialize bias to zeros or None
@@ -430,7 +431,7 @@ def test_unit_linear_layer():
     assert np.allclose(layer.bias.data, 0), "Bias should be initialized to zeros"
 
     # Test forward pass
-    x = Tensor(np.random.randn(32, 784))  # Batch of 32 samples
+    x = Tensor(rng.standard_normal((32, 784)))  # Batch of 32 samples
     y = layer.forward(x)
     assert y.shape == (32, 256), f"Expected shape (32, 256), got {y.shape}"
 
@@ -466,12 +467,12 @@ def test_unit_edge_cases_linear():
     layer = Linear(10, 5)
 
     # Test single sample (should handle 2D input)
-    x_2d = Tensor(np.random.randn(1, 10))
+    x_2d = Tensor(rng.standard_normal((1, 10)))
     y = layer.forward(x_2d)
     assert y.shape == (1, 5), "Should handle single sample"
 
     # Test zero batch size (edge case)
-    x_empty = Tensor(np.random.randn(0, 10))
+    x_empty = Tensor(rng.standard_normal((0, 10)))
     y_empty = layer.forward(x_empty)
     assert y_empty.shape == (0, 5), "Should handle empty batch"
 
@@ -485,7 +486,7 @@ def test_unit_edge_cases_linear():
 
     # Test with no bias
     layer_no_bias = Linear(10, 5, bias=False)
-    x = Tensor(np.random.randn(4, 10))
+    x = Tensor(rng.standard_normal((4, 10)))
     y = layer_no_bias.forward(x)
     assert y.shape == (4, 5), "Should work without bias"
 
@@ -825,7 +826,7 @@ def test_unit_generate_dropout_mask():
     print("🧪 Unit Test: Dropout Mask Generation...")
 
     d = Dropout(0.5)
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     mask = d._generate_dropout_mask((1000,))
 
     # Shape must match the requested shape
@@ -844,7 +845,7 @@ def test_unit_generate_dropout_mask():
 
     # Test with different dropout probability
     d2 = Dropout(0.3)
-    np.random.seed(123)
+    rng = np.random.default_rng(7)
     mask2 = d2._generate_dropout_mask((2000,))
 
     # Values should be 0.0 or 1/(1-0.3) ≈ 1.4286
@@ -907,15 +908,26 @@ class Sequential:
         else:
             self.layers = list(layers)
 
-    def forward(self, x):
-        """Forward pass through all layers sequentially."""
+    def forward(self, x, training=True):
+        """Forward pass through all layers sequentially.
+
+        Passes training=True/False to layers that support it (e.g. Dropout),
+        and falls back to a plain forward(x) call for layers that don't.
+        This lets you switch between training and eval mode with one flag:
+
+            output = model.forward(x, training=False)   # eval: Dropout disabled
+            output = model.forward(x, training=True)    # train: Dropout active
+        """
         for layer in self.layers:
-            x = layer.forward(x)
+            try:
+                x = layer.forward(x, training=training)
+            except TypeError:
+                x = layer.forward(x)
         return x
 
-    def __call__(self, x):
+    def __call__(self, x, training=True):
         """Allow model to be called like a function."""
-        return self.forward(x)
+        return self.forward(x, training=training)
 
     def parameters(self):
         """Collect all parameters from all layers."""
@@ -966,7 +978,7 @@ def test_unit_dropout_layer():
 
     # Test training mode with partial dropout
     # Note: This is probabilistic, so we test statistical properties
-    np.random.seed(42)  # For reproducible test
+    rng = np.random.default_rng(7)  # For reproducible test
     x_large = Tensor(np.ones((1000,)))  # Large tensor for statistical significance
     y_train = dropout.forward(x_large, training=True)
 
@@ -1168,13 +1180,14 @@ def analyze_layer_performance():
     batch_sizes = [1, 32, 128, 512]
     layer = Linear(784, 256)
 
-    print("\nLinear Layer FLOPs Analysis:")
-    print("Batch Size → Matrix Multiply FLOPs → Bias Add FLOPs → Total FLOPs")
+    print("\nLinear Layer MACs Analysis:")
+    print("Batch Size → Matrix Multiply MACs → Bias Add MACs → Total MACs")
+    print("Note: FLOPs = 2 × MACs (one multiply + one add per MAC)")
 
     for batch_size in batch_sizes:
-        # Matrix multiplication: (batch, in) @ (in, out) = batch * in * out FLOPs
+        # Matrix multiplication: (batch, in) @ (in, out) = batch * in * out MACs
         matmul_flops = batch_size * 784 * 256
-        # Bias addition: batch * out FLOPs
+        # Bias addition: batch * out MACs
         bias_flops = batch_size * 256
         total_flops = matmul_flops + bias_flops
 
@@ -1185,7 +1198,7 @@ def analyze_layer_performance():
     print("Batch Size → Time (ms) → Throughput (samples/sec)")
 
     for batch_size in batch_sizes:
-        x = Tensor(np.random.randn(batch_size, 784))
+        x = Tensor(rng.standard_normal((batch_size, 784)))
 
         # Warm up
         for _ in range(10):
@@ -1263,7 +1276,7 @@ def test_module():
 
     # Test end-to-end forward pass with manual composition
     batch_size = 16
-    x = Tensor(np.random.randn(batch_size, 784))
+    x = Tensor(rng.standard_normal((batch_size, 784)))
 
     # Manual forward pass
     x = layer1.forward(x)
@@ -1282,7 +1295,7 @@ def test_module():
     assert len(all_params) == expected_params, f"Expected {expected_params} parameters, got {len(all_params)}"
 
     # Test individual layer functionality
-    test_x = Tensor(np.random.randn(4, 784))
+    test_x = Tensor(rng.standard_normal((4, 784)))
     # Test dropout in training vs inference
     dropout_test = Dropout(0.5)
     train_output = dropout_test.forward(test_x, training=True)
@@ -1410,7 +1423,7 @@ def demo_layers():
     layer = Linear(784, 10)
 
     # Simulate a batch of 32 flattened images
-    batch = Tensor(np.random.randn(32, 784))
+    batch = Tensor(rng.standard_normal((32, 784)))
 
     # Forward pass
     output = layer(batch)

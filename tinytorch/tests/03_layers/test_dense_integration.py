@@ -9,6 +9,7 @@ import sys
 import importlib
 import warnings
 import numpy as np
+rng = np.random.default_rng(7)
 
 
 def test_dense_module_integration():
@@ -77,7 +78,7 @@ def test_dense_module_integration():
             from tinytorch.core.layers import Linear
 
             # Test forward pass
-            data = np.random.randn(2, 4)  # batch_size=2, input_size=4
+            data = rng.standard_normal((2, 4))  # batch_size=2, input_size=4
             tensor = Tensor(data)
 
             output = mlp.forward(tensor)

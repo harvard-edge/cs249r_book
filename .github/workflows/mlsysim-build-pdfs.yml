@@ -1,0 +1,116 @@
+name: '🧮 MLSYSIM · 🔨 Build PDFs'
+
+# =============================================================================
+# MLSYSIM — Build Research Paper PDF Artifact
+# =============================================================================
+#
+# Builds the MLSYSIM research paper PDF using pdflatex (via Makefile) and
+# uploads as a workflow artifact. PDF is injected into the docs site during
+# deployment (not committed to repo).
+#
+# Flow:
+#   1. BUILD_PDF  — Install LaTeX deps + run make
+#   2. VALIDATE   — Verify PDF exists and report page count
+#   3. UPLOAD     — Upload as MLSYSIM-Paper artifact (90-day retention)
+#   4. SUMMARY    — Build status report
+#
+# Triggers:
+#   - workflow_dispatch: manual
+#   - workflow_call: called by preview and publish workflows
+#
+# Deploys to: N/A (artifact only)
+#
+# Related:
+#   - mlsysim-preview-dev.yml  — Downloads artifact for dev deploy
+#   - mlsysim-publish-live.yml — Downloads artifact for live deploy
+#   - mlsysim-update-pdfs.yml  — Rebuilds + deploys PDF without site
+#
+# =============================================================================
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to checkout (branch, tag, or SHA)"
+        type: string
+        required: false
+        default: ''
+    outputs:
+      pdf_built:
+        description: "Whether the PDF was built successfully"
+        value: ${{ jobs.build-pdf.result == 'success' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-pdf:
+    name: '📄 Build Research Paper PDF'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: 📦 Install LaTeX dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-science \
+            poppler-utils \
+            librsvg2-bin \
+            > /dev/null
+
+      - name: 📄 Build Paper PDF
+        working-directory: mlsysim/paper
+        run: make
+
+      - name: 🔍 Validate PDF
+        working-directory: mlsysim/paper
+        run: |
+          if [ ! -f paper.pdf ]; then
+            echo "❌ CRITICAL: paper.pdf was not generated"
+            exit 1
+          fi
+          PAGES=$(pdfinfo paper.pdf 2>/dev/null | grep Pages | awk '{print $2}' || echo "?")
+          SIZE=$(du -h paper.pdf | awk '{print $1}')
+          echo "✅ paper.pdf built successfully (${PAGES} pages, ${SIZE})"
+
+      - name: 📤 Upload PDF Artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: MLSYSIM-Paper
+          path: mlsysim/paper/paper.pdf
+          retention-days: 90
+
+  summary:
+    name: '📊 Build Summary'
+    runs-on: ubuntu-latest
+    needs: [build-pdf]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🧮 MLSYSIM Paper PDF Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📄 Research Paper | ${{ needs.build-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Usage" >> $GITHUB_STEP_SUMMARY
+          echo "PDF is uploaded as artifact and will be injected during site deployment." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To deploy with this PDF, run the appropriate publish workflow:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Live**: MLSYSIM Publish (Live)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dev**: MLSYSIM Preview (Dev)" >> $GITHUB_STEP_SUMMARY

@@ -9,17 +9,20 @@ Usage:
     python generate_readme_tables.py [--project PROJECT] [--update]
 """
 
+import argparse
 import json
 import re
-import argparse
+import sys
 from pathlib import Path
 
-PROJECTS = {
-    "book": "book/",
-    "kits": "kits/",
-    "labs": "labs/",
-    "tinytorch": "tinytorch/",
-}
+# Project key → on-disk directory. Project key is the canonical name used in
+# commit messages and bot replies; directory is where the .all-contributorsrc
+# file lives. Loaded from projects.json (the single source of truth — edit
+# that file, not this dict, to add or rename a project).
+sys.path.insert(0, str(Path(__file__).parent))
+from projects import dirs as _project_dirs  # noqa: E402
+
+PROJECTS = {key: f"{d}/" for key, d in _project_dirs().items()}
 
 # Emoji mapping for contribution types (only types actually in use)
 # Synced with generate_main_readme.py
@@ -54,7 +57,7 @@ def generate_table(contributors: list[dict], per_line: int = 7, image_size: int 
     if not contributors:
         return ""
     
-    lines = ["<table>", "  <tbody>"]
+    lines = ['<table width="100%" style="width:100%">', "  <tbody>"]
     
     for i in range(0, len(contributors), per_line):
         row = contributors[i:i + per_line]
@@ -137,10 +140,11 @@ def process_project(project_name: str, project_path: str, update: bool = False) 
     print(f"\n=== {project_name} ({len(contributors)} contributors) ===")
     
     if update:
+        readme_display = Path(project_path) / "README.md"
         if update_readme(project_path, table_html):
-            print(f"Updated {project_path}README.md")
+            print(f"Updated {readme_display}")
         else:
-            print(f"Failed to update {project_path}README.md")
+            print(f"Failed to update {readme_display}")
     else:
         print(table_html)
 

@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: tinyml-exp2-eval-0222
+track: tinyml
+level: L5
+zone: evaluation
+topic: dma-data-movement
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: DMA Buffer Placement vs Activation Spilling
+scenario: We are deploying an anomaly detection model on an ESP32-S3 (240 MHz dual-core Xtensa, 512 KB
+  SRAM, 8 MB PSRAM) utilizing its INT8 vector extensions. The sensor produces 16-bit data at 32 kHz via
+  I2S. The model's working memory (activations and pinned weights) requires exactly 480 KB of internal
+  SRAM for optimal vector pipeline performance. We need a 64 KB circular buffer for the incoming sensor
+  data. Design A routes the I2S DMA directly to the 8 MB PSRAM for the circular buffer, preserving the
+  512 KB SRAM for the model. Design B places the 64 KB DMA buffer in internal SRAM to avoid PSRAM bus
+  contention, which forces 64 KB of the model's hot activations to be spilled to PSRAM. Evaluate both
+  designs and identify the optimal choice for overall system throughput.
+details:
+  realistic_solution: Design A is the superior architecture. The continuous sensor data stream requires
+    very low bandwidth and is written sequentially, making it an ideal candidate for PSRAM where the DMA
+    controller can hide the latency. Placing intermediate activations in PSRAM (Design B) would cause
+    massive cache thrashing during the intense INT8 vector operations, starving the 240 MHz CPU and severely
+    degrading inference latency. The internal 512 KB SRAM must be fiercely protected for high-frequency
+    access patterns.
+  common_mistake: Candidates often choose Design B because they assume DMA should always target internal
+    SRAM to avoid bus latency or because they are unaware that the ESP32-S3 DMA can target PSRAM. They
+    underestimate the catastrophic performance penalty of spilling heavily accessed neural network activations
+    to external memory.
+  napkin_math: Sensor data rate = 32,000 samples/sec * 2 bytes = 64 KB/sec. The ESP32-S3 Octal SPI PSRAM
+    supports >40 MB/sec bandwidth, meaning the DMA writes consume <0.2% of the bus bandwidth. Conversely,
+    vector math on 64 KB of activations requires reading those bytes dozens of times per inference. At
+    240 MHz, an L1 cache miss to PSRAM costs roughly 50-100 cycles. If a convolution requires accessing
+    the 64 KB spilled activations 10 times, that's 640 KB of external reads per layer, introducing millions
+    of stall cycles per inference, whereas reading the 64 KB audio buffer from PSRAM just once per inference
+    window takes only ~2 milliseconds.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- RC, KA, and Mode are all set to None; these should be explicitly classified for a Staff-level question.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

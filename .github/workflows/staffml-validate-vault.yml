@@ -1,0 +1,155 @@
+name: '🎯 StaffML · ✅ Validate (Vault)'
+
+# =============================================================================
+# Vault validation — data integrity + CLI package + worker contract.
+#
+# Parallel to staffml-validate-dev.yml (which validates the site build);
+# this one validates the vault data layer + vault-cli + worker code.
+#
+# Checks performed:
+#   - ruff + mypy + pytest on vault-cli.
+#   - vault check --strict on the full corpus (9 structural invariants).
+#   - vault build + release_hash equivalence vs corpus-equivalence-hash.txt.
+#   - vault codegen --check (hash-based shared-types drift guard).
+#   - Registry append-only check vs base ref.
+#   - Exemplar-coverage audit staleness check.
+#   - Worker vitest (staffml-vault-worker/tests) on worker-path PRs.
+#
+# Referenced from: interviews/vault/ARCHITECTURE.md §19.3, TESTING.md §4.1.
+# Renamed 2026-04-22 from vault-ci.yml for consistency with the
+# staffml-<verb>-<scope> workflow naming convention used across the repo.
+# =============================================================================
+
+on:
+  pull_request:
+    paths:
+      - 'interviews/vault/**'
+      - 'interviews/vault-cli/**'
+      - 'interviews/staffml-vault-worker/**'
+      - 'interviews/staffml-vault-types/**'
+      - '.github/workflows/staffml-validate-vault.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'interviews/vault/**'
+      - 'interviews/vault-cli/**'
+      - 'interviews/staffml-vault-worker/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: vault-cli (python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0 }   # deep clone so append-only check has base ref
+
+      - name: Set up Python (PINNED for hash stability)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install vault-cli with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e 'interviews/vault-cli/[dev]'
+
+      - name: Verify CLI entry point
+        run: |
+          vault --version
+          vault --help
+
+      - name: Lint (ruff)
+        run: ruff check interviews/vault-cli/src interviews/vault-cli/tests
+
+      - name: Type-check (mypy, non-blocking)
+        run: mypy interviews/vault-cli/src
+        continue-on-error: true   # strict enforcement is a Phase-2 gate
+
+      - name: pytest (unit + integration + contract)
+        run: pytest interviews/vault-cli/tests/ -v
+
+      - name: vault check --strict (corpus invariants)
+        run: vault check --strict --vault-dir interviews/vault
+
+      - name: vault build (reproducibility smoke test)
+        # Historically this step also compared release_hash against a pinned
+        # value in corpus-equivalence-hash.txt. That pin was load-bearing
+        # when corpus.json was the source of truth (guarded against the
+        # committed-JSON drifting from the computed-from-YAMLs hash). Post-
+        # v1.0 the YAMLs ARE the source of truth and the build is
+        # deterministic-from-YAMLs, so the pin was a circular check that
+        # bounced every YAML-touching PR unless the contributor manually
+        # bumped the hash. Dropped 2026-04-22. The real integrity comes
+        # from vault check --strict + codegen drift check above.
+        run: |
+          vault build --vault-dir interviews/vault --release-id regression-ci
+          RELEASE_HASH=$(python3 -c "
+          import sqlite3
+          conn = sqlite3.connect('interviews/vault/vault.db')
+          print(conn.execute(\"SELECT value FROM release_metadata WHERE key='release_hash'\").fetchone()[0])
+          ")
+          echo "release_hash: $RELEASE_HASH"
+
+      - name: vault codegen --check (LinkML/Pydantic/DDL/TS drift)
+        run: vault codegen --check
+
+      - name: §11.1 YAML → corpus.json equivalence (legacy-json regen)
+        run: |
+          # Backup the committed site corpus.json; regenerate it from YAML;
+          # diff. If they differ, either YAML drifted or corpus.json was
+          # hand-edited. Pre-commit hook should have caught the latter.
+          cp interviews/staffml/src/data/corpus.json /tmp/corpus.committed.json
+          vault build --vault-dir interviews/vault --legacy-json
+          if ! diff -q /tmp/corpus.committed.json \
+                       interviews/staffml/src/data/corpus.json > /dev/null; then
+            echo "::error::corpus.json regenerated from YAML differs from committed."
+            echo "Run `vault build --legacy-json` locally and commit the result."
+            diff /tmp/corpus.committed.json \
+                 interviews/staffml/src/data/corpus.json | head -50
+            exit 1
+          fi
+          echo "corpus.json matches YAML-regenerated output exactly."
+
+      - name: id-registry append-only invariant
+        run: python3 interviews/vault-cli/scripts/check_registry_append_only.py
+
+      - name: Reviewer-identity spoof check (Gemini R5-H-3)
+        run: python3 interviews/vault-cli/scripts/check_reviewer_identity.py
+
+      - name: Exemplar-coverage audit staleness
+        run: |
+          python3 interviews/vault-cli/scripts/exemplar_coverage_audit.py
+          git diff --exit-code interviews/vault/exemplar-gaps.yaml \
+            || { echo "::error::exemplar-gaps.yaml is stale; re-run audit and commit"; exit 1; }
+
+  worker:
+    name: staffml-vault-worker (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: interviews/staffml-vault-worker
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml-vault-worker/package-lock.json
+
+      - name: Install worker deps (frozen)
+        run: npm ci
+
+      - name: tsc typecheck
+        run: npx tsc --noEmit
+
+      - name: vitest (worker contract tests)
+        run: npx vitest run

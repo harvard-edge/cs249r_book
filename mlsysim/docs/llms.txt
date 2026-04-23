@@ -1,0 +1,146 @@
+# MLSys·im: Agent-Native Documentation
+
+> This document is designed for Large Language Models (LLMs) and AI agents
+> to understand how to interact with the `mlsysim` Python framework.
+
+## Golden Rule
+Every calculation is deterministic. Do NOT hallucinate math.
+Use the `mlsysim` API to evaluate configurations — it enforces
+dimensional correctness via `pint.Quantity` and will catch unit errors.
+
+## Quick Start (5 lines)
+
+```python
+from mlsysim import Engine, Models, Hardware
+
+profile = Engine.solve(
+    model=Models.Language.Llama3_8B,
+    hardware=Hardware.Cloud.H100,
+    batch_size=1, precision="fp16"
+)
+print(profile.bottleneck)   # "Memory Bound" or "Compute Bound"
+print(profile.latency)      # e.g., 0.42 ms
+print(profile.throughput)   # e.g., 2381 samples/sec
+```
+
+## The Two Entry Points
+
+### 1. Engine.solve() — Single-Node Roofline
+Best for: quick bottleneck checks, batch-size sweeps, hardware comparisons.
+
+```python
+from mlsysim import Engine
+profile = Engine.solve(model=..., hardware=..., batch_size=1, precision="fp16", efficiency=0.5)
+```
+
+Returns `PerformanceProfile` with: bottleneck, latency, throughput, MFU, feasible, memory_usage.
+
+### 2. SystemEvaluator.evaluate() — Full Scorecard
+Best for: distributed training, TCO, carbon, fleet analysis.
+
+```python
+from mlsysim import SystemEvaluator
+evaluation = SystemEvaluator.evaluate(
+    scenario_name="...",
+    model_obj=Models.Language.Llama3_8B,
+    hardware_obj=Hardware.Cloud.H100,
+    batch_size=1024, precision="fp16", efficiency=0.45,
+    fleet_obj=Systems.Clusters.Research_256,
+    nodes=256, duration_days=30.0
+)
+print(evaluation.scorecard())
+```
+
+Returns `SystemEvaluation` with three lenses: feasibility, performance, macro.
+
+## The 5-Layer Stack
+
+Map your variables to these layers:
+
+- **Layer A — Workload** (`Models`): The AI model. E.g., `Models.Language.Llama3_70B`
+- **Layer B — Hardware** (`Hardware`): The accelerator. E.g., `Hardware.Cloud.H100`
+- **Layer C — Infra** (`Infra`): Datacenter/grid. E.g., `Infra.Grids.Quebec`
+- **Layer D — Systems** (`Systems`): Fleet topology. E.g., `Systems.Clusters.Research_256`
+- **Layer E — Engine**: The analytical solver that resolves constraints.
+
+## Built-in Registries (The Zoo)
+
+Do NOT invent hardware specs. Use the registries:
+
+### Hardware
+- Cloud: H100, H200, B200, GB200_NVL72, A100, V100, T4, MI300X, TPUv5p, Cerebras_CS3
+- Workstation: DGX_Spark, MacBookM3Max
+- Mobile: iPhone15Pro, Pixel8, Snapdragon8Gen3
+- Edge: JetsonOrinNX, Coral, NUC_Movidius
+- Tiny: ESP32_S3, HimaxWE1
+
+Access: `Hardware.Cloud.H100`, `Hardware.Edge.JetsonOrinNX`, etc.
+
+### Models
+- Language: GPT2, GPT3, GPT4, BERT_Base, BERT_Large, Llama2_70B, Llama3_8B, Llama3_70B
+- Vision: ResNet50, MobileNetV2, YOLOv8_Nano, AlexNet
+- Tiny: DS_CNN, WakeVision, AnomalyDetector
+- StateSpace: Mamba_130M, Mamba_2_8B
+- GenerativeVision: StableDiffusion_v1_5
+
+Access: `Models.Language.Llama3_8B`, `Models.Vision.ResNet50`, etc.
+
+### Infrastructure
+- Grids: Quebec (hydro, ~20 gCO2/kWh), Norway (~10), US_Avg (~390), Poland (~820)
+- Racks: Traditional, AI_Standard
+
+### Systems
+- Nodes: DGX_H100, DGX_A100, DGX_B200
+- Fabrics: Ethernet_10G, Ethernet_100G, InfiniBand_HDR, InfiniBand_NDR
+- Clusters: Research_256, Frontier_8K, Production_2K, Mega_100K
+
+## 24 Resolvers (3 Tiers)
+
+### Tier 1 — Analytical Models (Y = f(X))
+SingleNodeModel, EfficiencyModel, ServingModel, ContinuousBatchingModel,
+WeightStreamingModel, TailLatencyModel, DataModel, TransformationModel,
+TopologyModel, ScalingModel, InferenceScalingModel, CompressionModel,
+DistributedModel, ReliabilityModel, OrchestrationModel, EconomicsModel,
+SustainabilityModel, CheckpointModel, ResponsibleEngineeringModel
+
+### Tier 2 — Analysis Solvers (X = f⁻¹(Y))
+SensitivitySolver, SynthesisSolver
+
+### Tier 3 — Design Space Exploration (DSE)
+DSE (Declarative Design Space Engine)
+
+## CLI Commands
+
+```bash
+mlsysim zoo hardware              # List hardware registry
+mlsysim zoo models                # List model registry
+mlsysim eval Llama3_8B H100       # Single-node roofline
+mlsysim eval cluster.yaml         # Full cluster evaluation
+mlsysim eval Llama3_8B H100 -o json  # JSON output for agents
+mlsysim schema --type plan        # Export YAML schema for agents
+mlsysim optimize parallelism cluster.yaml
+mlsysim optimize batching cluster.yaml --sla-ms 50 --qps 100
+mlsysim optimize placement cluster.yaml --carbon-tax 150
+```
+
+Exit codes: 0 = success, 1 = bad input, 2 = physics violation (OOM), 3 = SLA violation.
+
+## MCP Tools (Model Context Protocol)
+
+When used as an MCP server, mlsysim exposes:
+- `evaluate_cluster_yaml` — evaluate a YAML cluster spec
+- `list_hardware` — list all hardware in the Zoo
+- `list_models` — list all models in the Zoo
+
+Setup: Add to Claude Desktop config:
+```json
+{"mcpServers": {"mlsysim": {"command": "python3", "args": ["-m", "mlsysim.examples.mcp_server"]}}}
+```
+
+## Key Optimization Guidance
+
+- If `bottleneck == "Memory Bound"`: increase batch size, upgrade HBM bandwidth, or quantize
+- If `bottleneck == "Compute Bound"`: add parallelism, use lower precision, or use faster hardware
+- If `feasible == False`: model does not fit in memory — reduce precision, use offloading, or add nodes
+- For "find the best hardware": iterate over `Hardware.Cloud` registry, run Engine.solve for each, compare
+- Do NOT write your own math loops — use the solvers (they enforce unit correctness)

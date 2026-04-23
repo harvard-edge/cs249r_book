@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/github/v/tag/harvard-edge/cs249r_book?filter=tinytorch-v*&label=version&color=D4740C&logo=fireship&logoColor=white)](https://github.com/harvard-edge/cs249r_book/releases?q=tinytorch)
 [![Status](https://img.shields.io/badge/status-preview-orange?logo=github)](https://github.com/harvard-edge/cs249r_book/discussions/1076)
 [![Docs](https://img.shields.io/badge/docs-mlsysbook.ai-blue?logo=readthedocs)](https://mlsysbook.ai/tinytorch)
-[![Python](https://img.shields.io/badge/python-3.8+-3776ab?logo=python&logoColor=white)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.10+-3776ab?logo=python&logoColor=white)](https://python.org)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Harvard](https://img.shields.io/badge/Harvard-CS249r-A51C30?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://mlsysbook.ai)
 
@@ -19,9 +19,14 @@
 
 ---
 
-> 🚧 **Preview Release** — TinyTorch is functional but evolving. We're sharing early to shape the direction with community input rather than building in isolation.
+<!-- EARLY-RELEASE-CALLOUT:START -->
+> [!NOTE]
+> **📌 Early release (2026)**
 >
-> 📅 **Classroom Ready**: Summer/Fall 2026 · **Right Now**: [We want your feedback](#-help-shape-tinytorch)
+> TinyTorch is **live and usable**. It shipped with the **2026** MLSysBook refresh and we expect **steady iteration**—modules, APIs, and course materials will keep improving. Community input drives what we prioritize next.
+>
+> **Classroom roadmap** — Summer/Fall 2026 | **Right now** — [Help shape TinyTorch](#-help-shape-tinytorch)
+<!-- EARLY-RELEASE-CALLOUT:END -->
 
 ---
 
@@ -84,29 +89,79 @@ We're sharing TinyTorch early because we'd rather shape the direction with commu
 
 ## Current Status
 
-| Ready | In Progress | Coming Soon |
-|-------|-------------|-------------|
-| ✅ All 20 modules implemented | 🔧 Documentation polish | 📅 NBGrader integration |
-| ✅ Complete test suite (600+ tests) | 🔧 Edge case handling | 📅 Community leaderboard |
-| ✅ `tito` CLI for workflows | 🔧 Instructor resources | 📅 Binder/Colab support |
-| ✅ Historical milestone scripts | | |
+<table width="100%" style="width:100%">
+  <thead>
+    <tr>
+      <th align="left" width="33%">Ready</th>
+      <th align="left" width="33%">In Progress</th>
+      <th align="left" width="34%">Coming Soon</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>✅ All 20 modules implemented</td>
+      <td>🔧 Documentation polish</td>
+      <td>📅 NBGrader integration</td>
+    </tr>
+    <tr>
+      <td>✅ Complete test suite (600+ tests)</td>
+      <td>🔧 Edge case handling</td>
+      <td>📅 Community leaderboard</td>
+    </tr>
+    <tr>
+      <td>✅ <code>tito</code> CLI for workflows</td>
+      <td>🔧 Instructor resources</td>
+      <td>📅 Binder/Colab support</td>
+    </tr>
+    <tr>
+      <td>✅ Historical milestone scripts</td>
+      <td></td>
+      <td></td>
+    </tr>
+  </tbody>
+</table>
 
 **Want to explore the code?** [Browse the repository structure](#repository-structure) to see how modules are organized.
 
-**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](site/getting-started.md).
+**Adventurous early adopter?** Local installation works, but expect rough edges. See the [setup guide](quarto/getting-started.qmd).
 
 ---
 
-## 20 Progressive Modules
+## 🏗️ 20 Progressive Modules
 
 Build your framework through four progressive parts:
 
-| Part | Modules | What You Build |
-|------|---------|----------------|
-| **I. Foundations** | 01-08 | Tensors, activations, layers, losses, dataloader, autograd, optimizers, training |
-| **II. Vision** | 09 | Conv2d, CNNs for image classification |
-| **III. Language** | 10-13 | Tokenization, embeddings, attention, transformers |
-| **IV. Optimization** | 14-20 | Profiling, quantization, compression, acceleration, benchmarking, capstone |
+<table width="100%" style="width:100%">
+  <thead>
+    <tr>
+      <th align="left" width="20%">Part</th>
+      <th align="left" width="15%">Modules</th>
+      <th align="left" width="65%">What You Build</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>I. Foundations</b></td>
+      <td align="center">01-08</td>
+      <td>Tensors, activations, layers, losses, dataloader, autograd, optimizers, training</td>
+    </tr>
+    <tr>
+      <td align="center"><b>II. Vision</b></td>
+      <td align="center">09</td>
+      <td>Conv2d, CNNs for image classification</td>
+    </tr>
+    <tr>
+      <td align="center"><b>III. Language</b></td>
+      <td align="center">10-13</td>
+      <td>Tokenization, embeddings, attention, transformers</td>
+    </tr>
+    <tr>
+      <td align="center"><b>IV. Optimization</b></td>
+      <td align="center">14-20</td>
+      <td>Profiling, quantization, compression, acceleration, memoization, benchmarking, capstone</td>
+    </tr>
+  </tbody>
+</table>
 
 Each module asks: **"Can I build this capability from scratch?"**
 
@@ -114,18 +169,51 @@ Each module asks: **"Can I build this capability from scratch?"**
 
 ---
 
-## Historical Milestones
+## 🏆 Historical Milestones
 
 As you progress, unlock recreations of landmark ML achievements:
 
-| Year | Milestone | Your Achievement |
-|------|-----------|------------------|
-| 1958 | Perceptron | Binary classification with gradient descent |
-| 1969 | XOR Crisis | Multi-layer networks solve non-linear problems |
-| 1986 | Backpropagation | Multi-layer network training |
-| 1998 | CNN Revolution | **Image classification with convolutions** |
-| 2017 | Transformer Era | Language generation with self-attention |
-| 2018+ | MLPerf | Production-ready optimization |
+<table width="100%" style="width:100%">
+  <thead>
+    <tr>
+      <th align="left" width="15%">Year</th>
+      <th align="left" width="35%">Milestone</th>
+      <th align="left" width="50%">Your Achievement</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center"><b>1958</b></td>
+      <td>Perceptron</td>
+      <td>Binary classification with gradient descent</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1969</b></td>
+      <td>XOR Crisis</td>
+      <td>Multi-layer networks solve non-linear problems</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1986</b></td>
+      <td>Backpropagation</td>
+      <td>Multi-layer network training</td>
+    </tr>
+    <tr>
+      <td align="center"><b>1998</b></td>
+      <td>CNN Revolution</td>
+      <td><b>Image classification with convolutions</b></td>
+    </tr>
+    <tr>
+      <td align="center"><b>2017</b></td>
+      <td>Transformer Era</td>
+      <td>Language generation with self-attention</td>
+    </tr>
+    <tr>
+      <td align="center"><b>2018+</b></td>
+      <td>MLPerf</td>
+      <td>Production-ready optimization</td>
+    </tr>
+  </tbody>
+</table>
 
 **These aren't toy demos** - they're historically significant ML achievements rebuilt with YOUR framework!
 
@@ -155,22 +243,40 @@ model.fit(X, y)  # Magic happens
 
 ## Documentation
 
-| Audience | Resources |
-|----------|-----------|
-| **Students** | [Course Website](https://mlsysbook.ai/tinytorch) ・ [Getting Started](site/getting-started.md) |
-| **Instructors** | [Instructor Guide](INSTRUCTOR.md) |
-| **Contributors** | [Contributing Guide](CONTRIBUTING.md) |
+<table width="100%" style="width:100%">
+  <thead>
+    <tr>
+      <th align="left" width="25%">Audience</th>
+      <th align="left" width="75%">Resources</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Students</b></td>
+      <td><a href="https://mlsysbook.ai/tinytorch">Course Website</a> ・ <a href="quarto/getting-started.qmd">Getting Started</a></td>
+    </tr>
+    <tr>
+      <td><b>Instructors</b></td>
+      <td><a href="INSTRUCTOR.md">Instructor Guide</a></td>
+    </tr>
+    <tr>
+      <td><b>Contributors</b></td>
+      <td><a href="CONTRIBUTING.md">Contributing Guide</a></td>
+    </tr>
+  </tbody>
+</table>
 
 ---
 
 ## Repository Structure
 
-```
+```text
 TinyTorch/
 ├── src/                        # 💻 Python source files (developers/contributors edit here)
 │   ├── 01_tensor/              # Module 01: Tensor operations from scratch
 │   │   ├── 01_tensor.py        # Python source (version controlled)
-│   │   └── ABOUT.md            # Conceptual overview & learning objectives
+│   │   └── module.yaml         # Module metadata
+│   │   # Chapter content lives in tinytorch/quarto/modules/01_tensor.qmd
 │   ├── 02_activations/         # Module 02: ReLU, Softmax activations
 │   ├── 03_layers/              # Module 03: Linear layers, Module system
 │   ├── 04_losses/              # Module 04: MSE, CrossEntropy losses
@@ -198,12 +304,14 @@ TinyTorch/
 │   │   └── tensor.py           # Your implementation
 │   └── ...                     # (20 module directories)
 │
-├── site/                       # 🌐 Course website & documentation (Jupyter Book)
-│   ├── intro.md                # Landing page
-│   ├── _toc.yml                # Site navigation (links to modules)
-│   ├── _config.yml             # HTML website configuration
-│   ├── chapters/               # Course content chapters
-│   └── modules/                # Module documentation
+├── quarto/                     # 🌐 Course website & documentation (Quarto)
+│   ├── index.qmd               # Landing page
+│   ├── _quarto.yml             # Site navigation & configuration
+│   ├── install.sh              # One-line installer (served at mlsysbook.ai/tinytorch/install.sh)
+│   ├── modules/                # Module chapter QMDs
+│   ├── milestones/             # Milestone chapter QMDs
+│   ├── tito/                   # tito CLI reference
+│   └── community/              # Community / about pages
 │
 ├── milestones/                 # 🏆 Historical ML evolution - prove what you built!
 │   ├── 01_1958_perceptron/     # Rosenblatt's first trainable network
@@ -215,7 +323,7 @@ TinyTorch/
 │
 ├── tito/                       # 🎛️ CLI tool for streamlined workflows
 │   ├── main.py                 # Entry point
-│   ├── commands/               # 23 command modules
+│   ├── commands/               # 26 command modules
 │   └── core/                   # Core utilities
 │
 ├── tinytorch/                  # 📦 Generated package (import from here)
@@ -264,33 +372,47 @@ Thanks to these wonderful people who helped improve TinyTorch!
 <!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<table>
+<table width="100%" style="width:100%">
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧠 🔎 🧪 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/kai4avaya"><img src="https://avatars.githubusercontent.com/kai4avaya?v=4?s=80" width="80px;" alt="kai"/><br /><sub><b>kai</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/minhdang26403?v=4?s=80" width="80px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/rnjema"><img src="https://avatars.githubusercontent.com/rnjema?v=4?s=80" width="80px;" alt="rnjema"/><br /><sub><b>rnjema</b></sub></a><br />🧑‍💻 ✍️ 🛠️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Pratham-ja"><img src="https://avatars.githubusercontent.com/u/114498234?v=4?v=4?s=80" width="80px;" alt="Pratham Chaudhary"/><br /><sub><b>Pratham Chaudhary</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=80" width="80px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/avikde"><img src="https://avatars.githubusercontent.com/avikde?v=4?s=80" width="80px;" alt="Avik De"/><br /><sub><b>Avik De</b></sub></a><br />🪲 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Takosaga"><img src="https://avatars.githubusercontent.com/Takosaga?v=4?s=80" width="80px;" alt="Takosaga"/><br /><sub><b>Takosaga</b></sub></a><br />🪲 ✍️</td>
-    </tr>
-    <tr>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/rnjema"><img src="https://avatars.githubusercontent.com/rnjema?v=4?s=80" width="80px;" alt="rnjema"/><br /><sub><b>rnjema</b></sub></a><br />🧑‍💻 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/joeswagson"><img src="https://avatars.githubusercontent.com/joeswagson?v=4?s=80" width="80px;" alt="joeswagson"/><br /><sub><b>joeswagson</b></sub></a><br />🧑‍💻 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/AndreaMattiaGaravagno"><img src="https://avatars.githubusercontent.com/u/22458187?v=4?v=4?s=80" width="80px;" alt="AndreaMattiaGaravagno"/><br /><sub><b>AndreaMattiaGaravagno</b></sub></a><br />🧑‍💻 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Roldao-Neto"><img src="https://avatars.githubusercontent.com/u/148023227?v=4?v=4?s=80" width="80px;" alt="Rolds"/><br /><sub><b>Rolds</b></sub></a><br />🪲 🧑‍💻</td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="asgalon"/><br /><sub><b>asgalon</b></sub></a><br />🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/AmirAlasady"><img src="https://avatars.githubusercontent.com/AmirAlasady?v=4?s=80" width="80px;" alt="Amir Alasady"/><br /><sub><b>Amir Alasady</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jettythek"><img src="https://avatars.githubusercontent.com/jettythek?v=4?s=80" width="80px;" alt="jettythek"/><br /><sub><b>jettythek</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/wz1114841863"><img src="https://avatars.githubusercontent.com/wz1114841863?v=4?s=80" width="80px;" alt="wzz"/><br /><sub><b>wzz</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ngbolin"><img src="https://avatars.githubusercontent.com/u/9389997?v=4?v=4?s=80" width="80px;" alt="Ng Bo Lin"/><br /><sub><b>Ng Bo Lin</b></sub></a><br />✍️</td>
-    </tr>
-    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/keo-dara"><img src="https://avatars.githubusercontent.com/u/175544368?v=4?v=4?s=80" width="80px;" alt="keo-dara"/><br /><sub><b>keo-dara</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Kobra299"><img src="https://avatars.githubusercontent.com/u/4283156?v=4?v=4?s=80" width="80px;" alt="Wayne Norman"/><br /><sub><b>Wayne Norman</b></sub></a><br />🪲</td>
+    </tr>
+    <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lalalostcode"><img src="https://avatars.githubusercontent.com/u/149884766?v=4?v=4?s=80" width="80px;" alt="Ilham Rafiqin"/><br /><sub><b>Ilham Rafiqin</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/oscarf189"><img src="https://avatars.githubusercontent.com/u/28113740?v=4?v=4?s=80" width="80px;" alt="Oscar Flores"/><br /><sub><b>Oscar Flores</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/harishb00a"><img src="https://avatars.githubusercontent.com/harishb00a?v=4?s=80" width="80px;" alt="harishb00a"/><br /><sub><b>harishb00a</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=80" width="80px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=80" width="80px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/adityamulik"><img src="https://avatars.githubusercontent.com/u/10626835?v=4?v=4?s=80" width="80px;" alt="Aditya Mulik"/><br /><sub><b>Aditya Mulik</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/AdemolaAri"><img src="https://avatars.githubusercontent.com/u/49918815?v=4?v=4?s=80" width="80px;" alt="Ademola Arigbabuwo"/><br /><sub><b>Ademola Arigbabuwo</b></sub></a><br />✍️</td>
+    </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/yarikoptic"><img src="https://avatars.githubusercontent.com/u/39889?v=4?v=4?s=80" width="80px;" alt="Yaroslav Halchenko"/><br /><sub><b>Yaroslav Halchenko</b></sub></a><br />🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/harishb00"><img src="https://avatars.githubusercontent.com/u/43300971?v=4?v=4?s=80" width="80px;" alt="Harish"/><br /><sub><b>Harish</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
@@ -301,7 +423,7 @@ Thanks to these wonderful people who helped improve TinyTorch!
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 **Recognize a contributor:** Comment on any issue or PR:
-```
+```text
 @all-contributors please add @username for bug, code, doc, or ideas
 ```
 
@@ -321,8 +443,8 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**[📖 Full Documentation](https://mlsysbook.ai/tinytorch)** ・ **[💬 Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** ・ **[🌐 ML Systems Book](https://mlsysbook.ai)**
+<b><a href="https://mlsysbook.ai/tinytorch">Full Documentation</a></b> ・ <b><a href="https://github.com/harvard-edge/cs249r_book/discussions">Discussions</a></b> ・ <b><a href="https://mlsysbook.ai">ML Systems Book</a></b>
 
-**Start Small. Go Deep. Build ML Systems.**
+<b>Start Small. Go Deep. Build ML Systems.</b>
 
 </div>

@@ -18,19 +18,37 @@ This pattern catches the most common and frustrating bugs students encounter.
 
 ### 🔥 Critical (Must Pass)
 
-| Test File | What It Catches | Modules |
-|-----------|-----------------|---------|
-| `test_gradient_flow.py` | Broken backpropagation | 01-08 |
-| `test_training_flow.py` | Training loop failures | 05-07 |
-| `test_nlp_pipeline_flow.py` | NLP stack issues | 10-13 |
-| `test_cnn_integration.py` | CNN gradient issues | 09 |
+<table width="100%">
+  <thead>
+<tr>
+<th width="35%"><b>Test File</b></th>
+<th width="45%">What It Catches</th>
+<th width="20%">Modules</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>`test_gradient_flow.py`</b></td><td>Broken backpropagation</td><td>01-08</td></tr>
+<tr><td><b>`test_training_flow.py`</b></td><td>Training loop failures</td><td>05-07</td></tr>
+<tr><td><b>`test_nlp_pipeline_flow.py`</b></td><td>NLP stack issues</td><td>10-13</td></tr>
+<tr><td><b>`test_cnn_integration.py`</b></td><td>CNN gradient issues</td><td>09</td></tr>
+</tbody>
+</table>
 
 ### 📋 Standard (Should Pass)
 
-| Test File | What It Catches | Modules |
-|-----------|-----------------|---------|
-| `test_dataloader_integration.py` | Data pipeline issues | 05 |
-| `test_api_simplification_integration.py` | API compatibility | All |
+<table width="100%">
+  <thead>
+<tr>
+<th width="45%"><b>Test File</b></th>
+<th width="35%">What It Catches</th>
+<th width="20%">Modules</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>`test_dataloader_integration.py`</b></td><td>Data pipeline issues</td><td>05</td></tr>
+<tr><td><b>`test_api_simplification_integration.py`</b></td><td>API compatibility</td><td>All</td></tr>
+</tbody>
+</table>
 
 ### 🔬 Scenario Tests
 
@@ -125,13 +143,21 @@ def test_profiling_does_not_break_training():
 
 ### Currently Missing
 
-| Module | Integration Test Needed |
-|--------|------------------------|
-| 14 Profiling | Profiler + training loop |
-| 15 Quantization | Quantized model accuracy |
-| 16 Compression | Compressed model still trains |
-| 17 Acceleration | Accelerated ops match baseline |
-| 18 Memoization | Cached ops maintain correctness |
+<table width="100%">
+  <thead>
+<tr>
+<th width="30%"><b>Module</b></th>
+<th width="70%">Integration Test Needed</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>14 Profiling</b></td><td>Profiler + training loop</td></tr>
+<tr><td><b>15 Quantization</b></td><td>Quantized model accuracy</td></tr>
+<tr><td><b>16 Compression</b></td><td>Compressed model still trains</td></tr>
+<tr><td><b>17 Acceleration</b></td><td>Accelerated ops match baseline</td></tr>
+<tr><td><b>18 Memoization</b></td><td>Cached ops maintain correctness</td></tr>
+</tbody>
+</table>
 
 ### How to Fill Gaps
 

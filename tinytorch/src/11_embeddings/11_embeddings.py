@@ -60,6 +60,7 @@ from tinytorch.core.embeddings import Embedding, PositionalEncoding, create_sinu
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import math
 from typing import List, Optional, Tuple
 
@@ -395,7 +396,7 @@ class Embedding:
         2. Create weight matrix of shape (vocab_size, embed_dim)
         3. Use Xavier/Glorot uniform initialization: limit = sqrt(6 / (V + D))
 
-        HINT: np.random.uniform(-limit, limit, (vocab_size, embed_dim))
+        HINT: rng.uniform(-limit, limit, (vocab_size, embed_dim))
         """
         ### BEGIN SOLUTION
         self.vocab_size = vocab_size
@@ -404,7 +405,7 @@ class Embedding:
         # Xavier initialization for better gradient flow
         limit = math.sqrt(6.0 / (vocab_size + embed_dim))
         self.weight = Tensor(
-            np.random.uniform(-limit, limit, (vocab_size, embed_dim))
+            rng.uniform(-limit, limit, (vocab_size, embed_dim))
         )
         ### END SOLUTION
 
@@ -629,7 +630,7 @@ class PositionalEncoding:
         # Smaller initialization than token embeddings since these are additive
         limit = math.sqrt(2.0 / embed_dim)
         self.position_embeddings = Tensor(
-            np.random.uniform(-limit, limit, (max_seq_len, embed_dim))
+            rng.uniform(-limit, limit, (max_seq_len, embed_dim))
         )
         ### END SOLUTION
 
@@ -770,7 +771,7 @@ def test_unit_positional_encoding():
     pos_enc = PositionalEncoding(max_seq_len=512, embed_dim=64)
 
     # Create sample embeddings
-    embeddings = Tensor(np.random.randn(2, 10, 64))
+    embeddings = Tensor(rng.standard_normal((2, 10, 64)))
     output = pos_enc.forward(embeddings)
 
     assert output.shape == (2, 10, 64), f"Expected shape (2, 10, 64), got {output.shape}"
@@ -1661,7 +1662,7 @@ def analyze_embedding_performance():
 
         for batch_size in batch_sizes:
             # Create random token batch
-            tokens = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_len)))
+            tokens = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
 
             # Warmup
             for _ in range(5):
@@ -1719,7 +1720,7 @@ def analyze_positional_encoding_strategies():
     print(f"\n📈 Encoding Pattern Analysis:")
 
     # Test sample sequences
-    test_input = Tensor(np.random.randn(1, 10, embed_dim))
+    test_input = Tensor(rng.standard_normal((1, 10, embed_dim)))
 
     learned_output = learned_pe.forward(test_input)
 
@@ -1888,7 +1889,7 @@ def test_module():
 
     # Test that we're not creating unnecessary copies
     large_embed = EmbeddingLayer(vocab_size=10000, embed_dim=512)
-    test_batch = Tensor(np.random.randint(0, 10000, (32, 128)))
+    test_batch = Tensor(rng.integers(0, 10000, (32, 128)))
 
     # Multiple forward passes should not accumulate memory (in production)
     for _ in range(5):

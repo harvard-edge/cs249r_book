@@ -1,6 +1,11 @@
 """
 Module 06: Autograd - Core Functionality Tests
 Tests automatic differentiation and computational graphs
+
+NOTE: These tests reference a Variable class that is not implemented in TinyTorch.
+TinyTorch enhances Tensor directly via enable_autograd(). These tests are retained
+as placeholders for future Variable API support but currently provide no test
+coverage.
 """
 
 import numpy as np

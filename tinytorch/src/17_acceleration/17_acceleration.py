@@ -68,6 +68,7 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 from typing import Dict, List, Tuple, Optional, Any, Union
 import warnings
@@ -272,7 +273,7 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     PERFORMANCE CHARACTERISTICS:
     - Time Complexity: O(N³) but highly optimized
     - Space Complexity: O(N²) for result
-    - Arithmetic Intensity: 2N³ FLOPs / 3N² bytes = 2N/3 (good for large N)
+    - Arithmetic Intensity: 2N³ FLOPs / (3N² × 4) bytes = N/6 (good for large N)
 
     HINTS:
     - Check a.shape[-1] == b.shape[-2] for inner dimension match
@@ -322,15 +323,15 @@ def test_unit_vectorized_matmul():
 
     # Test batch multiplication (3D tensors)
     batch_size, m, k, n = 2, 3, 4, 5
-    a_batch = Tensor(np.random.randn(batch_size, m, k))
-    b_batch = Tensor(np.random.randn(batch_size, k, n))
+    a_batch = Tensor(rng.standard_normal((batch_size, m, k)))
+    b_batch = Tensor(rng.standard_normal((batch_size, k, n)))
     result_batch = vectorized_matmul(a_batch, b_batch)
 
     assert result_batch.shape == (batch_size, m, n), f"Wrong batch shape: {result_batch.shape}"
 
     # Test broadcasting (different batch dimensions)
-    a_single = Tensor(np.random.randn(m, k))
-    b_batch = Tensor(np.random.randn(batch_size, k, n))
+    a_single = Tensor(rng.standard_normal((m, k)))
+    b_batch = Tensor(rng.standard_normal((batch_size, k, n)))
     result_broadcast = vectorized_matmul(a_single, b_batch)
 
     assert result_broadcast.shape == (batch_size, m, n), f"Broadcasting failed: {result_broadcast.shape}"
@@ -452,7 +453,7 @@ def fused_gelu(x: Tensor) -> Tensor:
     >>> x = Tensor([-2, -1, 0, 1, 2])
     >>> result = fused_gelu(x)
     >>> print(result.data)
-    [-0.04550026 -0.15865526  0.          0.8413447   1.9544997 ]
+    [-0.04540231 -0.15880801  0.          0.84119199  1.95459769]
     # Notice: smooth transition through 0, positive bias
 
     MEMORY EFFICIENCY:
@@ -470,8 +471,9 @@ def fused_gelu(x: Tensor) -> Tensor:
     sqrt_2_over_pi = np.sqrt(2.0 / np.pi)
 
     # Fused GELU computation - all operations in single expression
-    # This minimizes memory bandwidth by avoiding intermediate arrays
-    # NumPy's expression evaluator will optimize this into efficient machine code
+    # By computing the full expression in a single line, we avoid creating intermediate
+    # Tensor objects. Note: NumPy still allocates temporary arrays internally —
+    # real kernel fusion requires compiled frameworks like XLA or torch.compile.
     result_data = 0.5 * x.data * (
         1.0 + np.tanh(sqrt_2_over_pi * (x.data + 0.044715 * x.data**3))
     )
@@ -506,7 +508,7 @@ def test_unit_fused_gelu():
     assert not np.any(np.isinf(result_extreme.data)), "No infinite values allowed"
 
     # Test large tensor processing
-    x_large = Tensor(np.random.randn(1000, 1000).astype(np.float32))
+    x_large = Tensor(rng.standard_normal((1000, 1000)).astype(np.float32))
     result_large = fused_gelu(x_large)
 
     assert result_large.shape == x_large.shape, "Shape preservation failed"
@@ -590,7 +592,7 @@ def test_unit_fusion_speedup():
 
     # Create moderately large tensor for meaningful timing
     size = 2000
-    x = Tensor(np.random.randn(size, size).astype(np.float32))
+    x = Tensor(rng.standard_normal((size, size)).astype(np.float32))
     warmup_iterations = DEFAULT_WARMUP_ITERATIONS
     timing_iterations = DEFAULT_TIMING_ITERATIONS
 
@@ -698,8 +700,8 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
         Result matrix (M×N)
 
     EXAMPLE:
-    >>> a = Tensor(np.random.randn(256, 256))
-    >>> b = Tensor(np.random.randn(256, 256))
+    >>> a = Tensor(rng.standard_normal((256, 256)))
+    >>> b = Tensor(rng.standard_normal((256, 256)))
     >>> result = tiled_matmul(a, b, tile_size=64)
     >>> # Same result as vectorized_matmul, but more cache-friendly for large matrices
 
@@ -755,8 +757,8 @@ def test_unit_tiled_matmul():
     print("🧪 Unit Test: Tiled Matrix Multiplication...")
 
     # Test correctness against vectorized version
-    a = Tensor(np.random.randn(128, 128).astype(np.float32))
-    b = Tensor(np.random.randn(128, 128).astype(np.float32))
+    a = Tensor(rng.standard_normal((128, 128)).astype(np.float32))
+    b = Tensor(rng.standard_normal((128, 128)).astype(np.float32))
 
     result_tiled = tiled_matmul(a, b, tile_size=32)
     result_reference = vectorized_matmul(a, b)
@@ -771,8 +773,8 @@ def test_unit_tiled_matmul():
 
     # Test shape validation
     try:
-        wrong_a = Tensor(np.random.randn(128, 64).astype(np.float32))
-        wrong_b = Tensor(np.random.randn(128, 64).astype(np.float32))
+        wrong_a = Tensor(rng.standard_normal((128, 64)).astype(np.float32))
+        wrong_b = Tensor(rng.standard_normal((128, 64)).astype(np.float32))
         tiled_matmul(wrong_a, wrong_b)
         assert False, "Should have raised ValueError for shape mismatch"
     except ValueError as e:
@@ -806,8 +808,8 @@ def analyze_vectorization_scaling():
 
     for size in sizes:
         # Create test matrices
-        a = Tensor(np.random.randn(size, size).astype(np.float32))
-        b = Tensor(np.random.randn(size, size).astype(np.float32))
+        a = Tensor(rng.standard_normal((size, size)).astype(np.float32))
+        b = Tensor(rng.standard_normal((size, size)).astype(np.float32))
 
         # Warm up
         for _ in range(2):
@@ -856,8 +858,8 @@ def analyze_arithmetic_intensity():
     operations = []
 
     # Create test data
-    x = Tensor(np.random.randn(size, size).astype(np.float32))
-    y = Tensor(np.random.randn(size, size).astype(np.float32))
+    x = Tensor(rng.standard_normal((size, size)).astype(np.float32))
+    y = Tensor(rng.standard_normal((size, size)).astype(np.float32))
 
     print("\n🎯 Arithmetic Intensity Analysis:")
     print("┌─────────────────────┬─────────┬─────────────┬─────────────┬─────────────┐")
@@ -958,8 +960,8 @@ def analyze_memory_efficiency():
     print("├─────────┼──────────────┼──────────────┼──────────────┤")
 
     for size in sizes:
-        x = Tensor(np.random.randn(size, size).astype(np.float32))
-        y = Tensor(np.random.randn(size, size).astype(np.float32))
+        x = Tensor(rng.standard_normal((size, size)).astype(np.float32))
+        y = Tensor(rng.standard_normal((size, size)).astype(np.float32))
 
         # Measure vectorized matmul
         tracemalloc.start()
@@ -1070,9 +1072,9 @@ def analyze_acceleration_decision_framework():
     }
 
     print("\n🎯 Acceleration Technique Recommendations:")
-    print("┌─────────────────────┬─────────────┬─────────────┬─────────────┬─────────────┐")
-    print("│ Workload            │ Vectorize   │ Fuse Kernels│ Mixed Prec  │ Graph Opt   │")
-    print("├─────────────────────┼─────────────┼─────────────┼─────────────┼─────────────┤")
+    print("┌─────────────────────┬─────────────┬─────────────┬─────────────┐")
+    print("│ Workload            │ Vectorize   │ Fuse Kernels│ Graph Opt   │")
+    print("├─────────────────────┼─────────────┼─────────────┼─────────────┤")
 
     for workload_name, workload_chars in workloads:
         recommendations = []
@@ -1184,7 +1186,7 @@ def explore_acceleration_with_profiler():
     class SlowLinear:
         """Linear layer using explicit loops (slow)."""
         def __init__(self, in_features, out_features):
-            self.weight = Tensor(np.random.randn(in_features, out_features).astype(np.float32) * 0.01)
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
             self.name = "slow_linear"
 
         def forward(self, x):
@@ -1203,7 +1205,7 @@ def explore_acceleration_with_profiler():
     class FastLinear:
         """Linear layer using vectorized matmul (fast)."""
         def __init__(self, in_features, out_features):
-            self.weight = Tensor(np.random.randn(in_features, out_features).astype(np.float32) * 0.01)
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)).astype(np.float32) * 0.01)
             self.name = "fast_linear"
 
         def forward(self, x):
@@ -1218,7 +1220,7 @@ def explore_acceleration_with_profiler():
     fast_model = FastLinear(in_features, out_features)
 
     # Create input
-    input_tensor = Tensor(np.random.randn(batch_size, in_features).astype(np.float32))
+    input_tensor = Tensor(rng.standard_normal((batch_size, in_features)).astype(np.float32))
 
     print("\n🐢 BEFORE: Loop-based implementation")
     print("-" * 70)
@@ -1297,8 +1299,8 @@ def test_module():
     print(f"   Model config: batch={batch_size}, seq_len={seq_len}, hidden={hidden_dim}")
 
     # Test data
-    x = Tensor(np.random.randn(batch_size, seq_len, hidden_dim).astype(np.float32))
-    weight = Tensor(np.random.randn(hidden_dim, hidden_dim).astype(np.float32))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, hidden_dim)).astype(np.float32))
+    weight = Tensor(rng.standard_normal((hidden_dim, hidden_dim)).astype(np.float32))
     print(f"   Input tensor: {x.shape}, Weight tensor: {weight.shape}")
 
     # Test complete pipeline: reshape → matmul → activation
@@ -1325,8 +1327,8 @@ def test_module():
     class TransformerBlock:
         def __init__(self, hidden_dim):
             self.hidden_dim = hidden_dim
-            self.weight1 = Tensor(np.random.randn(hidden_dim, hidden_dim).astype(np.float32))
-            self.weight2 = Tensor(np.random.randn(hidden_dim, hidden_dim).astype(np.float32))
+            self.weight1 = Tensor(rng.standard_normal((hidden_dim, hidden_dim)).astype(np.float32))
+            self.weight2 = Tensor(rng.standard_normal((hidden_dim, hidden_dim)).astype(np.float32))
             self.weight1.grad = None
             self.weight2.grad = None
 
@@ -1373,8 +1375,8 @@ def test_module():
     # Verify acceleration provides measurable benefits
     test_sizes = [128, 256]
     for size in test_sizes:
-        test_x = Tensor(np.random.randn(size, size).astype(np.float32))
-        test_y = Tensor(np.random.randn(size, size).astype(np.float32))
+        test_x = Tensor(rng.standard_normal((size, size)).astype(np.float32))
+        test_y = Tensor(rng.standard_normal((size, size)).astype(np.float32))
 
         # Time operations and verify reasonable performance
         start = time.time()
@@ -1413,7 +1415,7 @@ Answer these to deepen your understanding of acceleration techniques and their s
 You implemented vectorized matrix multiplication and fused GELU.
 - Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
 - Arithmetic intensity: _____ FLOPs/byte
-- Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
+- Compared to element-wise addition (0.083 FLOPs/byte): _____× higher intensity
 - Why does this make matrix multiplication ideal for GPUs? _____
 
 ---

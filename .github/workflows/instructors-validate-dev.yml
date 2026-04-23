@@ -1,0 +1,168 @@
+name: '🎓 Instructors · ✅ Validate (Dev)'
+
+# =============================================================================
+# Instructors (The Blueprint) — Content & Build Validation
+# =============================================================================
+#
+# Validates instructor site content integrity: image references, Quarto
+# build output, and internal/external link health.
+#
+# Flow:
+#   1. VALIDATE_CONTENT — Check all image references exist on disk
+#   2. BUILD_SITE       — Quarto HTML render succeeds
+#   3. CHECK_LINKS      — Lychee link validation (non-blocking)
+#   4. SUMMARY          — Aggregate results
+#
+# Triggers:
+#   - push: dev branch, instructors/** paths
+#   - pull_request: instructors/** or workflow file changes
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+#
+# Related:
+#   - instructors-preview-dev.yml  — Dev preview deploy
+#   - instructors-publish-live.yml — Production deploy
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'instructors/**'
+      - '.github/workflows/instructors-validate-dev.yml'
+      - '.github/workflows/instructors-preview-dev.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'instructors/**'
+      - '.github/workflows/instructors-validate-dev.yml'
+      - '.github/workflows/instructors-preview-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: instructors-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Content validation (image refs)
+  # ===========================================================================
+  validate-content:
+    name: '🔍 Validate Content'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔍 Check image references exist
+        working-directory: instructors
+        run: |
+          echo "🔍 Checking that all referenced images exist..."
+          python3 - <<'PYEOF'
+          import re, os, sys, glob
+
+          pattern = re.compile(r'!\[.*?\]\(([^)]+)\)')
+          fails = []
+
+          for qmd in glob.glob("**/*.qmd", recursive=True):
+              qmd_dir = os.path.dirname(qmd)
+              with open(qmd) as f:
+                  for lineno, line in enumerate(f, 1):
+                      for m in pattern.finditer(line):
+                          img = m.group(1).split("{")[0].strip()
+                          if img.startswith(("http://", "https://", "#", "@")) or not img:
+                              continue
+                          if not os.path.isfile(os.path.join(qmd_dir, img)) and not os.path.isfile(img):
+                              fails.append(f"  {qmd}:{lineno} -> {img}")
+
+          if fails:
+              print(f"❌ {len(fails)} missing image reference(s):")
+              for f in fails:
+                  print(f)
+              sys.exit(1)
+          else:
+              print("✅ All image references are valid")
+          PYEOF
+
+  # ===========================================================================
+  # Stage 2: Quarto HTML site build
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build Instructor Site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Instructor Site (HTML)
+        working-directory: instructors
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          if [ ! -f "instructors/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing from build output."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh instructors/_build | cut -f1)"
+          echo "📄 Pages built: $(find instructors/_build -name '*.html' | wc -l)"
+
+  # ===========================================================================
+  # Stage 3: Link validation (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) blocks broken
+  # internal links + anchors. Lychee here adds external reachability as a
+  # warning. Flip fail_on_broken=true once baseline is clean (instructors is
+  # a small site so it's a likely first candidate to ratchet to blocking).
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './instructors/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 5
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [validate-content, build-site, check-links]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🎓 Instructor Site Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Content Validation | ${{ needs.validate-content.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Site Build (HTML) | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.validate-content.result }}" = "failure" ] || \
+             [ "${{ needs.build-site.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"

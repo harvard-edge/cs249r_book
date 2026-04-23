@@ -36,7 +36,7 @@ MLP from Milestone 03 on the SAME dataset. This proves spatial operations matter
 
 🏗️ ARCHITECTURE (Simple LeNet-style CNN):
     ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-    │ Input Image │    │   Conv2D    │    │    ReLU     │    │  MaxPool2D  │    │   Flatten   │    │   Linear    │
+    │ Input Image │    │   Conv2d    │    │    ReLU     │    │  MaxPool2d  │    │   Flatten   │    │   Linear    │
     │   8×8×1     │───▶│ YOUR Module │───▶│ YOUR Module │───▶│ YOUR Module │───▶│             │───▶│ YOUR Module │
     │  Grayscale  │    │     09      │    │     02      │    │     09      │    │   72 dims   │    │   72→10     │
     └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘

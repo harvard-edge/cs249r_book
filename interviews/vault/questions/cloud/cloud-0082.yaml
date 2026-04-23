@@ -1,0 +1,72 @@
+schema_version: '1.0'
+id: cloud-0082
+track: cloud
+level: L2
+zone: recall
+topic: batching-strategies
+competency_area: latency
+bloom_level: understand
+phase: inference
+title: The Continuous Batching Throughput Limit
+scenario: You are tasked with estimating the peak capacity of an LLM inference service running on a single
+  H100 GPU. The service runs a 70B parameter model and uses continuous batching. At steady state, telemetry
+  shows that there are, on average, 32 requests being actively processed concurrently. The average request
+  requires a 20ms prefill/prompt processing phase and then generates 128 new tokens.
+details:
+  realistic_solution: 'The correct approach is to use Little''s Law, which states that the average number
+    of items in a system (L) is equal to their average arrival rate (λ) multiplied by the average time
+    they spend in the system (W). Rearranging: λ = L / W. Here, L = 32 (average concurrent requests),
+    and W is the total time a request spends being processed (prefill + decode). Once we know W, we can
+    compute the peak request throughput λ. However, to compute W, we need the per-token decode time, which
+    the problem omits. If we assume a typical decode speed of ~15ms per token for a 70B model on H100,
+    then W = 20ms + (128 * 15ms) = 20ms + 1920ms = 1940ms ≈ 1.94s. Applying Little''s Law: λ = 32 / 1.94
+    ≈ 16.5 requests/second. The token throughput would be 16.5 * 128 ≈ 2,112 tokens/second. This demonstrates
+    why continuous batching is powerful: even though each request takes nearly 2 seconds, overlapping
+    32 requests yields high aggregate throughput.'
+  common_mistake: Engineers often misapply throughput formulas. A common mistake is to simply invert the
+    per-token generation time, which calculates the *token* throughput, not the *request* throughput.
+    Another is to calculate the throughput for a single, isolated request, ignoring the massive parallelism
+    gains from batching. A third mistake is to apply static batching logic, where the throughput is the
+    batch size divided by the time it takes for the slowest member of the batch to complete, which underestimates
+    the efficiency of continuous batching.
+  napkin_math: '1. **Find total time per request (W):** W = T_prefill + T_decode = 20ms + (128 tokens
+    * T_per_token). The scenario does not provide T_per_token directly, so we estimate: for a 70B model
+    on H100, weight read = 140 GB / 3.35 TB/s = 42ms per decode step at BS=1. With continuous batching
+    at BS=32, amortized to ~15ms/token. W = 20ms + 128 * 15ms = 1,940ms ≈ 1.94 seconds. 2. **Apply Little''s
+    Law:** λ = L / W = 32 / 1.94s ≈ 16.5 requests/second. 3. **Token throughput:** 16.5 req/s * 128 tokens/req
+    ≈ 2,112 tokens/second. 4. **Key insight:** Continuous batching decouples individual request latency
+    from system throughput. The GPU processes decode tokens for all 32 requests in each step, achieving
+    near-linear throughput scaling with concurrency.'
+  options:
+  - ~220 QPS
+  - ~1.7 QPS
+  - ~16.5 QPS
+  - ~56 QPS
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The Napkin Math makes an estimation for `T_per_token` ('amortized to ~15ms/token') without showing the
+  derivation or a clear basis for this value, reducing the rigor of the calculation.
+- The final throughput calculation `16.5 req/s * 128 tokens/req ≈ 2,` is incomplete, missing the final
+  number.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The problem is unsolvable as it omits the per-token generation time for the decode phase, which is needed
+  to calculate the total time per request (W).
+- The Napkin Math section is incomplete.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

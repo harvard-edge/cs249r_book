@@ -1,9 +1,38 @@
 name: '📚 Book · 🚀 Publish (Live)'
 
-# Shared concurrency group prevents gh-pages conflicts with other live workflows
-concurrency:
-  group: gh-pages-deploy
-  cancel-in-progress: false
+# =============================================================================
+# 🚀 Publish (Live) — Merge dev into main, build, and deploy to production
+# =============================================================================
+#
+# The "big red button" production release workflow. Merges a specific (or latest)
+# dev commit into main, triggers a full container build, deploys HTML to gh-pages,
+# creates a versioned Git tag, and publishes a GitHub Release with AI-generated notes.
+#
+# Flow:
+#   1. VALIDATE        — Confirm inputs, compute version, run pre-flight checks
+#   2. MERGE           — Fast-forward or merge dev commit into main
+#   3. BUILD           — Trigger book-build-container.yml targeting main
+#   4. DEPLOY          — Download artifacts, push HTML to gh-pages branch
+#   5. RELEASE         — Create Git tag, generate release notes, publish GitHub Release
+#   6. CLEANUP         — On failure or timeout, revert merge and clean up
+#
+# Triggers:
+#   - workflow_dispatch: manual only (requires "PUBLISH" confirmation)
+#
+# Deploys to: gh-pages branch (production site)
+# Secrets:    GITHUB_TOKEN
+# Vars:       BOOK_ROOT, BOOK_QUARTO, BOOK_DOCKER, BOOK_TOOLS, BOOK_DEPS
+#
+# Related:
+#   - book-build-container.yml — Reusable build matrix called for production builds
+#   - book-validate-dev.yml    — Dev validation (run this first before publishing)
+#   - book-preview-dev.yml     — Dev preview (staging equivalent of this workflow)
+#
+# =============================================================================
+
+# NB: gh-pages-deploy concurrency is declared per-job (on the deploy step
+# only). The container build, release-notes generation, and tagging do not
+# touch gh-pages and run in parallel with other publish workflows.
 
 # =============================================================================
 # CONFIGURABLE VARIABLES - Edit these to customize the workflow
@@ -36,11 +65,11 @@ env:
 #
 # artifact-manifest: JSON file declaring the names of HTML, PDF, and EPUB artifacts
 # main-html-linux: Contains build/html/ (web version)
-# main-pdf-linux:  Contains build/pdf/Machine-Learning-Systems.pdf
-# main-epub-linux: Contains build/epub/Machine-Learning-Systems.epub
+# main-pdf-linux:  Contains Machine-Learning-Systems-Vol{1,2}.pdf
+# main-epub-linux: Contains Machine-Learning-Systems-Vol{1,2}.epub
 # main-html-windows: Contains build/html/ (web version)
-# main-pdf-windows: Contains build/pdf/Machine-Learning-Systems.pdf
-# main-epub-windows: Contains build/epub/Machine-Learning-Systems.epub
+# main-pdf-windows: Contains Machine-Learning-Systems-Vol{1,2}.pdf
+# main-epub-windows: Contains Machine-Learning-Systems-Vol{1,2}.epub
 #
 # This workflow downloads the artifact manifest first to get the exact names,
 # then downloads the HTML, PDF, and EPUB artifacts using those names for coordination.
@@ -131,7 +160,7 @@ on:
         required: false
         default: '60'
       previous_version:
-        description: 'Previous version to increment from (format: book-vX.Y.Z) [auto-detect from latest git tag]'
+        description: 'Previous version override (vol1-vX.Y.Z or vol2-vX.Y.Z). Only used when deploy_target is vol1 OR vol2 (single-volume). Ignored if deploy_target=all. Leave blank to auto-detect from latest matching tag.'
         required: false
         default: ''
       testing_mode:
@@ -142,6 +171,15 @@ on:
           - 'no'
           - 'yes'
         default: 'no'
+      deploy_target:
+        description: 'Deploy target (vol1, vol2, all=everything)'
+        required: false
+        type: choice
+        options:
+          - 'all'
+          - 'vol1'
+          - 'vol2'
+        default: 'all'
 
 permissions:
   contents: write
@@ -149,6 +187,18 @@ permissions:
   packages: read
 
 jobs:
+  # Block publish unless the latest dev validate run for the book is green.
+  # See .github/workflows/infra-publish-guard.yml for guard semantics.
+  # NB: book has its own elaborate pre-flight; this guard is the cross-cutting
+  # safety check that verifies *validate-dev* is recently green, not just that
+  # the local checkout looks OK.
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: book-validate-dev.yml
+
   debug-log:
     name: '📋 Debug & Audit Log'
     runs-on: ubuntu-latest
@@ -157,7 +207,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -285,12 +335,25 @@ jobs:
   validate-inputs:
     name: '🔍 Validate Inputs'
     runs-on: ubuntu-latest
+    needs: [guard]
     timeout-minutes: 10
     if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
     outputs:
+      # Backwards-compatible "summary" version string used by the 50+ status /
+      # release-notes / commit-message references downstream. With per-volume
+      # versioning it becomes either "vol1-vX.Y.Z", "vol2-vX.Y.Z", or
+      # "vol1-vX.Y.Z+vol2-vA.B.C" depending on deploy_target. Steps that need
+      # the per-volume value should use new_vol1_version / new_vol2_version
+      # instead.
       new_version: ${{ steps.version.outputs.new_version }}
       previous_version: ${{ steps.version.outputs.previous_version }}
       release_type: ${{ steps.version.outputs.release_type }}
+      # Per-volume outputs — empty string when that volume is not in the
+      # current deploy_target.
+      new_vol1_version: ${{ steps.version.outputs.new_vol1_version }}
+      new_vol2_version: ${{ steps.version.outputs.new_vol2_version }}
+      previous_vol1_version: ${{ steps.version.outputs.previous_vol1_version }}
+      previous_vol2_version: ${{ steps.version.outputs.previous_vol2_version }}
 
     steps:
       - name: 🔒 Check Branch Restriction
@@ -309,7 +372,7 @@ jobs:
           echo "✅ Branch check passed - running from ${{ github.ref_name }}"
 
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -342,66 +405,244 @@ jobs:
 
           echo "✅ Ready to publish"
 
-      - name: 🏷️ Calculate Next Version
+      - name: 🏷️ Calculate Next Version (per-volume)
         id: version
         run: |
-          echo "🔄 Getting latest release version..."
+          # ----------------------------------------------------------------
+          # Per-volume version computation.
+          #
+          # Each volume tracks its own tag space:
+          #   vol1: tag prefix  vol1-v*    (continues from legacy book-v* if
+          #                                no vol1-v* tag exists yet)
+          #   vol2: tag prefix  vol2-v*    (defaults to v0.0.0 → first release
+          #                                bumps to v0.1.0)
+          #
+          # `deploy_target` decides which volume(s) get bumped on this run.
+          # The release_type (patch/minor/major) is applied to each volume
+          # that is in scope. The `new_version` output is a summary string
+          # used by downstream status/commit-message steps.
+          #
+          # `previous_version` workflow input (legacy override) is interpreted
+          # as the previous version for whichever single volume is targeted.
+          # If deploy_target=all, the input is ignored and both versions are
+          # auto-detected.
+          # ----------------------------------------------------------------
 
-          # Use provided previous version or auto-detect
-          if [ -n "${{ github.event.inputs.previous_version }}" ]; then
-            LATEST_VERSION="${{ github.event.inputs.previous_version }}"
-            echo "📌 Using provided previous version: $LATEST_VERSION"
-          else
-            # Get latest git tag version, default to book-v0.0.0 if no tags exist
-            LATEST_VERSION=$(git tag -l "book-v*" | sort -V | tail -n1)
-            if [ -z "$LATEST_VERSION" ]; then
-              LATEST_VERSION="book-v0.0.0"
-              echo "📊 No git tags found, using default: $LATEST_VERSION"
+          DEPLOY_TARGET="${{ github.event.inputs.deploy_target }}"
+          RELEASE_TYPE="${{ github.event.inputs.release_type }}"
+          OVERRIDE="${{ github.event.inputs.previous_version }}"
+
+          echo "📦 Deploy target: $DEPLOY_TARGET"
+          echo "📈 Release type:  $RELEASE_TYPE"
+
+          # NOTE on bash style: each `local` declaration is on its own line.
+          # Bundling them ("local a=$1 b=$2 c=${b#x}") breaks the parameter
+          # expansion in `c` because `b` isn't visible at expansion time.
+          bump() {
+            # bump <PREFIX> <PREVIOUS_FULL_TAG> → echoes new full tag
+            local prefix="$1"
+            local prev="$2"
+            local num="${prev#${prefix}-v}"
+            local major minor patch
+            IFS='.' read -r major minor patch <<< "$num"
+            major=${major:-0}
+            minor=${minor:-0}
+            patch=${patch:-0}
+            case "$RELEASE_TYPE" in
+              major) major=$((major+1)); minor=0; patch=0 ;;
+              minor) minor=$((minor+1)); patch=0 ;;
+              patch) patch=$((patch+1)) ;;
+            esac
+            echo "${prefix}-v${major}.${minor}.${patch}"
+          }
+
+          latest_for() {
+            # latest_for <PREFIX> [FALLBACK_TAG] → echoes latest tag with that
+            # prefix, or FALLBACK_TAG if none exists.
+            local prefix="$1"
+            local fallback="$2"
+            local latest
+            [ -z "$fallback" ] && fallback="${prefix}-v0.0.0"
+            latest=$(git tag -l "${prefix}-v*" | sort -V | tail -n1)
+            echo "${latest:-$fallback}"
+          }
+
+          # ------------------------------- vol1 ----------------------------
+          NEW_VOL1=""
+          PREV_VOL1=""
+          if [[ "$DEPLOY_TARGET" == "vol1" || "$DEPLOY_TARGET" == "all" ]]; then
+            if [ "$DEPLOY_TARGET" == "vol1" ] && [ -n "$OVERRIDE" ]; then
+              PREV_VOL1="$OVERRIDE"
+              echo "📌 vol1: using provided previous_version: $PREV_VOL1"
             else
-              echo "📊 Auto-detected latest git tag: $LATEST_VERSION"
+              # Seed vol1 from legacy book-v* if no vol1-v* tag exists yet,
+              # so the v0.5.1 → v0.6.0 line is preserved across the rename.
+              LEGACY=$(git tag -l "book-v*" | sort -V | tail -n1)
+              LEGACY=${LEGACY:-book-v0.0.0}
+              SEED_VOL1="vol1-v${LEGACY#book-v}"
+              PREV_VOL1=$(latest_for "vol1" "$SEED_VOL1")
+              echo "📊 vol1: latest = $PREV_VOL1"
             fi
+            NEW_VOL1=$(bump "vol1" "$PREV_VOL1")
+            echo "🎯 vol1: new    = $NEW_VOL1"
           fi
 
-          # Remove 'book-v' prefix for calculation
-          VERSION_NUM=${LATEST_VERSION#book-v}
+          # ------------------------------- vol2 ----------------------------
+          NEW_VOL2=""
+          PREV_VOL2=""
+          if [[ "$DEPLOY_TARGET" == "vol2" || "$DEPLOY_TARGET" == "all" ]]; then
+            if [ "$DEPLOY_TARGET" == "vol2" ] && [ -n "$OVERRIDE" ]; then
+              PREV_VOL2="$OVERRIDE"
+              echo "📌 vol2: using provided previous_version: $PREV_VOL2"
+            else
+              # Seed vol2 from v0.0.0 so the FIRST publish lands at v0.1.0
+              # (when release_type=minor, which it should be for a 1st
+              # release). vol2 has no legacy tag history to inherit from.
+              PREV_VOL2=$(latest_for "vol2" "vol2-v0.0.0")
+              echo "📊 vol2: latest = $PREV_VOL2"
+            fi
+            NEW_VOL2=$(bump "vol2" "$PREV_VOL2")
+            echo "🎯 vol2: new    = $NEW_VOL2"
+          fi
 
-          # Split version into components
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NUM"
+          # --------------------------- summary string -----------------------
+          # Backwards-compatible `new_version` for the many downstream
+          # references that just want to print "what we're shipping".
+          if [ -n "$NEW_VOL1" ] && [ -n "$NEW_VOL2" ]; then
+            NEW_SUMMARY="${NEW_VOL1}+${NEW_VOL2}"
+            PREV_SUMMARY="${PREV_VOL1}+${PREV_VOL2}"
+          elif [ -n "$NEW_VOL1" ]; then
+            NEW_SUMMARY="$NEW_VOL1"
+            PREV_SUMMARY="$PREV_VOL1"
+          elif [ -n "$NEW_VOL2" ]; then
+            NEW_SUMMARY="$NEW_VOL2"
+            PREV_SUMMARY="$PREV_VOL2"
+          else
+            echo "❌ deploy_target=$DEPLOY_TARGET produced no per-volume bumps"
+            exit 1
+          fi
 
-          # Handle empty or invalid versions
-          MAJOR=${MAJOR:-0}
-          MINOR=${MINOR:-0}
-          PATCH=${PATCH:-0}
+          echo ""
+          echo "🏁 Summary: $NEW_SUMMARY (prev: $PREV_SUMMARY)"
 
-          echo "📊 Previous version components: $MAJOR.$MINOR.$PATCH"
+          {
+            echo "new_version=$NEW_SUMMARY"
+            echo "previous_version=$PREV_SUMMARY"
+            echo "release_type=$RELEASE_TYPE"
+            echo "new_vol1_version=$NEW_VOL1"
+            echo "new_vol2_version=$NEW_VOL2"
+            echo "previous_vol1_version=$PREV_VOL1"
+            echo "previous_vol2_version=$PREV_VOL2"
+          } >> "$GITHUB_OUTPUT"
 
-          # Calculate new version based on release type
-          case "${{ github.event.inputs.release_type }}" in
-            "major")
-              NEW_MAJOR=$((MAJOR + 1))
-              NEW_MINOR=0
-              NEW_PATCH=0
-              ;;
-            "minor")
-              NEW_MAJOR=$MAJOR
-              NEW_MINOR=$((MINOR + 1))
-              NEW_PATCH=0
-              ;;
-            "patch")
-              NEW_MAJOR=$MAJOR
-              NEW_MINOR=$MINOR
-              NEW_PATCH=$((PATCH + 1))
-              ;;
-          esac
+      - name: 🛡️ No-downgrade guard (per-volume)
+        env:
+          # Step `run:` blocks don't inherit shell variables across steps;
+          # surface the per-volume outputs as env so the guard can read them.
+          NEW_VOL1: ${{ steps.version.outputs.new_vol1_version }}
+          NEW_VOL2: ${{ steps.version.outputs.new_vol2_version }}
+        run: |
+          # ----------------------------------------------------------------
+          # No-downgrade guard.
+          #
+          # The version-bump step computes NEW_VOL{1,2} from the latest
+          # vol{1,2}-v* tag (with a legacy/zero-seed fallback for first
+          # releases). When the per-volume index.qmd doi has been edited
+          # ahead of the tags — for example vol2 is currently displaying
+          # `doi: "v0.5.1"` inherited from the legacy single-volume era —
+          # the auto-computed value can be LOWER than what the source
+          # already shows, and the downstream sed step would silently
+          # rewrite the doi to the lower version.
+          #
+          # Concrete failure modes this guard prevents:
+          #   - vol2: index-vol2.qmd doi="v0.5.1", no vol2-v* tag exists,
+          #           release_type=patch → workflow computes vol2-v0.0.1
+          #           → sed rewrites doi to "v0.0.1" → the public welcome
+          #           page silently regresses from v0.5.1 to v0.0.1.
+          #   - any volume where someone manually edited doi past the
+          #           latest tag and then ran patch/minor against the
+          #           older tag.
+          #
+          # The guard refuses to proceed if the bare planned version is
+          # not >= the bare doi already in EITHER per-volume index.qmd.
+          # Equality is allowed (no-op write); strictly less is blocked.
+          #
+          # Fix when this trips:
+          #   - If the doi in index-vol{N}.qmd is correct, request the
+          #     matching version: re-run with previous_version pointing
+          #     at the right tag (or seed a tag at the displayed version
+          #     and re-run).
+          #   - If the doi is stale, edit it down to match the latest
+          #     tag and re-run.
+          # ----------------------------------------------------------------
 
-          NEW_VERSION="book-v$NEW_MAJOR.$NEW_MINOR.$NEW_PATCH"
-          echo "🎯 New version: $NEW_VERSION (${{ github.event.inputs.release_type }} release)"
-          echo "📋 Description: ${{ github.event.inputs.description }}"
+          # sort -V puts the higher semver last
+          semver_lt() {
+            # returns 0 (true) if $1 < $2 strictly
+            local a="$1" b="$2"
+            [ "$a" = "$b" ] && return 1
+            local highest
+            highest=$(printf '%s\n%s\n' "$a" "$b" | sort -V | tail -n1)
+            [ "$highest" = "$b" ]
+          }
 
-          # Export for other steps
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "release_type=${{ github.event.inputs.release_type }}" >> $GITHUB_OUTPUT
-          echo "previous_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          read_doi() {
+            local f="$1"
+            [ -f "$f" ] || { echo ""; return; }
+            grep -E '^[[:space:]]*doi:[[:space:]]*"' "$f" \
+              | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' \
+              | sed -E 's/^v//'
+          }
+
+          check_volume() {
+            # check_volume <vol-tag>  e.g. vol1-v0.6.0
+            local new_tag="$1" prefix bare doi_bare doi_raw f
+            [ -z "$new_tag" ] && return 0   # not in scope this run
+            prefix="${new_tag%%-*}"        # vol1 or vol2
+            bare="${new_tag#${prefix}-v}"  # X.Y.Z
+            f="${{ vars.BOOK_QUARTO }}/index-${prefix}.qmd"
+
+            if [ ! -f "$f" ]; then
+              echo "⚠️ $f missing — skipping guard for $prefix (PR-6 not deployed?)."
+              return 0
+            fi
+
+            doi_bare=$(read_doi "$f")
+            doi_raw="v${doi_bare}"
+            echo "📂 $prefix source-of-truth (${f##*/}): $doi_raw"
+            echo "🎯 $prefix planned new version:        v$bare"
+
+            if [ -z "$doi_bare" ]; then
+              echo "❌ Could not read doi from $f — refusing to proceed."
+              return 1
+            fi
+
+            if semver_lt "$bare" "$doi_bare"; then
+              echo ""
+              echo "❌ DOWNGRADE BLOCKED for $prefix"
+              echo "   ${f##*/} doi is v$doi_bare but this run would write v$bare."
+              echo ""
+              echo "   This usually means index-${prefix}.qmd was edited past"
+              echo "   the latest ${prefix}-v* tag, or no ${prefix}-v* tag"
+              echo "   exists yet and the auto-seeded baseline is lower than"
+              echo "   what readers currently see."
+              echo ""
+              echo "   To proceed, either:"
+              echo "     1. Run with previous_version=${prefix}-v$doi_bare so the"
+              echo "        next bump starts from the displayed version, or"
+              echo "     2. Edit index-${prefix}.qmd doi down to match the"
+              echo "        latest ${prefix}-v* tag and re-run."
+              return 1
+            fi
+
+            echo "✅ $prefix planned v$bare ≥ source v$doi_bare — allowed."
+            return 0
+          }
+
+          rc=0
+          check_volume "$NEW_VOL1" || rc=1
+          check_volume "$NEW_VOL2" || rc=1
+          exit "$rc"
 
   pre-flight-checks:
     name: '🛫 Pre-Flight Validation'
@@ -412,7 +653,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -550,41 +791,82 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📝 Update Version in index.qmd
+      - name: 📝 Update per-volume version in index.qmd
         run: |
-          echo "📝 Updating version number in ${{ vars.BOOK_QUARTO }}/index.qmd..."
-          echo "🎯 This automatically updates the version displayed on the website"
-          echo "🔗 The version links to GitHub releases via assets/scripts/version-link.js"
-          echo ""
+          # The volume version display lives in TWO places per volume:
+          #   index-vol{N}.qmd                 (project-root, renders /book/vol{N}/index.html)
+          #   contents/vol{N}/index.qmd        (deep, renders /book/vol{N}/contents/vol{N}/index.html)
+          # Both have a `doi: "vX.Y.Z"` line that surfaces in the title block,
+          # and version-link.js picks up the v\d+\.\d+\.\d+ string to hyperlink
+          # it to the releases page. The deep file remains the canonical
+          # sidebar "Volume home"; the root file is what the public URL hits.
+          #
+          # We MUST update both — otherwise the publicly-rendered welcome page
+          # at /book/vol{N}/ would display a stale version after the publish.
+          # The bare "vX.Y.Z" form (no `vol{N}-` prefix) is what readers see;
+          # the per-volume git tag itself uses the vol{N}-v prefix.
 
-          # Switch to dev branch first to update the file
+          NEW_VOL1="${{ needs.validate-inputs.outputs.new_vol1_version }}"
+          NEW_VOL2="${{ needs.validate-inputs.outputs.new_vol2_version }}"
+
           git checkout dev
           git pull origin dev
 
-          # Find and update the doi line with the new version
-          # The doi field is repurposed to show version (with custom label "Version")
-          # JavaScript makes it link to releases page instead of DOI registry
-          sed -i "s|doi: \".*\"|doi: \"${{ needs.validate-inputs.outputs.new_version }}\"|g" ${{ vars.BOOK_QUARTO }}/index.qmd
+          UPDATED_FILES=()
 
-          echo "✅ Version updated to ${{ needs.validate-inputs.outputs.new_version }}"
-          echo "📄 Updated line:"
-          cat ${{ vars.BOOK_QUARTO }}/index.qmd | grep "doi:" || echo "Could not verify doi field"
+          # bump_volume_doi <bare-version> <file...>
+          # Tolerates a missing file (warn only) so a future config change
+          # that removes one of the surfaces doesn't fail the publish.
+          bump_volume_doi() {
+            local bare="$1"; shift
+            for f in "$@"; do
+              if [ ! -f "$f" ]; then
+                echo "⚠️ skipping (not found): $f"
+                continue
+              fi
+              echo "📝 setting doi → $bare in $f"
+              sed -i "s|doi: \".*\"|doi: \"$bare\"|g" "$f"
+              grep "doi:" "$f" || echo "⚠️ no doi: line found in $f"
+              UPDATED_FILES+=("$f")
+            done
+          }
 
-          # Commit the version update
+          if [ -n "$NEW_VOL1" ]; then
+            BARE="${NEW_VOL1#vol1-}"   # strip "vol1-" → "vX.Y.Z"
+            bump_volume_doi "$BARE" \
+              "${{ vars.BOOK_QUARTO }}/index-vol1.qmd" \
+              "${{ vars.BOOK_QUARTO }}/contents/vol1/index.qmd"
+          fi
+
+          if [ -n "$NEW_VOL2" ]; then
+            BARE="${NEW_VOL2#vol2-}"
+            bump_volume_doi "$BARE" \
+              "${{ vars.BOOK_QUARTO }}/index-vol2.qmd" \
+              "${{ vars.BOOK_QUARTO }}/contents/vol2/index.qmd"
+          fi
+
+          if [ "${#UPDATED_FILES[@]}" -eq 0 ]; then
+            echo "ℹ️ No per-volume index.qmd to update for this deploy_target."
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add ${{ vars.BOOK_QUARTO }}/index.qmd
-          git commit -m "chore: update version to ${{ needs.validate-inputs.outputs.new_version }}" || echo "No changes to commit"
-          git push origin dev
+          git add "${UPDATED_FILES[@]}"
+          if git diff --cached --quiet; then
+            echo "✅ Volume index.qmd files already at target version — nothing to commit."
+            exit 0
+          fi
 
-          echo "✅ Version committed to dev branch"
-          echo "🔄 Next step: merge-to-main will include this version update"
+          git commit -m "chore: bump volume version(s) to ${{ needs.validate-inputs.outputs.new_version }}"
+          git push origin dev
+          echo "✅ Version commit pushed to dev. merge-to-main will pick it up."
 
   merge-to-main:
     name: '🔄 Merge to Main'
@@ -595,7 +877,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -728,7 +1010,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -752,6 +1034,7 @@ jobs:
       build_html: true     # HTML + PDF + EPUB for production
       build_pdf: true
       build_epub: true
+      build_target: all
       target: main
       container_registry: 'ghcr.io'
       container_tag: 'latest'
@@ -766,7 +1049,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -783,38 +1066,48 @@ jobs:
 
           echo "✅ Synced with latest main branch"
 
-      - name: 🏷️ Create Release Tag
+      - name: 🏷️ Create per-volume release tag(s)
         run: |
-          echo "🏷️ Creating release tag ${{ needs.validate-inputs.outputs.new_version }}..."
-          echo "✅ Build AND deployment completed successfully - safe to create release tag"
+          # Tag each volume independently. We REFUSE to retag (no force-
+          # delete on remote) because that would silently overwrite a
+          # previously-shipped release; if a tag already exists for the
+          # version we're trying to ship, that's a maintainer error and
+          # the publish should fail loudly.
 
-          # Check if tag already exists locally
-          if git tag -l "${{ needs.validate-inputs.outputs.new_version }}" | grep -q "${{ needs.validate-inputs.outputs.new_version }}"; then
-            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists locally"
-            echo "🔄 Removing existing tag to recreate it..."
-            git tag -d ${{ needs.validate-inputs.outputs.new_version }}
-          fi
+          NEW_VOL1="${{ needs.validate-inputs.outputs.new_vol1_version }}"
+          NEW_VOL2="${{ needs.validate-inputs.outputs.new_vol2_version }}"
+          DESCRIPTION="${{ github.event.inputs.description }}"
 
-          # Check if tag exists on remote
-          if git ls-remote --tags origin | grep -q "refs/tags/${{ needs.validate-inputs.outputs.new_version }}$"; then
-            echo "⚠️ Tag ${{ needs.validate-inputs.outputs.new_version }} already exists on remote"
-            echo "🔄 Removing remote tag to recreate it..."
-            git push origin --delete ${{ needs.validate-inputs.outputs.new_version }}
-          fi
+          create_tag() {
+            local tag="$1"
+            local label="$2"
+            [ -z "$tag" ] && return 0
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+               || git ls-remote --tags origin | grep -q "refs/tags/${tag}$"; then
+              echo "❌ Tag $tag already exists. Refusing to overwrite a"
+              echo "   previously-shipped release. If this is intentional,"
+              echo "   delete the tag manually first."
+              exit 1
+            fi
+            echo "🏷️ Creating $label tag: $tag"
+            git tag -a "$tag" -m "Release $tag: $DESCRIPTION"
+            git push origin "$tag"
+            echo "✅ Pushed $tag"
+          }
 
-          # Create the tag on the latest main commit
-          git tag -a ${{ needs.validate-inputs.outputs.new_version }} -m "Release ${{ needs.validate-inputs.outputs.new_version }}: ${{ github.event.inputs.description }}"
-          echo "✅ Tag created successfully!"
+          create_tag "$NEW_VOL1" "Volume I"
+          create_tag "$NEW_VOL2" "Volume II"
 
-      - name: 🚀 Push tag for release tracking
+      - name: 📋 Tag summary
         run: |
-          echo "🚀 Pushing release tag for version tracking..."
-          git push origin ${{ needs.validate-inputs.outputs.new_version }}
-
-          echo "✅ Release tag pushed successfully!"
-          echo "🏷️ Tag: ${{ needs.validate-inputs.outputs.new_version }}"
-          echo "📋 Description: ${{ github.event.inputs.description }}"
-          echo "📊 This tag marks a successful build and tested release"
+          echo "## 🏷️ Release tags created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.validate-inputs.outputs.new_vol1_version }}" ] && \
+            echo "- **Volume I:**  \`${{ needs.validate-inputs.outputs.new_vol1_version }}\`" >> $GITHUB_STEP_SUMMARY
+          [ -n "${{ needs.validate-inputs.outputs.new_vol2_version }}" ] && \
+            echo "- **Volume II:** \`${{ needs.validate-inputs.outputs.new_vol2_version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Description: ${{ github.event.inputs.description }}" >> $GITHUB_STEP_SUMMARY
 
   download-and-deploy-artifacts:
     name: '📦 Download Artifacts & Deploy to GitHub Pages'
@@ -822,6 +1115,9 @@ jobs:
     timeout-minutes: 15
     needs: call-production-build
     if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
     permissions:
       contents: write # Allow write access to repository for gh-pages push
       pages: write    # Allow GitHub Pages deployment
@@ -829,184 +1125,185 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🔍 Validate API Contract
         run: |
           echo "🔍 Validating artifact names from API..."
-
-          HTML_ARTIFACT="${{ needs.call-production-build.outputs.linux_html_artifact }}"
-          PDF_ARTIFACT="${{ needs.call-production-build.outputs.linux_pdf_artifact }}"
-          EPUB_ARTIFACT="${{ needs.call-production-build.outputs.linux_epub_artifact }}"
-
-          echo "📄 HTML artifact name: '$HTML_ARTIFACT'"
-          echo "📑 PDF artifact name: '$PDF_ARTIFACT'"
-          echo "📚 EPUB artifact name: '$EPUB_ARTIFACT'"
-
-          # Fail explicitly if API didn't provide artifact names
-          if [ -z "$HTML_ARTIFACT" ]; then
-            echo "❌ CRITICAL: HTML artifact name not provided by build workflow API!"
-            echo "🔧 This indicates the workflow output contract is broken."
+          VOL1_HTML="${{ needs.call-production-build.outputs.linux_html_vol1_artifact }}"
+          VOL2_HTML="${{ needs.call-production-build.outputs.linux_html_vol2_artifact }}"
+          echo "📘 Vol1 HTML artifact: '$VOL1_HTML'"
+          echo "📙 Vol2 HTML artifact: '$VOL2_HTML'"
+          if [ -z "$VOL1_HTML" ] || [ -z "$VOL2_HTML" ]; then
+            echo "❌ CRITICAL: Volume artifact names missing from build workflow outputs"
             exit 1
           fi
+          echo "✅ API contract validated for volume artifacts"
 
-          if [ -z "$PDF_ARTIFACT" ]; then
-            echo "❌ CRITICAL: PDF artifact name not provided by build workflow API!"
-            echo "🔧 This indicates the workflow output contract is broken."
-            exit 1
-          fi
-
-          if [ -z "$EPUB_ARTIFACT" ]; then
-            echo "❌ CRITICAL: EPUB artifact name not provided by build workflow API!"
-            echo "🔧 This indicates the workflow output contract is broken."
-            exit 1
-          fi
-
-          echo "✅ API contract validated - all artifact names provided"
-
-      - name: 📦 Download HTML Artifacts
+      # =================================================================
+      # Volume I Artifacts (when deploy_target is vol1 or all)
+      # =================================================================
+      - name: 📦 Download Volume I HTML Artifacts
+        if: github.event.inputs.deploy_target == 'vol1' || github.event.inputs.deploy_target == 'all'
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.call-production-build.outputs.linux_html_artifact }}
-          path: ./html-temp
+          name: ${{ needs.call-production-build.outputs.linux_html_vol1_artifact }}
+          path: ./html-vol1-temp
+        continue-on-error: true
 
-      - name: 📦 Download PDF Artifacts
+      - name: 📦 Download Volume I PDF Artifacts
+        if: github.event.inputs.deploy_target == 'vol1' || github.event.inputs.deploy_target == 'all'
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.call-production-build.outputs.linux_pdf_artifact }}
-          path: ./pdf-temp
+          name: ${{ needs.call-production-build.outputs.linux_pdf_vol1_artifact }}
+          path: ./pdf-vol1-temp
+        continue-on-error: true
 
-      - name: 📦 Download EPUB Artifacts
+      - name: 📦 Download Volume I EPUB Artifacts
+        if: github.event.inputs.deploy_target == 'vol1' || github.event.inputs.deploy_target == 'all'
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.call-production-build.outputs.linux_epub_artifact }}
-          path: ./epub-temp
+          name: ${{ needs.call-production-build.outputs.linux_epub_vol1_artifact }}
+          path: ./epub-vol1-temp
+        continue-on-error: true
+
+      # =================================================================
+      # Volume II Artifacts (when deploy_target is vol2 or all)
+      # =================================================================
+      - name: 📦 Download Volume II HTML Artifacts
+        if: github.event.inputs.deploy_target == 'vol2' || github.event.inputs.deploy_target == 'all'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_html_vol2_artifact }}
+          path: ./html-vol2-temp
+        continue-on-error: true
+
+      - name: 📦 Download Volume II PDF Artifacts
+        if: github.event.inputs.deploy_target == 'vol2' || github.event.inputs.deploy_target == 'all'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_pdf_vol2_artifact }}
+          path: ./pdf-vol2-temp
+        continue-on-error: true
+
+      - name: 📦 Download Volume II EPUB Artifacts
+        if: github.event.inputs.deploy_target == 'vol2' || github.event.inputs.deploy_target == 'all'
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.call-production-build.outputs.linux_epub_vol2_artifact }}
+          path: ./epub-vol2-temp
         continue-on-error: true
 
       - name: 📋 Verify Downloaded Artifacts
         run: |
           echo "📦 Verifying downloaded artifacts..."
-
-          # Find HTML build directory - check if html-temp has content
-          if [ ! -d "html-temp" ] || [ -z "$(ls -A html-temp 2>/dev/null)" ]; then
-            echo "❌ HTML build directory not found or empty!"
-            echo "📊 HTML artifact contents:"
-            find html-temp -type f -o -type d | head -20
+          DEPLOY_TARGET="${{ github.event.inputs.deploy_target }}"
+          if [[ "$DEPLOY_TARGET" == "vol1" || "$DEPLOY_TARGET" == "all" ]] && [ ! -d "html-vol1-temp" ]; then
+            echo "❌ Required Volume I HTML artifact was not downloaded."
+            exit 1
+          fi
+          if [[ "$DEPLOY_TARGET" == "vol2" || "$DEPLOY_TARGET" == "all" ]] && [ ! -d "html-vol2-temp" ]; then
+            echo "❌ Required Volume II HTML artifact was not downloaded."
             exit 1
           fi
 
-          # Look for the actual HTML build structure
-          HTML_BUILD_DIR="html-temp"
-          if [ -d "html-temp/html" ]; then
-            HTML_BUILD_DIR="html-temp/html"
-            echo "✅ HTML build found in subdirectory: $HTML_BUILD_DIR"
-          else
-            echo "✅ HTML build found at root level: $HTML_BUILD_DIR"
-          fi
+          # =================================================================
+          # Prepare Volume I site (if artifacts exist)
+          # =================================================================
+          if [ -d "html-vol1-temp" ]; then
+            echo "🔄 Preparing Volume I site..."
+            mkdir -p vol1-site
 
-          echo "📊 HTML structure preview:"
-          ls -la "$HTML_BUILD_DIR" | head -5
-
-          # Find PDF file
-          PDF_FILE=$(find pdf-temp -name "Machine-Learning-Systems.pdf" -type f | head -1)
-          if [ -z "$PDF_FILE" ] || [ ! -f "$PDF_FILE" ]; then
-            echo "❌ PDF file not found in extracted artifacts!"
-            echo "📊 PDF artifact contents:"
-            find pdf-temp -type f -o -type d | head -20
-            exit 1
-          fi
-
-          echo "✅ PDF found: $PDF_FILE"
-          echo "📊 PDF size: $(du -h "$PDF_FILE" | cut -f1)"
-
-          # Find EPUB file if available
-          EPUB_FILE=""
-          if [ -d "epub-temp" ]; then
-            EPUB_FILE=$(find epub-temp -name "Machine-Learning-Systems.epub" -type f | head -1)
-            if [ -z "$EPUB_FILE" ] || [ ! -f "$EPUB_FILE" ]; then
-              # Try alternative EPUB filenames
-              EPUB_FILE=$(find epub-temp -name "*.epub" -type f | head -1)
-              if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
-                echo "✅ EPUB found (alternative name): $EPUB_FILE"
-                echo "📊 EPUB size: $(du -h "$EPUB_FILE" | cut -f1)"
-              else
-                echo "⚠️ EPUB file not found in extracted artifacts - will skip EPUB deployment"
-                EPUB_FILE=""
-              fi
+            # Find HTML content
+            if [ -d "html-vol1-temp/html-vol1" ]; then
+              cp -r html-vol1-temp/html-vol1/* vol1-site/
             else
-              echo "✅ EPUB found: $EPUB_FILE"
-              echo "📊 EPUB size: $(du -h "$EPUB_FILE" | cut -f1)"
+              cp -r html-vol1-temp/* vol1-site/
             fi
-          else
-            echo "⚠️ No EPUB artifact extracted - will skip EPUB deployment"
+
+            mkdir -p vol1-site/assets/downloads
+
+            # Copy Vol1 PDF if available (use exact name to avoid picking up figure PDFs)
+            VOL1_PDF=$(find pdf-vol1-temp -name "Machine-Learning-Systems-Vol1.pdf" -type f 2>/dev/null | head -1)
+            if [ -n "$VOL1_PDF" ] && [ -f "$VOL1_PDF" ]; then
+              cp "$VOL1_PDF" vol1-site/assets/downloads/Machine-Learning-Systems-Vol1.pdf
+              echo "  ✅ Vol1 PDF: Ready ($(du -h "$VOL1_PDF" | cut -f1))"
+            fi
+
+            # Copy Vol1 EPUB if available
+            VOL1_EPUB=$(find epub-vol1-temp -name "Machine-Learning-Systems-Vol1.epub" -type f 2>/dev/null | head -1)
+            if [ -n "$VOL1_EPUB" ] && [ -f "$VOL1_EPUB" ]; then
+              cp "$VOL1_EPUB" vol1-site/assets/downloads/Machine-Learning-Systems-Vol1.epub
+              echo "  ✅ Vol1 EPUB: Ready"
+            fi
+
+            echo "✅ Volume I site prepared"
           fi
 
-          # Prepare combined site
-          echo "🔄 Preparing combined HTML site with PDF and EPUB..."
-          mkdir -p combined-site
+          # =================================================================
+          # Prepare Volume II site (if artifacts exist)
+          # =================================================================
+          if [ -d "html-vol2-temp" ]; then
+            echo "🔄 Preparing Volume II site..."
+            mkdir -p vol2-site
 
-          # Copy HTML content
-          cp -r "$HTML_BUILD_DIR"/* combined-site/
+            # Find HTML content
+            if [ -d "html-vol2-temp/html-vol2" ]; then
+              cp -r html-vol2-temp/html-vol2/* vol2-site/
+            else
+              cp -r html-vol2-temp/* vol2-site/
+            fi
 
-          # Create assets and downloads directories
-          mkdir -p combined-site/assets/downloads
+            mkdir -p vol2-site/assets/downloads
 
-          # Copy PDF if available
-          if [ -n "$PDF_FILE" ] && [ -f "$PDF_FILE" ]; then
-            PDF_SIZE_MB=$(du -m "$PDF_FILE" | cut -f1)
-            echo "📊 PDF size: ${PDF_SIZE_MB}MB"
+            # Copy Vol2 PDF if available (use exact name to avoid picking up figure PDFs)
+            VOL2_PDF=$(find pdf-vol2-temp -name "Machine-Learning-Systems-Vol2.pdf" -type f 2>/dev/null | head -1)
+            if [ -n "$VOL2_PDF" ] && [ -f "$VOL2_PDF" ]; then
+              cp "$VOL2_PDF" vol2-site/assets/downloads/Machine-Learning-Systems-Vol2.pdf
+              echo "  ✅ Vol2 PDF: Ready ($(du -h "$VOL2_PDF" | cut -f1))"
+            fi
 
-            # Deploy PDF to both GitHub Pages and GitHub Release
-            cp "$PDF_FILE" combined-site/assets/downloads/Machine-Learning-Systems.pdf
-            echo "✅ PDF deployed to GitHub Pages (${PDF_SIZE_MB}MB)"
+            # Copy Vol2 EPUB if available
+            VOL2_EPUB=$(find epub-vol2-temp -name "Machine-Learning-Systems-Vol2.epub" -type f 2>/dev/null | head -1)
+            if [ -n "$VOL2_EPUB" ] && [ -f "$VOL2_EPUB" ]; then
+              cp "$VOL2_EPUB" vol2-site/assets/downloads/Machine-Learning-Systems-Vol2.epub
+              echo "  ✅ Vol2 EPUB: Ready"
+            fi
 
-            # Also copy PDF for GitHub release
-            cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
-            echo "✅ PDF prepared for release"
-          else
-            echo "❌ PDF file not found - skipping PDF deployment"
+            echo "✅ Volume II site prepared"
           fi
 
-          # Copy EPUB if available
-          if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
-            EPUB_SIZE_MB=$(du -m "$EPUB_FILE" | cut -f1)
-            echo "📊 EPUB size: ${EPUB_SIZE_MB}MB"
+          # =================================================================
+          # Landing page is rendered separately (see next step)
+          # =================================================================
+          echo "ℹ️ Landing page will be rendered in next step"
 
-            # Deploy EPUB to both GitHub Pages and GitHub Release
-            cp "$EPUB_FILE" combined-site/assets/downloads/Machine-Learning-Systems.epub
-            echo "✅ EPUB deployed to GitHub Pages (${EPUB_SIZE_MB}MB)"
+      - name: 🔧 Setup Quarto (for landing page)
+        if: github.event.inputs.deploy_target == 'all'
+        uses: quarto-dev/quarto-actions/setup@v2
 
-            # Also copy EPUB for GitHub release
-            cp "$EPUB_FILE" "Machine-Learning-Systems.epub"
-            echo "✅ EPUB prepared for release"
+      - name: 🏠 Build Landing Page
+        if: github.event.inputs.deploy_target == 'all'
+        run: |
+          if [ -d "site/landing" ] && [ -f "site/landing/index.qmd" ]; then
+            echo "🏗️ Rendering landing page with Quarto..."
+            cd site/landing
+            quarto render
+            echo "✅ Landing page rendered"
+            ls -la _build/
           else
-            echo "❌ EPUB file not found - skipping EPUB deployment"
-          fi
-
-          echo "📊 Combined site structure:"
-          ls -la combined-site/ | head -10
-          echo "📊 Assets directory:"
-          ls -la combined-site/assets/
-
-          # Summary of what was prepared
-          echo "📋 Asset preparation complete:"
-          if [ -f "Machine-Learning-Systems.pdf" ]; then
-            echo "  ✅ PDF: Ready for deployment"
-          else
-            echo "  ❌ PDF: Not available"
-          fi
-          if [ -f "Machine-Learning-Systems.epub" ]; then
-            echo "  ✅ EPUB: Ready for deployment"
-          else
-            echo "  ❌ EPUB: Not available"
+            echo "⚠️ Landing page source not found — will use redirect fallback"
           fi
 
       - name: 🚀 Deploy Combined Site to GitHub Pages (Production)
         run: |
-          echo "🚀 Deploying combined HTML + PDF + EPUB site to GitHub Pages..."
-          echo "🌐 Production URL: https://harvard-edge.github.io/cs249r_book/"
+          echo "🚀 Deploying to GitHub Pages..."
+          echo "🌐 Production URL: https://mlsysbook.ai/"
+          echo "📦 Deploy target: ${{ github.event.inputs.deploy_target }}"
+
+          DEPLOY_TARGET="${{ github.event.inputs.deploy_target }}"
 
           # Clone gh-pages branch
           git clone --depth=1 --branch=gh-pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages-repo
@@ -1018,18 +1315,16 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           # =================================================================
-          # SUBDIRECTORY DEPLOYMENT: Book deploys to /book/
+          # SUBDIRECTORY DEPLOYMENT STRUCTURE
           # =================================================================
-          # Each subsite has its own directory (no conflicts, no preservation needed):
-          #   /book/      - Main textbook (this workflow)
-          #   /tinytorch/ - TinyTorch framework (tinytorch-publish-live.yml)
-          #   /kits/      - Hardware Kits (kits-publish-live.yml)
-          #   /collabs/   - Collaborations (collabs-publish-live.yml)
+          # Each subsite has its own directory:
+          #   /           - Landing page (AI Engineering)
+          #   /book/vol1/ - Volume I
+          #   /book/vol2/ - Volume II
+          #   /tinytorch/ - TinyTorch framework
+          #   /kits/      - Hardware Kits
+          #   /labs/      - Labs
           # =================================================================
-
-          # Clear only the book/ subdirectory (preserves other subsites)
-          echo "🗑️ Clearing existing book/ directory..."
-          rm -rf book/
 
           # Clean up stale root-level files from old deployment structure
           echo "🧹 Removing stale root-level files..."
@@ -1043,10 +1338,67 @@ jobs:
           rm -rf .claude .github  # Remove symlinks and dev-only directories
           echo "✅ Stale files removed"
 
-          # Create book directory and copy new content
-          echo "📦 Deploying textbook to /book/..."
-          mkdir -p book
-          cp -r ../combined-site/* book/
+          # =================================================================
+          # Deploy Volume I to /book/vol1/ (if target is vol1 or all)
+          # =================================================================
+          if [[ "$DEPLOY_TARGET" == "vol1" || "$DEPLOY_TARGET" == "all" ]]; then
+            if [ -d "../vol1-site" ]; then
+              echo "📦 Deploying Volume I to /book/vol1/..."
+              rm -rf book/vol1/
+              mkdir -p book/vol1
+              cp -r ../vol1-site/* book/vol1/
+              echo "✅ Volume I deployed to /book/vol1/"
+            else
+              echo "⚠️ Volume I site not found - skipping"
+            fi
+          fi
+
+          # =================================================================
+          # Deploy Volume II to /book/vol2/ (if target is vol2 or all)
+          # =================================================================
+          if [[ "$DEPLOY_TARGET" == "vol2" || "$DEPLOY_TARGET" == "all" ]]; then
+            if [ -d "../vol2-site" ]; then
+              echo "📦 Deploying Volume II to /book/vol2/..."
+              rm -rf book/vol2/
+              mkdir -p book/vol2
+              cp -r ../vol2-site/* book/vol2/
+              echo "✅ Volume II deployed to /book/vol2/"
+            else
+              echo "⚠️ Volume II site not found - skipping"
+            fi
+          fi
+
+          # =================================================================
+          # Deploy Landing Page to root (if target is all)
+          # =================================================================
+          if [[ "$DEPLOY_TARGET" == "all" ]]; then
+            LANDING_BUILD="${{ github.workspace }}/site/landing/_build"
+            if [ -f "$LANDING_BUILD/index.html" ]; then
+              echo "📦 Deploying rendered landing page to root..."
+              # Copy all landing page output (HTML, CSS, JS, covers, assets)
+              # but preserve existing subsite directories (book/, kits/, etc.)
+              for item in "$LANDING_BUILD"/*; do
+                basename="$(basename "$item")"
+                # Skip site_libs — the gh-pages root already has its own from the book
+                if [[ "$basename" == "site_libs" ]]; then continue; fi
+                # Skip files that would conflict with subsite directories
+                if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|about|community|newsletter)$ ]]; then
+                  continue
+                fi
+                cp -r "$item" .
+              done
+              echo "✅ Landing page deployed to root"
+            else
+              echo "⚠️ Landing page build not found — creating redirect to /book/vol1/"
+              echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/vol1/"><link rel="canonical" href="https://mlsysbook.ai/book/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/vol1/">ML Systems Volume I</a>...</p></body></html>' > index.html
+            fi
+          else
+            # For non-all deployments, keep existing root or create redirect
+            if [ ! -f "index.html" ]; then
+              echo "📦 Creating root redirect to /book/vol1/..."
+              echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/vol1/"><link rel="canonical" href="https://mlsysbook.ai/book/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/vol1/">ML Systems Volume I</a>...</p></body></html>' > index.html
+            fi
+          fi
 
           # Ensure CNAME file exists at root for custom domain
           if [ ! -f "CNAME" ]; then
@@ -1059,27 +1411,20 @@ jobs:
           # Ensure .nojekyll exists at root
           touch .nojekyll
 
-          # Create root index.html that redirects to /book/
-          cat > index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta http-equiv="refresh" content="0;url=/book/">
-            <link rel="canonical" href="https://mlsysbook.ai/book/">
-            <title>Redirecting to ML Systems Textbook...</title>
-          </head>
-          <body>
-            <p>Redirecting to <a href="/book/">ML Systems Textbook</a>...</p>
-          </body>
-          </html>
-          EOF
-          echo "✅ Root redirect to /book/ created"
-
           echo "📊 Deployed content structure:"
           ls -la | head -15
-          echo "📊 Book directory contents:"
-          ls -la book/ | head -10
+          if [ -d "book" ]; then
+            echo "📊 Book directory contents:"
+            ls -la book/ | head -10
+          fi
+          if [ -d "vol1" ]; then
+            echo "📊 Vol1 directory contents:"
+            ls -la vol1/ | head -10
+          fi
+          if [ -d "vol2" ]; then
+            echo "📊 Vol2 directory contents:"
+            ls -la vol2/ | head -10
+          fi
 
           # Add all files to git
           git add .
@@ -1105,8 +1450,8 @@ jobs:
           Combined HTML site with PDF and EPUB assets for download.
 
           - HTML: Interactive web textbook at /book/
-          - PDF: /book/assets/downloads/Machine-Learning-Systems.pdf
-          - EPUB: /book/assets/downloads/Machine-Learning-Systems.epub (if available)
+          - Vol1 PDF/EPUB: /book/vol1/assets/downloads/
+          - Vol2 PDF/EPUB: /book/vol2/assets/downloads/
           - Release: ${{ needs.validate-inputs.outputs.new_version }}
           - Files updated: $CHANGED_FILES"
 
@@ -1158,34 +1503,55 @@ jobs:
           echo "  - Root (redirects to /book/): https://mlsysbook.ai/"
           echo ""
           echo "📄 Direct Asset Links:"
-          echo "  - PDF: https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf"
-          echo "  - EPUB: https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub"
+          echo "  - Vol1 PDF: https://mlsysbook.ai/book/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf"
+          echo "  - Vol1 EPUB: https://mlsysbook.ai/book/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub"
+          echo "  - Vol2 PDF: https://mlsysbook.ai/book/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf"
+          echo "  - Vol2 EPUB: https://mlsysbook.ai/book/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub"
           echo ""
           echo "⏰ Note: Changes may take 1-5 minutes to appear due to CDN caching."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📤 Upload PDF Artifact for GitHub Release
-        uses: actions/upload-artifact@v4
-        with:
-          name: pdf-artifact
-          path: Machine-Learning-Systems.pdf
-
-      - name: 📤 Upload EPUB Artifact for GitHub Release
-        if: success()
+      - name: 📤 Collect release assets (PDF + EPUB per volume)
         run: |
-          if [ -f "Machine-Learning-Systems.epub" ]; then
-            echo "✅ EPUB file found for upload"
-          else
-            echo "⚠️ No EPUB file found - creating empty artifact to prevent workflow failure"
-            touch Machine-Learning-Systems.epub
+          mkdir -p release-assets
+
+          # Collect Vol1 PDF (use exact name to avoid figure PDFs in artifact)
+          VOL1_PDF=$(find pdf-vol1-temp -name "Machine-Learning-Systems-Vol1.pdf" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL1_PDF" ]; then
+            cp "$VOL1_PDF" release-assets/Machine-Learning-Systems-Vol1.pdf
+            echo "✅ Vol1 PDF: $(du -h "$VOL1_PDF" | cut -f1)"
           fi
 
-      - name: 📤 Upload EPUB Artifact
-        uses: actions/upload-artifact@v4
+          # Collect Vol2 PDF
+          VOL2_PDF=$(find pdf-vol2-temp -name "Machine-Learning-Systems-Vol2.pdf" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL2_PDF" ]; then
+            cp "$VOL2_PDF" release-assets/Machine-Learning-Systems-Vol2.pdf
+            echo "✅ Vol2 PDF: $(du -h "$VOL2_PDF" | cut -f1)"
+          fi
+
+          # Collect Vol1 EPUB
+          VOL1_EPUB=$(find epub-vol1-temp -name "Machine-Learning-Systems-Vol1.epub" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL1_EPUB" ]; then
+            cp "$VOL1_EPUB" release-assets/Machine-Learning-Systems-Vol1.epub
+            echo "✅ Vol1 EPUB: $(du -h "$VOL1_EPUB" | cut -f1)"
+          fi
+
+          # Collect Vol2 EPUB
+          VOL2_EPUB=$(find epub-vol2-temp -name "Machine-Learning-Systems-Vol2.epub" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL2_EPUB" ]; then
+            cp "$VOL2_EPUB" release-assets/Machine-Learning-Systems-Vol2.epub
+            echo "✅ Vol2 EPUB: $(du -h "$VOL2_EPUB" | cut -f1)"
+          fi
+
+          echo "📦 Release assets:"
+          ls -la release-assets/
+
+      - name: 📤 Upload release assets artifact
+        uses: actions/upload-artifact@v6
         with:
-          name: epub-artifact
-          path: Machine-Learning-Systems.epub
+          name: release-assets
+          path: release-assets/
           if-no-files-found: warn
 
   generate-release-notes:
@@ -1197,15 +1563,15 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📄 Download PDF from previous job
-        uses: actions/download-artifact@v4
+      - name: 📄 Download release assets from previous job
+        uses: actions/download-artifact@v7
         with:
-          name: pdf-artifact
-          path: ./
+          name: release-assets
+          path: ./release-assets
 
       - name: 📝 Generate Release Notes
         run: |
@@ -1455,13 +1821,13 @@ jobs:
           fi
 
       - name: 📤 Upload Release Notes Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-notes
           path: release_notes_${{ needs.validate-inputs.outputs.new_version }}.md
 
       - name: 📤 Upload Git Log Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: git-changes
           path: |
@@ -1478,24 +1844,18 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📄 Download PDF from previous job
-        uses: actions/download-artifact@v4
+      - name: 📦 Download release assets
+        uses: actions/download-artifact@v7
         with:
-          name: pdf-artifact
-          path: ./
-
-      - name: 📚 Download EPUB from previous job
-        uses: actions/download-artifact@v4
-        with:
-          name: epub-artifact
-          path: ./
+          name: release-assets
+          path: ./release-assets
 
       - name: 📝 Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: ./
@@ -1567,82 +1927,56 @@ jobs:
             exit 1
           fi
 
-      - name: 📄 Upload PDF to Release Assets
+      - name: 📦 Upload release assets (PDF + EPUB per volume)
         run: |
-          echo "📄 Uploading PDF to release assets..."
+          echo "📦 Uploading release assets..."
+          echo "📋 Available assets:"
+          ls -la release-assets/
 
-          if [ ! -f "Machine-Learning-Systems.pdf" ]; then
-            echo "❌ PDF file not found!"
-            exit 1
-          fi
+          UPLOAD_FAILURES=0
 
-          echo "📊 PDF size: $(du -h Machine-Learning-Systems.pdf | cut -f1)"
+          for ASSET_FILE in release-assets/*; do
+            [ -f "$ASSET_FILE" ] || continue
+            [ -s "$ASSET_FILE" ] || { echo "⚠️ Skipping empty file: $ASSET_FILE"; continue; }
 
-          # Upload the PDF to the release
-          UPLOAD_RESPONSE=$(curl -s \
-            -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/pdf" \
-            --data-binary @Machine-Learning-Systems.pdf \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.pdf")
+            ASSET_NAME=$(basename "$ASSET_FILE")
+            ASSET_EXT="${ASSET_NAME##*.}"
+            echo ""
+            echo "📤 Uploading $ASSET_NAME ($(du -h "$ASSET_FILE" | cut -f1))..."
 
-          echo "📊 Upload Response:"
-          echo "$UPLOAD_RESPONSE" | jq '.'
+            # Set content type based on extension
+            case "$ASSET_EXT" in
+              pdf)  CONTENT_TYPE="application/pdf" ;;
+              epub) CONTENT_TYPE="application/epub+zip" ;;
+              *)    CONTENT_TYPE="application/octet-stream" ;;
+            esac
 
-          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+            UPLOAD_RESPONSE=$(curl -s \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: $CONTENT_TYPE" \
+              --data-binary @"$ASSET_FILE" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=$ASSET_NAME")
 
-          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
-            echo "✅ PDF uploaded successfully to release!"
-            echo "📊 Asset ID: $UPLOAD_ID"
-            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf"
+            UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+
+            if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
+              echo "✅ $ASSET_NAME uploaded (Asset ID: $UPLOAD_ID)"
+              echo "🔗 https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/$ASSET_NAME"
+            else
+              echo "⚠️ Failed to upload $ASSET_NAME"
+              echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
+              UPLOAD_FAILURES=$((UPLOAD_FAILURES + 1))
+            fi
+          done
+
+          if [ "$UPLOAD_FAILURES" -gt 0 ]; then
+            echo ""
+            echo "⚠️ $UPLOAD_FAILURES asset(s) failed to upload"
           else
-            echo "❌ Failed to upload PDF to release!"
-            echo "📊 Error details:"
-            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
-            exit 1
-          fi
-
-      - name: 📚 Upload EPUB to Release Assets
-        run: |
-          echo "📚 Checking for EPUB file to upload..."
-
-          if [ ! -f "Machine-Learning-Systems.epub" ]; then
-            echo "⚠️ EPUB file not found - skipping EPUB upload"
-            exit 0
-          fi
-
-          # Check if it's an empty file (created as placeholder)
-          if [ ! -s "Machine-Learning-Systems.epub" ]; then
-            echo "⚠️ EPUB file is empty (placeholder) - skipping EPUB upload"
-            exit 0
-          fi
-
-          echo "📚 Uploading EPUB to release assets..."
-          echo "📊 EPUB size: $(du -h Machine-Learning-Systems.epub | cut -f1)"
-
-          # Upload the EPUB to the release
-          UPLOAD_RESPONSE=$(curl -s \
-            -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/epub+zip" \
-            --data-binary @Machine-Learning-Systems.epub \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.epub")
-
-          echo "📊 Upload Response:"
-          echo "$UPLOAD_RESPONSE" | jq '.'
-
-          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
-
-          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
-            echo "✅ EPUB uploaded successfully to release!"
-            echo "📊 Asset ID: $UPLOAD_ID"
-            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub"
-          else
-            echo "⚠️ Failed to upload EPUB to release (continuing anyway)!"
-            echo "📊 Error details:"
-            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
+            echo ""
+            echo "✅ All release assets uploaded successfully"
           fi
 
   summary:
@@ -1698,17 +2032,17 @@ jobs:
           echo "- 🔥 [TinyTorch Framework](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
           echo "- ⚙️ [Hardware Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 [Download EPUB eBook](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Direct PDF Access](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 [Direct EPUB Access](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download Vol1 PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol1.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download Vol2 PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol2.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Download Vol1 EPUB](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol1.epub)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Download Vol2 EPUB](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol2.epub)" >> $GITHUB_STEP_SUMMARY
           echo "- 🎓 [Share with Students](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Build Status:" >> $GITHUB_STEP_SUMMARY
           echo "- 📋 **Quarto Build Container Workflow**: Should be running/completed" >> $GITHUB_STEP_SUMMARY
           echo "- 🏗️ **Quarto Build**: HTML + PDF + EPUB generation" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 **PDF Assets**: Available at `/assets/downloads/Machine-Learning-Systems.pdf`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 **EPUB Assets**: Available at `/assets/downloads/Machine-Learning-Systems.epub`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Assets**: Available at \`/book/vol{1,2}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 **EPUB Assets**: Available at \`/book/vol{1,2}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
 
   cleanup-on-failure:
     name: '🧹 Cleanup Failed Release'
@@ -1719,7 +2053,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -1819,7 +2153,7 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}

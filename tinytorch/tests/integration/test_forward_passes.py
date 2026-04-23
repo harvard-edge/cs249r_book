@@ -9,6 +9,7 @@ This validates the "plumbing" - data flows through without errors.
 import sys
 import os
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Add project root to path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
@@ -105,7 +106,7 @@ class ForwardPassTester:
 def test_linear_forward():
     """Test Linear layer forward pass."""
     layer = Linear(10, 5)
-    x = Tensor(np.random.randn(3, 10))
+    x = Tensor(rng.standard_normal((3, 10)))
     y = layer(x)
     assert y.shape == (3, 5)
 
@@ -113,7 +114,7 @@ def test_linear_forward():
 def test_conv2d_forward():
     """Test Conv2d forward pass."""
     layer = Conv2d(3, 16, kernel_size=3)
-    x = Tensor(np.random.randn(2, 3, 32, 32))
+    x = Tensor(rng.standard_normal((2, 3, 32, 32)))
     y = layer(x)
     assert y.shape == (2, 16, 30, 30)
 
@@ -121,7 +122,7 @@ def test_conv2d_forward():
 def test_conv2d_with_padding():
     """Test Conv2d with padding."""
     layer = Conv2d(3, 16, kernel_size=3, padding=1)
-    x = Tensor(np.random.randn(2, 3, 32, 32))
+    x = Tensor(rng.standard_normal((2, 3, 32, 32)))
     y = layer(x)
     assert y.shape == (2, 16, 32, 32)  # Same size with padding=1
 
@@ -129,7 +130,7 @@ def test_conv2d_with_padding():
 def test_conv2d_with_stride():
     """Test Conv2d with stride."""
     layer = Conv2d(3, 16, kernel_size=3, stride=2)
-    x = Tensor(np.random.randn(2, 3, 32, 32))
+    x = Tensor(rng.standard_normal((2, 3, 32, 32)))
     y = layer(x)
     assert y.shape == (2, 16, 15, 15)  # (32-3)/2 + 1 = 15
 
@@ -144,7 +145,7 @@ def test_relu_forward():
 
 def test_sigmoid_forward():
     """Test Sigmoid activation."""
-    x = Tensor(np.random.randn(2, 3))
+    x = Tensor(rng.standard_normal((2, 3)))
     y = F.sigmoid(x)
     assert y.shape == x.shape
     # Check sigmoid bounds
@@ -153,7 +154,7 @@ def test_sigmoid_forward():
 
 def test_tanh_forward():
     """Test Tanh activation."""
-    x = Tensor(np.random.randn(2, 3))
+    x = Tensor(rng.standard_normal((2, 3)))
     y = F.tanh(x)
     assert y.shape == x.shape
     # Check tanh bounds
@@ -162,7 +163,7 @@ def test_tanh_forward():
 
 def test_softmax_forward():
     """Test Softmax activation."""
-    x = Tensor(np.random.randn(2, 10))
+    x = Tensor(rng.standard_normal((2, 10)))
     y = F.softmax(x, dim=-1)
     assert y.shape == x.shape
     # Check softmax sums to 1
@@ -173,14 +174,14 @@ def test_softmax_forward():
 # Test pooling operations
 def test_maxpool2d_forward():
     """Test MaxPool2d."""
-    x = Tensor(np.random.randn(2, 16, 32, 32))
+    x = Tensor(rng.standard_normal((2, 16, 32, 32)))
     y = F.max_pool2d(x, kernel_size=2)
     assert y.shape == (2, 16, 16, 16)
 
 
 def test_avgpool2d_forward():
     """Test AvgPool2d."""
-    x = Tensor(np.random.randn(2, 16, 32, 32))
+    x = Tensor(rng.standard_normal((2, 16, 32, 32)))
     y = F.avg_pool2d(x, kernel_size=2)
     assert y.shape == (2, 16, 16, 16)
 
@@ -188,14 +189,14 @@ def test_avgpool2d_forward():
 # Test reshape operations
 def test_flatten_forward():
     """Test flatten operation."""
-    x = Tensor(np.random.randn(2, 3, 4, 5))
+    x = Tensor(rng.standard_normal((2, 3, 4, 5)))
     y = F.flatten(x, start_dim=1)
     assert y.shape == (2, 60)  # 3*4*5 = 60
 
 
 def test_reshape_forward():
     """Test reshape operation."""
-    x = Tensor(np.random.randn(2, 3, 4))
+    x = Tensor(rng.standard_normal((2, 3, 4)))
     y = x.reshape(6, 4)
     assert y.shape == (6, 4)
 
@@ -204,7 +205,7 @@ def test_reshape_forward():
 def test_layernorm_forward():
     """Test LayerNorm."""
     layer = LayerNorm(128)
-    x = Tensor(np.random.randn(2, 10, 128))
+    x = Tensor(rng.standard_normal((2, 10, 128)))
     y = layer(x)
     assert y.shape == x.shape
 
@@ -215,7 +216,7 @@ def test_batchnorm_forward():
     try:
         from tinytorch.nn import BatchNorm1d
         layer = BatchNorm1d(128)
-        x = Tensor(np.random.randn(32, 128))
+        x = Tensor(rng.standard_normal((32, 128)))
         y = layer(x)
         assert y.shape == x.shape
     except ImportError:
@@ -232,7 +233,7 @@ def test_sequential_forward():
         ReLU(),
         Linear(30, 5)
     ])
-    x = Tensor(np.random.randn(4, 10))
+    x = Tensor(rng.standard_normal((4, 10)))
     y = model(x)
     assert y.shape == (4, 5)
 
@@ -251,7 +252,7 @@ def test_mlp_forward():
             return self.fc3(x)
 
     model = MLP()
-    x = Tensor(np.random.randn(32, 784))  # MNIST batch
+    x = Tensor(rng.standard_normal((32, 784)))  # MNIST batch
     y = model.forward(x)
     assert y.shape == (32, 10)
 
@@ -275,7 +276,7 @@ def test_cnn_forward():
             return self.fc2(x)
 
     model = CNN()
-    x = Tensor(np.random.randn(16, 1, 28, 28))  # MNIST batch
+    x = Tensor(rng.standard_normal((16, 1, 28, 28)))  # MNIST batch
     y = model.forward(x)
     assert y.shape == (16, 10)
 
@@ -302,7 +303,7 @@ def test_transformer_forward():
             return x.reshape(batch, seq, 1000)
 
     model = SimpleTransformer()
-    x = Tensor(np.random.randint(0, 1000, (4, 20)))  # Token batch
+    x = Tensor(rng.integers(0, 1000, (4, 20)))  # Token batch
     y = model.forward(x)
     assert y.shape == (4, 20, 1000)
 
@@ -322,7 +323,7 @@ def test_residual_block_forward():
             return F.relu(out)
 
     block = ResidualBlock(64)
-    x = Tensor(np.random.randn(2, 64, 16, 16))
+    x = Tensor(rng.standard_normal((2, 64, 16, 16)))
     y = block.forward(x)
     assert y.shape == x.shape
 

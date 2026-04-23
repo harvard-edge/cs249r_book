@@ -1,0 +1,237 @@
+---
+title: "Which Solver Do I Need?"
+subtitle: "A decision guide for choosing the right MLSYSIM analytical tool"
+---
+
+MLSYSIM provides six specialized solvers, each designed to answer a different class of question about ML systems. This page helps you pick the right one --- and shows you how to compose them for real-world analyses.
+
+---
+
+## Start With Your Question
+
+**"How fast will my model run on this GPU?"**
+: Use the [**SingleNodeModel**](api/core.solver.SingleNodeModel.qmd). It applies the roofline model to determine whether your workload is compute-bound or memory-bound and returns latency, throughput, and bottleneck classification.
+: *Lecture slides:* [Hardware Acceleration](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 11) · [Benchmarking](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 12)
+
+**"How fast will my LLM generate tokens?"**
+: Use the [**ServingModel**](api/core.solver.ServingModel.qmd). It models the two distinct phases of autoregressive inference: the compute-bound prefill (TTFT) and the memory-bound decode (ITL), plus KV-cache memory pressure.
+: *Lecture slides:* [Model Serving](https://mlsysbook.ai/slides/vol1.html) (Vol I, Ch 13) · [Inference at Scale](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 9)
+
+**"How does performance scale across multiple GPUs?"**
+: Use the [**DistributedModel**](api/core.solver.DistributedModel.qmd). It decomposes workloads using 3D/4D parallelism (DP, TP, PP, EP) and calculates communication overhead, pipeline bubbles, and scaling efficiency.
+: *Lecture slides:* [Distributed Training](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 5) · [Collective Communication](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 6) · [Network Fabrics](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 3)
+
+**"How much will this cost to run?"**
+: Use the [**EconomicsModel**](api/core.solver.EconomicsModel.qmd). It calculates Total Cost of Ownership: CapEx (hardware purchase), OpEx (energy + maintenance), and total TCO over a specified duration.
+: *Lecture slides:* [Compute Infrastructure](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 2)
+
+**"What is the carbon footprint?"**
+: Use the [**SustainabilityModel**](api/core.solver.SustainabilityModel.qmd). It computes energy consumption (factoring in PUE), carbon emissions (using regional grid intensity), and water usage across datacenter locations.
+: *Lecture slides:* [Sustainable AI](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 15)
+
+**"How often will my cluster fail during training?"**
+: Use the [**ReliabilityModel**](api/core.solver.ReliabilityModel.qmd). It estimates fleet-wide MTBF, failure probability for a given job duration, and the Young-Daly optimal checkpoint interval.
+: *Lecture slides:* [Fault Tolerance](https://mlsysbook.ai/slides/vol2.html) (Vol II, Ch 7)
+
+---
+
+## Quick Reference
+
+| Solver | Key Inputs | Key Outputs | Best For |
+|:-------|:-----------|:------------|:---------|
+| [**SingleNodeModel**](api/core.solver.SingleNodeModel.qmd) | `model`, `hardware`, `batch_size`, `precision` | latency, throughput, bottleneck, MFU | "Is my model memory-bound?" |
+| [**ServingModel**](api/core.solver.ServingModel.qmd) | `model`, `hardware`, `seq_len`, `batch_size` | TTFT, ITL, KV-cache size, feasibility | "Can I serve this LLM on this GPU?" |
+| [**DistributedModel**](api/core.solver.DistributedModel.qmd) | `model`, `fleet`, `tp_size`, `pp_size`, `ep_size` | scaling efficiency, communication overhead | "How many GPUs do I actually need?" |
+| [**EconomicsModel**](api/core.solver.EconomicsModel.qmd) | `fleet`, `duration_days`, `kwh_price` | CapEx, OpEx, total TCO | "What will this cost over 3 years?" |
+| [**SustainabilityModel**](api/core.solver.SustainabilityModel.qmd) | `fleet`, `duration_days`, `datacenter` | energy (kWh), carbon (kg CO₂e), water (L) | "Where should I train to minimize carbon?" |
+| [**ReliabilityModel**](api/core.solver.ReliabilityModel.qmd) | `fleet`, `job_duration_hours`, `checkpoint_time_s` | MTBF, failure probability, checkpoint interval | "Will my training job complete?" |
+
+---
+
+## Code Examples
+
+### Single-node roofline analysis
+
+```python
+import mlsysim
+from mlsysim import SingleNodeModel
+
+solver = SingleNodeModel()
+profile = solver.solve(
+    model=mlsysim.Models.ResNet50,
+    hardware=mlsysim.Hardware.Cloud.A100,
+    batch_size=1
+)
+print(f"Bottleneck: {profile.bottleneck}")   # → Memory Bound
+print(f"Latency:    {profile.latency.to('ms'):~.2f}")
+print(f"MFU:        {profile.mfu:.1%}")
+```
+
+### LLM serving analysis
+
+```python
+from mlsysim import ServingModel
+
+serving = ServingModel()
+result = serving.solve(
+    model=mlsysim.Models.Language.Llama3_8B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    seq_len=2048,
+    batch_size=1
+)
+print(f"TTFT: {result['ttft'].to('ms'):~.1f}")
+print(f"ITL:  {result['itl'].to('ms'):~.2f}")
+print(f"KV$:  {result['kv_cache_size']:~.2f}")
+print(f"Fits: {result['feasible']}")
+```
+
+### Distributed training at scale
+
+```python
+from mlsysim import DistributedModel, Systems
+
+dist = DistributedModel()
+result = dist.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    fleet=Systems.Clusters.Frontier_8K,
+    batch_size=2048,
+    tp_size=8,
+    pp_size=4,
+    microbatch_count=16
+)
+print(f"Scaling efficiency: {result['scaling_efficiency']:.1%}")
+print(f"Bubble fraction:    {result['bubble_fraction']:.1%}")
+print(f"DP comm latency:    {result['dp_communication_latency'].to('ms'):~.2f}")
+```
+
+### Parameter sweep (manual loop)
+
+MLSYSIM does not provide a built-in sweep function. Instead, use a simple Python loop --- this keeps the analysis transparent and gives you full control over what you collect:
+
+```python
+import mlsysim
+from mlsysim import SingleNodeModel
+
+solver = SingleNodeModel()
+targets = [
+    mlsysim.Hardware.Cloud.T4,
+    mlsysim.Hardware.Cloud.A100,
+    mlsysim.Hardware.Cloud.H100,
+    mlsysim.Hardware.Cloud.B200,
+]
+
+for hw in targets:
+    p = solver.solve(model=mlsysim.Models.ResNet50, hardware=hw, batch_size=32)
+    print(f"{hw.name:20s}  {p.latency.to('ms'):>8.2f~}  {p.bottleneck}")
+```
+
+---
+
+## Composing Solvers
+
+Real-world questions often require **chaining** multiple solvers. The output of one solver feeds naturally into the next because all solvers share typed inputs and `pint.Quantity`-valued outputs.
+
+### "Can I serve Llama-70B on 4 H100s within budget?"
+
+1. **ServingModel** --- check if the model fits in memory and estimate TTFT/ITL.
+2. **EconomicsModel** --- calculate the cost of running that fleet.
+
+### "What is the most sustainable way to train GPT-3?"
+
+1. **DistributedModel** --- find the optimal parallelism configuration.
+2. **SustainabilityModel** --- compare carbon footprint across regions.
+
+### "Should I use A100s or H100s for inference?"
+
+1. **SingleNodeModel** on A100 --- get latency and bottleneck.
+2. **SingleNodeModel** on H100 --- get latency and bottleneck.
+3. **EconomicsModel** for each --- compare cost per query.
+
+---
+
+## Textbook Chapter Mapping
+
+Each solver connects to specific chapters in the *Machine Learning Systems* textbook and corresponding lecture slide decks.
+
+| Solver | Vol I Chapters (Slides) | Vol II Chapters (Slides) |
+|:-------|:------------------------|:-------------------------|
+| **SingleNodeModel** | [Training](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/08_training.pdf) · [HW Acceleration](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/11_hw_acceleration.pdf) · [Benchmarking](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/12_benchmarking.pdf) | [Performance Engineering](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/10_performance_engineering.pdf) |
+| **ServingModel** | [Model Serving](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/13_model_serving.pdf) | [Inference at Scale](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/09_inference.pdf) |
+| **DistributedModel** | --- | [Distributed Training](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/05_distributed_training.pdf) · [Collective Communication](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/06_collective_communication.pdf) · [Network Fabrics](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/03_network_fabrics.pdf) |
+| **EconomicsModel** | --- | [Compute Infrastructure](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/02_compute_infrastructure.pdf) |
+| **SustainabilityModel** | --- | [Sustainable AI](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf) |
+| **ReliabilityModel** | --- | [Fault Tolerance](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf) |
+
+: Direct PDF download links for each lecture deck. Full slide portal at [mlsysbook.ai/slides](https://mlsysbook.ai/slides/). {.sm}
+
+---
+
+::: {.callout-tip}
+## Engine.solve() vs. SingleNodeModel
+
+`Engine.solve()` is a convenience shortcut that produces identical results to `SingleNodeModel().solve()`. Use `Engine.solve()` for quick single-node analysis. Use the individual solver classes (`ServingModel`, `DistributedModel`, etc.) when you need specialized analyses beyond the roofline.
+:::
+
+---
+
+## Why Analytical Solvers?
+
+MLSYSIM is not an empirical profiler (like PyTorch Profiler) or a cycle-accurate simulator (like gem5). It is an **analytical modeling platform** that computes performance bounds from specifications and first-order equations. This is a deliberate design choice:
+
+- **Speed.** Closed-form equations evaluate in microseconds. You can sweep thousands of hardware x model x parallelism configurations in seconds --- impossible with empirical profiling.
+- **Intuition.** By working from equations rather than opaque traces, students see *exactly* which physical quantity (bandwidth, compute, memory capacity) creates the bottleneck.
+- **Accessibility.** No hardware required. A laptop running `pip install mlsysim` gives you the same analysis as a $50,000 GPU cluster.
+- **Composability.** Solvers can be chained because they share typed inputs/outputs. The output of one solver feeds naturally into the next.
+
+---
+
+## Solver Architecture
+
+Every solver follows the same three-step pattern:
+
+1. **Takes typed registry objects** --- `HardwareNode`, `TransformerWorkload`, `Fleet`, `GridProfile` --- as input. These carry physical units (`pint.Quantity`), so dimensional errors are caught at runtime.
+2. **Applies first-order equations** from the [Math Foundations](math.qmd) page.
+3. **Returns typed results** --- either a `PerformanceProfile` (for `SingleNodeModel`) or a `dict` with `Quantity`-valued fields (for specialized solvers).
+
+The key principle: every `.solve()` method is a **pure function** of its inputs. No hidden state, no side effects, no network calls.
+
+---
+
+## Writing a Custom Solver
+
+You can create your own solver by following the same pattern. Here is a "power efficiency" solver that computes TFLOP/s per watt across the hardware registry:
+
+```python
+import mlsysim
+from mlsysim.hardware.types import HardwareNode
+
+class PowerEfficiencyModel:
+    """Compare hardware on performance-per-watt."""
+
+    def solve(self, hardware: HardwareNode) -> dict:
+        if hardware.tdp is None:
+            raise ValueError(f"{hardware.name}: no TDP specified")
+
+        flops_per_watt = hardware.compute.peak_flops / hardware.tdp
+
+        return {
+            "device": hardware.name,
+            "peak_flops": hardware.compute.peak_flops,
+            "tdp": hardware.tdp,
+            "flops_per_watt": flops_per_watt.to("TFLOPs/s/kW"),
+        }
+
+# Use it
+solver = PowerEfficiencyModel()
+
+for hw in [mlsysim.Hardware.Cloud.H100, mlsysim.Hardware.Cloud.A100,
+           mlsysim.Hardware.Cloud.T4, mlsysim.Hardware.Edge.JetsonOrinNX]:
+    r = solver.solve(hw)
+    print(f"{r['device']:25s}  {r['flops_per_watt']:>10.1f~}")
+```
+
+Use `pint.Quantity` for all physical calculations so that unit errors are impossible. For more complex solvers, see the [source code](https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim/core/solver.py) for the six built-in solvers.
+
+---
+
+*For the equations behind each solver, see [Math Foundations](math.qmd). For full API details, see the [Solver API Reference](api/core.solver.qmd).*

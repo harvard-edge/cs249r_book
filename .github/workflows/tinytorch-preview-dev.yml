@@ -1,7 +1,31 @@
 name: '🔥 TinyTorch · 👁️ Preview (Dev)'
 
-# Builds and deploys TinyTorch site to dev preview
-# Triggers after Validate (Dev) passes, builds PDFs, then deploys
+# =============================================================================
+# TinyTorch — Dev Preview Deploy (Quarto)
+# =============================================================================
+#
+# Builds the TinyTorch Quarto site with PDFs and slide decks, then
+# deploys to the dev preview site via SSH. Gated on Validate (Dev) passing.
+#
+# Flow:
+#   1. BUILD_PDFS   — Compile guide + paper PDFs (reusable workflow)
+#   2. BUILD_SITE   — Quarto render + inject PDFs + download slides
+#   3. DEPLOY       — Push to dev preview repo via SSH
+#
+# Triggers:
+#   - workflow_run: after Validate (Dev) succeeds on dev branch
+#   - workflow_dispatch: manual
+#
+# Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_TINYTORCH_PATH}/
+# Secrets:    SSH_DEPLOY_KEY
+# Vars:       TINYTORCH_SITE, BOOK_TOOLS, DEV_REPO, DEV_REPO_URL, DEV_TINYTORCH_PATH
+#
+# Related:
+#   - tinytorch-validate-dev.yml — Gates this workflow (must pass first)
+#   - tinytorch-publish-live.yml — Production deploy to mlsysbook.ai/tinytorch/
+#   - tinytorch-build-pdfs.yml   — Reusable PDF build
+#
+# =============================================================================
 
 on:
   workflow_dispatch:
@@ -9,6 +33,10 @@ on:
     workflows: ["🔥 TinyTorch · ✅ Validate (Dev)"]
     types: [completed]
     branches: [dev]
+
+permissions:
+  contents: read
+  actions: read
 
 concurrency:
   group: tinytorch-dev-deploy
@@ -27,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-pdfs]
     if: |
-      always() && 
+      always() &&
       ((github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch')
     permissions:
       contents: read
@@ -35,45 +63,29 @@ jobs:
 
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: 'tinytorch/site/requirements.txt'
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: 📦 Install dependencies
-        working-directory: tinytorch
+      # Community dashboard is in-tree at tinytorch/quarto/community/
+      # and published via Quarto's `resources: community/**` entry; no
+      # pre-render copy step is needed here.
+      - name: 🔨 Build Quarto Site
+        working-directory: ${{ vars.TINYTORCH_SITE }}
         run: |
-          pip install --upgrade pip
-          pip install -r site/requirements.txt
-
-      - name: 👥 Generate team page from contributors
-        working-directory: tinytorch/site
-        run: |
-          echo "👥 Generating team page from .all-contributorsrc..."
-          python3 scripts/generate_team.py
-          echo "✅ Team page generated"
-
-      - name: 🔨 Build Jupyter Book
-        working-directory: tinytorch/site
-        run: |
-          echo "🔨 Building TinyTorch Jupyter Book..."
-          jupyter-book build . --all
-          touch _build/html/.nojekyll
-          echo "✅ Build complete"
+          quarto render
+          touch _build/.nojekyll
 
       - name: 📥 Download PDF Guide
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           name: TinyTorch-Guide
           path: ./pdf-artifacts/guide
 
       - name: 📥 Download PDF Paper
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           name: TinyTorch-Paper
@@ -82,17 +94,17 @@ jobs:
       - name: 📁 Inject PDFs into site
         run: |
           echo "📁 Injecting PDFs into built site..."
-          mkdir -p tinytorch/site/_build/html/_static/downloads
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads
 
-          if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
-            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Guide.pdf
+          if [ -f ./pdf-artifacts/guide/TinyTorch-Guide.pdf ]; then
+            cp ./pdf-artifacts/guide/TinyTorch-Guide.pdf ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/TinyTorch-Guide.pdf
             echo "✅ Injected TinyTorch-Guide.pdf"
           else
             echo "⚠️ Guide PDF not found"
           fi
 
           if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
-            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Paper.pdf
+            cp ./pdf-artifacts/paper/paper.pdf ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/TinyTorch-Paper.pdf
             echo "✅ Injected TinyTorch-Paper.pdf"
           else
             echo "⚠️ Paper PDF not found"
@@ -100,25 +112,40 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la tinytorch/site/_build/html/_static/downloads/ || echo "No downloads folder"
+          ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/downloads/ || echo "No downloads folder"
 
       - name: 📊 Download slide decks from release
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           echo "📊 Downloading slide decks from GitHub release..."
-          mkdir -p tinytorch/site/_build/html/_static/slides
+          mkdir -p ${{ vars.TINYTORCH_SITE }}/_build/assets/slides
 
           # Download all PDFs from the slides release
           gh release download tinytorch-slides-v0.1.0 \
             --repo harvard-edge/cs249r_book \
             --pattern "*.pdf" \
-            --dir tinytorch/site/_build/html/_static/slides
+            --dir ${{ vars.TINYTORCH_SITE }}/_build/assets/slides || echo "⚠️ No slides release found"
 
           echo ""
           echo "📦 Slides folder contents:"
-          ls -la tinytorch/site/_build/html/_static/slides/ || echo "No slides folder"
-          echo "✅ Downloaded $(ls tinytorch/site/_build/html/_static/slides/*.pdf 2>/dev/null | wc -l) slide decks"
+          ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/ || echo "No slides folder"
+          echo "✅ Downloaded $(ls ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/*.pdf 2>/dev/null | wc -l) slide decks"
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh tinytorch ${{ vars.TINYTORCH_SITE }}/_build
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          COMMIT_SHORT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+
+          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            ${{ vars.TINYTORCH_SITE }}/_build \
+            --verbose \
+            --commit-hash "${{ github.sha }}" \
+            --commit-short "$COMMIT_SHORT"
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -128,11 +155,9 @@ jobs:
           eval "$(ssh-agent -s)"
           echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
 
-          # Add github.com to known hosts
           mkdir -p ~/.ssh
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-          echo "🔧 Configuring git..."
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
@@ -146,7 +171,7 @@ jobs:
           mkdir -p ${{ vars.DEV_TINYTORCH_PATH }}
 
           echo "🚚 Copying TinyTorch site content..."
-          cp -r "${{ github.workspace }}/tinytorch/site/_build/html/." ${{ vars.DEV_TINYTORCH_PATH }}/
+          cp -r "${{ github.workspace }}/${{ vars.TINYTORCH_SITE }}/_build/." ${{ vars.DEV_TINYTORCH_PATH }}/
 
           echo "🔍 Validating deployment content..."
           if [ ! -f "${{ vars.DEV_TINYTORCH_PATH }}/index.html" ]; then
@@ -157,9 +182,16 @@ jobs:
           echo "📦 Contents of ${{ vars.DEV_TINYTORCH_PATH }}/:"
           ls -la ${{ vars.DEV_TINYTORCH_PATH }}/ | head -10
 
-          echo "📦 Committing and pushing changes..."
           git add .
-          git commit -m "🔥 Deploy TinyTorch dev to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
-          git push origin main
+          git commit -m "🔥 Deploy TinyTorch dev (Quarto) to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
 
           echo "✅ TinyTorch deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_TINYTORCH_PATH }}/"

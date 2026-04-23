@@ -1,0 +1,132 @@
+name: '📊 Slides · 👁️ Preview (Dev)'
+
+# =============================================================================
+# Lecture Slides — Dev Preview Deploy
+# =============================================================================
+#
+# Builds the Quarto slides portal (HTML index) and deploys to the dev preview
+# site via SSH. PDF compilation is NOT done here -- PDFs are built via
+# slides-build-pdfs.yml and referenced from the portal via GitHub Releases.
+#
+# Flow:
+#   1. BUILD_PORTAL — Quarto render of slides portal
+#   2. REWRITE_URLS — Adjust links for dev site base path
+#   3. DEPLOY       — Push to dev preview repo via SSH
+#
+# Triggers:
+#   - push: dev branch, slides/** paths
+#   - workflow_dispatch: manual
+#
+# Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_SLIDES_PATH}/
+# Secrets:    SSH_DEPLOY_KEY
+# Vars:       SLIDES_ROOT, BOOK_TOOLS, DEV_REPO, DEV_REPO_URL, DEV_SLIDES_PATH
+#
+# Related:
+#   - slides-validate-dev.yml — Content & build validation
+#   - slides-publish-live.yml — Production deploy with PDF release
+#   - slides-build-pdfs.yml   — Build all slide deck PDFs
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'slides/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: slides-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '📊 Build & Deploy Slides (Dev)'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Slides Portal
+        working-directory: ${{ vars.SLIDES_ROOT }}
+        run: quarto render
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "${{ vars.SLIDES_ROOT }}/_build/index.html" ]; then
+            echo "❌ Build failed — no index.html"
+            exit 1
+          fi
+          echo "✅ Build successful"
+          echo "📊 Size: $(du -sh ${{ vars.SLIDES_ROOT }}/_build | cut -f1)"
+
+      - name: 🔧 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh slides ${{ vars.SLIDES_ROOT }}/_build
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          COMMIT_SHORT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+
+          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            ${{ vars.SLIDES_ROOT }}/_build \
+            --verbose \
+            --commit-hash "${{ github.sha }}" \
+            --commit-short "$COMMIT_SHORT"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository (${{ vars.DEV_REPO }})..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+
+          cd target-repo
+
+          echo "🧹 Cleaning ${{ vars.DEV_SLIDES_PATH }} directory..."
+          rm -rf ${{ vars.DEV_SLIDES_PATH }}
+          mkdir -p ${{ vars.DEV_SLIDES_PATH }}
+
+          echo "🚚 Copying Slides portal content..."
+          cp -r "${{ github.workspace }}/${{ vars.SLIDES_ROOT }}/_build/." ${{ vars.DEV_SLIDES_PATH }}/
+
+          if [ ! -f "${{ vars.DEV_SLIDES_PATH }}/index.html" ]; then
+            echo "❌ CRITICAL: ${{ vars.DEV_SLIDES_PATH }}/index.html is missing. Aborting deployment."
+            exit 1
+          fi
+
+          echo "📊 Contents of ${{ vars.DEV_SLIDES_PATH }}/:"
+          ls -la ${{ vars.DEV_SLIDES_PATH }}/ | head -10
+
+          git add .
+          git commit -m "📊 Deploy Slides dev to /${{ vars.DEV_SLIDES_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
+
+          echo "✅ Slides deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_SLIDES_PATH }}/"

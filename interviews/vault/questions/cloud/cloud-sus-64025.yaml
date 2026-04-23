@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-sus-64025
+track: cloud
+level: L4
+zone: diagnosis
+topic: tail-latency
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: H100 Inference SLA Degradation Under Noisy Neighbor CPU Contention
+scenario: Your LLM serving system on H100 has been meeting p99 < 150ms for weeks. After a co-tenant's
+  batch analytics job is scheduled on the same physical host's CPUs, you observe p99 latency spiking to
+  380ms while p50 remains at 42ms. GPU utilization on nvidia-smi is unchanged at 45%. The analytics job
+  uses no GPUs. Diagnose the root cause of the latency spike and propose both immediate and systemic mitigations.
+details:
+  realistic_solution: 'Root cause: CPU core contention between the inference serving process and the analytics
+    job is causing scheduling latency for CUDA kernel launches and pre-processing steps. The long tail
+    (p99) blooms because CPU stalls are bursty and rare, not because average GPU work increased. Evidence:
+    p50 unchanged (most requests complete before CPU is preempted), GPU util unchanged (GPU work finishes
+    fast when CPU isn''t stalled). Immediate: use cgroups or Kubernetes CPU limits to isolate the serving
+    process to dedicated CPU cores (e.g., numactl --cpunodebind=0). Systemic: request CPU isolation guarantees
+    from cloud provider (dedicated host or CPU-pinned pods), add CPU scheduling jitter to your SLO monitoring.'
+  common_mistake: 'Assuming GPU-only workloads cannot be affected by CPU contention. Modern LLM serving
+    has significant CPU-side overhead: tokenization, KV cache management, request scheduling, tensor deserialization,
+    and CUDA kernel launch all run on CPU cores. p99 spikes with stable p50 and stable GPU utilization
+    is a classic sign of CPU scheduling jitter, not GPU pressure.'
+  napkin_math: 'p99/p50 ratio: 380/42 = 9.05×. In an M/M/1 queue, p99/p50 ≈ log2(100)/log2(2) = log2(100)
+    ≈ 6.64× at heavy load—but at 45% GPU util, queue theory predicts p99/p50 ≈ 2-3×. Actual 9× ratio implies
+    external latency injection, not queueing. CPU scheduling quantum: Linux CFS default 4ms per 100ms
+    period = 4% CPU time minimum. If analytics job takes 95% of shared cores, serving gets 5% of CPU time.
+    CPU work per request: ~5ms (tokenization + launch). At 5% CPU allocation: 5ms / 0.05 = 100ms CPU wait.
+    p99 = 42ms GPU + 100ms CPU stall = 142ms... but analytics job is bursty → p99 can hit 42 + 338 = 380ms
+    when preempted at worst moment.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Queue theory math error: ln(100)/ln(2) is approximately 6.64x, not 4.6x'
+- Text is truncated at the end
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -14,6 +14,7 @@ DEPENDENCY CHAIN: 01_tensor → ... → 11_embeddings → 12_attention → 13_tr
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -49,8 +50,8 @@ class TestTransformerCore:
             num_heads = 8
             ff_dim = 256
             
-            block = TransformerBlock(embed_dim, num_heads, ff_dim)
-            
+            block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+
             assert hasattr(block, 'forward'), "Block missing forward"
             
         except ImportError:
@@ -70,9 +71,9 @@ class TestTransformerCore:
             batch_size = 2
             seq_len = 10
             
-            block = TransformerBlock(embed_dim, num_heads, ff_dim)
-            
-            x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+            block = TransformerBlock(embed_dim, num_heads, ff_dim=ff_dim)
+
+            x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
             
             output = block(x)
             
@@ -166,8 +167,8 @@ class TestTransformerWithAttention:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.attention import MultiHeadAttention
             
-            block = TransformerBlock(64, 8, 256)
-            
+            block = TransformerBlock(64, 8, ff_dim=256)
+
             # Block should have attention component
             has_attention = (
                 hasattr(block, 'attention') or 
@@ -199,7 +200,7 @@ class TestTransformerWithTraining:
             
             embed_dim = 32
             
-            block = TransformerBlock(embed_dim, 4, 128)
+            block = TransformerBlock(embed_dim, 4, ff_dim=128)
             fc = Linear(embed_dim, 1)
             loss_fn = MSELoss()
             
@@ -213,8 +214,8 @@ class TestTransformerWithTraining:
             optimizer = SGD(params, lr=0.01)
             
             # Forward
-            x = Tensor(np.random.randn(2, 5, embed_dim))
-            target = Tensor(np.random.randn(2, 1))
+            x = Tensor(rng.standard_normal((2, 5, embed_dim)))
+            target = Tensor(rng.standard_normal((2, 1)))
             
             block_out = block(x)
             pooled = Tensor(block_out.data.mean(axis=1))
@@ -298,7 +299,7 @@ class TestRegressionPrevention:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         layer = Linear(4, 2)
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
         y = layer(x)
         assert y.shape == (2, 2)
 
@@ -314,7 +315,7 @@ class TestRegressionPrevention:
         """✅ Module 05"""
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.dataloader import TensorDataset, DataLoader
-        data = Tensor(np.random.randn(10, 3))
+        data = Tensor(rng.standard_normal((10, 3)))
         targets = Tensor(np.arange(10).astype(float))
         dataset = TensorDataset(data, targets)
         dataloader = DataLoader(dataset, batch_size=2)
@@ -334,7 +335,7 @@ class TestRegressionPrevention:
             from tinytorch.core.spatial import Conv2d
             from tinytorch.core.tensor import Tensor
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(np.random.randn(2, 3, 8, 8))
+            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
             y = conv(x)
             assert y.shape[0] == 2
         except ImportError:
@@ -346,7 +347,7 @@ class TestRegressionPrevention:
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.tensor import Tensor
             mha = MultiHeadAttention(32, 4)
-            x = Tensor(np.random.randn(1, 5, 32))
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = mha(x)
             assert out.shape == x.shape
         except ImportError:
@@ -378,8 +379,8 @@ class TestModule13Completion:
             capabilities["TransformerBlock exists"] = True
             
             # Test 2: Forward
-            block = TransformerBlock(32, 4, 128)
-            x = Tensor(np.random.randn(1, 5, 32))
+            block = TransformerBlock(32, 4, ff_dim=128)
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = block(x)
             if out.shape == x.shape:
                 capabilities["TransformerBlock forward works"] = True

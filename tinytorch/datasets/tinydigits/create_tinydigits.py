@@ -14,6 +14,7 @@ Target sizes:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pickle
 from pathlib import Path
 
@@ -32,7 +33,7 @@ def create_tinydigits():
     print(f"   ✓ Normalized to [0, 1]")
 
     # Set random seed for reproducibility
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
 
     # Create balanced splits
     train_images, train_labels = [], []
@@ -45,7 +46,7 @@ def create_tinydigits():
         digit_count = len(digit_indices)
 
         # Shuffle indices
-        np.random.shuffle(digit_indices)
+        rng.shuffle(digit_indices)
 
         # Split: 100 for training, 20 for test (Karpathy's ~1000 samples philosophy)
         train_count = 100
@@ -68,11 +69,11 @@ def create_tinydigits():
     test_labels = np.array(test_labels, dtype=np.int64)
 
     # Shuffle both sets
-    train_shuffle = np.random.permutation(len(train_images))
+    train_shuffle = rng.permutation(len(train_images))
     train_images = train_images[train_shuffle]
     train_labels = train_labels[train_shuffle]
 
-    test_shuffle = np.random.permutation(len(test_images))
+    test_shuffle = rng.permutation(len(test_images))
     test_images = test_images[test_shuffle]
     test_labels = test_labels[test_shuffle]
 

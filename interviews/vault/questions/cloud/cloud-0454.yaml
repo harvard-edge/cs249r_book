@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0454
+track: cloud
+level: L3
+zone: fluency
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: both
+title: The Scaling Efficiency Collapse
+scenario: You are scaling the training of a 70B parameter model from a single node to a 16-node cluster.
+  Your forward and backward pass compute time is 6 seconds. When you use a cluster with 400 Gbps NDR InfiniBand,
+  the total step time is about 11.3 seconds. When you switch to a seemingly cheaper cluster with 100 Gbps
+  Ethernet, the total step time balloons to over 27 seconds. Your scaling efficiency has collapsed. Diagnose
+  the most likely cause for this dramatic slowdown.
+details:
+  realistic_solution: The root cause is the lack of RDMA in the Ethernet cluster. During the all-reduce
+    step, GPUs must synchronize 140 GB of gradient data. With InfiniBand, RDMA allows GPUs in one node
+    to directly access the memory of GPUs in another node, bypassing the host CPU entirely. On the Ethernet
+    cluster, data must be copied from GPU VRAM to host CPU RAM, then processed through the slow kernel
+    TCP/IP stack, sent over the wire, and the process is reversed on the destination node. This CPU-mediated
+    communication, combined with the lower bandwidth, makes the gradient synchronization step prohibitively
+    slow and kills scaling efficiency.
+  common_mistake: Engineers might focus only on the advertised bandwidth difference (4x) and fail to account
+    for the ~7x real-world slowdown. They often forget the critical role of the network protocol and CPU
+    overhead. The TCP/IP stack used by standard Ethernet requires CPU intervention for every packet, creating
+    a massive bottleneck that is completely bypassed by InfiniBand's Remote Direct Memory Access (RDMA).
+  napkin_math: Gradients for 70B FP16 = 140GB. All-reduce transfers ~2x data = 280GB. Over NDR InfiniBand
+    (50 GB/s), network time ~ 280GB / 50 GB/s = 5.6s. Total step ~ 11.6s. Over 100Gbps Ethernet (12.5
+    GB/s) without RDMA, transfer takes 280GB / 12.5 GB/s = 22.4s + CPU overhead, exploding step time.
+  options:
+  - The cluster's storage (NVMe) is too slow for writing checkpoints at each step.
+  - The PCIe bus on each node is saturated from transferring data to the network card.
+  - The Ethernet cluster lacks RDMA, forcing slow, CPU-mediated data transfers for gradient synchronization.
+  - The power budget of the Ethernet cluster is lower, causing the GPUs to be thermally throttled.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

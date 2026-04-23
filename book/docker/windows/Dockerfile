@@ -1,14 +1,16 @@
 # escape=`
 # MLSysBook Windows Quarto Build Container (Windows Server 2022)
 # - PowerShell 7 via ZIP (no MSI)
-# - Quarto 1.7.31 via ZIP (no MSI)
+# - Quarto via Scoop (extras bucket)
 # - Python 3.13.1 + requirements
-# - Ghostscript + Inkscape (Chocolatey)
-# - TeX Live 2025.20251008.0+ (pinned version fixes install-tl.zip issue) + packages from tl_packages
-# - R 4.3.2 + packages via install_packages.R
+# - Ghostscript + Inkscape (Scoop)
+# - TeX Live (latest by default; overridable via TEXLIVE_VERSION build arg) + packages from tl_packages
+# - R 4.5.2 + packages via install_packages.R
 # - Verifications: versions, kpsewhich font files, TikZ smoke test
 
 FROM mcr.microsoft.com/windows/server:ltsc2022
+ARG TEXLIVE_VERSION=latest
+ENV TEXLIVE_VERSION=${TEXLIVE_VERSION}
 
 # Use Windows PowerShell initially
 SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
@@ -24,6 +26,9 @@ ENV QUARTO_LOG_LEVEL="INFO"
 ENV PYTHONIOENCODING="utf-8"
 ENV LANG="en_US.UTF-8"
 ENV LC_ALL="en_US.UTF-8"
+# Explicitly set TMP/TEMP so the TeX Live Perl installer always has a valid temp dir
+ENV TMP="C:/temp"
+ENV TEMP="C:/temp"
 
 RUN Write-Host '=== STARTING BASE SETUP ===' ; `
     Write-Host 'Creating base directories...' ; `
@@ -87,6 +92,10 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
     Write-Host '📦 Chocolatey install script executed' ; `
     Write-Host 'Verifying Chocolatey installation...' ; `
     choco --version ; `
+    Write-Host '🔧 Configuring Chocolatey for CI stability...' ; `
+    choco config set --name commandExecutionTimeoutSeconds --value 14400 ; `
+    choco feature disable --name showDownloadProgress ; `
+    Write-Host '✅ Chocolatey timeout/progress settings applied' ; `
     Write-Host '✅ Chocolatey installation complete'
 
 # ------------------------------------------------------------
@@ -96,73 +105,11 @@ COPY book/tools/dependencies/requirements.txt C:/temp/requirements.txt
 COPY book/tools/dependencies/install_packages.R C:/temp/install_packages.R
 COPY book/tools/dependencies/tl_packages C:/temp/tl_packages
 COPY book/docker/windows/verify_r_packages.R C:/temp/verify_r_packages.R
+COPY book/docker/windows/install_texlive.ps1 C:/temp/install_texlive.ps1
 RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
-# PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
-# ------------------------------------------------------------
-RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
-    Write-Host '📦 Installing TeX Live via Chocolatey (pinned to 2025.20251008.0+)...' ; `
-    choco install texlive --version=2025.20251008.0 -y ; `
-    if ($LASTEXITCODE -ne 0) { `
-        Write-Host '❌ TeX Live installation failed' ; `
-        exit 1 ; `
-    } ; `
-    Write-Host '✅ TeX Live installed via Chocolatey' ; `
-    `
-    Write-Host '🔍 Finding TeX Live installation directory...' ; `
-    $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
-    Write-Host "📁 TeX Live root: $texRoot" ; `
-    `
-    Write-Host '🔍 Looking for year-based directories...' ; `
-    $texYearDir = Get-ChildItem $texRoot -Directory | `
-        Where-Object { $_.Name -match '^\d{4}$' } | `
-        Sort-Object Name -Descending | `
-        Select-Object -First 1 ; `
-    Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
-    `
-    $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
-    Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
-    `
-    Write-Host '🔧 Adding TeX Live to PATH...' ; `
-    $env:PATH = "$texLiveBin;$env:PATH" ; `
-    Write-Host "✅ PATH updated with: $texLiveBin" ; `
-    `
-    Write-Host '📋 Reading collections from tl_packages...' ; `
-    if (Test-Path 'C:\temp\tl_packages') { `
-        $collections = Get-Content 'C:\temp\tl_packages' | `
-            Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') } ; `
-        Write-Host "📦 Found $($collections.Count) collections to install" ; `
-        Write-Host '📋 Collections:' ; `
-        $collections | ForEach-Object { Write-Host "  - $_" } ; `
-        `
-        Write-Host '🔄 Installing collections...' ; `
-        $i = 1 ; `
-        foreach ($collection in $collections) { `
-            Write-Host "📦 [$i/$($collections.Count)] Installing $collection..." ; `
-            & "$texLiveBin\tlmgr.bat" install $collection ; `
-            if ($LASTEXITCODE -eq 0) { `
-                Write-Host "✅ $collection installed successfully" ; `
-            } else { `
-                Write-Host "⚠️ Failed to install $collection, continuing..." ; `
-            } ; `
-            $i++ ; `
-        } ; `
-        Write-Host '✅ Collection installation complete' ; `
-    } else { `
-        Write-Host '⚠️ No tl_packages file found, skipping collection installation' ; `
-    } ; `
-    `
-    Write-Host '🔄 Updating tlmgr...' ; `
-    & "$texLiveBin\tlmgr.bat" update --self --all ; `
-    Write-Host '✅ tlmgr updated' ; `
-    `
-    Write-Host '🔍 Verifying lualatex installation...' ; `
-    & "$texLiveBin\lualatex.exe" --version ; `
-    Write-Host '✅ TeX Live installation verified'
-
-# ------------------------------------------------------------
-# PHASE 5: Install Scoop (Package manager setup)
+# PHASE 4: Install Scoop (Package manager setup)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host 'Setting UTF-8 encoding...' ; `
@@ -195,58 +142,113 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host '✅ Scoop installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 6: Install Quarto (Main tool)
+# PHASE 5: Install Quarto via r-bucket (pins exact version for llms-txt support)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
-    Write-Host 'Installing Quarto via Scoop...' ; `
-    scoop install quarto ; `
-    Write-Host '📦 Quarto installed' ; `
-    Write-Host 'Verifying Quarto installation...' ; `
-    quarto --version ; `
+    Write-Host 'Adding r-bucket for version-pinned Quarto...' ; `
+    scoop bucket add r-bucket https://github.com/cderv/r-bucket ; `
+    scoop install r-bucket/quarto@1.9.27 ; `
+    if (-not (Get-Command quarto -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Quarto install failed: executable not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $qv = quarto --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Quarto install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Quarto installed: $qv" ; `
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 7: Install Ghostscript (required for PDF generation)
+# PHASE 6: Install Ghostscript (required for PDF generation)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host 'Installing Ghostscript via Scoop...' ; `
     scoop install main/ghostscript ; `
-    Write-Host '📦 Ghostscript installed' ; `
-    Write-Host 'Verifying Ghostscript installation...' ; `
-    gs --version ; `
+    $gsCmd = Get-Command gs -ErrorAction SilentlyContinue ; `
+    if (-not $gsCmd) { `
+        Write-Host '❌ Ghostscript install failed: gs shim not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "Resolved Ghostscript: $($gsCmd.Source)" ; `
+    Write-Host '📦 Ghostscript installed (runtime check deferred to final verification)' ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 8: Install Inkscape (required for SVG processing)
+# PHASE 7: Install Inkscape and rsvg-convert (required for SVG processing)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Installing Inkscape via Scoop...' ; `
     scoop install inkscape ; `
-    Write-Host '📦 Inkscape installed' ; `
-    Write-Host 'Verifying Inkscape installation...' ; `
-    inkscape --version ; `
+    if (-not (Get-Command inkscape -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Inkscape install failed: executable not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $iv = inkscape --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Inkscape install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Inkscape installed: $iv" ; `
     Write-Host '✅ Inkscape installation complete'
 
+RUN Write-Host '=== STARTING RSVG-CONVERT INSTALLATION ===' ; `
+    Write-Host 'Installing rsvg-convert via Scoop (required by Quarto for SVG-to-PDF)...' ; `
+    scoop install rsvg-convert ; `
+    if (-not (Get-Command rsvg-convert -ErrorAction SilentlyContinue)) { `
+        Write-Host '⚠️ Scoop install failed or package unavailable from current buckets; trying Chocolatey...' ; `
+        choco install rsvg-convert -y ; `
+    } ; `
+    if (-not (Get-Command rsvg-convert -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ rsvg-convert install failed via both Scoop and Chocolatey' ; `
+        exit 1 ; `
+    } ; `
+    $rv = rsvg-convert --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ rsvg-convert install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 rsvg-convert installed: $rv" ; `
+    Write-Host '✅ rsvg-convert installation complete'
+
 # ------------------------------------------------------------
-# PHASE 9: Install Python (Medium complexity)
+# PHASE 8: Install Python (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host 'Installing Python via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing Python from main bucket...' ; `
     scoop install main/python ; `
-    Write-Host '📦 Python installed' ; `
-    Write-Host 'Verifying Python installation...' ; `
-    python --version ; `
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Python install failed: executable not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $pv = python --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Python install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    $pyExe = (python -c 'import sys; print(sys.executable)').Trim() ; `
+    $pyDir = Split-Path $pyExe -Parent ; `
+    $py3Exe = Join-Path $pyDir 'python3.exe' ; `
+    if (-not (Test-Path $py3Exe)) { `
+        Copy-Item $pyExe $py3Exe -Force ; `
+    } ; `
+    $pv3 = python3 --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Python install failed: python3 alias check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Python installed: $pv" ; `
+    Write-Host "📦 Python3 alias verified: $pv3" ; `
     Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
-# PHASE 10: Install Python packages (Medium complexity)
+# PHASE 9: Install Python packages (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
     Write-Host 'Installing Python packages from requirements.txt (same as quarto-build workflow)...' ; `
-    Write-Host 'Upgrading pip...' ; `
-    python -m pip install --upgrade pip ; `
-    Write-Host '📦 pip upgraded' ; `
+    Write-Host 'Using bundled pip (skip upgrade to avoid WinError 3 shim lock)...' ; `
     Write-Host 'Installing packages from requirements.txt...' ; `
     Write-Host 'Requirements file contents:' ; `
     Get-Content C:/temp/requirements.txt | Write-Host ; `
@@ -254,7 +256,7 @@ RUN Write-Host '=== STARTING PYTHON PACKAGE INSTALLATION ===' ; `
     Write-Host '✅ Python package installation complete'
 
 # ------------------------------------------------------------
-# PHASE 11: Install Visual C++ Redistributable (Required for Quarto DLLs)
+# PHASE 10: Install Visual C++ Redistributable (Required for Quarto DLLs)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
     Write-Host 'Installing Microsoft Visual C++ Redistributable...' ; `
@@ -264,19 +266,25 @@ RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
     Write-Host '✅ Visual C++ Redistributable installation complete'
 
 # ------------------------------------------------------------
-# PHASE 12: Install R (Medium complexity)
+# PHASE 11: Install R (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
-    Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing R from main bucket...' ; `
-    scoop install main/r ; `
-    Write-Host '📦 R installed' ; `
-    Write-Host 'Verifying R installation...' ; `
-    R --version ; `
+    Write-Host 'Installing R 4.5.2 via Scoop (main bucket)...' ; `
+    scoop install main/r@4.5.2 ; `
+    if (-not (Get-Command Rscript -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ R install failed: Rscript not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $rv = Rscript --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ R install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 R installed: $rv" ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
-# PHASE 13: Install R packages (Medium complexity)
+# PHASE 12: Install R packages (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host 'Installing R packages from install_packages.R (same as quarto-build workflow)...' ; `
@@ -301,21 +309,54 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
     Write-Host '✅ R package installation complete'
 
 # ------------------------------------------------------------
+# PHASE 13: Install TeX Live LAST (largest/slowest install)
+# Direct install-tl approach via standalone script:
+# - Bypasses Chocolatey's ErrorActionPreference=Stop wrapper
+# - Pins mirror in profile, tries 3 mirrors in order
+# ------------------------------------------------------------
+RUN & 'C:\temp\install_texlive.ps1'
+
+RUN Write-Host '=== VERIFY TEX LIVE INSTALLATION ===' ; `
+    $cmd = Get-Command lualatex -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { `
+        Write-Host '❌ TeX Live verification failed: lualatex not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $lvAll = & lualatex --version 2>&1 ; `
+    $lv = $lvAll | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { `
+        Write-Host "❌ TeX Live verification failed: lualatex --version exited $exitCode" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 LaTeX verified: $lv" ; `
+    Write-Host '✅ TeX Live verification complete'
+
+# ------------------------------------------------------------
 # PHASE 14: Cleanup and Environment Setup
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     Write-Host 'Cleaning temporary files and setting up environment...' ; `
     Write-Host 'Removing temporary files...' ; `
     Remove-Item C:/temp/requirements.txt -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ requirements.txt removed' ; `
     Remove-Item C:/temp/install_packages.R -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ install_packages.R removed' ; `
     Remove-Item C:/temp/verify_r_packages.R -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ verify_r_packages.R removed' ; `
     Remove-Item C:/temp/tl_packages -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ tl_packages removed' ; `
     Remove-Item C:/temp/requirements/ -Recurse -Force -ErrorAction SilentlyContinue ; `
-    Write-Host '🗑️ requirements/ directory removed' ; `
+    Remove-Item C:/temp/install_texlive.ps1 -ErrorAction SilentlyContinue ; `
+    Write-Host '🗑️ temp files removed' ; `
+    Write-Host 'Cleaning Scoop caches...' ; `
+    scoop cache rm * 2>$null ; `
+    Remove-Item -Recurse -Force "$env:USERPROFILE\scoop\cache\*" -ErrorAction SilentlyContinue ; `
+    Write-Host '🗑️ Scoop cache cleared' ; `
+    Write-Host 'Cleaning Chocolatey caches...' ; `
+    Remove-Item -Recurse -Force 'C:\ProgramData\chocolatey\lib\*.nupkg' -ErrorAction SilentlyContinue ; `
+    Remove-Item -Recurse -Force "$env:TEMP\chocolatey" -ErrorAction SilentlyContinue ; `
+    Write-Host '🗑️ Chocolatey cache cleared' ; `
+    Write-Host 'Cleaning pip cache...' ; `
+    python -m pip cache purge 2>$null ; `
+    Write-Host '🗑️ pip cache cleared' ; `
     Write-Host 'Setting up environment variables for Quarto...' ; `
     $env:QUARTO_LOG_LEVEL = 'DEBUG' ; `
     [Environment]::SetEnvironmentVariable('QUARTO_LOG_LEVEL', 'DEBUG', 'Machine') ; `
@@ -323,54 +364,102 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
     Write-Host '✅ Cleanup and environment setup complete'
 
 # ------------------------------------------------------------
+# PHASE 15: Commit PATH into Docker image metadata
+# [Environment]::SetEnvironmentVariable writes to the registry but Docker does
+# not re-read HKLM between RUN steps — each new layer inherits the *previous
+# layer's* Docker ENV, not registry changes made mid-layer.  Using the Docker
+# ENV directive here guarantees these paths are committed into the image and
+# visible to every subsequent RUN step and to containers at runtime.
+# ------------------------------------------------------------
+ENV PATH="C:\\Users\\ContainerAdministrator\\scoop\\shims;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current\\Scripts;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current;C:\\Users\\ContainerAdministrator\\scoop\\apps\\ghostscript\\current\\lib;C:\\Users\\ContainerAdministrator\\scoop\\apps\\r\\current\\bin;C:\\Users\\ContainerAdministrator\\scoop\\apps\\git\\current\\cmd;C:\\texlive\\bin\\windows;C:\\Program Files\\PowerShell\\7;C:\\ProgramData\\chocolatey\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\"
+
+# ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics
 # ------------------------------------------------------------
 WORKDIR C:/workspace
-RUN Write-Host '=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ===' ; `
-    Write-Host 'Verifying all installations with comprehensive checks...' ; `
-    Write-Host '' ; `
-    Write-Host '🔍 SYSTEM DIAGNOSTICS:' ; `
-    Write-Host '----------------------' ; `
+RUN Write-Host '=== FINAL VERIFICATION ===' ; `
     Write-Host 'PATH environment variable:' ; `
     Write-Host $env:PATH ; `
     Write-Host '' ; `
-    Write-Host 'Visual C++ Redistributable check:' ; `
-    Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' | Select-Object Name, Length, LastWriteTime ; `
-    Write-Host '' ; `
-    Write-Host '📊 TOOL VERIFICATION:' ; `
-    Write-Host '---------------------' ; `
-    Write-Host 'Checking Quarto...' ; `
-    try { `
-        quarto --version ; `
-        Write-Host '✅ Quarto version check: PASSED' ; `
-        Write-Host 'Running Quarto check for comprehensive validation...' ; `
-        & quarto check 2>&1 | Write-Host ; `
-        if ($LASTEXITCODE -eq 0) { `
-            Write-Host '✅ Quarto check: PASSED' ; `
-        } else { `
-            Write-Host '⚠️ Quarto check: ISSUES DETECTED' ; `
-            Write-Host "Exit code: $LASTEXITCODE" ; `
-        } ; `
-    } catch { `
-        Write-Host '❌ Quarto verification failed:' ; `
-        Write-Host $_.Exception.Message ; `
-    } ; `
-    Write-Host 'Checking Python...' ; `
-    python --version ; `
-    Write-Host '✅ Python verified' ; `
-    Write-Host 'Checking R...' ; `
-    R --version ; `
-    Write-Host '✅ R verified' ; `
-    Write-Host 'Checking LaTeX...' ; `
-    lualatex --version ; `
-    Write-Host '✅ LaTeX verified' ; `
-    Write-Host 'Checking Ghostscript...' ; `
-    gs --version ; `
-    Write-Host '✅ Ghostscript verified' ; `
-    Write-Host 'Checking Inkscape...' ; `
-    inkscape --version ; `
-    Write-Host '✅ Inkscape verified' ; `
-    Write-Host '' ; `
-    Write-Host '🎯 FINAL STATUS:' ; `
-    Write-Host '----------------' ; `
-    Write-Host '✅ Windows container build completed with enhanced diagnostics'
+    Write-Host 'Tool checks run in separate Docker steps below for isolated reporting'
+
+RUN Write-Host '=== VERIFY: Quarto ===' ; `
+    $cmd = Get-Command quarto -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Quarto FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & quarto --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Quarto FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ Quarto verified'
+
+RUN Write-Host '=== VERIFY: Python ===' ; `
+    $cmd = Get-Command python -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Python FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & python --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Python FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ Python verified'
+
+RUN Write-Host '=== VERIFY: Python3 ===' ; `
+    $cmd = Get-Command python3 -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Python3 FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & python3 --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Python3 FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ Python3 verified'
+
+RUN Write-Host '=== VERIFY: R ===' ; `
+    $cmd = Get-Command Rscript -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ R FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & Rscript --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ R FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ R verified'
+
+RUN Write-Host '=== VERIFY: LaTeX ===' ; `
+    $cmd = Get-Command lualatex -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ LaTeX FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & lualatex --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ LaTeX FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ LaTeX verified'
+
+RUN Write-Host '=== VERIFY: Ghostscript ===' ; `
+    $cmd = Get-Command gs -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { $cmd = Get-Command gswin64c -ErrorAction SilentlyContinue } ; `
+    if (-not $cmd) { Write-Host "❌ Ghostscript FAILED: gs/gswin64c not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & $cmd.Source --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Ghostscript FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ Ghostscript verified'
+
+RUN Write-Host '=== VERIFY: Inkscape ===' ; `
+    $cmd = Get-Command inkscape -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Inkscape FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & inkscape --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Inkscape FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ Inkscape verified'
+
+RUN Write-Host '=== VERIFY: rsvg-convert ===' ; `
+    $cmd = Get-Command rsvg-convert -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ rsvg-convert FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & rsvg-convert --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ rsvg-convert FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ rsvg-convert verified'

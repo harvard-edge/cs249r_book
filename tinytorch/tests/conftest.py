@@ -129,7 +129,16 @@ try:
 except ImportError:
     pass  # test_utils not yet created or has issues
 
-# Register plugins (note: pytest_tinytorch was removed during test cleanup)
+# Register the --tinytorch CLI flag (the pytest_tinytorch plugin was removed
+# during test cleanup, but tito module test still passes this flag)
+def pytest_addoption(parser):
+    """Register --tinytorch flag for educational test output."""
+    parser.addoption(
+        "--tinytorch",
+        action="store_true",
+        default=False,
+        help="Enable educational WHAT/WHY test output",
+    )
 
 
 # =============================================================================
@@ -302,7 +311,7 @@ def pytest_runtest_makereport(item, call):
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Add educational summary at the end of test run."""
     # Check if we should show educational summary
-    if hasattr(config, '_tinytorch_show_summary') and config._tinytorch_show_summary:
+    if config.getoption("--tinytorch", default=False):
         _reporter.print_summary()
 
 

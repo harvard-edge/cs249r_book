@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2137
+track: cloud
+level: L4
+zone: diagnosis
+topic: mlops-lifecycle
+competency_area: data
+bloom_level: analyze
+phase: both
+title: The Streaming Feature Consistency Trap
+scenario: 'Your fraud detection model uses a streaming feature ''rolling_30min_transaction_count''. During
+  a Kafka consumer rebalance, the Flink job restarts from a checkpoint. After recovery, you notice the
+  feature value for some users is temporarily double-counted: transactions processed before the checkpoint
+  are replayed and counted again. The model starts flagging legitimate users as fraudsters. How do you
+  ensure exactly-once semantics for streaming features?'
+details:
+  realistic_solution: 'The double-counting happens because the Flink checkpoint captures Kafka offsets
+    but the feature store write is not atomically coupled to the checkpoint. On recovery, events between
+    the last checkpoint and the failure are replayed. If the feature store already committed those increments
+    before the crash, they are applied twice. Three approaches: (1) **Idempotent writes**: include a sequence
+    number or event ID with each feature update; the feature store deduplicates on write. (2) **Two-phase
+    commit**: Flink''s built-in exactly-once sink connector for supported stores (e.g., Kafka transactions
+    + compacted topic as feature store). (3) **Read-repair at serving time**: store raw events and compute
+    the aggregation at read time, making the computation inherently idempotent (but slower). Approach
+    1 is most practical: add a composite key (user_id, event_id) and use upsert semantics.'
+  common_mistake: Assuming Kafka's exactly-once guarantee extends end-to-end. Kafka's EOS covers produce→consume,
+    but the feature store write is a separate system — without idempotent writes, replayed events create
+    duplicates.
+  napkin_math: 'Rebalance frequency: ~1-2 per day in a healthy cluster. Checkpoint interval: 1 minute.
+    Events to replay per rebalance: 1 minute × 10K events/sec = 600K events. If 1% of users are affected,
+    that''s ~6K users with inflated counts. At a 0.1% fraud threshold, double-counted users may see 2×
+    normal velocity, flagging hundreds of false positives per rebalance event.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

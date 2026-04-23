@@ -1,24 +1,25 @@
 """
 Module 03: Progressive Integration Tests
-Tests that Module 04 (Layers) works correctly AND that the foundation stack (01→03) still works.
+Tests that Module 03 (Layers) works correctly AND that the foundation stack (01→02) still works.
 
-DEPENDENCY CHAIN: 01_setup → 02_tensor → 03_activations → 04_layers
+DEPENDENCY CHAIN: 01_tensor → 02_activations → 03_layers
 This is where we create reusable building blocks for neural networks.
 
 🎯 WHAT THIS TESTS:
 - Module 03: Layer base class and interface design
 - Integration: Layers work with tensors and activations from previous modules
-- Regression: Previous modules (01→03) still work correctly
-- Preparation: Foundation ready for Module 05 (DataLoader)
+- Regression: Previous modules (01→02) still work correctly
+- Preparation: Foundation ready for Module 04 (Losses)
 
 💡 FOR STUDENTS: If tests fail, check:
 1. Does your Layer base class exist in tinytorch.core.layers?
 2. Does Layer have a forward() method?
 3. Is Layer callable (has __call__ method)?
-4. Do layers work with Tensor objects from Module 02?
+4. Do layers work with Tensor objects from Module 01?
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 class TestPriorModulesStillWork:
     """
-    🔄 REGRESSION CHECK: Verify Modules 01→03 still work after Layer development.
+    🔄 REGRESSION CHECK: Verify Modules 01→02 still work after Layer development.
 
     💡 If these fail: You may have broken something in the foundation while working on layers.
     🔧 Fix: Check that your layer code doesn't interfere with basic tensor/activation functionality.
@@ -36,10 +37,10 @@ class TestPriorModulesStillWork:
 
     def test_setup_environment_stable(self):
         """
-        ✅ TEST: Module 01 (Setup) - Environment should still work
+        ✅ TEST: Module 01 (Tensor) - Environment should still work
 
         📋 CHECKS:
-        - Python 3.8+ available
+        - Python 3.10+ available
         - NumPy working correctly
         - Project structure intact
 
@@ -49,7 +50,7 @@ class TestPriorModulesStillWork:
         try:
             # Environment checks
             assert sys.version_info >= (3, 8), \
-                "❌ Python 3.8+ required. Current: Python {}.{}".format(
+                "❌ Python 3.10+ required. Current: Python {}.{}".format(
                     sys.version_info.major, sys.version_info.minor)
 
             # NumPy functionality
@@ -65,12 +66,12 @@ class TestPriorModulesStillWork:
 
         except Exception as e:
             assert False, f"""
-            ❌ MODULE 01 REGRESSION: Setup environment broken!
+            ❌ MODULE 01 REGRESSION: Tensor environment broken!
 
             🔍 ERROR: {str(e)}
 
             🔧 HOW TO FIX:
-            1. Check Python version: python --version (need 3.8+)
+            1. Check Python version: python --version (need 3.10+)
             2. Reinstall NumPy: pip install numpy
             3. Verify project structure exists
             4. Run Module 01 tests separately: python tests/run_all_modules.py --module module_01
@@ -78,7 +79,7 @@ class TestPriorModulesStillWork:
 
     def test_tensor_operations_stable(self):
         """
-        ✅ TEST: Module 02 (Tensor) - Tensors should still work
+        ✅ TEST: Module 01 (Tensor) - Tensors should still work
 
         📋 CHECKS:
         - Tensor class can be imported
@@ -97,19 +98,19 @@ class TestPriorModulesStillWork:
                 f"❌ Tensor shape broken. Expected (3,), got {t.shape}"
 
             # Multi-dimensional tensors
-            t2 = Tensor(np.random.randn(4, 5))
+            t2 = Tensor(rng.standard_normal((4, 5)))
             assert t2.shape == (4, 5), \
                 f"❌ Multi-dim tensor broken. Expected (4, 5), got {t2.shape}"
 
         except ImportError as e:
             assert False, f"""
-            ❌ MODULE 02 REGRESSION: Cannot import Tensor!
+            ❌ MODULE 01 REGRESSION: Cannot import Tensor!
 
             🔍 IMPORT ERROR: {str(e)}
 
             🔧 HOW TO FIX:
-            1. Implement Tensor class in modules/02_tensor/
-            2. Export module: tito module complete 02_tensor
+            1. Implement Tensor class in modules/01_tensor/
+            2. Export module: tito module complete 01_tensor
             3. Check tinytorch.core.tensor exists
             4. Verify Tensor class is exported correctly
 
@@ -121,7 +122,7 @@ class TestPriorModulesStillWork:
             """
         except Exception as e:
             assert False, f"""
-            ❌ MODULE 02 REGRESSION: Tensor functionality broken!
+            ❌ MODULE 01 REGRESSION: Tensor functionality broken!
 
             🔍 ERROR: {str(e)}
 
@@ -129,12 +130,12 @@ class TestPriorModulesStillWork:
             1. Check Tensor.__init__ accepts data parameter
             2. Ensure Tensor.shape property returns correct tuple
             3. Test with: t = Tensor([1,2,3]); print(t.shape)
-            4. Run Module 02 tests: python tests/run_all_modules.py --module module_02
+            4. Run Module 01 tests: python tests/run_all_modules.py --module module_01
             """
 
     def test_activations_stable(self):
         """
-        ✅ TEST: Module 03 (Activations) - Activations should still work
+        ✅ TEST: Module 02 (Activations) - Activations should still work
 
         📋 CHECKS:
         - Activation functions can be imported
@@ -167,13 +168,13 @@ class TestPriorModulesStillWork:
 
         except ImportError as e:
             assert False, f"""
-            ❌ MODULE 03 REGRESSION: Cannot import activations!
+            ❌ MODULE 02 REGRESSION: Cannot import activations!
 
             🔍 IMPORT ERROR: {str(e)}
 
             🔧 HOW TO FIX:
-            1. Implement ReLU and Sigmoid in modules/03_activations/
-            2. Export module: tito module complete 03_activations
+            1. Implement ReLU and Sigmoid in modules/02_activations/
+            2. Export module: tito module complete 02_activations
             3. Check tinytorch.core.activations exists
             4. Verify activation classes are exported
 
@@ -185,7 +186,7 @@ class TestPriorModulesStillWork:
             """
         except Exception as e:
             assert False, f"""
-            ❌ MODULE 03 REGRESSION: Activation functionality broken!
+            ❌ MODULE 02 REGRESSION: Activation functionality broken!
 
             🔍 ERROR: {str(e)}
 
@@ -194,13 +195,13 @@ class TestPriorModulesStillWork:
             2. Check Sigmoid returns 1/(1+exp(-x))
             3. Ensure activations are callable: relu(tensor)
             4. Test activations work with Tensor objects
-            5. Run Module 03 tests: python tests/run_all_modules.py --module module_03
+            5. Run Module 02 tests: python tests/run_all_modules.py --module module_02
             """
 
 
-class TestModule04LayersCore:
+class TestModule03LayersCore:
     """
-    🆕 NEW FUNCTIONALITY: Test Module 04 (Layers) core implementation.
+    🆕 NEW FUNCTIONALITY: Test Module 03 (Layers) core implementation.
 
     💡 What you're implementing: Base Layer class that all neural network layers inherit from.
     🎯 Goal: Create a standard interface for all layers (Dense, Conv2D, etc.)
@@ -240,7 +241,7 @@ class TestModule04LayersCore:
 
             🔧 HOW TO IMPLEMENT:
 
-            1. Create in modules/04_layers/04_layers.py:
+            1. Create in modules/03_layers/03_layers.py:
 
             class Layer:
                 '''Base class for all neural network layers.'''
@@ -254,7 +255,7 @@ class TestModule04LayersCore:
                     return self.forward(x)
 
             2. Export the module:
-               tito module complete 04_layers
+               tito module complete 03_layers
 
             📚 WHY THIS MATTERS:
             - All layers (Dense, Conv2D, etc.) will inherit from Layer
@@ -345,7 +346,7 @@ class TestModule04LayersCore:
         - Custom forward() method works correctly
         - Layer interface is flexible and extensible
 
-        💡 FOR STUDENTS: This shows how your Linear layer works in Module 03
+        💡 FOR STUDENTS: This shows how your Linear layer works in Module 03 (Layers)
         """
         try:
             from tinytorch.core.layers import Layer
@@ -404,7 +405,7 @@ class TestProgressiveStackIntegration:
     """
     🔗 INTEGRATION TEST: Layer + Tensor + Activations working together.
 
-    💡 This tests the "progressive stack" - ensuring all modules 01→04 work together.
+    💡 This tests the "progressive stack" - ensuring all modules 01→03 work together.
     🎯 Goal: Verify you can build neural network components using everything so far.
     """
 
@@ -417,7 +418,7 @@ class TestProgressiveStackIntegration:
         - Layer returns Tensor objects
         - Tensor operations work within layers
 
-        💡 This is crucial for Module 05 (DataLoader)
+        💡 This is crucial for Module 04 (Losses)
         """
         try:
             from tinytorch.core.layers import Layer
@@ -435,7 +436,7 @@ class TestProgressiveStackIntegration:
             test_cases = [
                 ([1, 2, 3], (3,)),
                 ([[1, 2], [3, 4]], (2, 2)),
-                (np.random.randn(5, 10), (5, 10))
+                (rng.standard_normal((5, 10)), (5, 10))
             ]
 
             for input_data, expected_shape in test_cases:
@@ -545,16 +546,15 @@ class TestProgressiveStackIntegration:
 
     def test_complete_stack_readiness(self):
         """
-        ✅ TEST: Complete stack (01→04) ready for neural networks
+        ✅ TEST: Complete stack (01→03) ready for neural networks
 
         📋 COMPREHENSIVE CHECK:
-        - Environment (01) working
-        - Tensors (02) working
-        - Activations (03) working
-        - Layers (04) working
+        - Tensors (01) working
+        - Activations (02) working
+        - Layers (03) working
         - All components work together
 
-        🎯 MILESTONE: Ready for Module 05 (DataLoader)!
+        🎯 MILESTONE: Ready for Module 04 (Losses)!
         """
         try:
             # Import all components
@@ -602,10 +602,9 @@ class TestProgressiveStackIntegration:
 
             🔍 ERROR: {str(e)}
 
-            🎯 STACK REQUIREMENTS (Modules 01→04):
-            ✅ Module 01: Python environment, NumPy, project structure
-            ✅ Module 02: Tensor class with data and shape
-            ✅ Module 03: ReLU and Sigmoid activation functions
+            🎯 STACK REQUIREMENTS (Modules 01→03):
+            ✅ Module 01: Tensor class with data and shape
+            ✅ Module 02: ReLU and Sigmoid activation functions
             ✅ Module 03: Layer base class with forward() and __call__()
 
             🔧 FIX EACH MODULE:
@@ -625,7 +624,7 @@ class TestNeuralNetworkReadiness:
     """
     🧠 NEURAL NETWORK READINESS: Test foundation is ready for real neural networks.
 
-    💡 These tests verify you have everything needed for Module 05 (DataLoader).
+    💡 These tests verify you have everything needed for Module 04 (Losses).
     🎯 Goal: Confirm the foundation supports building actual neural networks.
     """
 
@@ -648,8 +647,8 @@ class TestNeuralNetworkReadiness:
             class ParameterizedLayer(Layer):
                 def __init__(self, input_size, output_size):
                     # Neural network parameters
-                    self.weight = Tensor(np.random.randn(input_size, output_size))
-                    self.bias = Tensor(np.random.randn(output_size))
+                    self.weight = Tensor(rng.standard_normal((input_size, output_size)))
+                    self.bias = Tensor(rng.standard_normal(output_size))
 
                 def forward(self, x):
                     # Simple linear transformation: y = x @ W + b
@@ -688,7 +687,7 @@ class TestNeuralNetworkReadiness:
             4. Matrix operations must work
 
             💡 WHAT THIS ENABLES:
-            - Linear/Dense layers (Module 03)
+            - Linear/Dense layers (Module 03: Layers)
             - Convolutional layers (Module 09)
             - All parameterized neural network components
 
@@ -719,7 +718,7 @@ class TestNeuralNetworkReadiness:
             feature_dim = 10
 
             # Create batch of data
-            batch_data = Tensor(np.random.randn(batch_size, feature_dim))
+            batch_data = Tensor(rng.standard_normal((batch_size, feature_dim)))
 
             # Test batch processing through activation
             relu = ReLU()
@@ -735,7 +734,7 @@ class TestNeuralNetworkReadiness:
 
             # Test that we can process different batch sizes
             for test_batch_size in [1, 16, 64]:
-                test_batch = Tensor(np.random.randn(test_batch_size, feature_dim))
+                test_batch = Tensor(rng.standard_normal((test_batch_size, feature_dim)))
                 test_output = relu(test_batch)
                 assert test_output.shape == (test_batch_size, feature_dim), \
                     f"❌ Batch size {test_batch_size} processing broken"
@@ -758,7 +757,7 @@ class TestNeuralNetworkReadiness:
             - Essential for modern deep learning
 
             🧪 DEBUG TEST:
-            batch = Tensor(np.random.randn(4, 3))  # 4 samples, 3 features
+            batch = Tensor(rng.standard_normal((4, 3)))  # 4 samples, 3 features
             print(f"Batch shape: {{batch.shape}}")
             relu = ReLU()
             output = relu(batch)
@@ -775,7 +774,7 @@ class TestNeuralNetworkReadiness:
         - Activation functions
         - Output generation
 
-        🎯 MILESTONE: Ready for Module 05 DataLoader!
+        🎯 MILESTONE: Ready for Module 04 (Losses)!
         """
         try:
             from tinytorch.core.tensor import Tensor
@@ -785,8 +784,8 @@ class TestNeuralNetworkReadiness:
             # Simulate complete neural network workflow
             class MockDenseLayer(Layer):
                 def __init__(self, in_features, out_features):
-                    self.weight = Tensor(np.random.randn(in_features, out_features) * 0.1)
-                    self.bias = Tensor(np.random.randn(out_features) * 0.1)
+                    self.weight = Tensor(rng.standard_normal((in_features, out_features)) * 0.1)
+                    self.bias = Tensor(rng.standard_normal(out_features) * 0.1)
 
                 def forward(self, x):
                     # Dense layer: y = x @ W + b
@@ -802,7 +801,7 @@ class TestNeuralNetworkReadiness:
 
             # Simulate MNIST-like input
             batch_size = 32
-            x = Tensor(np.random.randn(batch_size, 784))  # Flattened 28x28 images
+            x = Tensor(rng.standard_normal((batch_size, 784)))  # Flattened 28x28 images
 
             # Forward pass through network
             h1 = relu(layer1(x))      # 32 x 128
@@ -858,14 +857,14 @@ class TestNeuralNetworkReadiness:
 
 class TestModuleCompletionReadiness:
     """
-    ✅ COMPLETION CHECK: Module 04 ready and foundation set for Module 05.
+    ✅ COMPLETION CHECK: Module 03 ready and foundation set for Module 04.
 
     🎯 This is the final validation that everything works before moving to Dense Networks.
     """
 
-    def test_module_04_complete(self):
+    def test_module_03_complete(self):
         """
-        ✅ FINAL TEST: Module 04 (Layers) is complete and working
+        ✅ FINAL TEST: Module 03 (Layers) is complete and working
 
         📋 COMPLETION CHECKLIST:
         □ Layer base class implemented
@@ -873,7 +872,7 @@ class TestModuleCompletionReadiness:
         □ Integration with previous modules
         □ Ready for inheritance (Dense, Conv2D, etc.)
 
-        🎯 SUCCESS = Ready for Module 05: DataLoader!
+        🎯 SUCCESS = Ready for Module 04: Losses!
         """
         completion_checklist = {
             "Layer base class exists": False,
@@ -933,7 +932,7 @@ class TestModuleCompletionReadiness:
             completion_checklist["Foundation supports parameters"] = True
 
             # Check 7: supports batches
-            batch_x = Tensor(np.random.randn(4, 3))
+            batch_x = Tensor(rng.standard_normal((4, 3)))
             batch_output = test_layer(batch_x)
             assert batch_output.shape == (4, 3)
             completion_checklist["Foundation supports batches"] = True
@@ -954,7 +953,7 @@ class TestModuleCompletionReadiness:
             progress_report += f"\n📊 Progress: {completed_count}/{total_count} checks passed"
 
             assert False, f"""
-            ❌ MODULE 04 NOT COMPLETE!
+            ❌ MODULE 03 NOT COMPLETE!
 
             🔍 ERROR: {str(e)}
 
@@ -963,7 +962,7 @@ class TestModuleCompletionReadiness:
             🔧 NEXT STEPS:
             1. Fix the failing check above
             2. Re-run this test
-            3. When all ✅, you're ready for Module 05!
+            3. When all ✅, you're ready for Module 04!
 
             💡 ALMOST THERE!
             You've completed {completed_count}/{total_count} requirements.
@@ -972,14 +971,14 @@ class TestModuleCompletionReadiness:
 
         # If we get here, everything passed!
         assert True, """
-        🎉 MODULE 04 COMPLETE! 🎉
+        🎉 MODULE 03 COMPLETE! 🎉
 
         ✅ Layer base class implemented
         ✅ Proper interface design
         ✅ Integration with foundation
         ✅ Ready for neural networks
 
-        🚀 READY FOR MODULE 05: DATALOADER!
+        🚀 READY FOR MODULE 04: LOSSES!
 
         💡 What you can now do:
         - Inherit from Layer to create Dense layers
@@ -992,4 +991,4 @@ class TestModuleCompletionReadiness:
 
 
 # Note: No regression prevention section needed here since we ARE testing regression
-# by checking that modules 01-03 still work after implementing module 04.
+# by checking that modules 01-02 still work after implementing module 03.

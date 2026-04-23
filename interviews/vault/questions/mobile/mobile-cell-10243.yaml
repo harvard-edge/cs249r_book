@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-cell-10243
+track: mobile
+level: L4
+zone: design
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Realizing On-Device Agent State Persistence Across App Backgrounding on Snapdragon 8 Gen 3
+scenario: 'A Snapdragon 8 Gen 3 (45 TOPS, 16GB) agentic app loses its multi-step task state when the user
+  switches apps. The agent maintains: current task plan (JSON, 2KB), conversation history (20 turns, ~4000
+  tokens as text = 16KB), intermediate tool results (up to 50KB), and FAISS query context (10 recent query
+  embeddings, 10*384*4=15.4KB). Android may kill the app process when backgrounded. Implement state persistence
+  that allows the agent to resume within 500ms of returning to the foreground.'
+details:
+  realistic_solution: 'Serialize only the lightweight state: task_plan(2KB) + conversation_history_as_text(16KB)
+    + tool_results(50KB) + query_embeddings(15.4KB) = 83.4KB total. Write to SharedPreferences or Room
+    DB on every state change (not just on background). On resume: (1) Read state from DB: 83.4KB at 3GB/s
+    NVMe = 0.028ms — negligible. (2) KV cache is NOT persisted — rebuild by running prefill on restored
+    conversation history. Prefill 4000 tokens at Snapdragon 8 Gen 3: 4000*2*1B/(45e12*0.3)=592ms — too
+    slow. Alternative: store only last 512 tokens verbatim and summarized older turns (200 tokens). Prefill
+    712 tokens: 105ms. Total resume: 0.028+105=105ms well within 500ms.'
+  common_mistake: Serializing the full agent state including model weights and KV cache to disk on every
+    background event. Model weights don't need saving (they're in the APK/assets), but teams try to serialize
+    the KV cache (which can be 50MB+) causing 500ms+ writes that delay the background transition.
+  napkin_math: 'State size: 2+16+50+15.4=83.4KB. Write latency: 83.4KB/3GB/s=0.028ms. KV cache size (not
+    persisted): 4000 tokens * 40KB/token = 160MB — too large to persist (160MB/3GB/s=53ms write + 53ms
+    read = 106ms just for I/O, plus 100ms deserialization = 206ms acceptable, but 160MB as volatile state).
+    Decision: persist only conversation text (83.4KB), rebuild KV via truncated prefill. Prefill 712-token
+    history: 712*2*1B/(45e12*0.3)=105.5ms. Total resume path: DB read(0.03ms) + prefill(105ms) + warm-up(50ms)
+    = 155ms < 500ms.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

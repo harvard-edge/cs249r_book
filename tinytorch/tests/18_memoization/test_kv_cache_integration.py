@@ -1,9 +1,10 @@
 """
-Integration Tests for Module 14: KV Caching
+Integration Tests for Module 18: KV Caching
 Tests integration with transformer components and generation
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from tinytorch.core.attention import MultiHeadAttention
 
 # Optional import - KV cache may not be implemented yet
 try:
-    from tinytorch.generation.kv_cache import KVCache, enable_kv_cache
+    from tinytorch.perf.memoization import KVCache, enable_kv_cache
     HAS_KV_CACHE = True
 except ImportError:
     HAS_KV_CACHE = False
@@ -44,7 +45,7 @@ class TestKVCacheIntegration:
         v_proj = Linear(embed_dim, embed_dim)
 
         # Create input
-        x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+        x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
 
         # Project to Q, K, V
         Q = q_proj.forward(x)
@@ -125,8 +126,8 @@ class TestKVCacheIntegration:
         for pos in range(seq_len):
             for layer_idx in range(num_layers):
                 # Simulate K, V for current token at this layer
-                k = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-                v = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+                k = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+                v = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
 
                 cache.update(layer_idx=layer_idx, key=k, value=v)
 
@@ -238,8 +239,8 @@ class TestKVCacheIntegration:
         for pos in range(seq_len):
             for layer_idx in range(num_layers):
                 # Different K, V for each sequence in batch
-                k = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-                v = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+                k = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+                v = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
                 cache.update(layer_idx, k, v)
             cache.advance()
 
@@ -275,8 +276,8 @@ class TestKVCacheIntegration:
 
         # Test 2: Fill to maximum
         for pos in range(max_seq_len):
-            k = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-            v = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+            k = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+            v = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
             cache.update(0, k, v)
             cache.advance()
 
@@ -286,8 +287,8 @@ class TestKVCacheIntegration:
 
         # Test 3: Overflow protection
         try:
-            k = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
-            v = Tensor(np.random.randn(batch_size, num_heads, 1, head_dim))
+            k = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
+            v = Tensor(rng.standard_normal((batch_size, num_heads, 1, head_dim)))
             cache.update(0, k, v)
             assert False, "Should raise ValueError on overflow"
         except ValueError as e:
@@ -319,7 +320,7 @@ def test_kv_cache_integration_with_attention():
     attn = MultiHeadAttention(embed_dim=embed_dim, num_heads=num_heads)
 
     # Create input sequence
-    x = Tensor(np.random.randn(batch_size, seq_len, embed_dim))
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
 
     # Standard attention (no cache)
     output_standard = attn.forward(x)
@@ -336,7 +337,7 @@ def test_kv_cache_integration_with_attention():
 
 if __name__ == "__main__":
     print("\n" + "="*70)
-    print("🔬 Module 14: KV Caching Integration Tests")
+    print("🔬 Module 18: KV Caching Integration Tests")
     print("="*70)
 
     # Run all tests

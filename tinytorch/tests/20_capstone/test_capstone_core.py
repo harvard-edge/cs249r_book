@@ -21,6 +21,7 @@ WHAT THIS MODULE TIES TOGETHER:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -48,7 +49,7 @@ class TestBenchmarkSuite:
                 return x
 
         models = [MockModel("test_model")]
-        datasets = [{"name": "test", "data": np.random.randn(10, 4)}]
+        datasets = [{"name": "test", "data": rng.standard_normal((10, 4))}]
         suite = BenchmarkSuite(models=models, datasets=datasets)
         assert suite is not None
 
@@ -109,7 +110,7 @@ class TestCapstoneValidation:
         WHY: Layers are the building blocks of neural networks.
         """
         layer = Linear(4, 2)
-        x = Tensor(np.random.randn(1, 4))
+        x = Tensor(rng.standard_normal((1, 4)))
 
         output = layer.forward(x)
 

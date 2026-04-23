@@ -16,6 +16,7 @@ Modules tested: 10-13 (Tokenization → Embeddings → Attention → Transformer
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -127,7 +128,7 @@ class TestAttentionGradientFlow:
 
         # Random input sequence
         x = Tensor(
-            np.random.randn(batch_size, seq_len, embed_dim),
+            rng.standard_normal((batch_size, seq_len, embed_dim)),
             requires_grad=True
         )
 
@@ -156,7 +157,7 @@ class TestAttentionGradientFlow:
         attention = MultiHeadAttention(embed_dim, num_heads)
 
         x = Tensor(
-            np.random.randn(1, 4, embed_dim),
+            rng.standard_normal((1, 4, embed_dim)),
             requires_grad=True
         )
 
@@ -194,7 +195,7 @@ class TestTransformerGradientFlow:
         block = TransformerBlock(embed_dim, num_heads, ff_dim)
 
         x = Tensor(
-            np.random.randn(1, 8, embed_dim),
+            rng.standard_normal((1, 8, embed_dim)),
             requires_grad=True
         )
 
@@ -224,7 +225,7 @@ class TestTransformerGradientFlow:
         blocks = [TransformerBlock(embed_dim, num_heads, ff_dim) for _ in range(num_layers)]
 
         x = Tensor(
-            np.random.randn(1, 8, embed_dim),
+            rng.standard_normal((1, 8, embed_dim)),
             requires_grad=True
         )
 
@@ -275,7 +276,7 @@ class TestNLPPipelineEndToEnd:
         loss_fn = CrossEntropyLoss()
 
         # Input: token IDs (as Tensor) - shape (batch_size, seq_len)
-        token_ids = Tensor(np.random.randint(0, vocab_size, (batch_size, seq_len)))
+        token_ids = Tensor(rng.integers(0, vocab_size, (batch_size, seq_len)))
         target = Tensor(np.array([3]))  # Class 3
 
         # Forward pass

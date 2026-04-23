@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-0203
+track: cloud
+level: L3
+zone: fluency
+topic: mlops-lifecycle
+competency_area: deployment
+bloom_level: apply
+phase: both
+title: The Normalization Mismatch
+scenario: Your image classification model achieves 91% accuracy in the training notebook but only 72%
+  when deployed to a Flask serving endpoint on the same A100 GPU. Same model weights, same test images
+  (you verified by saving the raw bytes). The training team uses PyTorch, the serving team uses ONNX Runtime.
+  What's the most likely preprocessing bug?
+details:
+  realistic_solution: 'The serving pipeline applies different input normalization than training. The most
+    common variant: the training pipeline normalizes images to [0, 1] range and then applies ImageNet
+    mean/std normalization ($\mu = [0.485, 0.456, 0.406]$, $\sigma = [0.229, 0.224, 0.225]$). The serving
+    pipeline either: (1) forgets the mean/std normalization entirely (passes [0, 1] values directly);
+    (2) applies normalization but in the wrong channel order (RGB vs BGR — OpenCV loads BGR by default,
+    PIL loads RGB); or (3) normalizes to [-1, 1] instead of using ImageNet statistics (a common TensorFlow
+    convention applied to a PyTorch-trained model). Any of these produces inputs that are statistically
+    different from what the model saw during training. The model still gets *some* predictions right (72%)
+    because the spatial structure of the image is preserved — the model can still detect edges and shapes
+    — but the magnitude and distribution of activations are wrong. Fix: extract the exact preprocessing
+    pipeline from the training code (including library-specific defaults) and replicate it byte-for-byte
+    in the serving code. Add an assertion that compares the preprocessed tensor''s mean and std against
+    expected values.'
+  common_mistake: '"ONNX Runtime must have a conversion bug" or "The model needs to be re-exported." ONNX
+    conversion for standard architectures is well-tested and unlikely to cause a 19-point drop. The model
+    is fine — the *input* is wrong.'
+  napkin_math: 'ImageNet normalization: pixel value 128 (mid-gray) → $(128/255 - 0.485) / 0.229 = (0.502
+    - 0.485) / 0.229 = 0.074$. Without normalization: the model receives 0.502 instead of 0.074 — a **6.8×
+    magnitude error**. With BGR instead of RGB: the red channel''s mean (0.485) is applied to the blue
+    channel (which has mean 0.406). Error per pixel: $(0.406 - 0.485) / 0.229 = -0.345$ systematic bias
+    in the blue channel. Over a 224×224 image: every one of the 50,176 pixels has a ~0.3 bias — the model
+    sees a systematically tinted image. For a model trained on correctly normalized inputs, this is equivalent
+    to adding a colored filter to every image. The 72% accuracy (vs 91%) means the model is robust enough
+    to classify ~79% of "easy" images despite the bias, but fails on the ~21% that require precise color
+    or intensity discrimination.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

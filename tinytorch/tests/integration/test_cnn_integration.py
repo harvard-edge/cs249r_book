@@ -11,6 +11,7 @@ Tests that verify:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
@@ -65,7 +66,7 @@ class TestConv2dOperations:
         ]
 
         for in_ch, out_ch, kernel_size, input_shape, expected_shape in test_cases:
-            x = Tensor(np.random.randn(*input_shape))
+            x = Tensor(rng.standard_normal(input_shape))
             conv = Conv2d(in_channels=in_ch, out_channels=out_ch, kernel_size=kernel_size)
             output = conv.forward(x)
 
@@ -165,7 +166,7 @@ class TestPoolingOperations:
         ]
 
         for input_shape, kernel_size, stride, expected_shape in test_cases:
-            x = Tensor(np.random.randn(*input_shape))
+            x = Tensor(rng.standard_normal(input_shape))
 
             # Test MaxPool2d
             maxpool = MaxPool2d(kernel_size=kernel_size, stride=stride)
@@ -196,7 +197,7 @@ class TestCNNGradientFlow:
         enable_autograd()
 
         # Create simple conv layer
-        x = Tensor(np.random.randn(1, 3, 8, 8), requires_grad=True)
+        x = Tensor(rng.standard_normal((1, 3, 8, 8)), requires_grad=True)
         conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
         conv.weight.requires_grad = True
 
@@ -232,7 +233,7 @@ class TestCNNGradientFlow:
         enable_autograd()
 
         # Input
-        x = Tensor(np.random.randn(2, 3, 16, 16), requires_grad=True)
+        x = Tensor(rng.standard_normal((2, 3, 16, 16)), requires_grad=True)
 
         # Layer 1: Conv2d
         conv1 = Conv2d(in_channels=3, out_channels=8, kernel_size=3)

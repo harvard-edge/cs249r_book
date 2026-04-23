@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-r2-40049
+track: cloud
+level: L4
+zone: optimization
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: AllReduce on Non-Power-of-Two GPU Counts
+scenario: Due to GPU failures, your 512-H100 cluster now has 497 working GPUs. The recursive halving-doubling
+  algorithm requires power-of-two participant counts. NCCL falls back to ring AllReduce, but ring performance
+  at 497 GPUs has significant per-step latency overhead. Propose an efficient AllReduce strategy for 497
+  GPUs.
+details:
+  realistic_solution: 'Use the Rabenseifner algorithm variant for non-power-of-two: (1) Round down to
+    nearest power of 2: P'' = 256. (2) The extra 497 - 256 = 241 GPUs each pair with one of the first
+    241 GPUs in the power-of-two group. (3) Pre-reduction: the 241 extra GPUs send their gradients to
+    their partners. Cost: D/B = 2GB/50GB/s = 40ms. (4) Recursive halving-doubling among 256 GPUs (which
+    now hold reduced gradients from 2 GPUs each). Cost: 2 × log₂(256) × α + 2 × 255/256 × 2GB/400GB/s
+    = 160μs + 10ms = 10.16ms. (5) Post-broadcast: the 256 GPUs send results back to their partners. Cost:
+    40ms. Total: 40 + 10.16 + 40 = 90.16ms. Compare to ring with 497: 2 × 496 × 5μs + 2 × 496/497 × 2GB/400GB/s
+    = 4.96ms + 10ms = 14.96ms. Ring is actually faster here because the pre/post reduction phases (80ms)
+    dominate. For multi-rail: pre/post reduction uses only 1 link each while halving-doubling uses all
+    rails. With 8 rails: pre/post = 5ms each, halving-doubling = 10.16/8 = 1.27ms. Total: 5 + 1.27 + 5
+    = 11.27ms. Ring 8-rail: 14.96/8 = 1.87ms + 4.96ms = 6.83ms. At this scale, ring wins.'
+  common_mistake: Simply using ring AllReduce and accepting the 496-step latency overhead. Another mistake
+    is padding to 512 with dummy GPUs that waste compute and memory.
+  napkin_math: '497 GPUs, 2GB gradient, 8-rail 400Gbps: Ring = 2×496×5μs + 2×496/497×2GB/400GB/s = 4.96ms
+    + 9.98ms = 14.94ms (latency + BW). With 8 rails (BW term only scales): 4.96ms + 1.25ms = 6.21ms. Ring''s
+    simplicity wins over complex non-power-of-two algorithms when multi-rail reduces the BW term.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

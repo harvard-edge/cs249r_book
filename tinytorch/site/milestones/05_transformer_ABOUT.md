@@ -1,1 +1,0 @@
-../../milestones/05_2017_transformer/ABOUT.md

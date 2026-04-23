@@ -4,6 +4,9 @@ Module Dependency Integration Testing
 Tests how each module interfaces with modules that came before it
 """
 
+import numpy as np
+rng = np.random.default_rng(7)
+
 # Module dependency graph for TinyTorch
 # Current module structure:
 # 01_tensor, 02_activations, 03_layers, 04_losses, 05_dataloader,
@@ -86,6 +89,7 @@ def test_tensor_integration():
     """Test that Tensor works as expected for dependent modules."""
     from tinytorch.core.tensor import Tensor
     import numpy as np
+    rng = np.random.default_rng(7)
 
     # Test tensor creation
     t = Tensor(np.array([1, 2, 3]))
@@ -119,7 +123,7 @@ def test_dense_integration():
 
     # Test Dense with Tensor input
     layer = Linear(10, 5)
-    x = Tensor(np.random.randn(32, 10))
+    x = Tensor(rng.standard_normal((32, 10)))
     output = layer(x)
 
     assert output.shape == (32, 5), "Dense should produce correct shape"
@@ -155,7 +159,7 @@ def test_dense_with_activations():
     sigmoid = Sigmoid()
 
     # Forward pass
-    x = Tensor(np.random.randn(16, 10))
+    x = Tensor(rng.standard_normal((16, 10)))
     h1 = layer1(x)
     h1_activated = relu(h1)
     output = layer2(h1_activated)
@@ -185,7 +189,7 @@ def test_multi_layer_network():
     ]
 
     # Forward pass through all layers
-    x = Tensor(np.random.randn(32, 784))
+    x = Tensor(rng.standard_normal((32, 784)))
 
     for i, layer in enumerate(layers):
         x = layer(x)
@@ -209,7 +213,7 @@ def test_conv2d_with_tensor():
     conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
 
     # Test with image tensor (batch, channels, height, width)
-    x = Tensor(np.random.randn(8, 3, 32, 32))
+    x = Tensor(rng.standard_normal((8, 3, 32, 32)))
     output = conv(x)
 
     # Check output shape (with valid padding, output is smaller)
@@ -226,7 +230,7 @@ def test_pooling_integration():
     conv = Conv2d(3, 32, kernel_size=3, padding=1)
     pool = MaxPool2d(kernel_size=2, stride=2)
 
-    x = Tensor(np.random.randn(4, 3, 28, 28))
+    x = Tensor(rng.standard_normal((4, 3, 28, 28)))
     conv_out = conv(x)
     pool_out = pool(conv_out)
 
@@ -242,7 +246,7 @@ def test_attention_with_dense():
     import numpy as np
 
     attention = MultiHeadAttention(embed_dim=64, num_heads=4)
-    x = Tensor(np.random.randn(2, 10, 64))  # (batch, seq_len, embed_dim)
+    x = Tensor(rng.standard_normal((2, 10, 64)))  # (batch, seq_len, embed_dim)
 
     output = attention(x)
     assert output.shape == x.shape, "Attention preserves shape"
@@ -255,7 +259,7 @@ def test_multihead_integration():
     import numpy as np
 
     mha = MultiHeadAttention(embed_dim=64, num_heads=8)
-    x = Tensor(np.random.randn(2, 10, 64))
+    x = Tensor(rng.standard_normal((2, 10, 64)))
 
     output = mha(x)
     assert output.shape == x.shape, "MHA preserves input shape"
@@ -309,8 +313,8 @@ def test_training_loop_integration():
     loss_fn = MSELoss()
 
     # Dummy data
-    X = Tensor(np.random.randn(32, 10))
-    y = Tensor(np.random.randn(32, 1))
+    X = Tensor(rng.standard_normal((32, 10)))
+    y = Tensor(rng.standard_normal((32, 1)))
 
     # One training step
     predictions = model(X)

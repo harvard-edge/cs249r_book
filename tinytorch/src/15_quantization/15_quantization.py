@@ -61,6 +61,7 @@ from tinytorch.perf.quantization import quantize_int8, QuantizedLinear, quantize
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| export
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 from typing import Tuple, Dict, List, Optional
 import warnings
@@ -141,7 +142,7 @@ def explore_motivation_profiling():
 
     for in_feat, out_feat, name in model_configs:
         model = Linear(in_feat, out_feat)
-        input_data = Tensor(np.random.randn(1, in_feat))
+        input_data = Tensor(rng.standard_normal((1, in_feat)))
 
         # Profile the model
         profile = profiler.profile_forward_pass(model, input_data)
@@ -282,7 +283,7 @@ Every quantization system uses this fundamental relationship:
 ```
 Quantization (FP32 → INT8):
 ┌─────────────────────────────────────────────────────────┐
-│  quantized = round((float_value - zero_point) / scale)  │
+│  quantized = round(float_value / scale + zero_point)     │
 └─────────────────────────────────────────────────────────┘
 
 Dequantization (INT8 → FP32):
@@ -434,11 +435,11 @@ Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Ap
 - **Dynamic Range:** Each tensor has different min/max values
 - **Precision Loss:** Map 4 billion FP32 values to just 256 INT8 values
 - **Zero Preservation:** Ensure FP32 zero maps exactly to an INT8 value
-- **Symmetric Mapping:** Distribute quantization levels efficiently
+- **Asymmetric Mapping:** Distribute quantization levels efficiently
 
 **Why This Algorithm:**
 - **Linear mapping** preserves relative relationships between values
-- **Symmetric quantization** works well for most neural network weights
+- **Affine (asymmetric) quantization** works well for most neural network weights
 - **Clipping to [-128, 127]** ensures valid INT8 range
 - **Round-to-nearest** minimizes quantization error
 """
@@ -447,7 +448,7 @@ Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Ap
 #| export
 def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     """
-    Quantize FP32 tensor to INT8 using symmetric quantization.
+    Quantize FP32 tensor to INT8 using asymmetric (min-max) quantization.
 
     TODO: Implement INT8 quantization with scale and zero_point calculation
 
@@ -455,7 +456,7 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     1. Find min/max values in tensor data
     2. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
     3. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
-       Formula: zero_point = round(INT8_MIN - min_val / scale)
+       Formula: zero_point = round(INT8_MIN - (min_val / scale))
     4. Apply quantization formula: round(value / scale + zero_point)
     5. Clamp to INT8 range [-128, 127]
 
@@ -485,10 +486,14 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     min_val = float(np.min(data))
     max_val = float(np.max(data))
 
-    # Step 2: Handle edge case (constant tensor)
+    # Step 2: Handle edge case (constant tensor).
+    # All elements have the same value, so there is no range to map.
+    # We still need dequantize(quantize(c)) ≈ c, so we encode every element
+    # as q=0 and set zero_point so that (0 - zero_point) * scale = c.
+    # With scale=1.0 that means zero_point = -round(c), clamped to INT8 range.
     if abs(max_val - min_val) < EPSILON:
         scale = 1.0
-        zero_point = 0
+        zero_point = int(np.clip(np.round(-min_val), INT8_MIN_VALUE, INT8_MAX_VALUE))
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
@@ -543,10 +548,25 @@ def test_unit_quantize_int8():
     # Using slightly higher tolerance to account for numerical precision variations
     assert error < 0.25, f"Quantization error too high: {error:.4f} (expected < 0.25 for INT8, range=5.0)"
 
-    # Test edge case: constant tensor
+    # Test edge case: constant tensor -- dequantize must recover the original value,
+    # not zero. Previously zero_point was hardcoded to 0, so (0 - 0) * 1.0 = 0.0
+    # for every element regardless of what the constant was.
     constant_tensor = Tensor([[2.0, 2.0], [2.0, 2.0]])
     q_const, scale_const, zp_const = quantize_int8(constant_tensor)
     assert scale_const == 1.0
+    restored_const = (q_const.data.astype(np.float32) - zp_const) * scale_const
+    assert np.allclose(restored_const, 2.0), (
+        f"Constant tensor dequantized to {restored_const} instead of 2.0. "
+        "zero_point must encode the constant value, not default to 0."
+    )
+
+    # Negative constant
+    neg_tensor = Tensor([[-3.0, -3.0]])
+    q_neg, scale_neg, zp_neg = quantize_int8(neg_tensor)
+    restored_neg = (q_neg.data.astype(np.float32) - zp_neg) * scale_neg
+    assert np.allclose(restored_neg, -3.0, atol=0.01), (
+        f"Negative constant tensor dequantized to {restored_neg} instead of -3.0."
+    )
 
     print("INT8 quantization works correctly!")
 
@@ -800,8 +820,8 @@ class QuantizedLinear:
 
         EXAMPLE:
         >>> original_layer = Linear(128, 64)
-        >>> original_layer.weight = Tensor(np.random.randn(128, 64) * 0.1)
-        >>> original_layer.bias = Tensor(np.random.randn(64) * 0.01)
+        >>> original_layer.weight = Tensor(rng.standard_normal((128, 64)) * 0.1)
+        >>> original_layer.bias = Tensor(rng.standard_normal(64) * 0.01)
         >>> quantized_layer = QuantizedLinear(original_layer)
         >>> print(quantized_layer.q_weight.data.dtype)
         int8
@@ -843,7 +863,7 @@ class QuantizedLinear:
 
         EXAMPLE:
         >>> layer = QuantizedLinear(Linear(64, 32))
-        >>> sample_data = [Tensor(np.random.randn(1, 64)) for _ in range(10)]
+        >>> sample_data = [Tensor(rng.standard_normal((1, 64))) for _ in range(10)]
         >>> layer.calibrate(sample_data)
         >>> print(layer.input_scale is not None)
         True
@@ -976,14 +996,14 @@ def test_unit_quantized_linear():
 
     # Create original linear layer
     original = Linear(4, 3)
-    original.weight = Tensor(np.random.randn(4, 3) * 0.5)  # Smaller range for testing
-    original.bias = Tensor(np.random.randn(3) * 0.1)
+    original.weight = Tensor(rng.standard_normal((4, 3)) * 0.5)  # Smaller range for testing
+    original.bias = Tensor(rng.standard_normal(3) * 0.1)
 
     # Create quantized version
     quantized = QuantizedLinear(original)
 
     # Test forward pass
-    x = Tensor(np.random.randn(2, 4) * 0.5)
+    x = Tensor(rng.standard_normal((2, 4)) * 0.5)
 
     # Original forward pass
     original_output = original.forward(x)
@@ -1107,7 +1127,7 @@ def _collect_layer_inputs(model, layer_index: int, calibration_data: List[Tensor
 
     EXAMPLE:
     >>> model = Sequential(Linear(4, 8), ReLU(), Linear(8, 3))
-    >>> samples = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+    >>> samples = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
     >>> inputs_at_layer2 = _collect_layer_inputs(model, 2, samples)
     >>> print(len(inputs_at_layer2))  # 5 activation tensors
     5
@@ -1143,15 +1163,15 @@ def test_unit_collect_layer_inputs():
 
     # Create a simple model
     layer1 = Linear(4, 8)
-    layer1.weight = Tensor(np.random.randn(4, 8) * 0.5)
-    layer1.bias = Tensor(np.random.randn(8) * 0.1)
+    layer1.weight = Tensor(rng.standard_normal((4, 8)) * 0.5)
+    layer1.bias = Tensor(rng.standard_normal(8) * 0.1)
     activation = ReLU()
     layer2 = Linear(8, 3)
-    layer2.weight = Tensor(np.random.randn(8, 3) * 0.5)
-    layer2.bias = Tensor(np.random.randn(3) * 0.1)
+    layer2.weight = Tensor(rng.standard_normal((8, 3)) * 0.5)
+    layer2.bias = Tensor(rng.standard_normal(3) * 0.1)
     model = Sequential(layer1, activation, layer2)
 
-    samples = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+    samples = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
 
     # Collect inputs for layer at index 0 (no preceding layers)
     inputs_at_0 = _collect_layer_inputs(model, 0, samples)
@@ -1215,7 +1235,7 @@ def _quantize_single_layer(layer: Linear, calibration_inputs: Optional[List[Tens
 
     EXAMPLE:
     >>> original = Linear(8, 3)
-    >>> original.weight = Tensor(np.random.randn(8, 3) * 0.5)
+    >>> original.weight = Tensor(rng.standard_normal((8, 3)) * 0.5)
     >>> quantized = _quantize_single_layer(original)
     >>> print(quantized.q_weight.data.dtype)
     int8
@@ -1251,8 +1271,8 @@ def test_unit_quantize_single_layer():
 
     # Create a linear layer
     layer = Linear(4, 3)
-    layer.weight = Tensor(np.random.randn(4, 3) * 0.5)
-    layer.bias = Tensor(np.random.randn(3) * 0.1)
+    layer.weight = Tensor(rng.standard_normal((4, 3)) * 0.5)
+    layer.bias = Tensor(rng.standard_normal(3) * 0.1)
 
     # Quantize without calibration
     q_layer = _quantize_single_layer(layer)
@@ -1261,13 +1281,13 @@ def test_unit_quantize_single_layer():
     assert q_layer.input_scale is None, "Without calibration, input_scale should be None"
 
     # Quantize with calibration
-    cal_inputs = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+    cal_inputs = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
     q_layer_cal = _quantize_single_layer(layer, calibration_inputs=cal_inputs)
     assert isinstance(q_layer_cal, QuantizedLinear)
     assert q_layer_cal.input_scale is not None, "With calibration, input_scale should be set"
 
     # Verify forward pass works
-    x = Tensor(np.random.randn(2, 4))
+    x = Tensor(rng.standard_normal((2, 4)))
     output = q_layer.forward(x)
     assert output.shape == (2, 3), f"Output shape should be (2, 3), got {output.shape}"
 
@@ -1381,20 +1401,20 @@ def test_unit_quantize_model():
     layer2 = Linear(8, 3)
 
     # Initialize weights
-    layer1.weight = Tensor(np.random.randn(4, 8) * 0.5)
-    layer1.bias = Tensor(np.random.randn(8) * 0.1)
-    layer2.weight = Tensor(np.random.randn(8, 3) * 0.5)
-    layer2.bias = Tensor(np.random.randn(3) * 0.1)
+    layer1.weight = Tensor(rng.standard_normal((4, 8)) * 0.5)
+    layer1.bias = Tensor(rng.standard_normal(8) * 0.1)
+    layer2.weight = Tensor(rng.standard_normal((8, 3)) * 0.5)
+    layer2.bias = Tensor(rng.standard_normal(3) * 0.1)
 
     # Use Sequential from tinytorch.core.layers
     model = Sequential(layer1, activation, layer2)
 
     # Test original model
-    x = Tensor(np.random.randn(2, 4))
+    x = Tensor(rng.standard_normal((2, 4)))
     original_output = model.forward(x)
 
     # Create calibration data
-    calibration_data = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+    calibration_data = [Tensor(rng.standard_normal((1, 4))) for _ in range(5)]
 
     # Quantize model
     quantize_model(model, calibration_data)
@@ -1523,8 +1543,8 @@ def test_unit_measure_layer_bytes():
 
     # Test FP32 Linear layer
     linear = Linear(10, 5)
-    linear.weight = Tensor(np.random.randn(10, 5))
-    linear.bias = Tensor(np.random.randn(5))
+    linear.weight = Tensor(rng.standard_normal((10, 5)))
+    linear.bias = Tensor(rng.standard_normal(5))
     params, bytes_ = _measure_layer_bytes(linear)
     assert params == 55, f"Expected 55 params (10*5 + 5), got {params}"
     assert bytes_ == 55 * BYTES_PER_FLOAT32, f"Expected {55 * BYTES_PER_FLOAT32} bytes, got {bytes_}"
@@ -1659,20 +1679,20 @@ def test_unit_analyze_model_sizes():
     layer1_orig = Linear(100, 50)
     activation_orig = ReLU()
     layer2_orig = Linear(50, 10)
-    layer1_orig.weight = Tensor(np.random.randn(100, 50))
-    layer1_orig.bias = Tensor(np.random.randn(50))
-    layer2_orig.weight = Tensor(np.random.randn(50, 10))
-    layer2_orig.bias = Tensor(np.random.randn(10))
+    layer1_orig.weight = Tensor(rng.standard_normal((100, 50)))
+    layer1_orig.bias = Tensor(rng.standard_normal(50))
+    layer2_orig.weight = Tensor(rng.standard_normal((50, 10)))
+    layer2_orig.bias = Tensor(rng.standard_normal(10))
     original_model = Sequential(layer1_orig, activation_orig, layer2_orig)
 
     # Create quantized copy
     layer1_quant = Linear(100, 50)
     activation_quant = ReLU()
     layer2_quant = Linear(50, 10)
-    layer1_quant.weight = Tensor(np.random.randn(100, 50))
-    layer1_quant.bias = Tensor(np.random.randn(50))
-    layer2_quant.weight = Tensor(np.random.randn(50, 10))
-    layer2_quant.bias = Tensor(np.random.randn(10))
+    layer1_quant.weight = Tensor(rng.standard_normal((100, 50)))
+    layer1_quant.bias = Tensor(rng.standard_normal(50))
+    layer2_quant.weight = Tensor(rng.standard_normal((50, 10)))
+    layer2_quant.bias = Tensor(rng.standard_normal(10))
     quantized_model = Sequential(layer1_quant, activation_quant, layer2_quant)
 
     quantize_model(quantized_model)
@@ -2124,14 +2144,14 @@ def test_module():
             # Xavier initialization
             fan_in, fan_out = layer.weight.shape
             std = np.sqrt(2.0 / (fan_in + fan_out))
-            layer.weight = Tensor(np.random.randn(fan_in, fan_out) * std)
+            layer.weight = Tensor(rng.standard_normal((fan_in, fan_out)) * std)
             layer.bias = Tensor(np.zeros(fan_out))
 
     # Generate realistic calibration data
-    calibration_data = [Tensor(np.random.randn(1, 784) * 0.1) for _ in range(20)]
+    calibration_data = [Tensor(rng.standard_normal((1, 784)) * 0.1) for _ in range(20)]
 
     # Test original model
-    test_input = Tensor(np.random.randn(8, 784) * 0.1)
+    test_input = Tensor(rng.standard_normal((8, 784)) * 0.1)
     original_output = model.forward(test_input)
 
     # Quantize the model

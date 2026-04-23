@@ -90,6 +90,7 @@ import os
 import time
 import copy
 import numpy as np
+rng = np.random.default_rng(7)
 from pathlib import Path
 
 # Add project root
@@ -204,7 +205,7 @@ def step_1_profile(model, X_test, y_test, Profiler, Tensor):
     flops = profiler.count_flops(model, input_shape)
 
     # Measure inference latency
-    sample_input = Tensor(np.random.randn(1, 64).astype(np.float32))
+    sample_input = Tensor(rng.standard_normal((1, 64)).astype(np.float32))
     latency_ms = profiler.measure_latency(model, sample_input, warmup=3, iterations=10)
     throughput = 1000 / latency_ms if latency_ms > 0 else 0
 
@@ -471,8 +472,8 @@ def step_5_accelerate(vectorized_matmul, Tensor):
     ))
 
     # Create test matrices
-    A = Tensor(np.random.randn(64, 128).astype(np.float32))
-    B = Tensor(np.random.randn(128, 64).astype(np.float32))
+    A = Tensor(rng.standard_normal((64, 128)).astype(np.float32))
+    B = Tensor(rng.standard_normal((128, 64)).astype(np.float32))
 
     # Time standard operation
     start = time.time()
@@ -851,10 +852,10 @@ def main():
         console.print(f"  [green]✓[/green] Test: {len(y_test)} samples")
     except Exception:
         console.print("  [yellow]⚠️ Using synthetic data[/yellow]")
-        X_train = Tensor(np.random.randn(1000, 64).astype(np.float32))
-        y_train = np.random.randint(0, 10, 1000)
-        X_test = Tensor(np.random.randn(200, 64).astype(np.float32))
-        y_test = np.random.randint(0, 10, 200)
+        X_train = Tensor(rng.standard_normal((1000, 64)).astype(np.float32))
+        y_train = rng.integers(0, 10, 1000)
+        X_test = Tensor(rng.standard_normal((200, 64)).astype(np.float32))
+        y_test = rng.integers(0, 10, 200)
 
     # ─────────────────────────────────────────────────────────────────────────
     # QUICK TRAINING

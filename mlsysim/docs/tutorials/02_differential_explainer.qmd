@@ -1,0 +1,95 @@
+---
+title: "The Differential Explainer"
+subtitle: "Automated 'Why?' analysis for hardware upgrades."
+description: "Learn how to use the DifferentialExplainer to automatically compare two configurations and generate a written explanation of the performance delta."
+categories: ["analysis", "intermediate"]
+---
+
+## The Question
+
+When you run a simulation comparing an A100 to an H100, the output might say:
+- A100 Latency: 11.0 ms
+- H100 Latency: 8.0 ms
+
+The speedup is 1.4x. But the hardware sheet says the H100 has 3.2x more FLOP/s! **How do we automatically explain this discrepancy to a user or a stakeholder without manually digging through the formulas?**
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Compare** two system evaluations automatically.
+- **Generate** a human-readable explanation of why a speedup did (or didn't) match hardware specs.
+- **Identify** "Regime Shifts" where an upgrade fundamentally changes the bottleneck.
+:::
+
+## 1. Setup
+
+Import the necessary modules. We will use the standard `Engine` to get our baseline and proposed profiles, and the new `DifferentialExplainer` to compare them.
+
+```python
+import mlsysim
+from mlsysim.core.engine import Engine
+from mlsysim.core.explainers import DifferentialExplainer
+```
+
+## 2. A Memory-Bound Upgrade (The Disappointment)
+
+Let's test the classic scenario: upgrading hardware for LLM Inference at a low batch size.
+
+```python
+model = mlsysim.Models.Language.Llama3_8B
+
+# Get our two profiles
+prof_a100 = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.A100, batch_size=1)
+prof_h100 = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.H100, batch_size=1)
+
+# Ask the explainer what happened
+explanation = DifferentialExplainer.compare_performance(
+    baseline=prof_a100,
+    proposal=prof_h100
+)
+
+print(explanation)
+```
+
+**Output:**
+```text
+📊 Differential Analysis: Proposal vs. Baseline
+• Speedup: 1.39x
+• Baseline Regime: Memory Bound
+• Proposal Regime: Memory Bound
+
+Analysis: The workload remained Memory Bound. The speedup is constrained strictly by the ratio of HBM bandwidth between the two configurations. Any additional compute capacity (FLOP/s) in the proposal was left unutilized.
+```
+
+## 3. A Regime Shift (The Breakthrough)
+
+What happens if we increase the batch size significantly?
+
+```python
+# At batch size 256, the A100 is struggling with compute, but the H100 has plenty
+prof_a100_batch = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.A100, batch_size=256)
+prof_h100_batch = Engine.solve(model=model, hardware=mlsysim.Hardware.Cloud.H100, batch_size=256)
+
+explanation_batch = DifferentialExplainer.compare_performance(
+    baseline=prof_a100_batch,
+    proposal=prof_h100_batch
+)
+
+print(explanation_batch)
+```
+
+**Output:**
+```text
+📊 Differential Analysis: Proposal vs. Baseline
+• Speedup: 2.65x
+• Baseline Regime: Compute Bound
+• Proposal Regime: Compute Bound
+
+Analysis: The workload remained Compute Bound. The speedup is constrained strictly by the ratio of peak arithmetic throughput (FLOP/s) between the two configurations. Additional memory bandwidth was not the limiting factor.
+```
+
+## What You Learned
+
+- **The Differential Explainer** takes the cognitive load off the user by explicitly stating *why* an upgrade behaved the way it did.
+- It detects **Regime Shifts**, helping you realize when a hardware upgrade actually solved your bottleneck.
+- This tool is perfect for embedding into CI/CD pipelines (e.g., leaving a comment on a GitHub PR explaining why a new model architecture will slow down production).

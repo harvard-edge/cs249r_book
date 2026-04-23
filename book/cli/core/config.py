@@ -12,6 +12,30 @@ from rich.console import Console
 console = Console()
 
 
+def get_output_file(output_dir: Path, format_type: str) -> Optional[Path]:
+    """Return the primary output file for a build: any .pdf, any .epub, or index.html.
+
+    Used by build (open output) and debug (success check) so all commands use the same
+    rule: PDF = first .pdf in dir, EPUB = first .epub in dir, HTML = index.html.
+    """
+    if not output_dir.exists():
+        return None
+    if format_type == "pdf":
+        for p in sorted(output_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() == ".pdf":
+                return p
+        return None
+    if format_type == "epub":
+        for p in sorted(output_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() == ".epub":
+                return p
+        return None
+    if format_type == "html":
+        index = output_dir / "index.html"
+        return index if index.exists() else None
+    return None
+
+
 class ConfigManager:
     """Manages Quarto configuration files and format switching."""
 
@@ -24,27 +48,46 @@ class ConfigManager:
         self.root_dir = Path(root_dir)
 
         # Determine book directory
-        if (self.root_dir / "book" / "quarto").exists():
-            # New structure: book/quarto/
-            self.book_dir = self.root_dir / "book" / "quarto"
-        elif (self.root_dir / "quarto").exists():
-            # Old structure or running from book/: quarto/
+        # Expected to run from book/ folder where quarto/ is a subdirectory
+        if (self.root_dir / "quarto").exists():
+            # Running from book/: quarto/
             self.book_dir = self.root_dir / "quarto"
+        elif (self.root_dir / "book" / "quarto").exists():
+            # Running from repo root: book/quarto/
+            self.book_dir = self.root_dir / "book" / "quarto"
+        elif (self.root_dir / "contents").exists():
+            # We're in quarto directory itself
+            self.book_dir = self.root_dir
         else:
-            # We're in quarto directory
+            # Fallback
             self.book_dir = self.root_dir
 
-        # Configuration file paths
-        self.html_config = self.book_dir / "config" / "_quarto-html.yml"
-        self.pdf_config = self.book_dir / "config" / "_quarto-pdf.yml"
-        self.epub_config = self.book_dir / "config" / "_quarto-epub.yml"
-        self.active_config = self.book_dir / "_quarto.yml"
+        # Configuration file paths (default to vol1 configs since combined configs don't exist)
+        self.html_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
+        self.pdf_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
+        self.epub_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
 
-    def get_config_file(self, format_type: str) -> Path:
-        """Get the configuration file for a specific format.
+        # Volume-specific configuration file paths
+        self.html_vol1_config = self.book_dir / "config" / "_quarto-html-vol1.yml"
+        self.html_vol2_config = self.book_dir / "config" / "_quarto-html-vol2.yml"
+        self.pdf_vol1_config = self.book_dir / "config" / "_quarto-pdf-vol1.yml"
+        self.pdf_vol2_config = self.book_dir / "config" / "_quarto-pdf-vol2.yml"
+        self.epub_vol1_config = self.book_dir / "config" / "_quarto-epub-vol1.yml"
+        self.epub_vol2_config = self.book_dir / "config" / "_quarto-epub-vol2.yml"
+
+        self.active_config = self.book_dir / "_quarto.yml"
+        self.active_index = self.book_dir / "index.qmd"
+
+        # Volume-specific index files
+        self.index_vol1 = self.book_dir / "contents" / "vol1" / "index.qmd"
+        self.index_vol2 = self.book_dir / "contents" / "vol2" / "index.qmd"
+
+    def get_config_file(self, format_type: str, volume: Optional[str] = None) -> Path:
+        """Get the configuration file for a specific format and optional volume.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Path to the configuration file
@@ -52,6 +95,25 @@ class ConfigManager:
         Raises:
             ValueError: If format_type is not supported
         """
+        # Volume-specific config map
+        if volume:
+            volume_config_map = {
+                ("html", "vol1"): self.html_vol1_config,
+                ("html", "vol2"): self.html_vol2_config,
+                ("pdf", "vol1"): self.pdf_vol1_config,
+                ("pdf", "vol2"): self.pdf_vol2_config,
+                ("epub", "vol1"): self.epub_vol1_config,
+                ("epub", "vol2"): self.epub_vol2_config,
+            }
+            key = (format_type, volume)
+            if key in volume_config_map:
+                config_file = volume_config_map[key]
+                if config_file.exists():
+                    return config_file
+                else:
+                    console.print(f"[yellow]⚠️ Volume config not found: {config_file}, falling back to combined config[/yellow]")
+
+        # Combined config map (fallback)
         config_map = {
             "html": self.html_config,
             "pdf": self.pdf_config,
@@ -63,11 +125,12 @@ class ConfigManager:
 
         return config_map[format_type]
 
-    def setup_symlink(self, format_type: str) -> str:
-        """Setup _quarto.yml symlink for the specified format.
+    def setup_symlink(self, format_type: str, volume: Optional[str] = None) -> str:
+        """Setup _quarto.yml symlink for the specified format and optional volume.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Name of the config file that was linked
@@ -75,7 +138,7 @@ class ConfigManager:
         Raises:
             ValueError: If format_type is not supported
         """
-        config_file = self.get_config_file(format_type)
+        config_file = self.get_config_file(format_type, volume)
 
         if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
@@ -88,24 +151,67 @@ class ConfigManager:
         relative_path = config_file.relative_to(self.book_dir)
         self.active_config.symlink_to(relative_path)
 
+        # Also setup index.qmd symlink for volume-specific builds
+        if volume:
+            self._setup_index_symlink(volume)
+
         return config_file.name
 
-    def get_output_dir(self, format_type: str) -> Path:
+    def _setup_index_symlink(self, volume: str) -> None:
+        """Setup index.qmd symlink for the specified volume.
+
+        Quarto book projects require index.qmd at the root level.
+        This method switches the symlink to point to the correct volume's index.
+
+        Args:
+            volume: Volume ('vol1' or 'vol2')
+        """
+        index_map = {
+            "vol1": self.index_vol1,
+            "vol2": self.index_vol2,
+        }
+
+        if volume not in index_map:
+            console.print(f"[yellow]⚠️ Unknown volume: {volume}[/yellow]")
+            return
+
+        index_file = index_map[volume]
+
+        if not index_file.exists():
+            console.print(f"[yellow]⚠️ Volume index not found: {index_file}[/yellow]")
+            return
+
+        # Remove existing symlink if present
+        if self.active_index.is_symlink():
+            self.active_index.unlink()
+        elif self.active_index.exists():
+            # It's a regular file - this shouldn't happen but handle it
+            console.print(f"[yellow]⚠️ index.qmd is a regular file, removing...[/yellow]")
+            self.active_index.unlink()
+
+        # Create new symlink
+        relative_path = index_file.relative_to(self.book_dir)
+        self.active_index.symlink_to(relative_path)
+        console.print(f"[dim]🔗 Linked index.qmd → {relative_path}[/dim]")
+
+    def get_output_dir(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the output directory from Quarto configuration.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Path to the output directory
         """
         try:
-            config_file = self.get_config_file(format_type)
+            config_file = self.get_config_file(format_type, volume)
 
             if not config_file.exists():
                 console.print(f"[yellow]⚠️  Config file not found: {config_file}[/yellow]")
                 # Fallback to default
-                return self.book_dir / f"_build/{format_type}"
+                suffix = f"-{volume}" if volume else ""
+                return self.book_dir / f"_build/{format_type}{suffix}"
 
             # Read and parse the YAML config
             with open(config_file, 'r', encoding='utf-8') as f:
@@ -117,17 +223,20 @@ class ConfigManager:
                 return self.book_dir / output_path
             else:
                 # Fallback to default
-                return self.book_dir / f"_build/{format_type}"
+                suffix = f"-{volume}" if volume else ""
+                return self.book_dir / f"_build/{format_type}{suffix}"
 
         except Exception as e:
             console.print(f"[yellow]⚠️  Error reading config: {e}[/yellow]")
-            return self.book_dir / f"_build/{format_type}"
+            suffix = f"-{volume}" if volume else ""
+            return self.book_dir / f"_build/{format_type}{suffix}"
 
-    def read_config(self, format_type: str) -> Dict[str, Any]:
+    def read_config(self, format_type: str, volume: Optional[str] = None) -> Dict[str, Any]:
         """Read and parse a configuration file.
 
         Args:
             format_type: Format type ('html', 'pdf', 'epub')
+            volume: Optional volume ('vol1', 'vol2') for volume-specific builds
 
         Returns:
             Parsed configuration as dictionary
@@ -136,7 +245,7 @@ class ConfigManager:
             FileNotFoundError: If config file doesn't exist
             yaml.YAMLError: If config file is invalid YAML
         """
-        config_file = self.get_config_file(format_type)
+        config_file = self.get_config_file(format_type, volume)
 
         if not config_file.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
@@ -153,3 +262,12 @@ class ConfigManager:
             console.print("[dim]  📄 Active config: _quarto.yml (regular file)[/dim]")
         else:
             console.print("[dim]  ❌ No active config found[/dim]")
+
+        # Also show index.qmd status
+        if self.active_index.is_symlink():
+            target = self.active_index.readlink()
+            console.print(f"[dim]  🔗 Active index: {target}[/dim]")
+        elif self.active_index.exists():
+            console.print("[dim]  📄 Active index: index.qmd (regular file)[/dim]")
+        else:
+            console.print("[dim]  ❌ No index.qmd found[/dim]")

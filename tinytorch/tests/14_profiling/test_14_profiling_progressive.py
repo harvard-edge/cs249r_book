@@ -14,6 +14,7 @@ DEPENDENCY CHAIN: 01_tensor → ... → 12_attention → 13_transformers → 14_
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 import time
 from pathlib import Path
@@ -32,7 +33,7 @@ class TestProfilingCore:
         ✅ TEST: Profiler class exists
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             
             assert Profiler is not None
             
@@ -44,15 +45,15 @@ class TestProfilingCore:
         ✅ TEST: Profiler works as context manager
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.tensor import Tensor
             
             profiler = Profiler()
             
             with profiler:
                 # Some computation
-                x = Tensor(np.random.randn(100, 100))
-                y = x @ x.T
+                x = Tensor(rng.standard_normal((100, 100)))
+                y = x @ x.transpose()
             
             # Should have recorded timing
             assert hasattr(profiler, 'elapsed') or hasattr(profiler, 'duration'), \
@@ -66,12 +67,12 @@ class TestProfilingCore:
         ✅ TEST: Memory profiling capability
         """
         try:
-            from tinytorch.core.profiler import profile_memory, MemoryProfiler
+            from tinytorch.perf.profiling import profile_memory, MemoryProfiler
             from tinytorch.core.tensor import Tensor
             
             # Profile memory usage
             with MemoryProfiler() as mp:
-                tensors = [Tensor(np.random.randn(1000)) for _ in range(10)]
+                tensors = [Tensor(rng.standard_normal(1000)) for _ in range(10)]
             
             if hasattr(mp, 'peak_memory'):
                 assert mp.peak_memory > 0, "Memory profiling not working"
@@ -84,7 +85,7 @@ class TestProfilingCore:
         ✅ TEST: Execution timing works
         """
         try:
-            from tinytorch.core.profiler import Timer
+            from tinytorch.perf.profiling import Timer
             from tinytorch.core.tensor import Tensor
             
             timer = Timer()
@@ -92,8 +93,8 @@ class TestProfilingCore:
             timer.start()
             # Some computation
             for _ in range(100):
-                x = Tensor(np.random.randn(50, 50))
-                y = x @ x.T
+                x = Tensor(rng.standard_normal((50, 50)))
+                y = x @ x.transpose()
             elapsed = timer.stop()
             
             assert elapsed > 0, "Timer should measure positive time"
@@ -112,14 +113,14 @@ class TestProfilingWithModels:
         ✅ TEST: Profile Linear layer execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.layers import Linear
             from tinytorch.core.tensor import Tensor
             
             layer = Linear(100, 50)
             profiler = Profiler()
             
-            x = Tensor(np.random.randn(32, 100))
+            x = Tensor(rng.standard_normal((32, 100)))
             
             with profiler:
                 for _ in range(10):
@@ -137,14 +138,14 @@ class TestProfilingWithModels:
         ✅ TEST: Profile Conv2d layer execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.spatial import Conv2d
             from tinytorch.core.tensor import Tensor
             
             conv = Conv2d(3, 16, kernel_size=3, padding=1)
             profiler = Profiler()
             
-            x = Tensor(np.random.randn(4, 3, 32, 32))
+            x = Tensor(rng.standard_normal((4, 3, 32, 32)))
             
             with profiler:
                 output = conv(x)
@@ -159,14 +160,14 @@ class TestProfilingWithModels:
         ✅ TEST: Profile TransformerBlock execution
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
             
-            block = TransformerBlock(64, 8, 256)
+            block = TransformerBlock(64, 8, ff_dim=256)
             profiler = Profiler()
             
-            x = Tensor(np.random.randn(2, 10, 64))
+            x = Tensor(rng.standard_normal((2, 10, 64)))
             
             with profiler:
                 output = block(x)
@@ -187,7 +188,7 @@ class TestProfilingWithTraining:
         ✅ TEST: Profile training step
         """
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             from tinytorch.core.layers import Linear
             from tinytorch.core.losses import MSELoss
             from tinytorch.core.optimizers import SGD
@@ -199,8 +200,8 @@ class TestProfilingWithTraining:
             
             profiler = Profiler()
             
-            x = Tensor(np.random.randn(4, 10))
-            target = Tensor(np.random.randn(4, 5))
+            x = Tensor(rng.standard_normal((4, 10)))
+            target = Tensor(rng.standard_normal((4, 5)))
             
             with profiler:
                 pred = layer(x)
@@ -242,7 +243,7 @@ class TestRegressionPrevention:
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.layers import Linear
         layer = Linear(4, 2)
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
         y = layer(x)
         assert y.shape == (2, 2)
 
@@ -258,7 +259,7 @@ class TestRegressionPrevention:
         """✅ Module 05"""
         from tinytorch.core.tensor import Tensor
         from tinytorch.core.dataloader import TensorDataset, DataLoader
-        data = Tensor(np.random.randn(10, 3))
+        data = Tensor(rng.standard_normal((10, 3)))
         targets = Tensor(np.arange(10).astype(float))
         dataset = TensorDataset(data, targets)
         dataloader = DataLoader(dataset, batch_size=2)
@@ -278,7 +279,7 @@ class TestRegressionPrevention:
             from tinytorch.core.spatial import Conv2d
             from tinytorch.core.tensor import Tensor
             conv = Conv2d(3, 8, kernel_size=3, padding=1)
-            x = Tensor(np.random.randn(2, 3, 8, 8))
+            x = Tensor(rng.standard_normal((2, 3, 8, 8)))
             y = conv(x)
             assert y.shape[0] == 2
         except ImportError:
@@ -290,7 +291,7 @@ class TestRegressionPrevention:
             from tinytorch.core.attention import MultiHeadAttention
             from tinytorch.core.tensor import Tensor
             mha = MultiHeadAttention(32, 4)
-            x = Tensor(np.random.randn(1, 5, 32))
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = mha(x)
             assert out.shape == x.shape
         except ImportError:
@@ -301,8 +302,8 @@ class TestRegressionPrevention:
         try:
             from tinytorch.core.transformers import TransformerBlock
             from tinytorch.core.tensor import Tensor
-            block = TransformerBlock(32, 4, 128)
-            x = Tensor(np.random.randn(1, 5, 32))
+            block = TransformerBlock(32, 4, ff_dim=128)
+            x = Tensor(rng.standard_normal((1, 5, 32)))
             out = block(x)
             assert out.shape == x.shape
         except ImportError:
@@ -326,7 +327,7 @@ class TestModule14Completion:
         }
         
         try:
-            from tinytorch.core.profiler import Profiler
+            from tinytorch.perf.profiling import Profiler
             
             # Test 1: Profiler exists
             capabilities["Profiler exists"] = True

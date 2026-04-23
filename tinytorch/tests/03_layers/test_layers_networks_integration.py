@@ -7,6 +7,7 @@ Focuses on integration, not re-testing individual module functionality.
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 from test_utils import setup_integration_test
 
 # Ensure proper setup before importing
@@ -31,7 +32,7 @@ class TestLayersDenseNetworkInterface:
         network = Sequential([layer1, ReLU(), layer2])
 
         # Test interface compatibility
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
         result = network(x)
 
         # Verify integration works
@@ -45,7 +46,7 @@ class TestLayersDenseNetworkInterface:
         sequential_network = Sequential([Linear(6, 10), ReLU(), Linear(10, 3)])
 
         # Test same input works with both
-        x = Tensor(np.random.randn(1, 6))
+        x = Tensor(rng.standard_normal((1, 6)))
 
         # Individual layer output
         layer_output = individual_layer(x)
@@ -72,7 +73,7 @@ class TestLayersDenseNetworkInterface:
         ])
 
         # Test pipeline: input → layer → network
-        x = Tensor(np.random.randn(3, 5))
+        x = Tensor(rng.standard_normal((3, 5)))
         preprocessed = preprocessor(x)
         final_output = network(preprocessed)
 
@@ -90,7 +91,7 @@ class TestLayersDenseNetworkInterface:
         final_layer = Linear(8, 2)
 
         # Test composition
-        x = Tensor(np.random.randn(2, 4))
+        x = Tensor(rng.standard_normal((2, 4)))
 
         # Pipeline: input → network → layer
         network_output = base_network(x)
@@ -124,7 +125,7 @@ class TestLayerNetworkDataFlow:
             ])
 
             # Test data flow
-            x = Tensor(np.random.randn(batch_size, input_size))
+            x = Tensor(rng.standard_normal((batch_size, input_size)))
             layer_out = layer(x)
             network_out = network(layer_out)
 
@@ -139,7 +140,7 @@ class TestLayerNetworkDataFlow:
         network = Sequential([Linear(6, 8), ReLU(), Linear(8, 2)])
 
         # Test with float32 input
-        x_f32 = Tensor(np.random.randn(2, 4).astype(np.float32))
+        x_f32 = Tensor(rng.standard_normal((2, 4)).astype(np.float32))
         layer_out_f32 = layer(x_f32)
         network_out_f32 = network(layer_out_f32)
 
@@ -147,7 +148,7 @@ class TestLayerNetworkDataFlow:
         assert network_out_f32.dtype == np.float32, "Network output should be float32"
 
         # Test with float64 input - should normalize to float32
-        x_f64 = Tensor(np.random.randn(2, 4).astype(np.float64))
+        x_f64 = Tensor(rng.standard_normal((2, 4)).astype(np.float64))
         layer_out_f64 = layer(x_f64)
         network_out_f64 = network(layer_out_f64)
 
@@ -161,7 +162,7 @@ class TestLayerNetworkDataFlow:
         layer = Linear(4, 6)
         mismatched_network = Sequential([Linear(8, 2)])  # Expects 8, gets 6
 
-        x = Tensor(np.random.randn(1, 4))
+        x = Tensor(rng.standard_normal((1, 4)))
         layer_output = layer(x)  # Shape (1, 6)
 
         # Should fail gracefully with dimension mismatch
@@ -192,7 +193,7 @@ class TestLayerNetworkSystemIntegration:
         classifier = Linear(10, 3)
 
         # Test complete pipeline
-        x = Tensor(np.random.randn(4, 8))
+        x = Tensor(rng.standard_normal((4, 8)))
 
         preprocessed = preprocessor(x)
         features = feature_extractor(preprocessed)
@@ -219,7 +220,7 @@ class TestLayerNetworkSystemIntegration:
         ])
 
         # Test parallel processing
-        x = Tensor(np.random.randn(2, 6))
+        x = Tensor(rng.standard_normal((2, 6)))
 
         # Process in parallel
         out1 = branch1(x)
@@ -260,7 +261,7 @@ class TestLayerNetworkSystemIntegration:
         ]
 
         # Test all combinations work
-        x = Tensor(np.random.randn(1, 5))
+        x = Tensor(rng.standard_normal((1, 5)))
 
         for input_proc in input_processors:
             for core_net in core_networks:
@@ -288,7 +289,7 @@ class TestLayerNetworkInterfaceStandards:
             Sequential([Linear(4, 8), ReLU(), Linear(8, 6)])
         ]
 
-        x = Tensor(np.random.randn(1, 4))
+        x = Tensor(rng.standard_normal((1, 4)))
 
         # Test all components have consistent interface
         for component in components:
@@ -308,7 +309,7 @@ class TestLayerNetworkInterfaceStandards:
         multi_layer = Sequential([Linear(3, 4), ReLU(), Linear(4, 5)])
 
         # Test that all components can be used interchangeably
-        x = Tensor(np.random.randn(2, 3))
+        x = Tensor(rng.standard_normal((2, 3)))
 
         results = []
         for component in [layer, network, multi_layer]:

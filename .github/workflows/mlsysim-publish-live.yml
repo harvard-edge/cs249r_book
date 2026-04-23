@@ -1,0 +1,108 @@
+name: '🧮 MLSYSIM · 🚀 Publish (Live)'
+
+# =============================================================================
+# MLSYSIM — Production Deploy
+# =============================================================================
+#
+# Builds the MLSYSIM simulation engine docs site (Quarto) with the research
+# paper PDF and deploys to the live production site on GitHub Pages.
+#
+# Flow:
+#   1. BUILD_PDF    — Compile research paper PDF (reusable workflow)
+#   2. BUILD_SITE   — Quarto render + inject PDF into docs
+#   3. DEPLOY       — Push to gh-pages branch
+#
+# Triggers:
+#   - workflow_dispatch: manual only
+#
+# Deploys to: mlsysbook.ai/mlsysim/
+# Secrets:    GITHUB_TOKEN
+# Vars:       MLSYSIM_DOCS, DEV_MLSYSIM_PATH
+#
+# Related:
+#   - mlsysim-preview-dev.yml  — Dev preview deploy
+#   - mlsysim-validate-dev.yml — Test & build validation
+#   - mlsysim-build-pdfs.yml   — Reusable PDF build
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+# NB: gh-pages-deploy concurrency is declared on the build-and-deploy job
+# only. The guard and PDF build run without holding the lock.
+
+jobs:
+  # Block publish unless the latest dev validate run for this site is green.
+  # See .github/workflows/infra-publish-guard.yml for guard semantics.
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: mlsysim-validate-dev.yml
+
+  # Build PDF first (reusable workflow)
+  build-pdf:
+    name: '📄 Build PDF'
+    needs: [guard]
+    uses: ./.github/workflows/mlsysim-build-pdfs.yml
+
+  build-and-deploy:
+    name: '🧮 Build & Deploy MLSYSIM'
+    runs-on: ubuntu-latest
+    needs: [guard, build-pdf]
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🐍 Install Python dependencies
+        working-directory: mlsysim
+        run: pip install ".[docs]"
+
+      - name: 📥 Download Paper PDF
+        uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          name: MLSYSIM-Paper
+          path: ./pdf-artifacts/
+
+      - name: 📁 Inject PDF into docs
+        run: |
+          if [ -f ./pdf-artifacts/paper.pdf ]; then
+            cp ./pdf-artifacts/paper.pdf ${{ vars.MLSYSIM_DOCS }}/mlsysim-paper.pdf
+            echo "✅ Injected mlsysim-paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found in artifacts, continuing without it"
+          fi
+
+      - name: 🔨 Build MLSYSIM Site
+        working-directory: ${{ vars.MLSYSIM_DOCS }}
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./${{ vars.MLSYSIM_DOCS }}/_build
+          destination_dir: ${{ vars.DEV_MLSYSIM_PATH }}
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🧮 Deploy MLSYSIM live - ${{ github.sha }}'

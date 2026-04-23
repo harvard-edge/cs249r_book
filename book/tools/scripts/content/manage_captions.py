@@ -3,7 +3,10 @@
 Figure Caption Improvement Script
 
 A streamlined tool for improving figure and table captions in Quarto-based textbooks
-using local Ollama LLM models with strong, educational language.
+using LLM models with strong, educational language.
+
+Supports local Ollama models (default) and cloud LLM providers via OpenAI-compatible
+APIs (OpenAI, Groq, MiniMax, or any custom endpoint).
 
 Main Modes:
 1. --improve/-i: LLM caption improvement and file updates (default)
@@ -17,6 +20,7 @@ Features:
 - Strong language improvements (removes weak starters)
 - Proper formatting (spacing, capitalization, table prefixes)
 - Context-aware processing with paragraph-level analysis
+- Cloud LLM support via --provider flag (openai, groq, minimax)
 """
 
 import argparse
@@ -159,10 +163,22 @@ class FigureCaptionImprover:
     - Strong language improvements with educational focus
     - Proper formatting and spacing normalization
     - Context-aware processing with retry logic
+    - Cloud LLM provider support (OpenAI, Groq, MiniMax, or any OpenAI-compatible API)
     """
 
-    def __init__(self, model_name="qwen2.5:7b"):
+    # Well-known OpenAI-compatible cloud providers and their default base URLs
+    CLOUD_PROVIDERS = {
+        "openai":  "https://api.openai.com/v1",
+        "groq":    "https://api.groq.com/openai/v1",
+        "minimax": "https://api.minimax.io/v1",
+    }
+
+    def __init__(self, model_name="qwen2.5:7b", provider="ollama",
+                 api_key=None, api_base=None):
         self.model_name = model_name
+        self.provider = provider
+        self.api_key = api_key
+        self.api_base = api_base
         self.figure_pattern = re.compile(r'@fig-([a-zA-Z0-9_-]+)')
         self.stats = {
             'files_processed': 0,
@@ -1093,6 +1109,125 @@ Instead, write DIRECT, ACTIVE statements:
         # Should never reach here due to the loop structure, but just in case
         return None
 
+    def generate_caption_with_cloud(self, section_title: str, section_text: str,
+                                    figure_id: str, current_caption: str,
+                                    image_path: Optional[str] = None, is_table: bool = False,
+                                    is_listing: bool = False, code_content: Optional[str] = None) -> Optional[str]:
+        """Generate improved caption using an OpenAI-compatible cloud API with retry logic.
+
+        Supports any provider with an OpenAI-compatible chat completions endpoint,
+        including OpenAI, Groq, and MiniMax. Set the provider, api_key, and
+        optionally api_base in the constructor or via CLI flags.
+        """
+        import time
+        from openai import OpenAI
+
+        # Resolve base URL: explicit override > well-known provider > error
+        base_url = self.api_base
+        if not base_url:
+            base_url = self.CLOUD_PROVIDERS.get(self.provider)
+        if not base_url:
+            print(f"      ❌ Unknown provider '{self.provider}'. "
+                  f"Use --api-base or choose from: {', '.join(self.CLOUD_PROVIDERS)}")
+            return None
+
+        client = OpenAI(api_key=self.api_key, base_url=base_url)
+
+        # Build the same educational prompt used by the Ollama path
+        content_type = "code listing" if is_listing else "visual (figure or table)"
+        task_desc = ("code demonstrates or implements" if is_listing
+                     else "visual conveys")
+
+        code_section = ""
+        if is_listing:
+            snippet = code_content[:1500] if code_content else "No code content provided"
+            code_section = "CODE CONTENT:\n" + snippet + "\n"
+
+        prompt = (
+            f"You are an expert at editing a caption for a {content_type} "
+            f"in a technical AI/ML systems textbook.\n\n"
+            f"Your task is to improve the caption so that it *teaches*. "
+            f"The goal is to help students understand what the {task_desc} "
+            f"in the context of machine learning systems.\n\n"
+            f"SECTION: {section_title}\n"
+            f"ORIGINAL CAPTION: {current_caption}\n\n"
+            f"TEXTBOOK CONTEXT (for reference):\n{section_text[:1500]}\n\n"
+            f"{code_section}\n"
+            f"FORMAT:\n**<Key Phrase>**: Explanation sentence(s)\n\n"
+            f"REQUIREMENTS:\n"
+            f"1. Key Phrase: A single bolded noun phrase (1-5 words) that captures the main idea.\n"
+            f"2. Explanation: 1-2 concise, natural sentences using active voice.\n"
+            f"3. Never start with weak descriptive verbs (Shows, Demonstrates, Illustrates, etc.).\n"
+            f"4. Do not begin with 'This figure...', 'This table...', or 'This diagram...'.\n"
+            f"5. Use domain-specific language, be specific and pedagogical.\n"
+            f"6. If the original caption includes a source, retain it at the end in italics.\n\n"
+            f"Write only the improved caption below:"
+        )
+
+        max_retries = 2
+        base_delay = 1
+
+        for attempt in range(max_retries):
+            try:
+                # MiniMax requires temperature > 0; use 0.7 for all cloud providers
+                response = client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.7,
+                )
+
+                new_caption = response.choices[0].message.content.strip()
+
+                # Strip <think>…</think> reasoning blocks (some models emit them)
+                new_caption = re.sub(r'<think>.*?</think>\s*', '', new_caption, flags=re.DOTALL).strip()
+
+                # Clean up markdown code blocks
+                if new_caption.startswith('```') and new_caption.endswith('```'):
+                    new_caption = new_caption.strip('`').strip()
+                if new_caption.startswith('json\n'):
+                    new_caption = new_caption[5:].strip()
+
+                word_count = len(new_caption.split())
+                if word_count > 150:
+                    print(f"      ℹ️  Long caption generated ({word_count} words): {new_caption[:100]}...")
+
+                if '**' in new_caption and ':' in new_caption:
+                    formatted_caption = self.format_bold_explanation_caption(new_caption)
+                    improved_caption = self.validate_and_improve_caption(formatted_caption, is_table)
+                    final_word_count = len(improved_caption.split())
+                    if final_word_count > 150:
+                        print(f"      ℹ️  Large improved caption ({final_word_count} words): continuing anyway...")
+                    return improved_caption
+                else:
+                    print(f"      ⚠️  Generated caption doesn't follow **bold**: format: {new_caption[:100]}")
+                    return None
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"      ⚠️  Cloud API error: {e}, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"      ❌ Cloud API error: {e} (all {max_retries} attempts failed)")
+                    return None
+
+        return None
+
+    def generate_caption(self, section_title: str, section_text: str,
+                         figure_id: str, current_caption: str,
+                         image_path: Optional[str] = None, is_table: bool = False,
+                         is_listing: bool = False, code_content: Optional[str] = None) -> Optional[str]:
+        """Dispatch caption generation to the configured provider."""
+        if self.provider == "ollama":
+            return self.generate_caption(
+                section_title, section_text, figure_id, current_caption,
+                image_path, is_table, is_listing, code_content)
+        else:
+            return self.generate_caption_with_cloud(
+                section_title, section_text, figure_id, current_caption,
+                image_path, is_table, is_listing, code_content)
+
     def compile_tikz_to_image(self, tikz_code: str, figure_id: str) -> Optional[str]:
         """Compile TikZ code to a PNG image for multimodal processing."""
         temp_dir = Path("temp_tikz")
@@ -1979,7 +2114,7 @@ Instead, write DIRECT, ACTIVE statements:
 
         if needing_repair > 0:
             print(f"\n💡 To fix these issues, run:")
-            print(f"   python {__file__} --repair -d {' -d '.join(['contents/core/'])}")
+            print(f"   python {__file__} --repair -d {' -d '.join(['contents/vol1/'])}")
         else:
             print(f"\n✅ All captions look good!")
 
@@ -2146,13 +2281,13 @@ Instead, write DIRECT, ACTIVE statements:
                             if not os.path.exists(image_path):
                                 image_path = None
 
-                    new_caption = self.generate_caption_with_ollama(
+                    new_caption = self.generate_caption(
                         context['title'], context['content'], item_id, current_caption,
                         image_path, is_table=False
                     )
 
                 elif item_type == 'table':
-                    new_caption = self.generate_caption_with_ollama(
+                    new_caption = self.generate_caption(
                         context['title'], context['content'], item_id, current_caption,
                         None, is_table=True
                     )
@@ -2167,7 +2302,7 @@ Instead, write DIRECT, ACTIVE statements:
                         if code_match:
                             code_content = code_match.group(0)
 
-                    new_caption = self.generate_caption_with_ollama(
+                    new_caption = self.generate_caption(
                         context['title'], context['content'], item_id, current_caption,
                         None, is_table=False, is_listing=True, code_content=code_content
                     )
@@ -2913,7 +3048,7 @@ Instead, write DIRECT, ACTIVE statements:
 
                         # Generate improved caption
                         current_caption = fig_data.get('original_caption', '')
-                        new_caption = self.generate_caption_with_ollama(
+                        new_caption = self.generate_caption(
                             context['title'],
                             context['content'],
                             fig_id,
@@ -2949,7 +3084,7 @@ Instead, write DIRECT, ACTIVE statements:
 
                         # Generate improved caption (no image for tables)
                         current_caption = tbl_data.get('original_caption', '')
-                        new_caption = self.generate_caption_with_ollama(
+                        new_caption = self.generate_caption(
                             context['title'],
                             context['content'],
                             tbl_id,
@@ -2995,7 +3130,7 @@ Instead, write DIRECT, ACTIVE statements:
 
                         # Generate improved caption with code content
                         current_caption = lst_data.get('original_caption', '')
-                        new_caption = self.generate_caption_with_ollama(
+                        new_caption = self.generate_caption(
                             context['title'],
                             context['content'],
                             lst_id,
@@ -3532,7 +3667,7 @@ Instead, write DIRECT, ACTIVE statements:
                 print(f"  📊 {name:<25} │ {size_str:>8} │ {date_str}")
 
             print("=" * 60)
-            print("💡 Usage: python improve_figure_captions.py -d contents/core/ --model MODEL_NAME")
+            print("💡 Usage: python improve_figure_captions.py -d contents/vol1/ --model MODEL_NAME")
             return True
 
         except requests.exceptions.ConnectionError:
@@ -3932,39 +4067,45 @@ def main():
         epilog="""
 Examples:
   # Improve captions with LLM (recommended default):
-  python improve_figure_captions.py -d contents/core/
-  python improve_figure_captions.py --improve -d contents/core/
+  python improve_figure_captions.py -d contents/vol1/
+  python improve_figure_captions.py --improve -d contents/vol1/
 
   # Using different models:
-  python improve_figure_captions.py -d contents/core/ --model llama3.2:3b
-  python improve_figure_captions.py -i -d contents/core/ -m qwen2.5:14b
-  python improve_figure_captions.py -d contents/core/ --model mistral:7b
+  python improve_figure_captions.py -d contents/vol1/ --model llama3.2:3b
+  python improve_figure_captions.py -i -d contents/vol1/ -m qwen2.5:14b
+  python improve_figure_captions.py -d contents/vol1/ --model mistral:7b
 
   # Content filtering:
-  python improve_figure_captions.py -d contents/core/ --figures-only
-  python improve_figure_captions.py -d contents/core/ -F  # Short form
-  python improve_figure_captions.py -d contents/core/ --tables-only
-  python improve_figure_captions.py -d contents/core/ -T  # Short form
-  python improve_figure_captions.py -d contents/core/ --listings-only
-  python improve_figure_captions.py -d contents/core/ -L  # Short form
+  python improve_figure_captions.py -d contents/vol1/ --figures-only
+  python improve_figure_captions.py -d contents/vol1/ -F  # Short form
+  python improve_figure_captions.py -d contents/vol1/ --tables-only
+  python improve_figure_captions.py -d contents/vol1/ -T  # Short form
+  python improve_figure_captions.py -d contents/vol1/ --listings-only
+  python improve_figure_captions.py -d contents/vol1/ -L  # Short form
 
   # Analysis and utilities:
-  python improve_figure_captions.py --build-map -d contents/core/
-  python improve_figure_captions.py -b -d contents/core/
-  python improve_figure_captions.py --analyze -d contents/core/
-  python improve_figure_captions.py --repair -d contents/core/
+  python improve_figure_captions.py --build-map -d contents/vol1/
+  python improve_figure_captions.py -b -d contents/vol1/
+  python improve_figure_captions.py --analyze -d contents/vol1/
+  python improve_figure_captions.py --repair -d contents/vol1/
 
   # Content filtering with other modes:
-  python improve_figure_captions.py --analyze -d contents/core/ --figures-only
-  python improve_figure_captions.py --repair -d contents/core/ --tables-only
-  python improve_figure_captions.py --build-map -d contents/core/ --listings-only
-  python improve_figure_captions.py --build-map -d contents/core/ -F
+  python improve_figure_captions.py --analyze -d contents/vol1/ --figures-only
+  python improve_figure_captions.py --repair -d contents/vol1/ --tables-only
+  python improve_figure_captions.py --build-map -d contents/vol1/ --listings-only
+  python improve_figure_captions.py --build-map -d contents/vol1/ -F
 
   # Multiple directories:
-  python improve_figure_captions.py -d contents/core/ -d contents/frontmatter/ -m llama3.2:3b
+  python improve_figure_captions.py -d contents/vol1/ -d contents/frontmatter/ -m llama3.2:3b
 
   # Save detailed JSON output:
-  python improve_figure_captions.py -d contents/core/ --save-json
+  python improve_figure_captions.py -d contents/vol1/ --save-json
+
+  # Cloud LLM providers (no local Ollama required):
+  python improve_figure_captions.py -d contents/vol1/ -p openai -m gpt-4o-mini
+  python improve_figure_captions.py -d contents/vol1/ -p groq -m llama-3.3-70b-versatile
+  python improve_figure_captions.py -d contents/vol1/ -p minimax -m MiniMax-M2.7
+  python improve_figure_captions.py -d contents/vol1/ --provider minimax --model MiniMax-M2.7 --api-key sk-...
 """
     )
 
@@ -3994,9 +4135,17 @@ Examples:
     content_group.add_argument('--listings-only', '-L', action='store_true',
                               help='Process only code listings (ignore figures and tables)')
 
-    # Model options
+    # Model and provider options
     parser.add_argument('--model', '-m', default='qwen2.5:7b',
-                       help='Ollama model to use (default: qwen2.5:7b)')
+                       help='Model to use (default: qwen2.5:7b for Ollama)')
+    parser.add_argument('--provider', '-p', default='ollama',
+                       help='LLM provider: ollama (default), openai, groq, minimax, '
+                            'or any OpenAI-compatible service (set --api-base)')
+    parser.add_argument('--api-key', default=None,
+                       help='API key for cloud providers (or set OPENAI_API_KEY / '
+                            'GROQ_API_KEY / MINIMAX_API_KEY env var)')
+    parser.add_argument('--api-base', default=None,
+                       help='Custom API base URL for OpenAI-compatible providers')
     parser.add_argument('--list-models', action='store_true',
                        help='List available Ollama models and exit')
 
@@ -4035,13 +4184,33 @@ Examples:
                 print(f"❌ Not a QMD file: {file}")
                 return 1
 
-    # Initialize improver with specified model
-    improver = FigureCaptionImprover(model_name=args.model)
+    # Resolve API key from flag or environment variable
+    provider = args.provider.lower()
+    api_key = args.api_key
+    if not api_key and provider != "ollama":
+        env_map = {
+            "openai":  "OPENAI_API_KEY",
+            "groq":    "GROQ_API_KEY",
+            "minimax": "MINIMAX_API_KEY",
+        }
+        env_var = env_map.get(provider, "OPENAI_API_KEY")
+        api_key = os.environ.get(env_var)
+        if not api_key:
+            print(f"❌ No API key provided. Set --api-key or the {env_var} env var.")
+            return 1
 
-    # Check Ollama and model availability before proceeding
-    if not improver.check_ollama_and_model(args.model):
-        print(f"❌ Cannot proceed without properly configured Ollama and model {args.model}")
-        return 1
+    # Initialize improver with specified model and provider
+    improver = FigureCaptionImprover(
+        model_name=args.model, provider=provider,
+        api_key=api_key, api_base=args.api_base)
+
+    # Check provider availability before proceeding
+    if provider == "ollama":
+        if not improver.check_ollama_and_model(args.model):
+            print(f"❌ Cannot proceed without properly configured Ollama and model {args.model}")
+            return 1
+    else:
+        print(f"☁️  Using cloud provider: {provider} (model: {args.model})")
 
     try:
         if args.build_map:

@@ -11,6 +11,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 import numpy as np
+rng = np.random.default_rng(7)
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 
@@ -23,8 +24,8 @@ def test_batched_3d_matmul_backward():
     print("Testing batched 3D matmul backward...")
 
     # Batched matmul: (batch=2, m=4, k=8) @ (batch=2, k=8, n=4)
-    a = Tensor(np.random.randn(2, 4, 8), requires_grad=True)
-    b = Tensor(np.random.randn(2, 8, 4), requires_grad=True)
+    a = Tensor(rng.standard_normal((2, 4, 8)), requires_grad=True)
+    b = Tensor(rng.standard_normal((2, 8, 4)), requires_grad=True)
 
     # Forward pass
     c = a.matmul(b)
@@ -53,8 +54,8 @@ def test_attention_pattern_matmul():
     print("Testing attention pattern (Q @ K.T) backward...")
 
     # Attention scores: (batch=2, heads=4, seq=8, dim=64) @ (batch=2, heads=4, dim=64, seq=8)
-    Q = Tensor(np.random.randn(2, 4, 8, 64), requires_grad=True)
-    K = Tensor(np.random.randn(2, 4, 8, 64), requires_grad=True)
+    Q = Tensor(rng.standard_normal((2, 4, 8, 64)), requires_grad=True)
+    K = Tensor(rng.standard_normal((2, 4, 8, 64)), requires_grad=True)
 
     # Transpose K (swap last two dims)
     K_T = K.transpose()
@@ -86,8 +87,8 @@ def test_attention_output_matmul():
     print("Testing attention @ V pattern backward...")
 
     # Attention output: (batch=2, heads=4, seq=8, seq=8) @ (batch=2, heads=4, seq=8, dim=64)
-    attn_weights = Tensor(np.random.randn(2, 4, 8, 8), requires_grad=True)
-    V = Tensor(np.random.randn(2, 4, 8, 64), requires_grad=True)
+    attn_weights = Tensor(rng.standard_normal((2, 4, 8, 8)), requires_grad=True)
+    V = Tensor(rng.standard_normal((2, 4, 8, 64)), requires_grad=True)
 
     # Compute attention output
     output = attn_weights.matmul(V)

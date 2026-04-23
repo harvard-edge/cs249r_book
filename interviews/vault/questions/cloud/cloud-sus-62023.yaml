@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-sus-62023
+track: cloud
+level: L4
+zone: fluency
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: Decode Throughput Scaling with Tensor Parallelism
+scenario: You are scaling a 70B FP16 decode cluster using tensor parallelism. Compare the per-token decode
+  latency and aggregate throughput for TP=2 H100s vs. TP=1 MI300X at the same model. Show where AllReduce
+  communication overhead becomes the bottleneck, assuming NVLink (600 GB/s bidirectional) between TP peers.
+details:
+  realistic_solution: 'TP=2 H100 decode: each GPU holds half the weights (70 GB). Decode step: each GPU
+    reads 70 GB from HBM at 3.35 TB/s = 20.9 ms. After each GEMM (96 layers), an AllReduce across 2 GPUs
+    via NVLink: message size = batch_size × hidden_dim × 2 bytes. At batch=1, hidden_dim=8192: 1 × 8192
+    × 2 = 16 KB. NVLink AllReduce latency = 16 KB / (600 GB/s / 2) = 0.05 μs — negligible. At batch=128:
+    128 × 8192 × 2 = 2 MB. AllReduce = 2 MB / 300 GB/s = 6.7 μs per layer × 96 layers = 0.64 ms — still
+    small vs 20.9 ms. TP=1 MI300X: reads 140 GB at 5.3 TB/s = 26.4 ms. No AllReduce. Per-token latency:
+    TP=2 H100 = 20.9 ms (weight read dominates, AllReduce negligible). TP=1 MI300X = 26.4 ms. H100 TP=2
+    is 21% faster per token but requires 2 GPUs. Per-GPU-cost: MI300X is better (26.4 ms per single GPU
+    vs 41.8 ms total for the H100 pair? No: TP=2 H100 step = 20.9 ms, requires 2 GPU-steps). Throughput:
+    H100 TP=2: 1/0.0209 = 47.8 tok/s using 2 GPUs. MI300X TP=1: 1/0.0264 = 37.9 tok/s using 1 GPU. Per
+    GPU: H100 23.9 tok/s vs MI300X 37.9 tok/s — MI300X wins per GPU.'
+  common_mistake: Assuming TP=2 always gives 2× throughput — TP requires AllReduce after each layer's
+    GEMM, and at small batch sizes the communication overhead dominates.
+  napkin_math: 'H100 TP=2: each GPU reads 70 GB / 3.35 TB/s = 20.9 ms/step. MI300X TP=1: 140 GB / 5.3
+    TB/s = 26.4 ms/step. AllReduce at batch=1, 2-way NVLink (600 GB/s bidi = 300 GB/s per direction):
+    message = 16 KB, latency = 16e3/300e9 = 53 ns × 96 layers = 5.1 μs — 0.02% of step time. AllReduce
+    only becomes bottleneck at batch ≥ 10,000 (2 MB × 96 layers = 192 MB AllReduce, latency 0.64 ms ≈
+    3% overhead).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

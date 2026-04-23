@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: mobile-0737
+track: mobile
+level: L6+
+zone: design
+topic: differential-privacy
+competency_area: cross-cutting
+bloom_level: create
+phase: inference
+title: Local-Local RAG & On-Device Telemetry
+scenario: Siri needs to proactively suggest contextual actions based on a user's local message history,
+  photos, and app usage. We want to update a semantic index dynamically on-device, but we must guarantee
+  strict Local Differential Privacy (LDP) before any aggregated telemetry (to improve the global model)
+  leaves the device. The entire indexing and query pipeline must consume <50MB of RAM and <10ms latency
+  per query. How do you architect the local vector store, the CoreML embedding pipeline, and the LDP mechanism?
+details:
+  realistic_solution: Implement a direct-to-flash Product Quantization (PQ) index. The embedding model
+    is an ultra-lite dual-encoder (~10M parameters, INT8). The vector index uses memory-mapped (mmap)
+    files backed by NVMe flash storage, completely bypassing the RAM limit for storage. The ANE handles
+    the embedding extraction, while the Apple Matrix AMX coprocessor handles the PQ asymmetric distance
+    calculations. For telemetry, we use DP-FTRL (Differential Privacy Follow-The-Regularized-Leader).
+    We never send embeddings or text. We calculate local gradients on-device using a tiny federated learning
+    task, clip the gradients, add Gaussian noise (ensuring strict LDP), and only send the noisy gradients
+    to the server.
+  common_mistake: Using standard vector databases like FAISS or HNSW locally. HNSW has massive, unpredictable
+    memory overhead for its graph structure and indexing latency spikes that will trigger iOS watchdog
+    terminations. Furthermore, applying standard Laplace noise to raw text embeddings degrades local utility
+    to the point of uselessness.
+  napkin_math: '- **Memory:** Model: 10M params @ INT8 = **10MB**. | - **Index Storage:** 100,000 local
+    items * 64-dim * 1-byte (PQ) = **6.4MB** on disk (mmap''d, zero RAM footprint). | - **Active RAM:**
+    10MB (model) + 2MB (activations) + 1MB (PQ centroids in RAM) = **13MB total RAM**. | - **Latency:**
+    Embedding extraction = **~4ms** on ANE. Dot product of query against 100,000 64-dim INT8 vectors =
+    6.4M MACs. AMX throughput is ~2 TMACs/s. Compute time for the search is **< 0.1ms**. Total latency
+    = **~4.1ms**.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: mobile-chain-026
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

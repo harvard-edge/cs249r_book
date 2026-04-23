@@ -410,7 +410,7 @@ class SetupCommand(BaseCommand):
     def validate_environment(self) -> bool:
         """Validate the development environment setup."""
         checks = [
-            ("Python version (≥3.8)", self.check_python_version),
+            ("Python version (≥3.10)", self.check_python_version),
             ("NumPy", self.check_numpy),
             ("Jupyter", self.check_jupyter),
             ("Jupyter kernel (tinytorch)", self.check_jupyter_kernel),
@@ -450,7 +450,7 @@ class SetupCommand(BaseCommand):
 
     def check_python_version(self) -> bool:
         """Check if Python version is compatible."""
-        return sys.version_info >= (3, 8)
+        return sys.version_info >= (3, 10)
 
     def check_numpy(self) -> bool:
         """Check if NumPy is installed and working."""

@@ -12,15 +12,24 @@ A complete MLPerf-style optimization pipeline that takes YOUR networks from prev
 
 ## Required Modules
 
-| Module | Component | What It Provides |
-|--------|-----------|------------------|
-| Module 01-03 | Tensor, Linear, ReLU | YOUR base components |
-| Module 11 | Embeddings | YOUR token embeddings |
-| Module 12 | Attention | YOUR multi-head attention |
-| Module 14 | Profiling | YOUR profiler for measurement |
-| Module 15 | Quantization | YOUR INT8/FP16 implementations |
-| Module 16 | Compression | YOUR pruning techniques |
-| Module 17 | Acceleration | YOUR vectorized operations |
+<table width="100%">
+  <thead>
+<tr>
+<th width="25%"><b>Module</b></th>
+<th width="25%">Component</th>
+<th width="50%">What It Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Module 01-03</b></td><td>Tensor, Linear, ReLU</td><td>YOUR base components</td></tr>
+<tr><td><b>Module 11</b></td><td>Embeddings</td><td>YOUR token embeddings</td></tr>
+<tr><td><b>Module 12</b></td><td>Attention</td><td>YOUR multi-head attention</td></tr>
+<tr><td><b>Module 14</b></td><td>Profiling</td><td>YOUR profiler for measurement</td></tr>
+<tr><td><b>Module 15</b></td><td>Quantization</td><td>YOUR INT8/FP16 implementations</td></tr>
+<tr><td><b>Module 16</b></td><td>Compression</td><td>YOUR pruning techniques</td></tr>
+<tr><td><b>Module 17</b></td><td>Acceleration</td><td>YOUR vectorized operations</td></tr>
+</tbody>
+</table>
 
 ## Milestone Structure
 
@@ -53,17 +62,36 @@ Networks from:
 ## Expected Results
 
 ### Static Model Optimization (01)
-| Optimization | Size | Accuracy | Notes |
-|-------------|------|----------|-------|
-| Baseline | 100% | 85-90% | Full precision |
-| + Quantization | 25% | 84-89% | INT8 weights |
-| + Pruning | 12.5% | 82-87% | 50% weights removed |
+<table width="100%">
+  <thead>
+<tr>
+<th width="25%"><b>Optimization</b></th>
+<th width="15%">Size</th>
+<th width="20%">Accuracy</th>
+<th width="40%">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Baseline</b></td><td>100%</td><td>85-90%</td><td>Full precision</td></tr>
+<tr><td><b>+ Quantization</b></td><td>25%</td><td>84-89%</td><td>INT8 weights</td></tr>
+<tr><td><b>+ Pruning</b></td><td>12.5%</td><td>82-87%</td><td>50% weights removed</td></tr>
+</tbody>
+</table>
 
 ### Generation Speedup (02)
-| Mode | Time/Token | Speedup |
-|------|-----------|---------|
-| Without Cache | ~10ms | 1× |
-| With KV Cache | ~1ms | 6-10× |
+<table width="100%">
+  <thead>
+<tr>
+<th width="40%"><b>Mode</b></th>
+<th width="30%">Time/Token</th>
+<th width="30%">Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Without Cache</b></td><td>~10ms</td><td>1×</td></tr>
+<tr><td><b>With KV Cache</b></td><td>~1ms</td><td>6-10×</td></tr>
+</tbody>
+</table>
 
 ## Running the Milestone
 

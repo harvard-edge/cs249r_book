@@ -1,0 +1,78 @@
+schema_version: '1.0'
+id: cloud-0640
+track: cloud
+level: L4
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: both
+title: The Half-Baked Speedup
+scenario: You've been tasked with optimizing a large language model's training throughput. You successfully
+  converted most of your model to use BF16 (bfloat16) precision instead of FP32. You expected a near 2x
+  speedup in training time, but you're only observing about a 1.4x improvement. What's a likely technical
+  explanation for this discrepancy?
+details:
+  realistic_solution: 'The 1.4x speedup (rather than the expected 2x) is explained by the fact that training
+    involves a **mix of compute-bound and memory-bound operations**, and only some benefit fully from
+    BF16.
+
+
+    **Compute-bound operations** (large GEMMs in attention and FFN layers): These see a near-2x speedup
+    because the Tensor Cores can process twice as many BF16 operations per cycle as FP32.
+
+
+    **Memory-bound operations** (layer normalization, activation functions, softmax, embedding lookups,
+    optimizer steps): These are bottlenecked by memory bandwidth, not compute. Halving the data size from
+    FP32 to BF16 roughly halves the bytes transferred, giving up to a ~2x bandwidth speedup. However,
+    mixed-precision training requires maintaining an FP32 master copy of weights for the optimizer update
+    step. This means the optimizer step still operates on FP32 data, and the weight update involves reading
+    FP32 master weights, applying FP32 gradients, then casting back to BF16. This FP32 overhead in the
+    optimizer reduces the memory-bound speedup.
+
+
+    **The critical factor**: Not all operations run in BF16. Mixed-precision training deliberately keeps
+    loss scaling, gradient accumulation, and optimizer states in FP32 to maintain numerical stability.
+    If ~60% of wall-clock time is in BF16-accelerated GEMMs (2x speedup) and ~40% is in FP32 overhead
+    (1x speedup), the effective speedup by Amdahl''s Law is: 1 / (0.4/1 + 0.6/2) = 1 / (0.4 + 0.3) = **1.43x**
+    — closely matching the observed 1.4x.'
+  common_mistake: '"There must be some FP32 operations remaining in the graph" or "The BF16 kernels aren''t
+    fully optimized." While these can contribute, the primary issue is often more fundamental.'
+  napkin_math: "An H100 GPU has 989 TFLOPS FP16 (Tensor Core), 67 TFLOPS FP32, and 3.35 TB/s memory bandwidth.\n\
+    \n**Breakdown of training step time (typical LLM):**\n- Forward pass GEMMs: 40% of time → runs in\
+    \ BF16 → 2x speedup.\n- Backward pass GEMMs: 30% of time → runs in BF16 → 2x speedup.\n- Optimizer\
+    \ step (Adam): 15% of time → FP32 master weights → 1x speedup.\n- Communication (AllReduce): 10% of\
+    \ time → FP32 gradients → 1x speedup.\n- Other (LayerNorm, softmax, loss): 5% of time → mixed → ~1.5x\
+    \ speedup.\n\n**Amdahl's Law calculation:**\nSpeedup = 1 / (0.15/1 + 0.10/1 + 0.05/1.5 + 0.40/2 +\
+    \ 0.30/2)\n        = 1 / (0.15 + 0.10 + 0.033 + 0.20 + 0.15)\n        = 1 / 0.633\n        = **1.58x**\n\
+    \nIn practice, additional overhead from FP32↔BF16 casting, loss scaling, and gradient unscaling further\
+    \ reduces this toward the observed **~1.4x**. The lesson: mixed-precision speedup is bounded by the\
+    \ fraction of time spent in operations that cannot use reduced precision."
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The napkin math calculation of 1.725x speedup does not match the stated 1.4x speedup in the realistic
+  solution.
+- The text ends abruptly before completing the Amdahl's Law explanation in the 'Realistic Solution' section.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The realistic_solution is flawed; a purely memory-bound workload should see a ~2x speedup, so this doesn't
+  explain a 1.4x speedup.
+- The Napkin Math uses the sparse (312 TFLOPS) A100 BF16 number, which is incorrect for standard dense
+  training; it should be 156 TFLOPS.
+- The Napkin Math section is incomplete and ends abruptly.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

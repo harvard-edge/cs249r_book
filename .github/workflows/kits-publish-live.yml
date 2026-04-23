@@ -1,6 +1,30 @@
 name: '📦 Kits · 🚀 Publish (Live)'
 
-# Builds and deploys Hardware Kits site (with PDF) to mlsysbook.ai/kits/
+# =============================================================================
+# Hardware Kits — Production Deploy
+# =============================================================================
+#
+# Builds the Hardware Kits Quarto site with PDF and deploys to the live
+# production site on GitHub Pages.
+#
+# Flow:
+#   1. BUILD_PDF      — Compile Hardware Kits PDF (reusable workflow)
+#   2. BUILD_SITE     — Quarto render + inject PDF into site
+#   3. DEPLOY         — Push to gh-pages branch
+#
+# Triggers:
+#   - workflow_dispatch: manual only
+#
+# Deploys to: mlsysbook.ai/kits/
+# Secrets:    GITHUB_TOKEN
+# Vars:       KITS_ROOT, DEV_KITS_PATH
+#
+# Related:
+#   - kits-preview-dev.yml  — Dev preview deploy
+#   - kits-validate-dev.yml — Content & build validation
+#   - kits-build-pdfs.yml   — Reusable PDF build
+#
+# =============================================================================
 
 on:
   workflow_dispatch:
@@ -9,14 +33,23 @@ permissions:
   contents: write
   actions: read
 
-concurrency:
-  group: gh-pages-deploy
-  cancel-in-progress: false
+# NB: gh-pages-deploy concurrency is declared on the build-and-deploy job
+# only. The guard job and PDF build run without holding the lock, so multiple
+# publish-live workflows can run their non-deploy stages in parallel.
 
 jobs:
+  # Block publish unless the latest dev validate run for this site is green.
+  # See .github/workflows/infra-publish-guard.yml for guard semantics.
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: kits-validate-dev.yml
+
   # Build PDF first
   build-pdf:
     name: '📚 Build PDF'
+    needs: [guard]
     uses: ./.github/workflows/kits-build-pdfs.yml
     with:
       ref: ${{ github.ref }}
@@ -24,41 +57,47 @@ jobs:
   build-and-deploy:
     name: '🔧 Build & Deploy Kits'
     runs-on: ubuntu-latest
-    needs: [build-pdf]
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    needs: [guard, build-pdf]
 
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: 🔨 Build Kits Site
-        working-directory: kits
+        working-directory: ${{ vars.KITS_ROOT }}
         run: |
           quarto render
           touch _build/.nojekyll
 
       - name: 📥 Download PDF Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: Kits-PDF
-          path: kits/_build/assets/downloads/
+          path: ${{ vars.KITS_ROOT }}/_build/assets/downloads/
 
       - name: 📋 Verify PDF
         run: |
           echo "📋 PDF artifacts:"
-          ls -la kits/_build/assets/downloads/
+          ls -la ${{ vars.KITS_ROOT }}/_build/assets/downloads/
           echo ""
           echo "📊 PDF file size:"
-          du -h kits/_build/assets/downloads/*.pdf
+          du -h ${{ vars.KITS_ROOT }}/_build/assets/downloads/*.pdf
+
+      - name: 🕐 Inject Build Stamp
+        run: bash shared/scripts/inject-build-stamp.sh ${{ vars.KITS_ROOT }}/_build "Kits"
 
       - name: 🚀 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./kits/_build
-          destination_dir: kits
+          publish_dir: ./${{ vars.KITS_ROOT }}/_build
+          destination_dir: ${{ vars.DEV_KITS_PATH }}
           publish_branch: gh-pages
           keep_files: true
           commit_message: '🔧 Deploy Kits live (with PDF) - ${{ github.sha }}'

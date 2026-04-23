@@ -24,8 +24,8 @@ For most users, the easiest way is using our **Book Binder CLI**:
 
 # Build complete book
 ./binder build                          # Complete book (HTML)
-./binder pdf                            # Complete book (PDF)
-./binder epub                           # Complete book (EPUB)
+./binder build pdf                      # Complete book (PDF)
+./binder build epub                     # Complete book (EPUB)
 
 # Get help
 ./binder help
@@ -52,7 +52,7 @@ By default, Quarto can build the HTML version pretty easily. But **building the 
 
 | Tool | Why It's Needed | Version |
 |------|------------------|---------|
-| **Quarto** | The core tool that converts the `.qmd` files into HTML/PDF | 1.7.31+ |
+| **Quarto** | The core tool that converts the `.qmd` files into HTML/PDF | 1.9.27+ |
 | **Python** | Required for Book Binder CLI and build scripts | 3.9+ |
 | **Python packages** | Dependencies (see `tools/dependencies/requirements.txt`) | See below |
 | **R** | Some chapters include R code chunks and R-based plots | 4.0+ |
@@ -98,8 +98,8 @@ For the complete list, see `tools/dependencies/requirements.txt` and `pyproject.
 Quarto is what drives the entire build process.
 
 ```sh
-wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb
-sudo dpkg -i quarto-1.7.31-linux-amd64.deb
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-amd64.deb
+sudo dpkg -i quarto-1.9.27-linux-amd64.deb
 ```
 
 Test it with:
@@ -283,15 +283,15 @@ The **recommended way** to build the book is using the Book Binder CLI:
 #### Build Complete Book
 ```sh
 ./binder build                  # Complete website (HTML)
-./binder pdf                    # Complete book (PDF)
-./binder epub                   # Complete e-book (EPUB)
+./binder build pdf              # Complete book (PDF)
+./binder build epub             # Complete e-book (EPUB)
 ```
 
 #### Build Specific Chapter(s)
 ```sh
 ./binder build intro                    # Single chapter (HTML)
 ./binder build intro,ml_systems         # Multiple chapters (HTML)
-./binder pdf intro                      # Single chapter (PDF, selective build)
+./binder build pdf intro                # Single chapter (PDF, selective build)
 ```
 
 #### Preview Mode (Live Reload)
@@ -414,7 +414,7 @@ python binder doctor
 Or test building:
 ```powershell
 python binder build intro
-python binder pdf
+python binder build pdf
 ```
 
 ---
@@ -468,7 +468,7 @@ pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r req
 - Try rebuilding from scratch:
   ```sh
   ./binder clean
-  ./binder pdf
+  ./binder build pdf
   ```
 
 **Chapter not found?**
@@ -617,7 +617,7 @@ Once everything is set up, you'll be able to:
 ### Development Workflow
 - 🚀 **Preview changes locally** with live reload: `./binder preview intro`
 - 🔨 **Build individual chapters** for fast iteration: `./binder build intro`
-- 📚 **Build complete book** in multiple formats: `./binder build`, `./binder pdf`, `./binder epub`
+- 📚 **Build complete book** in multiple formats: `./binder build`, `./binder build pdf`, `./binder build epub`
 - 🔍 **Validate your setup** anytime: `./binder doctor`
 - 🧹 **Clean up artifacts**: `./binder clean`
 
@@ -630,7 +630,7 @@ Once everything is set up, you'll be able to:
 ### Next Steps
 1. Read [BINDER.md](BINDER.md) for complete CLI reference
 2. Check [DEVELOPMENT.md](DEVELOPMENT.md) for development workflow
-3. Review [contribute.md](contribute.md) for contribution guidelines
+3. Review [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines
 4. Join discussions at [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
 ---
@@ -640,8 +640,8 @@ Once everything is set up, you'll be able to:
 ### Documentation
 - **[BINDER.md](BINDER.md)** - Complete Book Binder CLI reference
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development guidelines and workflow
-- **[contribute.md](contribute.md)** - Contribution guidelines
-- **[PUBLISH_LIVE_WORKFLOW.md](PUBLISH_LIVE_WORKFLOW.md)** - Publishing workflow
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines
+- **[`book-publish-live.yml`](../../.github/workflows/book-publish-live.yml)** - Publishing workflow definition
 
 ### Community
 - **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** - Ask questions and share knowledge
@@ -671,7 +671,7 @@ We welcome contributions! The easiest way to get started:
 4. **Test locally**: `./binder preview <chapter>`
 5. **Submit a pull request**
 
-For detailed contribution guidelines, see [contribute.md](contribute.md).
+For detailed contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

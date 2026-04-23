@@ -1,0 +1,63 @@
+schema_version: '1.0'
+id: cloud-2258
+track: cloud
+level: L3
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: apply
+phase: training
+title: The Lowering Pass Fusion Loss
+scenario: After adding a custom activation function (SwiGLU) to your model, you profile the compiled kernel
+  and find that the compiler failed to fuse it with the preceding linear layer. The standard ReLU version
+  of the same architecture fuses perfectly. Why would SwiGLU break the fusion pass, and at which IR level
+  does the failure occur?
+details:
+  realistic_solution: 'The fusion failure occurs at the graph-level IR (e.g., MLIR''s `linalg` dialect
+    or XLA''s HLO). Standard fusions like matmul+bias+ReLU are implemented as pattern-matching rewrite
+    rules: the compiler recognizes the specific subgraph and replaces it with a fused kernel. SwiGLU has
+    the form $\text{SwiGLU}(x) = (xW_1) \otimes \sigma(xW_2)$, which requires two parallel linear projections
+    followed by an elementwise multiply — a non-trivial data dependency pattern. The fusion pass sees
+    two matmuls feeding into a multiply, which doesn''t match its matmul+activation fusion template. The
+    fix is either (1) register a custom fusion pattern for the SwiGLU subgraph in the compiler''s pattern
+    database, (2) implement SwiGLU as a single custom Triton kernel that handles both projections and
+    the gating internally, or (3) lower the SwiGLU components manually and hint the compiler to fuse them.
+    Option 2 is most common in practice.'
+  common_mistake: '"The compiler is buggy — file an issue and wait for a fix." While compiler bugs exist,
+    most fusion failures are caused by pattern-matching limitations at specific IR levels, not bugs.'
+  napkin_math: 'Unfused SwiGLU with hidden_dim=8192: Two matmul writes to HBM ($2 \times 8192 \times B
+    \times 2\text{B} = 32\text{KB} \times B$) + elementwise reads of those outputs ($32\text{KB} \times
+    B$) + final write. Fused version eliminates both the intermediate HBM writes and subsequent reads,
+    saving $64\text{KB} \times B$ of bandwidth per token. At B=2048 tokens: $64\text{KB} \times 2048 =
+    128\text{MB}$ saved per layer, $\times 80$ layers = 10.24 GB of memory traffic saved per forward pass.
+    At 3.35 TB/s HBM bandwidth, that is ~3.0ms saved — significant for inference.'
+  options:
+  - Data loading should be done synchronously in the main training loop to ensure deterministic ordering;
+    using multiple workers introduces non-determinism that degrades model convergence
+  - 'The data loading pipeline must overlap I/O with GPU computation using multi-worker DataLoaders with
+    prefetching. Architecture: (1) Multiple worker processes read and preprocess batches in parallel,
+    (2) Prefetch queue holds 2-3 batches ahead of GPU consumption, (3) Pinned (page-locked) memory enables
+    async DMA transfers to GPU. If N workers × throughput_per_worker < GPU consumption rate, the pipeline
+    becomes the bottleneck and GPU idles.'
+  - The GPU always waits for data regardless of prefetching because GPU compute is faster than any storage;
+    the only solution is to load the entire dataset into GPU HBM before training starts
+  - Pinned memory is harmful because it reduces available system RAM; standard pageable memory with kernel
+    buffering is faster than pinned memory for GPU transfers
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

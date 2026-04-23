@@ -1,0 +1,67 @@
+schema_version: '1.0'
+id: cloud-2261
+track: cloud
+level: L5
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The XLA vs TorchInductor Decision
+scenario: Your infrastructure team must choose a compiler backend for a large-scale transformer training
+  job. XLA (used via JAX) and TorchInductor (used via torch.compile) are the two candidates. Both produce
+  fused kernels from high-level operations. Analyze the architectural differences between these two compilation
+  strategies and explain when each has a structural advantage.
+details:
+  realistic_solution: 'The fundamental architectural difference is whole-program vs per-operator compilation
+    scope. XLA performs whole-program compilation: it captures the entire computation graph ahead of time,
+    runs global optimization passes (cross-layer fusion, memory planning across the full model, buffer
+    donation), and produces a single optimized executable. This gives XLA a structural advantage for static,
+    regular workloads (standard transformer training with fixed shapes) because it can make globally optimal
+    decisions — e.g., fusing the layer-norm at the end of one layer with the linear projection at the
+    start of the next. TorchInductor uses graph-fragment compilation: TorchDynamo traces subgraphs between
+    graph breaks and compiles them independently. This gives TorchInductor a structural advantage for
+    dynamic workloads (variable sequence lengths, data-dependent control flow, custom Python logic) because
+    it preserves Python''s flexibility while compiling the hot paths. The tradeoff is compilation scope
+    vs dynamism: XLA''s global view enables better optimization but requires static shapes; TorchInductor''s
+    local view misses cross-fragment optimizations but handles dynamism gracefully.'
+  common_mistake: '"XLA is for TPUs and TorchInductor is for GPUs — just pick based on hardware." Both
+    support multiple hardware targets; the real difference is in compilation strategy, not hardware support.'
+  napkin_math: 'For a standard 70B transformer with fixed shapes: XLA achieves 55-60% MFU (global fusion,
+    buffer planning). TorchInductor achieves 50-55% MFU (fragment-level fusion, less cross-layer optimization).
+    Gap: ~10% relative. For a MoE model with dynamic routing: XLA requires padding all experts to max
+    capacity (wasting 20-40% compute on padding). TorchInductor compiles the dynamic dispatch natively,
+    executing only active expert paths. Net: TorchInductor wins by 15-25% on dynamic MoE workloads.'
+  options:
+  - AllReduce on 8 nodes transfers only 140 GB / 8 = 17.5 GB per GPU because the gradient is sharded;
+    communication time = 17.5 GB / 50 GB/s = 0.35 seconds, negligible compared to compute
+  - Communication overhead is always <1% for 8-node training because InfiniBand provides 400 Gbps per
+    link, which exceeds the gradient data rate by 100×
+  - Overlapping communication with computation is not possible because backward pass gradients are needed
+    by AllReduce in layer order; each layer's AllReduce must wait for the next layer's backward
+  - 'For DP across 8 nodes over 400 Gbps IB: AllReduce time for 70B model (140 GB FP16 gradients) = 2
+    × (7/8) × 140 GB / 50 GB/s = 4.9 seconds. If compute per step = 5 seconds, communication overhead
+    = 4.9/(4.9+5) ≈ 49.5% without overlap. With overlapped AllReduce (bucketed, pipelined with backward):
+    overlap hides ~80% of comm → effective overhead ≈ 10%. This is why overlap is critical for multi-node
+    training efficiency.'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-466
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

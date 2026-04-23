@@ -30,7 +30,7 @@ def setup_integration_test():
         sys.path.insert(0, str(project_root))
 
     # Set random seed for reproducibility
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
 
     # Suppress certain warnings during tests
     warnings.filterwarnings('ignore', category=DeprecationWarning)
@@ -65,10 +65,9 @@ def create_test_tensor(shape, requires_grad=True, seed=None):
     import numpy as np
     from tinytorch.core.tensor import Tensor
 
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)  # seed=None gives non-deterministic
 
-    data = np.random.randn(*shape).astype(np.float32)
+    data = rng.standard_normal(shape).astype(np.float32)
     return Tensor(data, requires_grad=requires_grad)
 
 

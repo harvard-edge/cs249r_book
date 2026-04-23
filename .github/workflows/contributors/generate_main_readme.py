@@ -2,9 +2,12 @@
 """
 Generate the main README.md contributor section from all project configs.
 
-This script reads the .all-contributorsrc files from each project
-(book, tinytorch, kits, labs) and generates a sectioned contributor
-table for the main README.md.
+This script reads each project's .all-contributorsrc file and generates a
+sectioned contributor table for the main README.md.
+
+The list of projects (key, dir, section emoji/title/marker, render order)
+lives in ``projects.json`` and is the single source of truth — edit that
+file, not this one, to add or reorder a section.
 
 Usage:
     python generate_main_readme.py [--dry-run]
@@ -14,6 +17,10 @@ import json
 import re
 import sys
 from pathlib import Path
+
+# Local import: projects.py sits next to this file.
+sys.path.insert(0, str(Path(__file__).parent))
+from projects import projects as get_projects  # noqa: E402
 
 # Emoji mapping for contribution types (only types actually in use)
 # Synced with generate_readme_tables.py
@@ -67,13 +74,13 @@ def generate_contributor_cell(contributor: dict, show_badges: bool = True, image
     return f'''      <td align="center" valign="top" width="{width_pct}"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
 
 
-def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 9, image_size: int = 50) -> str:
+def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 7, image_size: int = 50) -> str:
     """Generate an HTML table for contributors.
 
     Args:
         contributors: List of contributor dicts
         show_badges: Whether to show contribution badges
-        cols: Number of columns per row (default 9 for compact display)
+        cols: Number of columns per row (default 7 for readable wrapping)
         image_size: Size of avatar images in pixels (default 50 for compact display)
     """
     if not contributors:
@@ -104,7 +111,7 @@ def generate_contributor_table(contributors: list, show_badges: bool = True, col
     if row_cells:
         rows.append("    <tr>\n" + "\n".join(row_cells) + "\n    </tr>")
 
-    return f'''<table>
+    return f'''<table width="100%" style="width:100%">
   <tbody>
 {chr(10).join(rows)}
   </tbody>
@@ -117,89 +124,45 @@ def generate_legend() -> str:
     return " · ".join(items)
 
 
+def _render_section(emoji: str, title: str, marker_id: str, table_html: str) -> str:
+    return (
+        f"### {emoji} {title}\n"
+        "\n"
+        f"<!-- {marker_id}-CONTRIBUTORS-START -->\n"
+        "<!-- prettier-ignore-start -->\n"
+        "<!-- markdownlint-disable -->\n"
+        f"{table_html}\n"
+        "\n"
+        "<!-- markdownlint-restore -->\n"
+        "<!-- prettier-ignore-end -->\n"
+        f"<!-- {marker_id}-CONTRIBUTORS-END -->"
+    )
+
+
 def generate_sectioned_contributors(repo_root: Path) -> str:
     """Generate the full sectioned contributor section showing ALL contributors."""
-    # Load all configs
-    book_config = load_config(repo_root / "book" / ".all-contributorsrc")
-    tinytorch_config = load_config(repo_root / "tinytorch" / ".all-contributorsrc")
-    kits_config = load_config(repo_root / "kits" / ".all-contributorsrc")
-    labs_config = load_config(repo_root / "labs" / ".all-contributorsrc")
+    rendered_sections = []
+    for project in get_projects():
+        section = project["section"]
+        config = load_config(repo_root / project["dir"] / ".all-contributorsrc")
+        contributors = config.get("contributors", [])
+        table_html = generate_contributor_table(contributors)
+        rendered_sections.append(
+            _render_section(section["emoji"], section["title"], section["marker"], table_html)
+        )
 
-    book_contributors = book_config.get("contributors", [])
-    tinytorch_contributors = tinytorch_config.get("contributors", [])
-    kits_contributors = kits_config.get("contributors", [])
-    labs_contributors = labs_config.get("contributors", [])
-
-    # Count contributors
-    book_count = len(book_contributors)
-    tinytorch_count = len(tinytorch_contributors)
-    kits_count = len(kits_contributors)
-    labs_count = len(labs_contributors)
-
-    # Generate tables - show ALL contributors
-    book_table = generate_contributor_table(book_contributors)
-    tinytorch_table = generate_contributor_table(tinytorch_contributors)
-    kits_table = generate_contributor_table(kits_contributors)
-    labs_table = generate_contributor_table(labs_contributors)
-
-    # Generate legend
     legend = generate_legend()
+    body = "\n\n---\n\n".join(rendered_sections)
 
-    return f'''## Contributors
-
-Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
-
-**Legend:** {legend}
-
-### 📖 Textbook Contributors
-
-<!-- BOOK-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{book_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- BOOK-CONTRIBUTORS-END -->
-
----
-
-### 🔥 TinyTorch Contributors
-
-<!-- TINYTORCH-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{tinytorch_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- TINYTORCH-CONTRIBUTORS-END -->
-
----
-
-### 🛠️ Hardware Kits Contributors
-
-<!-- KITS-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{kits_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- KITS-CONTRIBUTORS-END -->
-
----
-
-### 🧪 Labs Contributors
-
-<!-- LABS-CONTRIBUTORS-START -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
-{labs_table}
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-<!-- LABS-CONTRIBUTORS-END -->'''
+    return (
+        "## Contributors\n"
+        "\n"
+        "Thanks goes to these wonderful people who have contributed to making this resource better for everyone!\n"
+        "\n"
+        f"**Legend:** {legend}\n"
+        "\n"
+        f"{body}"
+    )
 
 
 def update_readme(repo_root: Path, dry_run: bool = False) -> bool:

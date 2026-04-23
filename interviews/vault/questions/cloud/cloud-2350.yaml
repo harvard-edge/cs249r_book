@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2350
+track: cloud
+level: L6+
+zone: mastery
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The Auto-Scaler Fragmentation Deadlock
+scenario: You manage a multi-tenant 1,000-node GPU cluster (8x A100 80GB per node, $3/hr per GPU). Overall
+  utilization is mysteriously stuck at 45% (3,600 GPUs active, 4,400 idle). However, 50 large LLM training
+  jobs (each requiring a strict 64-GPU gang schedule) are permanently stuck in the pending queue. Seeing
+  the 3,200-GPU pending demand, your cloud auto-scaler provisions 50 new nodes daily, wasting $28,800/day,
+  but the 64-GPU jobs still will not start. Meanwhile, small inference tasks (1-2 GPUs) launch instantly.
+  Diagnose the root cause of the stalled queue and the wasted auto-scaling spend.
+details:
+  realistic_solution: 'The root cause is severe cluster fragmentation combined with a topology-ignorant,
+    aggregate-demand auto-scaler. Small 1-2 GPU inference jobs are being loosely bin-packed across the
+    cluster without node-level affinity, leaving 3-5 GPUs idle on almost every node. The 64-GPU gang-scheduled
+    jobs require 8 completely empty, contiguous nodes (to utilize intra-node NVLink and dedicated inter-node
+    Infiniband). Even with 4,400 idle GPUs, there are zero 8-node contiguous blocks available. When the
+    auto-scaler adds 50 new nodes, small jobs instantly snap up a few GPUs on the new nodes before a full
+    8-node block becomes available, perpetuating the deadlock. To fix this: 1) Implement preemption and
+    defragmentation policies (evict small jobs, consolidate them onto fewer nodes). 2) Change the auto-scaler
+    trigger from ''aggregate pending GPU demand'' to ''unsatisfiable gang demand''. 3) Enforce strict
+    packing (First-Fit Decreasing) for small jobs to preserve empty nodes.'
+  common_mistake: Assuming the cluster lacks aggregate capacity and blindly increasing the auto-scaler
+    limits, or assuming the 64-GPU jobs have a misconfigured container specification.
+  napkin_math: 'Wasted spend: 50 nodes × 8 GPUs × $3/hr × 24h = $28,800/day. Fragmentation state: 1,000
+    nodes × 8 GPUs = 8,000 total GPUs. 45% util = 3,600 used. If perfectly distributed, each node hosts
+    3.6 small jobs, leaving 4.4 GPUs idle per node (4,400 total idle). Gang requirement: 64 GPUs = 8 full
+    nodes. Available full nodes = 0. Auto-scaling adds 400 GPUs, but a single 1-GPU job scheduled on a
+    new node ruins the 8-node contiguous block.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

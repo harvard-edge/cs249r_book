@@ -1,0 +1,77 @@
+schema_version: '1.0'
+id: cloud-2267
+track: cloud
+level: L6+
+zone: mastery
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: create
+phase: training
+title: The New Accelerator Compiler Stack
+scenario: 'Your company is designing a custom AI accelerator with a novel dataflow architecture: a 2D
+  array of processing elements (PEs), each with 256KB of local SRAM, connected by a configurable on-chip
+  network. Unlike GPUs (SIMT) or TPUs (systolic arrays), your PEs execute independent instruction streams
+  and communicate via explicit message passing. Design the compiler stack — from PyTorch model to executable
+  — specifying which MLIR dialects you would create or reuse, where the key lowering passes occur, and
+  how auto-tuning integrates with the novel hardware.'
+details:
+  realistic_solution: 'The compiler stack requires 4 dialect levels with custom lowering passes: **Level
+    1 — Reuse `torch`/`linalg` dialects**: The top of the stack is hardware-independent. TorchDynamo captures
+    the graph, and standard passes (operator fusion, constant folding, shape inference) apply unchanged.
+    **Level 2 — Create a `dataflow` dialect**: This is the key innovation layer. Unlike GPU''s `affine`
+    loops, this dialect represents computation as a DAG of tiles mapped to PEs, with explicit communication
+    edges. Operations: `dataflow.map_to_pe(tile, pe_id)`, `dataflow.send(tensor, src_pe, dst_pe)`, `dataflow.barrier(pe_group)`.
+    The critical lowering pass here partitions the computation graph into subgraphs that fit within each
+    PE''s 256KB SRAM, minimizing inter-PE communication. This is a graph partitioning problem (NP-hard
+    in general, but greedy heuristics with SRAM budget constraints work well). **Level 3 — Create a `pe_isa`
+    dialect**: Lower the dataflow operations to per-PE instruction streams. Each PE gets a linear sequence
+    of compute + send/receive instructions. The key optimization pass is communication-computation overlap:
+    schedule `send` instructions early so the on-chip network transfers happen while the next computation
+    executes. **Level 4 — Target codegen**: Emit the binary instruction stream for each PE plus the network
+    routing configuration. Auto-tuning integrates at Level 2: the tile sizes, PE mapping strategy, and
+    communication schedule form the search space. Because each configuration requires simulating the dataflow
+    (not just timing one kernel), use a cycle-accurate simulator as the cost function, with Bayesian optimization
+    to handle the expensive evaluation (~100ms per trial instead of 5ms for GPU kernels).'
+  common_mistake: '"Fork the NVIDIA GPU backend and modify it for our hardware." GPU compilers assume
+    SIMT execution (thousands of threads, shared memory, warp-level synchronization) — none of which applies
+    to a message-passing dataflow architecture.'
+  napkin_math: 'For a 70B model matmul (M=4096, N=8192, K=4096) on a 16×16 PE array (256 PEs): Each PE
+    computes a $(256 \times 512)$ output tile. Per-PE SRAM needed: A tile (256×4096×2B = 2MB — too large!)
+    → must K-tile: K_tile=128, A tile = 256×128×2B = 64KB, B tile = 128×512×2B = 128KB, output = 256×512×2B
+    = 256KB. Total = 448KB > 256KB budget. Must further tile: reduce output to 128×256 → 64KB, A tile
+    (128x128x2B) = 32KB, B tile (128x256x2B) = 64KB. Now total = 32+64+64 = 160KB ≤ 256KB. This requires
+    4× more communication rounds but fits in SRAM. Search space: 5 M_tile × 5 N_tile × 5 K_tile × 3 comm
+    schedules = 375 configs × 100ms/eval = 37.5s auto-tuning time per kernel.'
+  options:
+  - Architecture search is unnecessary for foundation models because all modern LLMs use the standard
+    GPT architecture; the only decisions are parameter count and dataset size
+  - Network bandwidth is irrelevant because the 100B model fits on a single 8-GPU node with ZeRO Stage
+    3; training requires only intra-node NVLink communication
+  - 'For the billion-parameter scale foundation model: (1) Architecture search cost: evaluate ~500 candidates
+    × 10% scale × 1,000 steps each = 500K GPU-hours on A100s. (2) Full training: 6 × 100B × 2T tokens
+    = 1.2e24 FLOPS → 1.2e24 / (989e12 × 0.45) = 2.7M H100-hours. (3) Network: TP=8 (NVLink), PP=8, DP≥32
+    → 2,048+ GPUs minimum. (4) Storage: 2T tokens × ~2 bytes/token = 4 TB dataset + checkpoints every
+    15 min. (5) MLOps: experiment tracking, hyperparameter management, training resumption from failures.'
+  - Storage planning should provision for the raw internet scrape (typically 100+ PB); dataset deduplication
+    and filtering happen during training, not preprocessing
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: cloud-chain-465
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

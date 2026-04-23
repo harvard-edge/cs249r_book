@@ -1,0 +1,76 @@
+schema_version: '1.0'
+id: cloud-2194
+track: cloud
+level: L6+
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: create
+phase: both
+title: The 100K-GPU Collective Breakdown
+scenario: 'You are designing the communication subsystem for a 100,000-GPU training cluster (similar in
+  scale to Meta''s Grand Teton or xAI''s Colossus). At this scale, standard AllReduce algorithms that
+  work at 256 GPUs exhibit new failure modes. The team has identified three problems: (1) Ring AllReduce
+  takes 500,000 latency steps, creating unacceptable overhead even for large messages; (2) Tree AllReduce
+  creates hotspots at root switches, causing packet drops and retransmissions; (3) NCCL''s auto-tuner
+  was never tested beyond 4,096 GPUs and produces suboptimal algorithm selections. Design a collective
+  communication architecture that addresses all three problems. Your solution must handle gradient AllReduce
+  for data parallelism across 12,500 DP replicas, AllGather/ReduceScatter for FSDP sharding across 8-GPU
+  nodes, and AllToAll for expert routing across 1,024 expert partitions.'
+details:
+  realistic_solution: 'The architecture must be **hierarchical, heterogeneous, and adaptive**. **Hierarchy
+    (3 tiers)**: (a) Intra-node (8 GPUs, NVLink 900 GB/s): Use NVLink-optimized Ring for all collectives.
+    (b) Intra-pod (128 nodes = 1,024 GPUs, IB within a pod): Use SHARP in-network reduction for AllReduce;
+    Ring for AllGather/ReduceScatter along FSDP dimension. (c) Inter-pod (97 pods, IB across spine): Use
+    2-level tree with SHARP at pod level, then butterfly exchange between pods — limits tree depth to
+    $\log_2(97) \approx 7$ levels while distributing root load. **Heterogeneous collective selection**:
+    DP AllReduce (12,500 replicas, large gradients): Hierarchical AllReduce — intra-node Ring + intra-pod
+    SHARP + inter-pod butterfly. Total steps: $14 + 2 \times \log_2(97) \approx 28$ instead of 199,998
+    for flat Ring. FSDP AllGather/ReduceScatter (8 GPUs, intra-node): NVLink Ring, no inter-node traffic.
+    Expert AllToAll (1,024 partitions): Route through a 2-level scheduling system — intra-pod AllToAll
+    via NCCL (if experts are co-located) + inter-pod point-to-point with rate limiting to prevent congestion
+    collapse at spine switches. **Adaptive tuning**: Deploy a profiling agent on each pod that measures
+    real link latency and bandwidth every 60 seconds, feeding a lookup table that selects algorithm +
+    chunk size per collective. Fallback to known-good configurations if the tuner produces worse results.
+    **Fault tolerance**: At 100K GPUs with MTBF of ~2 hours, collectives must handle dropped participants.
+    Implement timeout-and-skip: if a GPU doesn''t respond within 10 ms, exclude it from the collective
+    ring and adjust chunk boundaries. Report the failure to the training framework for gradient correction.'
+  common_mistake: Proposing a single algorithm for all collectives at all scales. At 100K GPUs, no single
+    algorithm works universally — the system must compose multiple algorithms in a hierarchy and adapt
+    based on message size, collective type, and network conditions.
+  napkin_math: '- Flat Ring on 100K GPUs: 199,998 steps × 5 μs = 1 second latency alone — unusable | -
+    Hierarchical (3-tier): 14 (intra-node) + 14 (intra-pod via SHARP) + 14 (inter-pod butterfly) = 42
+    steps × 5 μs = 210 μs latency | - Bandwidth for 28 MB gradients (175B × FP16 / 12,500 DP shards =
+    28 MB per shard after DP): inter-pod = 28 MB × 96 pods / 50 GB/s = 53.7 ms | - Total AllReduce: ~55
+    ms vs ~1.5 seconds for flat Ring → 27× improvement | - MTBF at 100K GPUs: ~2 hours → must tolerate
+    ~8 failures per AllReduce operation'
+  options:
+  - At 1,024 GPUs, software bugs in the training script are the dominant failure mode; hardware failures
+    are negligible because enterprise GPUs have 99.999% uptime SLAs
+  - 'At 1,024 GPUs, the dominant failure mode is GPU hardware faults (DRAM ECC errors, NVLink failures)
+    occurring every few hours. With MTBF of ~10,000 hours per GPU: cluster MTBF = 10,000/1,024 ≈ 10 hours.
+    Mitigation: checkpoint every 10-15 minutes, implement automatic fault detection and node replacement,
+    use redundant communication paths, and design the training framework to elastically resize around
+    failed nodes.'
+  - Checkpoint once per epoch (every few hours) to minimize checkpoint I/O overhead; GPU failures at this
+    scale are rare enough that losing an epoch of progress is acceptable
+  - Use ECC memory and NVLink error correction to make hardware failures transparent to the training job;
+    modern GPUs can correct all bit-flip errors without interrupting computation
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

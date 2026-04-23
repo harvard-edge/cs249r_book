@@ -159,10 +159,14 @@ local function read_summaries(path)
       in_description = true
     elseif in_description and current_key then
       local desc_content = line:match('%s%s%s*(.+)')
-      if desc_content then
+      if desc_content and not desc_content:match('^#') then
+        -- Valid description content (not a YAML comment)
         table.insert(description_lines, desc_content)
       elseif line:match('^%s*$') then
         -- Empty line, continue
+      elseif line:match('^%s*#') then
+        -- YAML comment line - end description
+        in_description = false
       else
         -- End of description
         in_description = false
@@ -332,10 +336,16 @@ function RawBlock(el)
       -- 1. BOOK DIVISIONS: Major book structure sections
       if part_type == "division" then
         part_cmd = "\\division{" .. formatted_title .. "}"
-        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
-        local line_cmd = "\\addtocontents{toc}{\\par\\noindent\\hfil{\\color{crimson}\\rule{0.6\\textwidth}{0.5pt}}\\hfil\\par\\addvspace{6pt}}"
+        -- Use \protect so \tocdivisionentry survives into the .toc file.
+        -- At read time, \tocdivisionentry checks \ifminitoc to render in
+        -- the global TOC but hide in chapter mini-TOCs (same pattern as
+        -- \tocpartentry for numbered parts).
+        local toc_cmd = "\\addtocontents{toc}{\\protect\\tocdivisionentry{" .. formatted_title .. "}}"
+        local line_cmd = "\\addtocontents{toc}{\\protect\\tocdivisionline}"
+        local float_flush = "\\FloatBarrier\\clearpage"  -- Aggressively flush all floats before division break
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (with TOC entry + crimson line)")
         return {
+          pandoc.RawBlock("latex", float_flush),
           pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", line_cmd),
           pandoc.RawBlock("latex", part_cmd)
@@ -344,9 +354,11 @@ function RawBlock(el)
       -- 2. LAB PLATFORMS: Circuit-style neural network design
       elseif part_type == "lab" then
         part_cmd = "\\labdivision{" .. formatted_title .. "}"
-        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
+        local toc_cmd = "\\addtocontents{toc}{\\protect\\tocdivisionentry{" .. formatted_title .. "}}"
+        local float_flush = "\\FloatBarrier\\clearpage"  -- Aggressively flush all floats before lab division break
         log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, clean TOC entry)")
         return {
+          pandoc.RawBlock("latex", float_flush),
           pandoc.RawBlock("latex", toc_cmd),
           pandoc.RawBlock("latex", part_cmd)
         }
@@ -360,13 +372,23 @@ function RawBlock(el)
         local part_number = get_next_part_number()
         local roman_numeral = to_roman(part_number)
 
-        part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
-        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}Part~" .. roman_numeral .. "~" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
+        part_cmd = "\\numberedpart{" .. formatted_title .. "}"
+        -- TOC entry: \protect prevents expansion at write time so \tocpartentry
+        -- survives into the .toc file. At read time, \tocpartentry checks
+        -- \ifminitoc to render in the global TOC but hide in chapter mini-TOCs.
+        -- See header-includes.tex for the full mechanism.
+        local toc_cmd = "\\addtocontents{toc}{\\protect\\tocpartentry{Part~" .. roman_numeral .. "~" .. formatted_title .. "}}"
+        local reset_cmd = "\\haspartsummaryfalse"  -- Reset flag after display
+        -- Skip part pages when building single chapters to avoid Float(s) lost errors
+        -- The float_skip just outputs floats without the fancy part page
+        local float_skip = "\\FloatBarrier\\clearpage"
         log_info("🔄 Replacing key '" .. key .. "' with numbered part: '" .. formatted_title .. "' (Part " .. roman_numeral .. ", division: " .. (part_entry.division or "mainmatter") .. ")")
         return {
+          pandoc.RawBlock("latex", float_skip),
           pandoc.RawBlock("latex", setpartsummary_cmd),
           pandoc.RawBlock("latex", toc_cmd),
-          pandoc.RawBlock("latex", part_cmd)
+          pandoc.RawBlock("latex", part_cmd),
+          pandoc.RawBlock("latex", reset_cmd)
         }
       end
     else

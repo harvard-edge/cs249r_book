@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: cloud-0711
+track: cloud
+level: L5
+zone: optimization
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: The ZeRO-3 Communication Overhead
+scenario: You're training a 175B parameter model using ZeRO Stage 3 (DeepSpeed) across 64 A100-80GB GPUs.
+  ZeRO-3 shards weights, gradients, AND optimizer states across all GPUs, so each GPU only stores 1/64th
+  of the model. But your training throughput is 40% lower than ZeRO Stage 1 (which only shards optimizer
+  states). Where is the time going?
+details:
+  realistic_solution: ZeRO-3 must perform an all-gather to reconstruct the full weight tensor before every
+    forward and backward layer computation, then a reduce-scatter to redistribute gradients after each
+    layer's backward pass. This means 3× the communication volume of ZeRO-1 (which only communicates gradients
+    once at the end of the backward pass). For a 175B model, this communication happens for every single
+    layer, every single step.
+  common_mistake: '"ZeRO-3 just uses less memory per GPU — communication should be the same." This confuses
+    memory savings with communication cost. ZeRO-3 trades memory for bandwidth.'
+  napkin_math: '175B model in FP16 = 350 GB. Optimizer states = 2100 GB. Total footprint = 2800 GB. ZeRO-1
+    memory per GPU: full weights (350 GB) + full gradients (350 GB) + 1/64th optimizer (2100/64 = 32.8
+    GB) = 732.8 GB — doesn''t fit on 80 GB. ZeRO-3 stores 1/64th of everything: 2800 GB / 64 = 43.75 GB
+    — fits easily. ZeRO-1 communication per step: one all-reduce of gradients = 700 GB. ZeRO-3 communication
+    per step: for each layer: all-gather forward + all-gather backward + reduce-scatter gradients = 3
+    × 350 GB = 1,050 GB total. With 64 GPUs on 8 nodes (8 GPUs/node), inter-node bandwidth = 50 GB/s per
+    link. ZeRO-1: 700 / 50 ≈ 14 s communication. ZeRO-3: 1050 / 50 ≈ 21 s, but critically, the all-gathers
+    cannot be fully overlapped because each layer needs its weights before computing.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The memory calculation for ZeRO-1 (350 GB weights + 350 GB gradients + 32.8 GB optimizer) totals 732.8
+  GB. The conclusion 'doesn't fit on 80 GB' is correct, but '350GB gradients' might be an oversight if
+  gradients are normally sharded as well in ZeRO-1 (though ZeRO-1 typically means no gradient sharding,
+  just optimizer state sharding).
+- The communication volume for ZeRO-1 is stated as 'one all-reduce of gradients = 700 GB'. However, if
+  gradients are 350 GB, then one all-reduce of gradients should be around 350 GB, not 700 GB, unless it's
+  a specific communication pattern. (e.g., 2*(N-1)/N * 350GB).
+- The communication volume for ZeRO-3 is stated as '3 × 350 GB'. This simplification might hide the fact
+  that AllGather and ReduceScatter involve different volumes and patterns than a simple AllReduce.
+validation_status_pro: WARN
+validation_issues_pro:
+- The napkin math for communication time is methodologically flawed, incorrectly modeling collective time
+  as Total_Volume / Single_Link_Bandwidth.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

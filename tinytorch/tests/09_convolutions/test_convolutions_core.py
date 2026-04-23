@@ -24,6 +24,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -100,7 +101,7 @@ class TestConv2DLayer:
         conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3)
 
         # Input: (batch, C, H, W) - NCHW format
-        x = Tensor(np.random.randn(8, 3, 32, 32))
+        x = Tensor(rng.standard_normal((8, 3, 32, 32)))
         output = conv(x)
 
         # 32 - 3 + 1 = 30
@@ -257,7 +258,7 @@ class TestConvOutputShapes:
         conv = Conv2d(in_channels=3, out_channels=8, kernel_size=3, padding=1)
 
         # NCHW format
-        x = Tensor(np.random.randn(4, 3, 32, 32))
+        x = Tensor(rng.standard_normal((4, 3, 32, 32)))
         output = conv(x)
 
         assert output.shape == (4, 8, 32, 32), (
@@ -281,7 +282,7 @@ class TestConvOutputShapes:
         conv = Conv2d(in_channels=3, out_channels=16, kernel_size=3, stride=2)
 
         # NCHW format
-        x = Tensor(np.random.randn(1, 3, 32, 32))
+        x = Tensor(rng.standard_normal((1, 3, 32, 32)))
         output = conv(x)
 
         # (32 - 3) / 2 + 1 = 15
@@ -318,7 +319,7 @@ class TestConvGradientFlow:
 
         conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
         # NCHW format
-        x = Tensor(np.random.randn(1, 1, 8, 8), requires_grad=True)
+        x = Tensor(rng.standard_normal((1, 1, 8, 8)), requires_grad=True)
 
         output = conv(x)
         loss = output.sum()
@@ -344,7 +345,7 @@ class TestConvGradientFlow:
         conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
         conv.weight.requires_grad = True  # Enable gradient tracking for weights
         # NCHW format
-        x = Tensor(np.random.randn(1, 1, 8, 8), requires_grad=True)
+        x = Tensor(rng.standard_normal((1, 1, 8, 8)), requires_grad=True)
 
         output = conv(x)
         loss = output.sum()

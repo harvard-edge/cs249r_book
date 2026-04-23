@@ -1,0 +1,151 @@
+name: '🌐 Landing Site · 🚀 Publish (Live)'
+
+# =============================================================================
+# Unified Site — Publish to mlsysbook.ai
+# =============================================================================
+#
+# Builds the unified site (landing + about + community + newsletter) and
+# deploys to the live site via gh-pages. Syncs newsletter from Buttondown
+# before building so posts are always current.
+#
+# Flow:
+#   1. SYNC      — Fetch latest newsletter posts from Buttondown API
+#   2. BUILD     — Quarto render entire site
+#   3. VALIDATE  — Verify all expected pages exist
+#   4. DEPLOY    — Push to gh-pages branch (only site subsites, preserves others)
+#
+# Triggers:
+#   - Manual: workflow_dispatch
+#   - Called by: publish-all-live.yml (orchestrator)
+#
+# Deploys to: gh-pages → mlsysbook.ai/{about,community,newsletter}/
+# Secrets:    BUTTONDOWN_API_KEY, GITHUB_TOKEN
+#
+# Related:
+#   - site-preview-dev.yml     — Same site, deployed to dev preview
+#   - sync-newsletter.yml      — Dedicated daily newsletter sync
+#   - publish-all-live.yml     — Orchestrates all live deploys
+#
+# =============================================================================
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+
+permissions:
+  contents: write
+  actions: read
+
+# NB: gh-pages-deploy concurrency is declared on the build-and-deploy job
+# only. The guard runs without holding the lock.
+
+jobs:
+  # Block publish unless the latest dev validate run for this site is green.
+  # See .github/workflows/infra-publish-guard.yml for guard semantics.
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: site-validate-dev.yml
+
+  build-and-deploy:
+    name: '🌐 Deploy Landing Site'
+    needs: [guard]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📬 Sync newsletter from Buttondown
+        env:
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+        run: |
+          pip install -r site/newsletter/requirements.txt
+          python3 site/newsletter/bin/news pull
+          echo "✅ Newsletter posts synced"
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build unified site
+        working-directory: site
+        run: |
+          quarto render
+          touch _build/.nojekyll
+          echo "✅ Site rendered: $(find _build -name '*.html' | wc -l) pages"
+
+      - name: 🔍 Validate build
+        run: |
+          for page in index.html about/index.html community/index.html newsletter/index.html; do
+            if [ ! -f "site/_build/$page" ]; then
+              echo "❌ CRITICAL: $page missing from build. Aborting."
+              exit 1
+            fi
+          done
+          echo "✅ All site pages validated"
+
+      - name: 🚀 Deploy to gh-pages
+        run: |
+          rm -rf gh-pages-repo
+          git clone --depth=1 --branch=gh-pages \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            gh-pages-repo
+
+          cd gh-pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BUILD_DIR="${{ github.workspace }}/site/_build"
+
+          # Deploy subsites to their directories
+          for subsite in about community newsletter; do
+            rm -rf "$subsite"
+            cp -r "$BUILD_DIR/$subsite" .
+          done
+
+          # Deploy landing page to root (preserve directories managed by other workflows)
+          for item in "$BUILD_DIR"/*; do
+            basename="$(basename "$item")"
+            [[ "$basename" == "site_libs" ]] && continue
+            if [[ -d "$basename" ]] && [[ "$basename" =~ ^(book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|staffml|about|community|newsletter)$ ]]; then
+              continue
+            fi
+            cp -r "$item" .
+          done
+          touch .nojekyll
+
+          [ -f "index.html" ] || { echo "❌ CRITICAL: Landing index.html missing."; exit 1; }
+
+          git add .
+          git commit -m "🌐 Deploy site live - ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+
+          for i in 1 2 3; do
+            if git push origin gh-pages 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin gh-pages || true
+          done
+
+          echo "✅ Site deployed to mlsysbook.ai"
+
+      - name: 📊 Summary
+        run: |
+          echo "## 🌐 Landing Site Publish Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Page | URL |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🏠 Landing | https://mlsysbook.ai/ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📋 About | https://mlsysbook.ai/about/ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌍 Community | https://mlsysbook.ai/community/ |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📬 Newsletter | https://mlsysbook.ai/newsletter/ |" >> $GITHUB_STEP_SUMMARY

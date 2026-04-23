@@ -162,11 +162,11 @@ ML systems exist on a **Pareto frontier** - you can't simultaneously maximize ac
 ```
 Accuracy
     ^
-    |  A .     <- Model A: High accuracy, high latency
+    |      A .<- Model A: High accuracy, high latency
     |
     |    B .  <- Model B: Balanced trade-off
     |
-    |      C .<- Model C: Low accuracy, low latency
+    |  C .     <- Model C: Low accuracy, low latency
     |__________> Latency (lower is better)
 ```
 
@@ -186,6 +186,7 @@ Professional benchmarking quantifies and minimizes these uncertainties.
 # %%
 #| export
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 import statistics
 import os
@@ -796,7 +797,7 @@ def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28,
 
         # Create input tensor for profiling
         from tinytorch.core.tensor import Tensor
-        input_tensor = Tensor(np.random.randn(*input_shape).astype(np.float32))
+        input_tensor = Tensor(rng.standard_normal(input_shape).astype(np.float32))
 
         # Use Profiler to measure latency with proper warmup and iterations
         latency_ms = self.profiler.measure_latency(
@@ -914,11 +915,11 @@ def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
                 else:
                     # Simulate accuracy for demonstration
                     base_accuracy = 0.85 + i * 0.05  # Different models have different base accuracies
-                    accuracy = base_accuracy + np.random.normal(0, 0.02)  # Add noise
+                    accuracy = base_accuracy + rng.normal(0, 0.02)  # Add noise
                     accuracy = max(0.0, min(1.0, accuracy))  # Clamp to [0, 1]
             except Exception:
                 # Fallback simulation
-                accuracy = 0.80 + np.random.normal(0, 0.05)
+                accuracy = 0.80 + rng.normal(0, 0.05)
                 accuracy = max(0.0, min(1.0, accuracy))
 
             accuracies.append(accuracy)
@@ -1500,7 +1501,7 @@ def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
         for i, model in enumerate(self.models):
             model_name = getattr(model, 'name', f'model_{i}')
             # Simulate energy measurements
-            energy_values = [0.5 + np.random.normal(0, 0.1) for _ in range(5)]
+            energy_values = [0.5 + rng.normal(0, 0.1) for _ in range(5)]
             energy_results[model_name] = BenchmarkResult(
                 f"{model_name}_energy_joules",
                 energy_values,
@@ -2108,7 +2109,10 @@ if __name__ == "__main__":
 """
 ### MLPerf - Standardized Industry Benchmarking
 
-MLPerf provides standardized benchmarks that enable fair comparison across different systems, similar to how MLPerf works for larger models. This is crucial for reproducible research and industry adoption.
+MLPerf® is a trademark of MLCommons. This module provides MLPerf-style standardized
+benchmarks that enable fair comparison across different systems, similar to how the
+official MLPerf suite works for larger models. This is important for reproducible
+research and industry adoption.
 
 ### Why Standardization Matters
 
@@ -2165,6 +2169,11 @@ MLPerf Benchmark Structure:
 - Task: Binary classification (anomaly/normal)
 - Target: 85% accuracy, <50ms latency
 
+**Image Classification**: Tiny image recognition (CIFAR-style)
+- Input: 32×32 RGB images
+- Task: Multi-class classification (10 classes)
+- Target: 75% accuracy, <150ms latency
+
 ### Reproducibility Requirements
 
 All MLPerf benchmarks use:
@@ -2187,7 +2196,7 @@ Standard MLPerf Benchmarks:
 ┌─────────────────────┬──────────────────┬─────────┬──────────┐
 │ Benchmark           │ Input Shape      │ Acc Tgt │ Lat Tgt  │
 ├─────────────────────┼──────────────────┼─────────┼──────────┤
-│ keyword_spotting     │ (1, 16000)       │ 90%     │ <100ms   │
+│ keyword_spotting    │ (1, 16000)       │ 90%     │ <100ms   │
 │ visual_wake_words   │ (1, 96, 96, 3)   │ 80%     │ <200ms   │
 │ anomaly_detection   │ (1, 640)         │ 85%     │ <50ms    │
 │ image_classification│ (1, 32, 32, 3)   │ 75%     │ <150ms   │
@@ -2200,6 +2209,10 @@ Standard MLPerf Benchmarks:
 class MLPerf:
     """
     MLPerf-style standardized benchmarking for edge ML systems.
+
+    MLPerf® is a trademark of MLCommons. Used here purely for educational purposes.
+    This module teaches the principles of MLPerf-style benchmarking through a
+    simplified suite inspired by MLPerf Tiny.
 
     Provides fixed benchmark configurations with target thresholds,
     standardized measurement protocols, and compliance reporting.
@@ -2226,7 +2239,7 @@ class MLPerf:
         """
         ### BEGIN SOLUTION
         self.random_seed = random_seed
-        np.random.seed(random_seed)
+        rng = np.random.default_rng(7)
 
         # Standard MLPerf benchmark configurations
         self.benchmarks = {
@@ -2357,12 +2370,12 @@ def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
                     output = model(test_input)
                 else:
                     # Simulate prediction
-                    output = np.random.rand(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words'] else np.random.rand(10)
+                    output = rng.random(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection'] else rng.random(10)
 
                 predictions.append(output)
             except Exception:
                 # Fallback simulation
-                predictions.append(np.random.rand(2))
+                predictions.append(rng.random(2))
 
         latencies.append(timer.elapsed * 1000)  # Convert to ms
 
@@ -2390,12 +2403,12 @@ def test_unit_mlperf_latency():
             self.name = name
         def forward(self, x):
             time.sleep(0.001)
-            return np.random.rand(2)
+            return rng.random(2)
 
     perf = MLPerf(random_seed=42)
     model = MockModel("test")
 
-    test_inputs = [np.random.randn(1, 16000).astype(np.float32) for _ in range(5)]
+    test_inputs = [rng.standard_normal((1, 16000)).astype(np.float32) for _ in range(5)]
     latencies, predictions = perf._run_latency_test(model, test_inputs, 'keyword_spotting', 5)
 
     assert len(latencies) == 5
@@ -2413,8 +2426,8 @@ if __name__ == "__main__":
 
 This helper calculates accuracy by comparing model predictions against synthetic
 ground truth labels. It handles both binary classification (keyword spotting,
-visual wake words) and multi-class classification (image classification,
-anomaly detection).
+visual wake words, anomaly detection) and multi-class classification (image
+classification).
 
 We'll build this in two steps: first a helper to extract a clean prediction
 array from various output formats, then the accuracy calculation itself.
@@ -2487,14 +2500,14 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     4. Add realistic noise based on model name
 
     HINTS:
-    - keyword_spotting and visual_wake_words are binary (2 classes)
-    - image_classification has 10 classes, anomaly_detection has 5
+    - keyword_spotting, visual_wake_words, and anomaly_detection are binary (2 classes)
+    - image_classification has 10 classes
     """
     ### BEGIN SOLUTION
-    np.random.seed(self.random_seed)
-    if benchmark_name in ['keyword_spotting', 'visual_wake_words']:
+    rng = np.random.default_rng(7)
+    if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
         # Binary classification
-        true_labels = np.random.randint(0, 2, num_runs)
+        true_labels = rng.integers(0, 2, num_runs)
         predicted_labels = []
         for pred in predictions:
             pred_array = _extract_pred_array(pred)
@@ -2503,9 +2516,9 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
             else:
                 predicted_labels.append(1 if pred_array[0] > 0.5 else 0)
     else:
-        # Multi-class classification
-        num_classes = 10 if benchmark_name == 'image_classification' else 5
-        true_labels = np.random.randint(0, num_classes, num_runs)
+        # Multi-class classification (image_classification only)
+        num_classes = 10
+        true_labels = rng.integers(0, num_classes, num_runs)
         predicted_labels = []
         for pred in predictions:
             pred_array = _extract_pred_array(pred)
@@ -2581,12 +2594,12 @@ def test_unit_mlperf_accuracy():
     model = MockModel("test_model")
 
     # Binary classification predictions
-    predictions = [np.random.rand(2) for _ in range(10)]
+    predictions = [rng.random(2) for _ in range(10)]
     accuracy = perf._run_accuracy_test(model, predictions, 'keyword_spotting', 10)
     assert 0 <= accuracy <= 1
 
     # Multi-class predictions
-    predictions_mc = [np.random.rand(10) for _ in range(10)]
+    predictions_mc = [rng.random(10) for _ in range(10)]
     accuracy_mc = perf._run_accuracy_test(model, predictions_mc, 'image_classification', 10)
     assert 0 <= accuracy_mc <= 1
 
@@ -2631,8 +2644,8 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     5. Compile results with compliance determination
 
     HINTS:
-    - Use np.random.seed(self.random_seed + i) for each input
-    - Audio data: np.random.randn, Image data: np.random.randint(0,256)/255
+    - Use rng = np.random.default_rng(7) for each input
+    - Audio data: rng.standard_normal, Image data: rng.integers(0,256)/255
     - compliant = accuracy_met AND latency_met
     """
     ### BEGIN SOLUTION
@@ -2650,17 +2663,19 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
           f"<{config['max_latency_ms']}ms latency")
 
-    # Generate standardized test inputs
+    # Generate standardized test inputs (as Tensors for TinyTorch model compatibility)
     input_shape = config['input_shape']
     test_inputs = []
     for i in range(num_runs):
         # Use deterministic random generation for reproducibility
-        np.random.seed(self.random_seed + i)
-        if len(input_shape) == 2:  # Audio/sequence data
-            test_input = np.random.randn(*input_shape).astype(np.float32)
-        else:  # Image data
-            test_input = np.random.randint(0, 256, input_shape).astype(np.float32) / 255.0
-        test_inputs.append(test_input)
+        rng = np.random.default_rng(7)
+        if len(input_shape) == 2:  # Audio/sequence data (keyword_spotting, anomaly_detection)
+            arr = rng.standard_normal(input_shape).astype(np.float32)
+        else:  # Image data (visual_wake_words, image_classification) - use CHW for Conv2d
+            arr = rng.integers(0, 256, input_shape).astype(np.float32) / 255.0
+            if arr.ndim == 4 and arr.shape[-1] == 3:  # (B,H,W,C) -> (B,C,H,W)
+                arr = np.transpose(arr, (0, 3, 1, 2))
+        test_inputs.append(Tensor(arr))
 
     # Run latency and accuracy tests using helpers
     latencies, predictions = self._run_latency_test(model, test_inputs, benchmark_name, num_runs)
@@ -2739,8 +2754,8 @@ def test_unit_mlperf_run():
         def forward(self, x):
             time.sleep(0.001)
             if hasattr(x, 'shape') and len(x.shape) == 2:
-                return np.random.rand(2)
-            return np.random.rand(10)
+                return rng.random(2)
+            return rng.random(10)
 
     perf = MLPerf(random_seed=42)
     model = MockModel("test_model")
@@ -3082,10 +3097,10 @@ def test_unit_mlperf():
             # Return appropriate output shape for different benchmarks
             if hasattr(x, 'shape'):
                 if len(x.shape) == 2:  # Audio/sequence
-                    return np.random.rand(2)  # Binary classification
+                    return rng.random(2)  # Binary classification
                 else:  # Image
-                    return np.random.rand(10)  # Multi-class
-            return np.random.rand(2)
+                    return rng.random(10)  # Multi-class
+            return rng.random(2)
 
     model = MockModel("test_model")
     perf = MLPerf(random_seed=42)
@@ -3683,7 +3698,7 @@ def analyze_benchmark_variance():
 
     for n_samples in sample_sizes:
         # Simulate measurements
-        measurements = np.random.normal(true_latency, noise_std, n_samples)
+        measurements = rng.normal(true_latency, noise_std, n_samples)
         mean_latency = np.mean(measurements)
         std_latency = np.std(measurements)
 
@@ -3863,12 +3878,12 @@ def test_module():
             memory_factor = self.characteristics.get('memory_factor', 1.0)
 
             # Simulate realistic computation
-            time.sleep(max(0, base_time + np.random.normal(0, variance)))
+            time.sleep(max(0, base_time + rng.normal(0, variance)))
 
             # Simulate memory usage
             if hasattr(x, 'shape'):
                 temp_size = int(np.prod(x.shape) * memory_factor)
-                temp_data = np.random.randn(temp_size)
+                temp_data = rng.standard_normal(temp_size)
                 _ = np.sum(temp_data)  # Use the data
 
             return x
@@ -3876,13 +3891,13 @@ def test_module():
         def evaluate(self, dataset):
             # Simulate evaluation
             base_acc = self.characteristics.get('base_accuracy', 0.85)
-            return base_acc + np.random.normal(0, 0.02)
+            return base_acc + rng.normal(0, 0.02)
 
         def parameters(self):
             # Simulate parameter count - return Tensor objects for compatibility
             from tinytorch.core.tensor import Tensor
             param_count = self.characteristics.get('param_count', 1000000)
-            return [Tensor(np.random.randn(param_count))]
+            return [Tensor(rng.standard_normal(param_count))]
 
     # Create test model suite
     models = [
@@ -3996,7 +4011,8 @@ For a model that takes 1ms to execute:
 - At what model latency does timer overhead become negligible (<1%)? _____ ms
 
 ### 3. Benchmark Configuration Trade-offs
-Your optimize_benchmark_configuration() function tested different warmup/measurement combinations.
+The BenchmarkSuite class uses configurable warmup_runs and measurement_runs parameters
+(with DEFAULT_WARMUP_RUNS=5 and DEFAULT_MEASUREMENT_RUNS=100 as defaults).
 For a CI/CD pipeline that runs 100 benchmarks per day:
 - Fast config (3s each): _____ minutes total daily
 - Accurate config (15s each): _____ minutes total daily
@@ -4043,7 +4059,7 @@ def demo_benchmarking():
 
     # Create a simple model and input
     layer = Linear(512, 256)
-    x = Tensor(np.random.randn(32, 512))
+    x = Tensor(rng.standard_normal((32, 512)))
 
     # Benchmark with proper methodology
     benchmark = Benchmark(
@@ -4059,10 +4075,10 @@ def demo_benchmarking():
     print(f"Model: Linear(512 → 256)")
     print(f"Batch: 32 samples")
     print(f"\nBenchmark Results (10 iterations):")
-    print(f"  Mean latency: {result.mean*1000:.2f} ms")
-    print(f"  Std dev:      {result.std*1000:.2f} ms")
-    print(f"  Min:          {result.min_val*1000:.2f} ms")
-    print(f"  Max:          {result.max_val*1000:.2f} ms")
+    print(f"  Mean latency: {result.mean:.2f} ms")
+    print(f"  Std dev:      {result.std:.2f} ms")
+    print(f"  Min:          {result.min_val:.2f} ms")
+    print(f"  Max:          {result.max_val:.2f} ms")
 
     print("\n✨ Reliable measurements guide optimization decisions!")
 

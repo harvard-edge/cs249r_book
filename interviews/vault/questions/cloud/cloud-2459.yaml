@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2459
+track: cloud
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: The NPU Fallback Latency Cliff
+scenario: You deploy an upgraded vision model (YOLOv8-nano, 3.2M parameters) to your edge devices via
+  your cloud management platform, replacing YOLOv5n (1.9M parameters). Although YOLOv8n has slightly more
+  parameters, its FLOP count is highly optimized (8.7 GFLOPs vs 4.5 GFLOPs). You expect inference latency
+  to roughly double from 15ms to 30ms. Instead, device telemetry shows the latency skyrocketing to 185ms,
+  and the edge CPU utilization spikes from 10% to 85%. Both models are compiled targeting the exact same
+  edge NPU.
+details:
+  realistic_solution: "This is a classic hardware-compiler-algorithm mismatch causing an Operator Fallback.\
+    \ Newer algorithms often introduce activation functions or operations that edge NPU compilers do not\
+    \ natively support. For example, YOLOv8 uses the SiLU (Swish) activation function, whereas YOLOv5\
+    \ used SiLU in later versions but older versions used LeakyReLU or ReLU, which are universally supported\
+    \ by NPUs. \n\nWhen the NPU compiler encounters an unsupported op like SiLU, it partitions the computation\
+    \ graph. It runs the layers before the op on the NPU, copies the intermediate tensor back to the CPU\
+    \ DRAM, computes the SiLU on the CPU, and copies the result back to the NPU for the next layer. This\
+    \ graph shattering completely destroys latency due to PCIe/memory bus synchronization overhead. The\
+    \ tradeoff-analysis dictates modifying the algorithm prior to cloud deployment: replacing SiLU with\
+    \ ReLU (or a hard-swish approximation) and retraining/fine-tuning the model. The slight ~1% mAP accuracy\
+    \ drop is worth the 6x latency improvement."
+  common_mistake: Assuming the latency increase is purely due to the increased parameter count or memory
+    bandwidth saturation on the NPU.
+  napkin_math: 'YOLOv8n has ~60 convolutions, each followed by a SiLU. If the graph shatters 60 times:
+    60 syncs * 2 memory copies (NPU->CPU->NPU). Let average intermediate tensor size be 1MB. Copying 1MB
+    over a 4GB/s bus = 0.25ms. 60 * 2 * 0.25ms = 30ms pure transfer time. Add OS context switch overhead
+    (~1ms per sync * 60 = 60ms) + CPU compute time for SiLU (~60ms). Total overhead: 30 + 60 + 60 = 150ms.
+    150ms overhead + ~35ms NPU compute = ~185ms total.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

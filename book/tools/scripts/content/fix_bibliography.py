@@ -1,103 +1,206 @@
-"""
-BibTeX Citation Key Formatter and .qmd File Updater
+#!/usr/bin/env python3
+"""Enrich bibliography entries with missing publisher/journal fields.
 
-This script processes multiple BibTeX files to update citation keys to a specific format and subsequently updates references in .qmd files.
-
-The citation keys are formatted as follows:
-- The first word of the first author's name (lowercase, non-alphanumeric characters removed).
-- The publication year.
-- The first substantial word (longer than 3 characters) from the title (lowercase, non-alphanumeric characters removed).
-
-The script searches recursively from the current directory for .bib and .qmd files, updating the citation keys and references accordingly.
+Adds publisher fields to @inproceedings and journal fields to @article
+entries based on known venue mappings.
 
 Usage:
-1. Place the script in the root directory where your .bib and .qmd files are located.
-2. Run the script in your Python environment. Ensure you have 'bibtexparser' installed (`pip install bibtexparser`).
-3. The script will automatically find, process, and update the files.
-
-It is recommended to back up your files before running the script.
+    python3 fix_bibliography.py --dry-run book/quarto/contents/vol1/backmatter/references.bib
+    python3 fix_bibliography.py book/quarto/contents/vol1/backmatter/references.bib
 """
-
-import os
+import argparse
 import re
-import bibtexparser
-from bibtexparser.bwriter import BibTexWriter
+import sys
+from pathlib import Path
 
-def is_valid_format(citation_key):
-    """
-    Check if the citation key already follows the desired format.
-    """
-    # Define a pattern that matches the desired format
-    pattern = re.compile(r'[A-Za-z]+[0-9]{4}[A-Za-z]+')
-    return pattern.fullmatch(citation_key) is not None
+# Known conference → publisher mappings
+CONFERENCE_PUBLISHERS = {
+    # ACM conferences
+    "neurips": "Curran Associates",
+    "nips": "Curran Associates",
+    "advances in neural information processing": "Curran Associates",
+    "icml": "PMLR",
+    "international conference on machine learning": "PMLR",
+    "iclr": "OpenReview.net",
+    "international conference on learning representations": "OpenReview.net",
+    "cvpr": "IEEE",
+    "computer vision and pattern recognition": "IEEE",
+    "iccv": "IEEE",
+    "international conference on computer vision": "IEEE",
+    "eccv": "Springer",
+    "european conference on computer vision": "Springer",
+    "aaai": "AAAI Press",
+    "annual meeting of the association for computational linguistics": "Association for Computational Linguistics",
+    "association for computational linguistics": "Association for Computational Linguistics",
+    "conference on computational linguistics": "Association for Computational Linguistics",
+    "emnlp": "Association for Computational Linguistics",
+    "naacl": "Association for Computational Linguistics",
+    "sigmod": "ACM",
+    "vldb": "VLDB Endowment",
+    "kdd": "ACM",
+    "knowledge discovery and data mining": "ACM",
+    "isca": "ACM",
+    "international symposium on computer architecture": "ACM",
+    "micro": "ACM",
+    "hpca": "IEEE",
+    "asplos": "ACM",
+    "osdi": "USENIX Association",
+    "sosp": "ACM",
+    "nsdi": "USENIX Association",
+    "usenix": "USENIX Association",
+    "mlsys": "MLSys",
+    "machine learning and systems": "MLSys",
+    "north american chapter": "Association for Computational Linguistics",
+    "interspeech": "ISCA",
+    "icassp": "IEEE",
+    "chi": "ACM",
+    "fat*": "ACM",
+    "facct": "ACM",
+    "fairness, accountability": "ACM",
+    "aistats": "PMLR",
+    "artificial intelligence and statistics": "PMLR",
+    "sigcomm": "ACM",
+    "infocom": "IEEE",
+    "dac": "ACM",
+    "date": "IEEE",
+    "embedded systems": "ACM",
+    "sensys": "ACM",
+    "mobicom": "ACM",
+    "mobisys": "ACM",
+    "ieee security": "IEEE",
+    "ieee symposium": "IEEE",
+    "ieee international": "IEEE",
+    "ieee conference": "IEEE",
+    "acm conference": "ACM",
+    "acm symposium": "ACM",
+    # Removed: "proceedings of the" → too generic, causes false matches
+}
 
-def extract_first_author(author_field):
-    # Extract the first word of the first author's name
-    authors = re.split(r'\sand\s|,', author_field)
-    first_author = authors[0].strip()
-    first_word = first_author.split()[0] if first_author else ''
-    return first_word
+# Known journal names for articles
+KNOWN_JOURNALS = {
+    "arxiv": "arXiv preprint",
+    "jmlr": "Journal of Machine Learning Research",
+    "nature": "Nature",
+    "science": "Science",
+    "transactions on": "IEEE",
+    "communications of the acm": "Communications of the ACM",
+}
 
-def valid_citation_key(entry):
-    # Generate a valid citation key
-    author = extract_first_author(entry.get('author', '')).lower()
-    author = re.sub(r'[^A-Za-z0-9]', '', author)
-    year = entry.get('year', '')
-    title = entry.get('title', '').split()
-    keyword = next((word for word in title if len(word) > 3), '').lower()
-    keyword = re.sub(r'[^A-Za-z0-9]', '', keyword)
-    return f"{author}{year}{keyword}"
 
-def process_bibtex_file(filepath):
-    # Process a single BibTeX file
-    print(f"Processing BibTeX file: {filepath}")
-    with open(filepath) as bibtex_file:
-        bib_database = bibtexparser.load(bibtex_file)
+def find_publisher_for_entry(entry_text: str) -> str | None:
+    """Try to determine publisher from booktitle or other fields."""
+    # Extract booktitle
+    m = re.search(r'booktitle\s*=\s*\{([^}]+)\}', entry_text, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    booktitle = m.group(1).lower().replace('\n', ' ')
 
-    new_key_mapping = {}
-    for entry in bib_database.entries:
-        old_key = entry['ID']
-        if not is_valid_format(old_key):
-            new_key = valid_citation_key(entry)
-            new_key_mapping[old_key] = new_key
-            entry['ID'] = new_key
-            print(f"Updated citation key: '{old_key}' to '{new_key}'")
+    # Check specific keywords first (longer/more specific before shorter/generic)
+    # Sort by keyword length descending to prioritize specific matches
+    sorted_keywords = sorted(CONFERENCE_PUBLISHERS.items(), key=lambda x: len(x[0]), reverse=True)
+    for keyword, publisher in sorted_keywords:
+        kw_lower = keyword.lower()
+        # For short keywords (< 6 chars), require word boundaries to avoid
+        # substring matches like "micro" in "microsoft"
+        if len(kw_lower) < 6:
+            if re.search(r'\b' + re.escape(kw_lower) + r'\b', booktitle):
+                return publisher
         else:
-            print(f"Citation key '{old_key}' already in correct format, no update needed.")
+            if kw_lower in booktitle:
+                return publisher
 
-    with open(filepath, 'w') as bibtex_file:
-        bibtexparser.dump(bib_database, bibtex_file)
+    return None
 
-    return new_key_mapping
 
-def update_qmd_files(qmd_file_path, key_mapping):
-    """
-    Update .qmd files with new citation keys. Handles multiple references to the same key in a file.
-    """
-    print(f"Updating .qmd file: {qmd_file_path}")
-    with open(qmd_file_path, 'r') as file:
-        content = file.read()
+def find_journal_for_entry(entry_text: str) -> str | None:
+    """Try to determine journal from eprint or other fields."""
+    # Check if it's an arXiv preprint
+    if re.search(r'eprint\s*=|archiveprefix\s*=\s*\{arxiv\}|arxiv', entry_text, re.IGNORECASE):
+        return "arXiv preprint"
 
-    for old_key, new_key in key_mapping.items():
-        # Replace all occurrences of the old key with the new key
-        content = content.replace(f"@{old_key}", f"@{new_key}")
+    # Check note field for journal info
+    m = re.search(r'note\s*=\s*\{([^}]+)\}', entry_text, re.IGNORECASE)
+    if m:
+        note = m.group(1).lower()
+        for keyword, journal in KNOWN_JOURNALS.items():
+            if keyword in note:
+                return journal
 
-    with open(qmd_file_path, 'w') as file:
-        file.write(content)
+    return None
 
-def find_files(directory, extension):
-    # Recursively find all files with the given extension
-    for dirpath, _, filenames in os.walk(directory):
-        for filename in [f for f in filenames if f.endswith(extension)]:
-            yield os.path.join(dirpath, filename)
 
-root_dir = os.getcwd()
-all_mappings = {}
-for filepath in find_files(root_dir, '.bib'):
-    key_mapping = process_bibtex_file(filepath)
-    all_mappings.update(key_mapping)
+def add_field_to_entry(entry_text: str, field_name: str, field_value: str) -> str:
+    """Add a field to a bib entry, before the closing }."""
+    # Find the last } that closes the entry
+    # Insert before it
+    lines = entry_text.rstrip().rstrip('}').rstrip()
+    # Ensure the last line has a comma
+    if not lines.rstrip().endswith(','):
+        lines = lines.rstrip() + ','
+    return f"{lines}\n  {field_name} = {{{field_value}}},\n}}"
 
-for filepath in find_files(root_dir, '.qmd'):
-    update_qmd_files(filepath, all_mappings)
 
-print("BibTeX and .qmd files have been successfully updated.")
+def process_bib(filepath: Path, dry_run: bool = False) -> int:
+    """Process a bib file. Returns count of entries enriched."""
+    text = filepath.read_text(encoding="utf-8")
+
+    # Split into entries
+    entries = re.split(r'(?=@\w+\{)', text)
+    new_entries = []
+    count = 0
+
+    for entry in entries:
+        entry_stripped = entry.strip()
+        if not entry_stripped:
+            new_entries.append(entry)
+            continue
+
+        m = re.match(r'@(\w+)\{([^,]+)', entry_stripped)
+        if not m:
+            new_entries.append(entry)
+            continue
+
+        etype = m.group(1).lower()
+        key = m.group(2).strip()
+        modified = False
+
+        if etype == 'inproceedings' and 'publisher' not in entry.lower():
+            publisher = find_publisher_for_entry(entry)
+            if publisher:
+                entry = add_field_to_entry(entry.rstrip(), 'publisher', publisher)
+                if dry_run:
+                    print(f"  + {key}: publisher = {{{publisher}}}")
+                count += 1
+                modified = True
+
+        elif etype == 'article' and 'journal' not in entry.lower():
+            journal = find_journal_for_entry(entry)
+            if journal:
+                entry = add_field_to_entry(entry.rstrip(), 'journal', journal)
+                if dry_run:
+                    print(f"  + {key}: journal = {{{journal}}}")
+                count += 1
+                modified = True
+
+        new_entries.append(entry)
+
+    if count > 0 and not dry_run:
+        filepath.write_text("".join(new_entries), encoding="utf-8")
+        print(f"  {filepath}: {count} entries enriched")
+
+    return count
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Enrich bibliography entries")
+    parser.add_argument("path", type=Path, help="Bib file to process")
+    parser.add_argument("--dry-run", action="store_true", help="Preview without applying")
+    args = parser.parse_args()
+
+    count = process_bib(args.path, dry_run=args.dry_run)
+    mode = "DRY RUN" if args.dry_run else "APPLIED"
+    print(f"\n{mode}: {count} entries enriched")
+
+
+if __name__ == "__main__":
+    main()

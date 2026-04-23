@@ -1,0 +1,130 @@
+name: '🧮 MLSYSIM · ✅ Validate (Dev)'
+
+# =============================================================================
+# MLSYSIM — Test & Build Validation
+# =============================================================================
+#
+# Runs the mlsysim test suite and builds the Quarto docs site to validate
+# changes before merge.
+#
+# Flow:
+#   1. TEST        — pytest on mlsysim/tests/
+#   2. BUILD_SITE  — Quarto HTML render of docs site
+#
+# Triggers:
+#   - push: dev branch, mlsysim/** paths
+#   - pull_request: mlsysim/** paths
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+# Vars:       MLSYSIM_DOCS
+#
+# Related:
+#   - mlsysim-preview-dev.yml  — Dev preview deploy
+#   - mlsysim-publish-live.yml — Production deploy
+#   - mlsysim-build-pdfs.yml   — Reusable PDF build
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'mlsysim/**'
+  push:
+    branches: [dev]
+    paths:
+      - 'mlsysim/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mlsysim-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+# Workflow-level environment. Defined here rather than as a repository variable
+# because repository variables are not exposed to workflows triggered by
+# pull_request events from forks (GitHub security default). Workflow-level
+# env vars are available in all contexts.
+env:
+  MLSYSIM_DOCS: mlsysim/docs
+
+jobs:
+  test:
+    name: '🧪 Run Tests'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 🐍 Install dependencies
+        working-directory: mlsysim
+        run: pip install ".[dev]"
+
+      - name: 🧪 Run tests
+        working-directory: mlsysim
+        run: pytest tests/ -v --tb=short
+
+  build-site:
+    name: '🔨 Build Docs Site'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🐍 Install dependencies
+        working-directory: mlsysim
+        run: pip install ".[docs]"
+
+      - name: 🔨 Build MLSYSIM Site
+        working-directory: ${{ env.MLSYSIM_DOCS }}
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          MLSYSIM_DOCS="${{ env.MLSYSIM_DOCS }}"
+          echo "🔎 Resolved MLSYSIM_DOCS: '${MLSYSIM_DOCS}'"
+          if [ -z "${MLSYSIM_DOCS}" ]; then
+            echo "❌ FATAL: MLSYSIM_DOCS resolved to empty string."
+            echo "   If this is a fork PR, check that MLSYSIM_DOCS is declared in the workflow-level env: block."
+            echo "   Repository variables are not available on fork PR triggers."
+            exit 1
+          fi
+          if [ ! -f "${MLSYSIM_DOCS}/_build/index.html" ]; then
+            echo "❌ CRITICAL: ${MLSYSIM_DOCS}/_build/index.html missing from build output."
+            echo "   Quarto render may have exited nonzero. Check the build step above."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh ${MLSYSIM_DOCS}/_build | cut -f1)"
+
+  # ===========================================================================
+  # Stage 3: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This pass adds external reachability as a
+  # warning. Flip fail_on_broken=true once the baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './mlsysim/docs/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8

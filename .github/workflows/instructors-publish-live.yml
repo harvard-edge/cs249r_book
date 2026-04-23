@@ -1,0 +1,90 @@
+name: '🎓 Instructors · 🚀 Publish (Live)'
+
+# =============================================================================
+# Instructors (The Blueprint) — Production Deploy
+# =============================================================================
+#
+# Builds the instructor-facing Quarto site ("The Blueprint") and deploys
+# to the live production site on GitHub Pages.
+#
+# Flow:
+#   1. BUILD_SITE  — Quarto render
+#   2. VALIDATE    — Check index.html exists + page count
+#   3. DEPLOY      — Push to gh-pages/instructors/
+#
+# Triggers:
+#   - workflow_dispatch: manual only
+#
+# Deploys to: mlsysbook.ai/instructors/
+# Secrets:    GITHUB_TOKEN
+#
+# Related:
+#   - instructors-preview-dev.yml  — Dev preview deploy
+#   - instructors-validate-dev.yml — Content & build validation
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+# NB: gh-pages-deploy concurrency is declared on the build-and-deploy job
+# only. The guard runs without holding the lock.
+
+jobs:
+  # Block publish unless the latest dev validate run for this site is green.
+  # See .github/workflows/infra-publish-guard.yml for guard semantics.
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: instructors-validate-dev.yml
+
+  build-and-deploy:
+    name: '🔧 Build & Deploy Instructors'
+    needs: [guard]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Instructor Site
+        working-directory: instructors
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🔍 Validate build
+        run: |
+          if [ ! -f "instructors/_build/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing. Aborting deployment."
+            exit 1
+          fi
+
+          PAGE_COUNT=$(find instructors/_build -name '*.html' | wc -l)
+          echo "✅ Site built: $PAGE_COUNT pages"
+          echo "📊 Build size: $(du -sh instructors/_build | cut -f1)"
+
+          if [ "$PAGE_COUNT" -lt 8 ]; then
+            echo "⚠️ WARNING: Expected at least 10 pages, got $PAGE_COUNT"
+          fi
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./instructors/_build
+          destination_dir: instructors
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🎓 Deploy Instructors live - ${{ github.sha }}'

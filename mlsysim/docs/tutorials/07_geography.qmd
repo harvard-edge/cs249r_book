@@ -1,0 +1,273 @@
+---
+title: "Geography is a Systems Variable"
+subtitle: "Same cluster, same model, same duration — but does location change the cost?"
+description: "Compare identical training runs across four grid regions to discover whether geography matters more than hardware choice or training duration for carbon footprint."
+categories: ["ops", "intermediate"]
+---
+
+## The Question
+
+You have a 256-GPU cluster training a model for 30 days. Does it matter *where* that
+cluster is located? Not for latency or throughput — those are fixed by the hardware. But
+for carbon emissions, water usage, and total cost of ownership, does geography matter —
+and if so, by how much?
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 1: The Memory Wall](01_memory_wall.qmd). No other prerequisites
+are required — this tutorial can be completed independently.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Calculate** the carbon footprint of identical training runs in different regions
+- **Quantify** the gap between the cleanest and dirtiest electricity grids
+- **Compare** geography vs. training duration as levers for sustainability
+- **Apply** the `EconomicsModel` to show how carbon pricing changes the cheapest option
+:::
+
+::: {.callout-tip}
+## Background: Grid Carbon Intensity
+
+Every kilowatt-hour of electricity has a carbon cost, measured in grams of CO2 per kWh
+(gCO2/kWh). This number depends entirely on how the electricity is generated:
+
+| Region | Primary Source | Carbon Intensity |
+|:-------|:---------------|:-----------------|
+| Quebec | Hydroelectric | ~20 gCO2/kWh |
+| Norway | Hydroelectric | ~29 gCO2/kWh |
+| US Average | Mixed (gas, coal, renewables) | ~390 gCO2/kWh |
+| Poland | Coal-dominated | ~820 gCO2/kWh |
+
+The range is wide. How wide — and whether it matters more than other levers like
+training duration or hardware choice — is what this tutorial quantifies.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+Engine = mlsysim.Engine
+```
+
+```python
+import mlsysim
+from mlsysim import Engine
+```
+
+---
+
+## 2. Two-Region Comparison
+
+Let's run the same training job in two locations: Quebec (hydroelectric) and Poland
+(coal-dominated). Same fleet, same model, same 30-day duration. The only variable
+is where the electricity comes from.
+
+```{python}
+from mlsysim import SustainabilityModel, Systems
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
+from mlsysim.core.constants import Q_
+from mlsysim.show import table, info
+
+# 256-GPU cluster: 32 DGX H100 nodes
+fleet = Fleet(
+    name="256-GPU Training Cluster",
+    node=Systems.Nodes.DGX_H100,
+    count=32,
+    fabric=Systems.Fabrics.InfiniBand_NDR
+)
+
+solver = SustainabilityModel()
+
+# Quebec: hydroelectric grid
+res_quebec = solver.solve(
+    fleet=fleet, duration_days=30,
+    datacenter=mlsysim.Infra.Grids.Quebec
+)
+
+# Poland: coal-heavy grid
+res_poland = solver.solve(
+    fleet=fleet, duration_days=30,
+    datacenter=mlsysim.Infra.Grids.Poland
+)
+
+carbon_q = res_quebec.carbon_footprint_kg / 1000  # tonnes
+carbon_p = res_poland.carbon_footprint_kg / 1000
+ratio = carbon_p / carbon_q if carbon_q > 0 else 0
+
+table(
+    ["Region", "Carbon (tonnes CO2)"],
+    [
+        ["Quebec (Hydro)", f"{carbon_q:.1f}"],
+        ["Poland (Coal)", f"{carbon_p:.1f}"],
+    ]
+)
+info(Ratio=f"{ratio:.0f}x")
+```
+
+Same cluster. Same model. Same duration. The carbon footprint differs by roughly
+**40x** depending on the electricity grid. This is not an optimization — it is a
+location decision.
+
+---
+
+## 3. All-Region Sweep
+
+Let's expand the comparison to all four grid regions in the Infrastructure Zoo,
+adding energy consumption, water usage, and PUE to the picture.
+
+```{python}
+grids = [
+    mlsysim.Infra.Grids.Quebec,
+    mlsysim.Infra.Grids.Norway,
+    mlsysim.Infra.Grids.US_Avg,
+    mlsysim.Infra.Grids.Poland,
+]
+
+region_results = {}
+rows = []
+for grid in grids:
+    r = solver.solve(fleet=fleet, duration_days=30, datacenter=grid)
+    energy_mwh = r.total_energy_kwh.magnitude / 1000
+    carbon_t = r.carbon_footprint_kg / 1000
+    water_kl = r.water_usage_liters / 1000
+    region_results[r.region_name] = r
+    rows.append([r.region_name, f"{energy_mwh:,.1f}", f"{carbon_t:,.1f}", f"{water_kl:,.1f}", f"{r.pue:.2f}"])
+
+table(["Region", "Energy (MWh)", "Carbon (t)", "Water (kL)", "PUE"], rows)
+```
+
+Notice that energy consumption also varies between regions because of different PUE
+values. A modern liquid-cooled facility (PUE 1.1) wastes less energy on cooling than
+a legacy air-cooled datacenter (PUE 1.6). But the dominant factor is carbon intensity
+— it creates the 40x gap.
+
+---
+
+## 4. Geography vs. Training Duration
+
+Is it better to train longer in a clean region or shorter in a dirty region? Let's
+compare 30 days in Quebec against just 10 days in Poland.
+
+```{python}
+# 30 days in Quebec
+res_30d_quebec = solver.solve(
+    fleet=fleet, duration_days=30,
+    datacenter=mlsysim.Infra.Grids.Quebec
+)
+
+# 10 days in Poland (1/3 the training time)
+res_10d_poland = solver.solve(
+    fleet=fleet, duration_days=10,
+    datacenter=mlsysim.Infra.Grids.Poland
+)
+
+c_q = res_30d_quebec.carbon_footprint_kg / 1000
+c_p = res_10d_poland.carbon_footprint_kg / 1000
+
+table(
+    ["Scenario", "Carbon (tonnes CO2)"],
+    [
+        ["30 days in Quebec", f"{c_q:.1f}"],
+        ["10 days in Poland", f"{c_p:.1f}"],
+    ]
+)
+info(Ratio=f"{c_p/c_q:.1f}x")
+```
+
+::: {.callout-important}
+## Key Insight
+
+**Geography is a larger lever than training duration for carbon footprint.** Even
+training for one-third the time in Poland produces more carbon than the full 30-day
+run in Quebec. The carbon intensity gap between hydro and coal grids is so large that
+no reasonable reduction in training time can compensate. For any organization serious
+about sustainable AI, datacenter location is not a logistics detail — it is a
+first-order systems design decision with 40x impact.
+:::
+
+---
+
+## 5. Economic Angle: When Carbon Has a Price
+
+What happens when carbon emissions carry a financial cost? Carbon pricing (through
+taxes or cap-and-trade) changes the economics of datacenter location. Let's compute
+TCO with a carbon price of $50/tonne.
+
+```{python}
+from mlsysim import EconomicsModel
+
+econ = EconomicsModel()
+carbon_price = 50  # USD per tonne CO2
+
+rows = []
+for grid in grids:
+    tco = econ.solve(fleet=fleet, duration_days=30, grid=grid)
+    carbon_cost = (tco.carbon_footprint_kg / 1000) * carbon_price
+    total = tco.tco_usd + carbon_cost
+    rows.append([tco.region_name, f"${tco.tco_usd:,.0f}", f"${carbon_cost:,.0f}", f"${total:,.0f}"])
+
+table(["Region", "TCO ($)", "Carbon Cost ($)", "Total ($)"], rows)
+```
+
+At $50/tonne, carbon pricing adds a visible cost differential between regions. At
+higher carbon prices (some jurisdictions already charge $100+/tonne), the difference
+becomes even more pronounced, potentially shifting which region offers the lowest TCO.
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+Training for 30 days in Quebec vs. 10 days in Poland — which produces more carbon?
+Write your prediction, then run both scenarios. Were you right? What does this tell
+you about the relative magnitude of grid carbon intensity vs. training duration?
+
+**Exercise 2: At what carbon price does geography change the cheapest option?**
+Sweep carbon price from $0 to $500/tonne in steps of $50. For each price, calculate
+the total cost (TCO + carbon cost) for all four regions. At what price does a region
+other than the default cheapest become the best option? Print a table showing the
+crossover.
+
+**Exercise 3: Sweep PUE from 1.0 to 2.0.**
+Create custom grid profiles using `from mlsysim.infra.types import GridProfile` with
+US Average carbon intensity but varying PUE. Sweep PUE from 1.0 to 2.0 in steps of
+0.1. How much does total energy increase? At what PUE does facility overhead exceed
+the IT energy itself?
+
+**Self-check:** If you train for 30 days in Quebec (20 gCO2/kWh) vs. 15 days in
+Poland (820 gCO2/kWh), and both use the same fleet and power, which produces more
+total carbon? Show the mental calculation: the ratio of carbon intensities is 41x,
+and the ratio of durations is 2x, so Poland is still 41/2 = ~20x worse.
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **Grid carbon intensity creates a 40x gap** between the cleanest (Quebec, ~20 gCO2/kWh) and dirtiest (Poland, ~820 gCO2/kWh) regions
+- **Geography dominates training duration** as a sustainability lever: 10 days in Poland emits more than 30 days in Quebec
+- **PUE amplifies energy use** but carbon intensity is the dominant factor in emissions
+- **Carbon pricing changes the economics**: at $50-100/tonne, location becomes a financial variable, not just an environmental one
+- **Datacenter location is a systems design decision** with first-order impact on sustainability and, increasingly, on cost
+:::
+
+---
+
+## Next Steps
+
+- **[The $9M Question](08_nine_million_dollar.qmd)** -- Quantify the infrastructure cost of chain-of-thought reasoning
+- **[Scaling to 1000 GPUs](06_scaling_1000_gpus.qmd)** -- Discover the hidden reliability cost at scale
+- **[Sensitivity Analysis](09_sensitivity.qmd)** -- Use sensitivity sweeps to find which parameter matters most
+- **[Infrastructure Zoo](../zoo/infra.qmd)** -- Browse all regional grid profiles and datacenter configurations

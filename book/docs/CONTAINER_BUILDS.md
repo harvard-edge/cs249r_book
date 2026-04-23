@@ -30,12 +30,12 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `docker/linux/Dockerfile` - A single Dockerfile for Linux builds.
-- `docker/linux/README.md` - Linux container documentation
-- `docker/linux/.dockerignore` - Build exclusions
-- `docker/windows/Dockerfile` - A single Dockerfile for Windows builds.
-- `docker/windows/README.md` - Windows container documentation
-- `docker/windows/.dockerignore` - Build exclusions
+- `book/docker/linux/Dockerfile` - Linux build container definition
+- `book/docker/linux/README.md` - Linux container documentation
+- `book/docker/linux/.dockerignore` - Linux build exclusions
+- `book/docker/windows/Dockerfile` - Windows build container definition
+- `book/docker/windows/README.md` - Windows container documentation
+- `book/docker/windows/.dockerignore` - Windows build exclusions
 
 ### Container Lifecycle
 1. **Build**: Weekly automatic rebuilds + manual triggers
@@ -55,17 +55,24 @@ Containerized Linux Build (5-10 minutes):
 You can build the containers locally using these commands:
 - **Linux**:
   ```bash
-  docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
+  docker build -f book/docker/linux/Dockerfile -t mlsysbook-linux .
   ```
 - **Windows**:
   ```powershell
-  docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+  docker build -f book/docker/windows/Dockerfile -t mlsysbook-windows .
   ```
 
 ### Manual Build Test
 ```bash
 # Test containerized build
-gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field format=html
+gh workflow run book-build-container.yml \
+  --field build_linux=true \
+  --field build_windows=false \
+  --field build_html=true \
+  --field build_pdf=false \
+  --field build_epub=false \
+  --field build_target=vol1 \
+  --field target=dev
 ```
 
 ### Container Information
@@ -78,15 +85,14 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ## Workflow Integration
 
 ### Current Workflows
-- `quarto-build-baremetal.yml` - Original workflow (brute force approach, legacy)
-- `quarto-build-container.yml` - Containerized version (fast path, recommended)
-- `build-linux-container.yml` - Linux container management
-- `build-windows-container.yml` - Windows container management
+- `book-build-container.yml` - Containerized book build matrix
+- `infra-container-linux.yml` - Linux container image management
+- `infra-container-windows.yml` - Windows container image management
 
 ### Migration Status
 1. **✅ Phase 1**: Containerized builds tested and validated
 2. **✅ Phase 2**: Performance significantly improved (45min → 5-10min)
-3. **✅ Phase 3**: Container workflow is now the primary build method
+3. **✅ Phase 3**: Container workflow is the only build method
 
 ## Container Contents
 
@@ -97,7 +103,7 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 - **TeX Live**: Full distribution (texlive-full)
 - **R**: R-base with all required packages
 - **Python**: Python 3.13 with all requirements
-- **Quarto**: Version 1.7.31
+- **Quarto**: Version 1.9.27
 - **Tools**: Inkscape, Ghostscript, fonts
 
 #### Windows Container
@@ -105,7 +111,7 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 - **TeX Live**: MiKTeX distribution
 - **R**: R-base with all required packages
 - **Python**: Python 3.x with all requirements
-- **Quarto**: Version 1.7.31
+- **Quarto**: Version 1.9.27
 - **Tools**: Inkscape, Ghostscript, Chocolatey package manager
 
 ### Environment Variables
@@ -127,7 +133,7 @@ LC_ALL=en_US.UTF-8
 ### Build Issues
 1. Check if container exists: `ghcr.io/harvard-edge/cs249r_book/quarto-linux:latest`
 2. Verify container has all dependencies
-3. Compare with traditional build logs
+3. Review container preflight/toolchain logs first
 
 ### Performance Issues
 1. Monitor container pull times
@@ -148,13 +154,13 @@ LC_ALL=en_US.UTF-8
 - Error rates vs traditional builds
 - Resource usage optimization
 
-## Rollback Plan
+## Recovery Plan
 
 If issues arise:
-1. Keep original `quarto-build-baremetal.yml` as backup
-2. Switch back to traditional builds immediately
-3. Debug container issues separately
-4. Re-enable when resolved
+1. Rebuild and republish the container image
+2. Fix preflight failures before render starts
+3. Re-run the container workflow
+4. Investigate dependency drift in Dockerfiles
 
 ## Security
 
@@ -175,8 +181,8 @@ To build the containers, use the standard `docker build` command:
 
 ```bash
 # For Linux
-docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
+docker build -f book/docker/linux/Dockerfile -t mlsysbook-linux .
 
 # For Windows
-docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+docker build -f book/docker/windows/Dockerfile -t mlsysbook-windows .
 ```

@@ -61,6 +61,7 @@ from tinytorch.perf.compression import magnitude_prune, structured_prune, measur
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 import copy
 from typing import List, Dict, Any, Tuple, Optional
 import time
@@ -105,34 +106,13 @@ that integrate with profiling and quantization for complete model optimization.
 
 # %% [markdown]
 """
-### Why No Sequential Container in TinyTorch
+### Note on Sequential Usage in This Module
 
-TinyTorch teaches ATOMIC COMPONENTS, not compositions!
-
-**FORBIDDEN Pattern:**
-```python
-model = Sequential([Linear(10, 20), ReLU(), Linear(20, 10)])
-y = model(x)  # Student can't see what's happening!
-```
-
-**CORRECT Pattern:**
-```python
-# Explicit composition - students see every step
-layer1 = Linear(10, 20)
-activation = ReLU()
-layer2 = Linear(20, 10)
-
-# Forward pass - nothing hidden
-x = layer1.forward(input)
-x = activation.forward(x)
-output = layer2.forward(x)
-```
-
-**Why This Matters:**
-- Students MUST see explicit forward passes to understand data flow
-- Hidden abstractions prevent learning
-- Sequential belongs in helper utilities, NOT core modules
-- Educational value comes from seeing layer interactions explicitly
+This module uses `Sequential` as a parameter container for compression operations.
+`Sequential` is familiar from Module 03 and is used here as a convenience — it gives
+compression wrappers a clean way to hold the original model's layers and expose them
+for inspection, pruning, and quantization. The compression logic itself remains explicit
+and visible throughout the module.
 """
 
 # %% [markdown]
@@ -154,7 +134,7 @@ def show_weight_distribution_motivation():
 
     # Create a model and analyze its weights
     model = Linear(512, 512)
-    input_data = Tensor(np.random.randn(1, 512))
+    input_data = Tensor(rng.standard_normal((1, 512)))
 
     # Profile basic characteristics
     profile = profiler.profile_forward_pass(model, input_data)
@@ -892,7 +872,7 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     4. Return decomposed matrices for memory savings
 
     EXAMPLE:
-    >>> weight = np.random.randn(100, 50)
+    >>> weight = rng.standard_normal((100, 50))
     >>> U, S, V = low_rank_approximate(weight, rank_ratio=0.3)
     >>> # Original: 100*50 = 5000 params
     >>> # Compressed: 100*15 + 15*50 = 2250 params (55% reduction)
@@ -937,7 +917,7 @@ def test_unit_low_rank_approximate():
     print("🧪 Unit Test: Low-Rank Approximate...")
 
     # Create test weight matrix
-    original_weight = np.random.randn(20, 15)
+    original_weight = rng.standard_normal((20, 15))
     original_params = original_weight.size
 
     # Apply low-rank approximation
@@ -1155,6 +1135,8 @@ class KnowledgeDistillation:
         hard_loss = self._cross_entropy(student_hard, true_labels)
 
         # Combined loss
+        # Note: Standard knowledge distillation (Hinton 2015) scales soft loss by T².
+        # This simplified version omits T² scaling for educational clarity.
         total_loss = self.alpha * soft_loss + (1 - self.alpha) * hard_loss
 
         return total_loss
@@ -1206,7 +1188,7 @@ def test_unit_knowledge_distillation():
     kd = KnowledgeDistillation(teacher, student, temperature=3.0, alpha=0.7)
 
     # Create dummy data for testing
-    input_data = Tensor(np.random.randn(8, 10))  # Batch of 8 samples
+    input_data = Tensor(rng.standard_normal((8, 10)))  # Batch of 8 samples
     true_labels = np.array([0, 1, 2, 3, 4, 0, 1, 2])  # Class labels
 
     # Forward passes - students see explicit data flow through each model
@@ -1525,9 +1507,8 @@ def analyze_compression_techniques():
         # Create fresh layers for magnitude pruning test
         mag_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
         for i, layer in enumerate(mag_layers):
-            layer.weight = layers[i].weight
-            # Linear layers always have bias (may be None)
-            layer.bias = layers[i].bias
+            layer.weight = Tensor(layers[i].weight.data.copy())
+            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
         mag_model = Sequential(*mag_layers)
         magnitude_prune(mag_model, sparsity=0.8)
         mag_sparsity = measure_sparsity(mag_model)
@@ -1539,9 +1520,8 @@ def analyze_compression_techniques():
         # Create fresh layers for structured pruning test
         struct_layers = [Linear(l.weight.shape[0], l.weight.shape[1]) for l in layers]
         for i, layer in enumerate(struct_layers):
-            layer.weight = layers[i].weight
-            # Linear layers always have bias (may be None)
-            layer.bias = layers[i].bias
+            layer.weight = Tensor(layers[i].weight.data.copy())
+            layer.bias = Tensor(layers[i].bias.data.copy()) if hasattr(layers[i], 'bias') and layers[i].bias is not None else None
         struct_model = Sequential(*struct_layers)
         structured_prune(struct_model, prune_ratio=0.5)
         struct_sparsity = measure_sparsity(struct_model)
@@ -1832,7 +1812,7 @@ def test_module():
     # Test 3: Low-rank approximation
     print("🧪 Integration Test: Low-rank approximation...")
 
-    large_matrix = np.random.randn(200, 150)
+    large_matrix = rng.standard_normal((200, 150))
     U, S, V = low_rank_approximate(large_matrix, rank_ratio=0.3)
 
     original_size = large_matrix.size

@@ -4,13 +4,47 @@ This folder contains scripts for managing contributor recognition across the rep
 
 ## Overview
 
-The contributor system tracks contributions to four projects:
-- **book/** - ML Systems textbook
-- **tinytorch/** - Educational ML framework
-- **kits/** - Hardware kits
-- **labs/** - Lab exercises
+The contributor system tracks contributions across each top-level Quarto site
+or sub-project. Every consumer — the two workflows, both generators, the bot
+reply text — reads from a single config file:
 
-Each project has its own `.all-contributorsrc` file, and the main `README.md` displays all contributors in organized sections.
+> **`projects.json`** is the **single source of truth**. Add, rename, reorder
+> a project there and nowhere else.
+
+`projects.py` loads `projects.json` and exposes:
+
+- a small Python API (`projects()`, `keys()`, `dirs()`, `alias_pairs()`) used
+  by the generator scripts via `from projects import …`
+- a CLI used by the workflows that need shell-friendly strings:
+  ```bash
+  python3 projects.py keys             # → book,tinytorch,…,instructors
+  python3 projects.py aliases          # → tito:tinytorch,interviews:staffml,…
+  python3 projects.py dirs-overrides   # → staffml:interviews
+  python3 projects.py update-files     # → newline-separated file list
+  ```
+
+### Each project entry has
+
+- **`key`** — canonical name used in commit messages, bot replies, and
+  section markers (e.g. `staffml`).
+- **`dir`** — on-disk directory holding `.all-contributorsrc` and
+  `README.md` (e.g. `interviews`). May differ from the key.
+- **`aliases`** — alternate strings recognised in the trigger comment
+  (substring-matched, so prefer non-ambiguous tokens).
+- **`section`** — `{emoji, title, marker}` rendered into the root README.
+
+### Where `projects.json` is consumed
+
+| Consumer | How it reads |
+|---|---|
+| `generate_main_readme.py` | imports `projects.projects()` for section list |
+| `generate_readme_tables.py` | imports `projects.dirs()` for the path map |
+| `all-contributors-add.yml` | sparse-checkouts the file, runs `projects.py keys/aliases/dirs-overrides`, exports to `$GITHUB_ENV` |
+| `update-contributors.yml` | runs `projects.py update-files` to derive the change-detection and `git add` lists |
+
+The push trigger in `update-contributors.yml` uses the glob
+`*/.all-contributorsrc`, so adding a new project's config doesn't even need
+a workflow edit to start triggering.
 
 ## Scripts
 
@@ -38,10 +72,11 @@ python generate_main_readme.py [--dry-run]
 ```
 
 **What it does:**
-- Reads all four project `.all-contributorsrc` files
-- Generates HTML tables with contributor avatars and badges
-- Updates the Contributors section in `README.md`
-- Creates sections: Book, TinyTorch, Kits, Labs
+- Reads each project's `.all-contributorsrc` (project list comes from
+  `projects.json`).
+- Generates HTML tables with contributor avatars and badges.
+- Updates the Contributors section in the root `README.md`, in the order
+  declared in `projects.json`.
 
 ### `generate_readme_tables.py`
 
@@ -52,7 +87,9 @@ python generate_readme_tables.py [--project PROJECT] [--update]
 ```
 
 **Options:**
-- `--project`: Process only one project (book, tinytorch, kits, labs)
+- `--project`: Process only one project. Valid values come from
+  `projects.json` (currently: `book`, `tinytorch`, `mlsysim`, `staffml`,
+  `kits`, `labs`, `slides`, `instructors`).
 - `--update`: Actually update the README files (without this, just prints)
 
 **What it does:**
@@ -101,10 +138,15 @@ Automatically adds contributors when you comment on any issue or PR:
 6. Replies to confirm the addition
 
 **Project Detection:**
-- Add `tinytorch` label OR mention "tinytorch" in issue title → tinytorch project
-- Add `kits` label OR mention "kits" in issue title → kits project
-- Add `labs` label OR mention "labs" in issue title → labs project
-- Otherwise → book project (default)
+1. Project name (or alias) explicitly mentioned in the trigger comment, e.g.
+   `@all-contributors please add @user for code in TinyTorch, Slides`. Multiple
+   projects in one comment are supported.
+2. PR file paths — if the PR only touches files under one top-level project
+   directory (`tinytorch/...`, `labs/...`, etc.), that project is used.
+3. Issue labels or title (matched against project names and aliases).
+
+If detection fails or is ambiguous, the workflow replies asking the user to
+specify the project explicitly.
 
 ### 2. `update-contributors.yml` - Push-Triggered
 
@@ -139,8 +181,10 @@ The workflow will automatically:
 ### Method 2: Manual Edit
 
 1. Edit the appropriate `.all-contributorsrc` file
-2. Add entry with: login, name, avatar_url, contributions
+2. Add entry with: login, name, avatar_url, profile, contributions
 3. Push to dev/main to trigger the update workflow
+
+**Avatar URLs:** For anyone with a GitHub account, set `avatar_url` to `https://avatars.githubusercontent.com/{login}` (and `profile` to `https://github.com/{login}`). Do **not** use `gravatar.com/...?d=identicon` for GitHub users—that shows a generic pattern, not their GitHub profile photo. Gravatar fallbacks are only for contributors who have no GitHub username.
 
 ## Contribution Types
 
@@ -156,16 +200,22 @@ Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`,
 ├── update-contributors.yml      # Push-triggered workflow
 └── contributors/
     ├── README.md                 # This file
+    ├── projects.json             # ⭐ Single source of truth
+    ├── projects.py               # Loader + CLI for projects.json
     ├── requirements.txt          # Python dependencies
     ├── update_contributors.py    # GitHub API updater
-    ├── generate_main_readme.py   # Main README generator
-    ├── generate_readme_tables.py # Per-project README generator
+    ├── generate_main_readme.py   # Main README generator (reads projects.json)
+    ├── generate_readme_tables.py # Per-project README generator (reads projects.json)
     └── scan_contributors.py      # Git history scanner
 
-Project configs:
-├── .all-contributorsrc           # Root config (legacy)
-├── book/.all-contributorsrc      # Book contributors
-├── tinytorch/.all-contributorsrc # TinyTorch contributors
-├── kits/.all-contributorsrc      # Kits contributors
-└── labs/.all-contributorsrc      # Labs contributors
+Project configs (path = on-disk directory, project key in parens):
+├── .all-contributorsrc              # Root config (legacy / aggregate)
+├── book/.all-contributorsrc         # book
+├── tinytorch/.all-contributorsrc    # tinytorch
+├── kits/.all-contributorsrc         # kits
+├── labs/.all-contributorsrc         # labs
+├── mlsysim/.all-contributorsrc      # mlsysim
+├── interviews/.all-contributorsrc   # staffml  (directory ≠ project key)
+├── slides/.all-contributorsrc       # slides
+└── instructors/.all-contributorsrc  # instructors
 ```

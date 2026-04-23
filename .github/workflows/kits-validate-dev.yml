@@ -1,0 +1,195 @@
+name: '📦 Kits · ✅ Validate (Dev)'
+
+# =============================================================================
+# Hardware Kits — Content & Build Validation
+# =============================================================================
+#
+# Validates Hardware Kits content integrity and build output before merge.
+#
+# Flow:
+#   1. VALIDATE_CONTENT — Check all image references exist on disk
+#   2. BUILD_SITE       — Quarto HTML render succeeds
+#   3. BUILD_PDF        — Calls kits-build-pdfs.yml to verify PDF compiles
+#   4. SUMMARY          — Aggregate results
+#
+# Triggers:
+#   - push: dev branch, kits/** paths
+#   - pull_request: kits/** or workflow file changes
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+#
+# Related:
+#   - kits-preview-dev.yml  — Dev preview deploy
+#   - kits-publish-live.yml — Production deploy
+#   - kits-build-pdfs.yml   — Reusable PDF build
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'kits/**'
+      - '.github/workflows/kits-validate-dev.yml'
+      - '.github/workflows/kits-preview-dev.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'kits/**'
+      - '.github/workflows/kits-validate-dev.yml'
+      - '.github/workflows/kits-preview-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kits-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+# Workflow-level environment. Defined here rather than as a repository variable
+# because repository variables are not exposed to workflows triggered by
+# pull_request events from forks (GitHub security default). Workflow-level
+# env vars are available in all contexts.
+env:
+  KITS_ROOT: kits
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Content validation (image refs, cross-refs)
+  # ===========================================================================
+  validate-content:
+    name: '🔍 Validate Content'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔍 Check image references exist
+        working-directory: kits
+        run: |
+          echo "🔍 Checking that all referenced images exist..."
+          python3 - <<'PYEOF'
+          import re, os, sys, glob
+
+          pattern = re.compile(r'!\[.*?\]\(([^)]+)\)')
+          fails = []
+
+          for qmd in glob.glob("contents/**/*.qmd", recursive=True):
+              qmd_dir = os.path.dirname(qmd)
+              with open(qmd) as f:
+                  for lineno, line in enumerate(f, 1):
+                      for m in pattern.finditer(line):
+                          img = m.group(1).split("{")[0].strip()
+                          if img.startswith(("http://", "https://", "#", "@")) or not img:
+                              continue
+                          # Check relative to QMD dir and to kits root
+                          if not os.path.isfile(os.path.join(qmd_dir, img)) and not os.path.isfile(img):
+                              fails.append(f"  {qmd}:{lineno} -> {img}")
+
+          if fails:
+              print(f"❌ {len(fails)} missing image reference(s):")
+              for f in fails:
+                  print(f)
+              sys.exit(1)
+          else:
+              print("✅ All image references are valid")
+          PYEOF
+
+  # ===========================================================================
+  # Stage 2: Quarto HTML site build
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build Kits Site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Kits Site (HTML)
+        working-directory: ${{ env.KITS_ROOT }}
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          KITS_ROOT="${{ env.KITS_ROOT }}"
+          echo "🔎 Resolved KITS_ROOT: '${KITS_ROOT}'"
+          if [ -z "${KITS_ROOT}" ]; then
+            echo "❌ FATAL: KITS_ROOT resolved to empty string."
+            echo "   If this is a fork PR, check that KITS_ROOT is declared in the workflow-level env: block."
+            echo "   Repository variables are not available on fork PR triggers."
+            exit 1
+          fi
+          if [ ! -f "${KITS_ROOT}/_build/index.html" ]; then
+            echo "❌ CRITICAL: ${KITS_ROOT}/_build/index.html missing from build output."
+            echo "   Quarto render may have exited nonzero. Check the build step above."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh ${KITS_ROOT}/_build | cut -f1)"
+
+  # ===========================================================================
+  # Stage 3: PDF build validation (reuse existing workflow)
+  # ===========================================================================
+  build-pdf:
+    name: '📚 Validate PDF Build'
+    uses: ./.github/workflows/kits-build-pdfs.yml
+    with:
+      ref: ${{ github.ref }}
+
+  # ===========================================================================
+  # Stage 4: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This Lychee pass adds external-URL
+  # reachability as a warning. Flip fail_on_broken=true once the baseline is
+  # clean (tracked in release-prep plan).
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './kits/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [validate-content, build-site, build-pdf, check-links]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 📦 Hardware Kits Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Content Validation | ${{ needs.validate-content.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Site Build (HTML) | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📚 PDF Build | ${{ needs.build-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.validate-content.result }}" = "failure" ] || \
+             [ "${{ needs.build-site.result }}" = "failure" ] || \
+             [ "${{ needs.build-pdf.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"

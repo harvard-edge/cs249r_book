@@ -1,7 +1,34 @@
 name: '🔧 Infra · 🐳 Container (Windows)'
 
-# This workflow builds the Windows Quarto build container
-# Windows containers are more complex but provide performance benefits
+# =============================================================================
+# 🐳 Windows Container — Build and push the Windows Quarto build container
+# =============================================================================
+#
+# Builds the Windows Docker image using native Docker (not Buildx, which has
+# compatibility issues with Windows containers on GitHub Actions).
+#
+# Flow:
+#   1. CHECKOUT & LOGIN — Authenticate to GHCR
+#   2. BUILD            — Native Docker build with optional cache bypass
+#   3. PUSH             — Push image to GHCR and extract digest
+#   4. SUMMARY          — Report build status and image metadata
+#
+# Triggers:
+#   - push (dev): Changes to book/tools/dependencies/ or book/docker/windows/
+#   - schedule: Weekly rebuild (Sunday 2am UTC, after Linux container)
+#   - workflow_dispatch: Manual with force_rebuild, no_cache options
+#   - workflow_call: Reusable by other workflows
+#
+# Deploys to: ghcr.io/harvard-edge/mlsysbook/quarto-windows:latest
+# Secrets:    GITHUB_TOKEN (automatic)
+# Vars:       BOOK_DOCKER
+#
+# Related:
+#   - infra-container-linux.yml — Linux container build (runs 2h before)
+#   - infra-health-check.yml    — Daily validation of built containers
+#   - infra-cleanup-caches.yml  — Weekly GHA cache cleanup
+#
+# =============================================================================
 
 # Prevent multiple builds running simultaneously
 concurrency:
@@ -118,23 +145,92 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Skip Docker Buildx for Windows containers - use native Docker engine
       # Buildx doesn't properly support Windows containers on GitHub Actions
       # - name: 🛠️ Set up Docker Buildx
-      #   uses: docker/setup-buildx-action@v3
+      #   uses: docker/setup-buildx-action@v4
 
       - name: 🔐 Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🧹 Free runner disk space
+        shell: pwsh
+        run: |
+          Write-Host "📊 Disk space BEFORE cleanup:"
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 } | Format-Table Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}}
+
+          # Pre-installed toolchains and SDKs not used by the Quarto Windows container build.
+          # NOTE: Do NOT remove anything from C:\ProgramData\chocolatey (scoop uses choco fallback),
+          # do NOT touch C:\Users\runneradmin\scoop (scoop state for the build),
+          # and do NOT touch Docker binaries or Windows container images already pulled.
+          $paths = @(
+            # Original toolchain removals
+            "C:\hostedtoolcache",
+            "C:\mingw64",
+            "C:\ghcup",
+            "C:\cabal",
+            "C:\Strawberry",
+            "$env:LOCALAPPDATA\Temp\*",
+
+            # Additional pre-installed SDKs the Quarto build does not use
+            "C:\Android",
+            "$env:ANDROID_HOME",
+            "$env:ANDROID_SDK_ROOT",
+            "C:\Program Files\Android",
+            "C:\Program Files (x86)\Android",
+            "C:\Program Files\Go",
+            "C:\Program Files\Microsoft\jdk-*",
+            "C:\Program Files\Java",
+            "C:\Program Files\dotnet\sdk\*",
+            "C:\Program Files\Unity Hub",
+            "C:\Program Files (x86)\Windows Kits\10\ExtensionSDKs",
+            "C:\tools\php*",
+            "C:\tools\ruby*",
+            "C:\Julia",
+            "C:\Miniconda",
+            "C:\Rust",
+            "C:\Users\runneradmin\.cargo",
+            "C:\Users\runneradmin\.rustup",
+            "C:\vcpkg",
+            "C:\SeleniumWebDrivers",
+
+            # Package manager caches that the Quarto build does not consume
+            "$env:LOCALAPPDATA\NuGet\Cache",
+            "$env:LOCALAPPDATA\NuGet\v3-cache",
+            "$env:APPDATA\npm-cache",
+            "$env:LOCALAPPDATA\pip\Cache",
+            "$env:LOCALAPPDATA\ChocolateyHttpCache",
+
+            # Windows update download cache (re-fetched on demand if needed)
+            "C:\Windows\SoftwareDistribution\Download\*"
+          )
+          foreach ($p in $paths) {
+            if ($p -and (Test-Path $p)) {
+              Write-Host "Removing $p ..."
+              Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+            }
+          }
+
+          # Empty recycle bin in case prior cleanup sent large dirs there
+          try { Clear-RecycleBin -Force -ErrorAction SilentlyContinue } catch {}
+
+          # Prune any stale Docker data (safe: no image has been built yet this run)
+          docker system prune -af 2>$null
+          docker builder prune -af 2>$null
+          docker volume prune -f  2>$null
+
+          Write-Host "📊 Disk space AFTER cleanup:"
+          Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -gt 0 } | Format-Table Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}}
+
       - name: 🏷️ Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |

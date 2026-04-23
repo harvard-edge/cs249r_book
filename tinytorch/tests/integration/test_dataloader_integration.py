@@ -6,6 +6,7 @@ actual training pipelines, not just in isolation.
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 import os
 
@@ -34,8 +35,8 @@ def test_training_workflow_integration():
     num_features = 20
     num_classes = 5
 
-    features = np.random.randn(num_samples, num_features).astype(np.float32)
-    labels = np.random.randint(0, num_classes, num_samples).astype(np.int64)
+    features = rng.standard_normal((num_samples, num_features)).astype(np.float32)
+    labels = rng.integers(0, num_classes, num_samples).astype(np.int64)
 
     dataset_full = TensorDataset(Tensor(features), Tensor(labels))
 
@@ -118,8 +119,8 @@ def test_dataloader_memory_efficiency():
 
     # Create large-ish dataset
     large_size = 10000
-    features = Tensor(np.random.randn(large_size, 50).astype(np.float32))
-    labels = Tensor(np.random.randint(0, 10, large_size).astype(np.int64))
+    features = Tensor(rng.standard_normal((large_size, 50)).astype(np.float32))
+    labels = Tensor(rng.integers(0, 10, large_size).astype(np.int64))
     dataset = TensorDataset(features, labels)
 
     loader = DataLoader(dataset, batch_size=64, shuffle=False)

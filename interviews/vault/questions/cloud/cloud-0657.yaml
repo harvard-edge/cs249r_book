@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-0657
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Tokenizer Overhead Spikes
+scenario: Your LLM inference server is utilizing a 70B model on an H100. P99 latency suddenly spikes.
+  You look at the GPU utilization metrics, and the GPU is sitting at 0% for 50 milliseconds before every
+  generation request. What CPU-bound process is blocking the GPU from doing its job?
+details:
+  realistic_solution: 'You are hitting the **Tokenizer CPU Bottleneck**. A slow Python BPE tokenizer might
+    process 100,000 tokens per second. A 5,000-token prompt takes 50ms to tokenize. However, the H100
+    prefilling that same prompt for a 70B model takes ~1.4 seconds (700 TFLOPs at ~50% GPU utilization),
+    so the 50ms tokenizer overhead is small relative to prefill. The real issue is that tokenization is
+    **synchronous and blocking**: the GPU sits completely idle (0% utilization) while the CPU tokenizes.
+    In a high-throughput serving system, this serial bottleneck prevents request pipelining. The fix is
+    to use a fast Rust-based tokenizer (HuggingFace `tokenizers`, ~1M+ tokens/s) and run tokenization
+    asynchronously in a thread pool, overlapping CPU tokenization of the next request with GPU inference
+    of the current one.'
+  common_mistake: '"The prompt is being transferred over the PCIe bus." Transferring a few kilobytes of
+    text takes microseconds, not 50 milliseconds.'
+  napkin_math: 'A slow Python BPE tokenizer might process 100,000 tokens per second. A 5,000-token prompt
+    takes 50ms to tokenize on CPU. An H100 prefilling that same 5,000-token prompt for a 70B model requires
+    2 × 70B × 5,000 = 700 TFLOPs of compute. At ~50% utilization of 989 TFLOPS FP16: 700 / 495 ≈ **1,400ms**
+    (~1.4 seconds). So the tokenizer''s 50ms is only ~3.5% of the total prefill time — but it is a **serial
+    CPU bottleneck** that blocks the GPU entirely. While the GPU sits idle during tokenization, it wastes
+    $3.50/hr × 50ms = $0.000049 per request. At 1,000 req/min: 50ms × 1000 = 50 seconds of GPU idle time
+    per minute — the GPU is stalled **83% of the time** if requests arrive back-to-back. Fix: use a Rust-based
+    tokenizer (e.g., HuggingFace `tokenizers` library) that processes 1M+ tokens/s, reducing tokenization
+    to <5ms, or run tokenization asynchronously on a separate CPU thread pool so the GPU is never blocked.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The napkin math section is cut off, making it incomplete.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The Napkin Math claims an H100 can prefill 5,000 tokens for a 70B model in ~15ms, which is incorrect
+  by over two orders of magnitude; a realistic time is over 1 second.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

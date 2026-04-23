@@ -1,7 +1,36 @@
-name: '🚀 Publish All (Live)'
+name: '🌐 All · 🚀 Publish (Live)'
 
-# Orchestrator workflow that deploys ALL subsites sequentially
-# Book → Kits → TinyTorch → Labs
+# =============================================================================
+# 🚀 Publish All (Live) — Orchestrator that deploys ALL subsites sequentially
+# =============================================================================
+#
+# Master deployment workflow that builds and deploys every subsite to gh-pages
+# in dependency order. Each step tolerates upstream skips (toggle per-site).
+#
+# Flow:
+#   1. BOOK        — Trigger book-publish-live.yml (Quarto render + release)
+#   2. KITS        — Build and deploy Kits site
+#   3. TINYTORCH   — Build and deploy TinyTorch site
+#   4. MLSYSIM     — Build and deploy MLSYSIM docs (with quartodoc)
+#   5. LABS        — Build and deploy Labs site
+#   6. STAFFML     — Build and deploy StaffML (Next.js)
+#   7. SITE        — Trigger site-publish-live.yml (landing + about + community)
+#   8. INSTRUCTORS — Trigger instructors-publish-live.yml
+#
+# Triggers:
+#   - workflow_dispatch: Manual with per-site toggles and release type
+#
+# Deploys to: gh-pages branch (each site to its own subdirectory)
+# Secrets:    GITHUB_TOKEN (automatic)
+# Vars:       KITS_ROOT, DEV_KITS_PATH, TINYTORCH_SITE,
+#             MLSYSIM_DOCS, DEV_MLSYSIM_PATH, LABS_ROOT, DEV_LABS_PATH
+#
+# Related:
+#   - book-publish-live.yml        — Called for book deployment (step 1)
+#   - site-publish-live.yml        — Called for site deployment (step 7)
+#   - instructors-publish-live.yml — Called for instructors deployment (step 8)
+#
+# =============================================================================
 
 on:
   workflow_dispatch:
@@ -30,10 +59,30 @@ on:
         description: 'Deploy TinyTorch?'
         type: boolean
         default: true
+      deploy_mlsysim:
+        description: 'Deploy MLSYSIM?'
+        type: boolean
+        default: true
       deploy_labs:
         description: 'Deploy Labs?'
         type: boolean
         default: true
+      deploy_staffml:
+        description: 'Deploy StaffML?'
+        type: boolean
+        default: true
+      deploy_site:
+        description: 'Deploy Site (unified: landing + about + community + newsletter)?'
+        type: boolean
+        default: true
+      deploy_instructors:
+        description: 'Deploy Instructors?'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
 
 env:
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,22 +135,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: Build Kits
+        working-directory: ${{ vars.KITS_ROOT }}
         run: |
-          cd kits
           quarto render
+          touch _build/.nojekyll
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./kits/_build
-          destination_dir: kits
+          publish_dir: ./${{ vars.KITS_ROOT }}/_build
+          destination_dir: ${{ vars.DEV_KITS_PATH }}
           publish_branch: gh-pages
           keep_files: true
           commit_message: '📦 Deploy Kits - ${{ github.sha }}'
@@ -116,62 +166,164 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
+      # Builds the Quarto TinyTorch site (tinytorch/quarto) — the
+      # legacy Jupyter Book site at tinytorch/site is deprecated. Both
+      # the source directory and the gh-pages destination are resolved
+      # through repo vars so this orchestrator stays in lockstep with
+      # tinytorch-publish-live.yml if the paths ever move.
       - name: Build TinyTorch
+        working-directory: ${{ vars.TINYTORCH_SITE }}
         run: |
-          cd tinytorch/site
           quarto render
+          touch _build/.nojekyll
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./tinytorch/site/_build/html
+          publish_dir: ./${{ vars.TINYTORCH_SITE }}/_build
           destination_dir: tinytorch
           publish_branch: gh-pages
           keep_files: true
           commit_message: '🔥 Deploy TinyTorch - ${{ github.sha }}'
 
   # ==========================================================================
-  # Step 4: Deploy Labs (after tinytorch)
+  # Step 4: Deploy MLSYSIM (after tinytorch)
   # ==========================================================================
-  deploy-labs:
-    name: '🔬 Deploy Labs'
+  deploy-mlsysim:
+    name: '🧮 Deploy MLSYSIM'
     needs: [deploy-tinytorch]
-    if: ${{ always() && inputs.deploy_labs && (needs.deploy-tinytorch.result == 'success' || needs.deploy-tinytorch.result == 'skipped') }}
+    if: ${{ always() && inputs.deploy_mlsysim && (needs.deploy-tinytorch.result == 'success' || needs.deploy-tinytorch.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
-      - name: Build Labs
+      - name: Install Python dependencies
         run: |
-          cd labs
+          pip install -e .
+          pip install quartodoc
+
+      - name: Build MLSYSIM
+        working-directory: ${{ vars.MLSYSIM_DOCS }}
+        run: |
           quarto render
+          touch _build/.nojekyll
 
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./labs/_build
-          destination_dir: labs
+          publish_dir: ./${{ vars.MLSYSIM_DOCS }}/_build
+          destination_dir: ${{ vars.DEV_MLSYSIM_PATH }}
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🧮 Deploy MLSYSIM - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Step 5: Deploy Labs (after mlsysim)
+  # ==========================================================================
+  deploy-labs:
+    name: '🔬 Deploy Labs'
+    needs: [deploy-mlsysim]
+    if: ${{ always() && inputs.deploy_labs && (needs.deploy-mlsysim.result == 'success' || needs.deploy-mlsysim.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Build Labs
+        working-directory: ${{ vars.LABS_ROOT }}
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./${{ vars.LABS_ROOT }}/_build
+          destination_dir: ${{ vars.DEV_LABS_PATH }}
           publish_branch: gh-pages
           keep_files: true
           commit_message: '🔬 Deploy Labs - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Step 6: Deploy StaffML (after labs)
+  # ==========================================================================
+  deploy-staffml:
+    name: '🎯 Deploy StaffML'
+    needs: [deploy-labs]
+    if: ${{ always() && inputs.deploy_staffml && (needs.deploy-labs.result == 'success' || needs.deploy-labs.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml/package-lock.json
+
+      - name: Install dependencies
+        working-directory: interviews/staffml
+        run: npm ci
+
+      - name: Build StaffML
+        working-directory: interviews/staffml
+        env:
+          NEXT_PUBLIC_BASE_PATH: /staffml
+        run: npm run build
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./interviews/staffml/out
+          destination_dir: staffml
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🎯 Deploy StaffML - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Step 7: Deploy Site subsites (after StaffML)
+  # ==========================================================================
+  deploy-site:
+    name: '🌐 Deploy Landing Site'
+    needs: [deploy-staffml]
+    if: ${{ always() && inputs.deploy_site && (needs.deploy-staffml.result == 'success' || needs.deploy-staffml.result == 'skipped') }}
+    uses: ./.github/workflows/site-publish-live.yml
+    secrets: inherit
+
+  # ==========================================================================
+  # Step 8: Deploy Instructors (after site)
+  # ==========================================================================
+  deploy-instructors:
+    name: '🎓 Deploy Instructors'
+    needs: [deploy-site]
+    if: ${{ always() && inputs.deploy_instructors && (needs.deploy-site.result == 'success' || needs.deploy-site.result == 'skipped') }}
+    uses: ./.github/workflows/instructors-publish-live.yml
+    secrets: inherit
 
   # ==========================================================================
   # Summary
   # ==========================================================================
   summary:
     name: '📋 Deployment Summary'
-    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-labs]
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-site, deploy-instructors]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -187,10 +339,21 @@ jobs:
           echo "| 📚 Book | ${{ needs.deploy-book.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📦 Kits | ${{ needs.deploy-kits.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔥 TinyTorch | ${{ needs.deploy-tinytorch.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧮 MLSYSIM | ${{ needs.deploy-mlsysim.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔬 Labs | ${{ needs.deploy-labs.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎯 StaffML | ${{ needs.deploy-staffml.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 Landing Site | ${{ needs.deploy-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎓 Instructors | ${{ needs.deploy-instructors.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Live URLs" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 [Book](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔥 [TinyTorch](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🧮 [MLSYSIM](https://mlsysbook.ai/mlsysim/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔬 [Labs](https://mlsysbook.ai/labs/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎯 [StaffML](https://mlsysbook.ai/staffml/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🏠 [Landing](https://mlsysbook.ai/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📋 [About](https://mlsysbook.ai/about/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌍 [Community](https://mlsysbook.ai/community/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📬 [Newsletter](https://mlsysbook.ai/newsletter/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎓 [Instructors](https://mlsysbook.ai/instructors/)" >> $GITHUB_STEP_SUMMARY

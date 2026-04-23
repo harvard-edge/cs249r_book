@@ -21,17 +21,26 @@ CNNs that exploit spatial structure in images:
 
 **Run after Module 09** (Convolutions: Conv2d + Pooling)
 
-| Module | Component | What It Provides |
-|--------|-----------|------------------|
-| Module 01 | Tensor | YOUR data structure |
-| Module 02 | Activations | YOUR ReLU activation |
-| Module 03 | Layers | YOUR Linear layers |
-| Module 04 | Losses | YOUR CrossEntropyLoss |
-| Module 05 | DataLoader | YOUR data batching |
-| Module 06 | Autograd | YOUR automatic differentiation |
-| Module 07 | Optimizers | YOUR SGD/Adam optimizers |
-| Module 08 | Training | YOUR end-to-end training loop |
-| **Module 09** | **Convolutions** | **YOUR Conv2d + MaxPool2d** |
+<table width="100%">
+  <thead>
+<tr>
+<th width="25%"><b>Module</b></th>
+<th width="25%">Component</th>
+<th width="50%">What It Provides</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure</td></tr>
+<tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR ReLU activation</td></tr>
+<tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layers</td></tr>
+<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR CrossEntropyLoss</td></tr>
+<tr><td><b>Module 05</b></td><td>DataLoader</td><td>YOUR data batching</td></tr>
+<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
+<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD/Adam optimizers</td></tr>
+<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop</td></tr>
+<tr><td><b>Module 09</b></td><td>Convolutions</td><td>YOUR Conv2d + MaxPool2d</td></tr>
+</tbody>
+</table>
 
 ## Milestone Structure
 
@@ -74,10 +83,23 @@ This milestone has **two parts** that progressively showcase your TinyTorch modu
 
 ## Expected Results
 
-| Script | Dataset | Image Size | Architecture | Accuracy | Training Time | vs MLP |
-|--------|---------|------------|--------------|----------|---------------|--------|
-| 01 (TinyDigits) | 1K train | 8×8 gray | Simple CNN | ~90% | 5-7 min | +10% improvement |
-| 02 (CIFAR-10) | 50K train | 32×32 RGB | Deeper CNN | 65-75% | 30-60 min | MLPs struggle here |
+<table width="100%">
+  <thead>
+<tr>
+<th width="18%"><b>Script</b></th>
+<th width="12%">Dataset</th>
+<th width="12%">Image Size</th>
+<th width="15%">Architecture</th>
+<th width="12%">Accuracy</th>
+<th width="15%">Training Time</th>
+<th width="18%">vs MLP</th>
+</tr>
+</thead>
+<tbody>
+<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8 gray</td><td>Simple CNN</td><td>~90%</td><td>5-7 min</td><td>+10% improvement</td></tr>
+<tr><td><b>02 (CIFAR-10)</b></td><td>50K train</td><td>32×32 RGB</td><td>Deeper CNN</td><td>65-75%</td><td>30-60 min</td><td>MLPs struggle here</td></tr>
+</tbody>
+</table>
 
 ## Key Learning: Why Convolution Dominates Vision
 

@@ -1,5 +1,5 @@
-# Use a base image with R 4.3.2 (supports both ARM64 and AMD64)
-FROM rocker/r-ver:4.3.2
+# Use a base image with R 4.5.2 (supports both ARM64 and AMD64)
+FROM rocker/r-ver:4.5.2
 # Set non-interactive mode to avoid prompts
 ENV DEBIAN_FRONTEND=noninteractive
 # ------------------------
@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y \
 # 📦 Install Quarto (Auto-detect architecture)
 # ------------------------
 RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL "https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.13/quarto-1.7.13-linux-${ARCH}.deb" -o quarto.deb && \
+    curl -fsSL "https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-${ARCH}.deb" -o quarto.deb && \
     dpkg -i quarto.deb && rm quarto.deb
 # ------------------------
 # 🌐 Install Chromium using Quarto's built-in installer

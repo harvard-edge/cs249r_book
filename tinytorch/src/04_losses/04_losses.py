@@ -97,6 +97,7 @@ If you see import errors, ensure you've run `tito export` after completing previ
 #| export
 
 import numpy as np
+rng = np.random.default_rng(7)
 from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
@@ -432,7 +433,7 @@ class MSELoss:
         >>> targets = Tensor([1.5, 2.5, 2.8])
         >>> loss = loss_fn(predictions, targets)
         >>> print(f"MSE Loss: {loss.data:.4f}")
-        MSE Loss: 0.1467
+        MSE Loss: 0.1800
 
         HINTS:
         - Use (predictions.data - targets.data) for element-wise difference
@@ -498,8 +499,8 @@ def test_unit_mse_loss():
     assert np.allclose(loss.data, expected_loss, atol=1e-6), f"Expected {expected_loss}, got {loss.data}"
 
     # Test that loss is always non-negative
-    random_pred = Tensor(np.random.randn(10))
-    random_target = Tensor(np.random.randn(10))
+    random_pred = Tensor(rng.standard_normal(10))
+    random_target = Tensor(rng.standard_normal(10))
     random_loss = loss_fn.forward(random_pred, random_target)
     assert random_loss.data >= 0, f"MSE loss should be non-negative, got {random_loss.data}"
 
@@ -1050,14 +1051,16 @@ def analyze_loss_sensitivity():
     min_mse_idx = np.argmin(mse_losses)
     min_bce_idx = np.argmin(bce_losses)
 
+    idx_05 = np.argmin(np.abs(predictions - 0.5))
+
     print(f"MSE Loss:")
     print(f"  Minimum at prediction = {predictions[min_mse_idx]:.2f}, loss = {mse_losses[min_mse_idx]:.4f}")
-    print(f"  At prediction = 0.5: loss = {mse_losses[24]:.4f}")  # Middle of range
+    print(f"  At prediction = 0.5: loss = {mse_losses[idx_05]:.4f}")
     print(f"  At prediction = 0.1: loss = {mse_losses[0]:.4f}")
 
     print(f"\nBinary Cross-Entropy Loss:")
     print(f"  Minimum at prediction = {predictions[min_bce_idx]:.2f}, loss = {bce_losses[min_bce_idx]:.4f}")
-    print(f"  At prediction = 0.5: loss = {bce_losses[24]:.4f}")
+    print(f"  At prediction = 0.5: loss = {bce_losses[idx_05]:.4f}")
     print(f"  At prediction = 0.1: loss = {bce_losses[0]:.4f}")
 
     print(f"\n💡 Sensitivity Insights:")

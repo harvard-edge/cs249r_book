@@ -10,29 +10,35 @@
 
 <div align="center">
 
+<!-- Build Status -->
 <p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300" alt="Book"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300" alt="TinyTorch"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/labs-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/labs-validate-dev.yml?branch=dev&label=Labs&logo=jupyter&cacheSeconds=300" alt="Labs"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/kits-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/kits-validate-dev.yml?branch=dev&label=Kits&logo=arduino&cacheSeconds=300" alt="Kits"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/mlsysim-validate-dev.yml?branch=dev&label=MLSys%C2%B7im&logo=python&cacheSeconds=300" alt="MLSys·im"></a></br>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/slides-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/slides-validate-dev.yml?branch=dev&label=Slides&logo=googleslides&cacheSeconds=300" alt="Slides"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/instructors-validate-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/instructors-validate-dev.yml?branch=dev&label=Instructors&logo=googleclassroom&cacheSeconds=300" alt="Instructors"></a>
+  <a href="https://github.com/harvard-edge/cs249r_book/actions/workflows/staffml-preview-dev.yml"><img src="https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/staffml-preview-dev.yml?branch=dev&label=StaffML&logo=target&cacheSeconds=300" alt="StaffML"></a>
+  <img src="https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300" alt="Updated">
+</p>
 
-  [![Book](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Book&logo=githubactions&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
-  [![TinyTorch](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/tinytorch-validate-dev.yml?branch=dev&label=TinyTorch&logo=python&cacheSeconds=300)](https://github.com/harvard-edge/cs249r_book/actions/workflows/tinytorch-validate-dev.yml)
-  ![Updated](https://img.shields.io/github/last-commit/harvard-edge/cs249r_book/dev?label=Updated&logo=git&cacheSeconds=300)
-  [![License](https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg)](https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md)
-  [![Cite](https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee)](#-citation--license)
-  [![Fund Us](https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective)](https://opencollective.com/mlsysbook)
-
+<!-- Meta -->
+<p align="center">
+  <a href="https://github.com/harvard-edge/cs249r_book/blob/dev/LICENSE.md"><img src="https://img.shields.io/badge/License-CC--BY--NC--ND%204.0-blue.svg" alt="License"></a>
+  <a href="#-citation--license"><img src="https://img.shields.io/badge/Cite-IEEE%202024-blue?logo=ieee" alt="Cite"></a>
+  <a href="https://opencollective.com/mlsysbook"><img src="https://img.shields.io/badge/Fund%20Us-Open%20Collective-blue.svg?logo=open-collective" alt="Fund Us"></a>
 </p>
 
 <p align="center">
-
-  <!-- Reader Navigation -->
-  **[📖 在线阅读](https://mlsysbook.ai)** •
-  **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 下载 PDF](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 下载 EPUB](https://mlsysbook.ai/epub)** •
-  **[🌐 探索生态系统](https://mlsysbook.org)**
-
+  <b><a href="https://mlsysbook.ai/vol1/">📘 Volume I</a></b> •
+  <b><a href="https://mlsysbook.ai/vol2/">📙 Volume II <i>(Summer 2026)</i></a></b> •
+  <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.org">🌐 生态系统</a></b>
 </p>
 
-📚 **2026 年 MIT Press 将出版纸质版**
+<p align="center">📚 <b>2026 年 MIT Press 将出版纸质版</b></p>
 
 </div>
 
@@ -127,10 +133,10 @@
 
 |   | Component | What You Do | Link |
 |---|-----------|-------------|------|
-| **READ** | [📖 教材](https://mlsysbook.ai) | 理解机器学习系统概念 | [book/](book/README.md) |
+| **READ** | [📖 教材](https://mlsysbook.ai) | 理解机器学习系统概念 | [book/](../book/README.md) |
 | **EXPLORE** | 🔮 Software Co‑Labs | 进行延迟、内存、能耗、成本实验 | *Coming 2026* |
-| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 亲手实现框架 | [tinytorch/](tinytorch/README.md) |
-| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | 在受内存、功耗、时延、安全约束的硬件上工程实现 | [kits/](kits/README.md) |
+| **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch) | 亲手实现框架 | [tinytorch/](../tinytorch/README.md) |
+| **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits) | 在受内存、功耗、时延、安全约束的硬件上工程实现 | [kits/](../kits/README.md) |
 | **PROVE** | 🏆 AI Olympics | 参与所有赛道的竞技与基准测试 | *Coming 2026* |
 
 **每条路径的学习内容：**
@@ -249,9 +255,9 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | 我想… | 前往 |
 |--------------|---------|
-| 修正错别字或改进章节 | [book/docs/CONTRIBUTING.md](book/docs/CONTRIBUTING.md) |
-| 添加 TinyTorch 模块或修复 bug | [tinytorch/CONTRIBUTING.md](tinytorch/CONTRIBUTING.md) |
-| 改进硬件实验 | [kits/README.md](kits/README.md) |
+| 修正错别字或改进章节 | [book/docs/CONTRIBUTING.md](../book/docs/CONTRIBUTING.md) |
+| 添加 TinyTorch 模块或修复 bug | [tinytorch/CONTRIBUTING.md](../tinytorch/CONTRIBUTING.md) |
+| 改进硬件实验 | [kits/README.md](../kits/README.md) |
 | 报告问题 | [GitHub Issues](https://github.com/harvard-edge/cs249r_book/issues) |
 | 提问 | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |
 
@@ -278,8 +284,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 | Component | License | What It Means |
 |-----------|---------|---------------|
-| **Book content** | [CC BY‑NC‑ND 4.0](LICENSE.md) | 在署名、非商业、禁止演绎的前提下自由分发 |
-| **TinyTorch code** | [Apache 2.0](tinytorch/LICENSE) | 自由使用、修改、分发并附带专利保护 |
+| **Book content** | [CC BY‑NC‑ND 4.0](../LICENSE.md) | 在署名、非商业、禁止演绎的前提下自由分发 |
+| **TinyTorch code** | [Apache 2.0](../tinytorch/LICENSE) | 自由使用、修改、分发并附带专利保护 |
 
 教材内容（章节、图表、解释）属于教育资料，应在署名且非商业使用的前提下自由共享。软件框架则是供任何人使用、修改、集成的工具。
 
@@ -297,8 +303,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 <div align="center">
 
-**[⭐ 在 GitHub 上给我们加星](https://github.com/harvard-edge/cs249r_book#support-this-work) • [✉️ 订阅更新](https://buttondown.email/mlsysbook) • [💬 参与讨论](https://github.com/harvard-edge/cs249r_book/discussions) • [🌐 访问 mlsysbook.ai](https://mlsysbook.ai)**
+<b><a href="https://buttondown.email/mlsysbook">✉️ 订阅更新</a> • <a href="https://github.com/harvard-edge/cs249r_book/discussions">💬 参与讨论</a> • <a href="https://mlsysbook.ai/">🌐 访问 mlsysbook.ai</a></b>
 
-*本教材由 MLSysBook 社区倾情打造。*
+<i>本教材由 MLSysBook 社区倾情打造。</i>
 
 </div>

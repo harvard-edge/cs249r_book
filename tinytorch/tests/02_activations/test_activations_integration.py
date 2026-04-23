@@ -4,6 +4,7 @@ Tests that activations work with Tensor and enable non-linear networks
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -85,7 +86,7 @@ class TestActivationNetworkIntegration:
         from tinytorch.core.activations import ReLU, Sigmoid
         from tinytorch.core.tensor import Tensor
 
-        x = Tensor(np.random.randn(10, 5))
+        x = Tensor(rng.standard_normal((10, 5)))
         relu = ReLU()
         sigmoid = Sigmoid()
 

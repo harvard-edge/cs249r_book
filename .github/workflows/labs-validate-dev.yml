@@ -1,0 +1,324 @@
+name: '🔮 Labs · ✅ Validate (Dev)'
+
+# =============================================================================
+# Labs — Notebook & Build Validation
+# =============================================================================
+#
+# Validates Marimo notebook integrity, mlsysim engine compatibility, WASM
+# export capability, and Quarto site build output.
+#
+# Flow:
+#   1. VALIDATE_NOTEBOOKS — Static analysis + engine + widget + protocol tests
+#   2. BUILD_SITE         — Quarto HTML render succeeds
+#   3. WASM_SMOKE_TEST    — Export representative labs to WASM + Pyodide check
+#   4. SUMMARY            — Aggregate results
+#
+# Triggers:
+#   - push: dev branch, labs/** or mlsysim/** paths
+#   - pull_request: labs/** or mlsysim/** or workflow file changes
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+#
+# Related:
+#   - labs-preview-dev.yml  — Gated on this workflow passing
+#   - labs-publish-live.yml — Production deploy
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'labs/**'
+      - 'mlsysim/**'
+      - '.github/workflows/labs-validate-dev.yml'
+      - '.github/workflows/labs-preview-dev.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'labs/**'
+      - 'mlsysim/**'
+      - '.github/workflows/labs-validate-dev.yml'
+      - '.github/workflows/labs-preview-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labs-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+# Workflow-level environment. Defined here rather than as a repository variable
+# because repository variables are not exposed to workflows triggered by
+# pull_request events from forks (GitHub security default). Workflow-level
+# env vars are available in all contexts.
+env:
+  LABS_ROOT: labs
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Python syntax + import validation
+  # ===========================================================================
+  validate-notebooks:
+    name: '🧪 Validate Notebooks'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r labs/requirements.txt
+          # Install mlsysim from source (the engine that powers all labs)
+          pip install "mlsysim/[full]"
+
+      - name: 🧪 Run Level 1 tests (static analysis)
+        run: |
+          echo "🧪 Running static analysis tests..."
+          python3 -m pytest labs/tests/test_static.py -v --tb=short --junitxml=test-results-static.xml
+
+      - name: 🧪 Run Level 2 tests (engine execution)
+        run: |
+          echo "🧪 Running engine execution tests..."
+          python3 -m pytest labs/tests/test_engine.py -v --tb=short -k "engine" --junitxml=test-results-engine.xml
+
+      - name: 🧪 Run Level 3 tests (widget structure)
+        run: |
+          echo "🧪 Running widget structure tests..."
+          python3 -m pytest labs/tests/test_widget.py -v --tb=short -k "widget" --junitxml=test-results-widget.xml
+        continue-on-error: true  # Widget tests are aspirational; many labs still WIP
+
+      - name: 🧪 Run Level 4 tests (protocol compliance)
+        run: |
+          echo "🧪 Running protocol invariant tests..."
+          python3 -m pytest labs/tests/test_protocol.py -v --tb=short -k "protocol" --junitxml=test-results-protocol.xml
+
+      - name: 📊 Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lab-test-results
+          path: test-results-*.xml
+
+  # ===========================================================================
+  # Stage 2: Quarto site build validation
+  # ===========================================================================
+  build-site:
+    name: '🔨 Build Labs Site'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Labs Site
+        working-directory: ${{ env.LABS_ROOT }}
+        run: quarto render
+
+      - name: 🔍 Validate build output
+        run: |
+          LABS_ROOT="${{ env.LABS_ROOT }}"
+          echo "🔎 Resolved LABS_ROOT: '${LABS_ROOT}'"
+          if [ -z "${LABS_ROOT}" ]; then
+            echo "❌ FATAL: LABS_ROOT resolved to empty string."
+            echo "   If this is a fork PR, check that LABS_ROOT is declared in the workflow-level env: block."
+            echo "   Repository variables are not available on fork PR triggers."
+            exit 1
+          fi
+          if [ ! -f "${LABS_ROOT}/_build/index.html" ]; then
+            echo "❌ CRITICAL: ${LABS_ROOT}/_build/index.html missing from build output."
+            echo "   Quarto render may have exited nonzero. Check the build step above."
+            exit 1
+          fi
+          echo "✅ Site built successfully"
+          echo "📊 Build size: $(du -sh ${LABS_ROOT}/_build | cut -f1)"
+
+  # ===========================================================================
+  # Stage 3: WASM export smoke test
+  # ===========================================================================
+  wasm-smoke-test:
+    name: '🌐 WASM Export Smoke Test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install build marimo
+          pip install -r labs/requirements.txt
+          pip install mlsysim/
+
+      - name: 📦 Build mlsysim wheel
+        run: |
+          cd mlsysim && python3 -m build --wheel
+          echo "✅ Wheel built:"
+          ls -la dist/*.whl
+
+      - name: 📦 Setup Node.js for Pyodide test
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 🧪 Test Pyodide wheel install
+        run: |
+          npm install pyodide
+          WHEEL_FILE=$(ls mlsysim/dist/*.whl | head -n 1)
+          cat << 'EOF' > test_pyodide.js
+          const { loadPyodide } = require("pyodide");
+          const path = require("path");
+          
+          async function main() {
+            const pyodide = await loadPyodide();
+            await pyodide.loadPackage("micropip");
+            const micropip = pyodide.pyimport("micropip");
+            
+            console.log("Installing dependencies...");
+            await pyodide.loadPackage(["pandas", "numpy"]);
+            await micropip.install(["pydantic", "pint"], {keep_going: false});
+            
+            console.log("Installing mlsysim wheel...");
+            const wheelPath = process.argv[2];
+            await micropip.install("file://" + path.resolve(wheelPath), {keep_going: false});
+            
+            console.log("Testing imports...");
+            pyodide.runPython(`
+              import mlsysim
+              from mlsysim.core.engine import Engine
+              print("✅ mlsysim imported successfully in Pyodide!")
+            `);
+          }
+          main().catch(err => {
+            console.error("❌ Pyodide test failed:", err);
+            process.exit(1);
+          });
+          EOF
+          node test_pyodide.js "$WHEEL_FILE"
+
+      - name: 🌐 Export representative labs to WASM HTML
+        run: |
+          # lab_05_dist_train is the regression guard: it shipped broken to
+          # prod when plotly was imported before micropip.install(). See #1353.
+          SMOKE_LABS="labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol2/lab_01_introduction.py labs/vol2/lab_05_dist_train.py"
+          FAILED=""
+
+          # Setup wheel directory so relative paths work
+          mkdir -p /tmp/wasm-smoke/wheels
+          cp mlsysim/dist/*.whl /tmp/wasm-smoke/wheels/
+
+          for lab in $SMOKE_LABS; do
+            name=$(basename "$lab" .py)
+            echo "  Exporting ${name}..."
+            mkdir -p "/tmp/wasm-smoke/${name}"
+            if marimo export html-wasm "$lab" \
+              -o "/tmp/wasm-smoke/${name}/index.html" \
+              --mode run --no-show-code; then
+              # Verify the HTML is non-trivial (>10KB)
+              SIZE=$(wc -c < "/tmp/wasm-smoke/${name}/index.html")
+              if [ "$SIZE" -lt 10000 ]; then
+                echo "❌ ${name}: index.html is only ${SIZE} bytes (expected >10KB)"
+                FAILED="${FAILED} ${name}"
+              else
+                echo "✅ ${name}: ${SIZE} bytes"
+              fi
+            else
+              echo "❌ ${name}: marimo export failed"
+              FAILED="${FAILED} ${name}"
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            echo ""
+            echo "❌ WASM smoke test failed for:${FAILED}"
+            exit 1
+          fi
+          echo ""
+          echo "✅ All WASM smoke tests passed"
+
+      # =====================================================================
+      # Browser-level Pyodide verification
+      # =====================================================================
+      # lab_05 shipped broken to prod (#1353): plotly imported before
+      # micropip.install() in a WASM runtime. Every static/engine/Node-Pyodide
+      # check passed — only a real browser caught it. This step runs the
+      # exported labs in headless Chromium behind the same cross-origin
+      # isolation headers the prod dev-preview uses, so SharedArrayBuffer is
+      # enabled and Pyodide threading works. A lab is considered healthy when
+      # a marimo DOM signal (tab, cell, or island) attaches within 180s.
+      - name: 🎭 Install Playwright + Chromium
+        run: |
+          pip install playwright
+          python3 -m playwright install --with-deps chromium
+
+      - name: 🌐 Browser smoke test (real Chromium + Pyodide)
+        run: |
+          python3 labs/tests/browser_smoke.py --labs-dir /tmp/wasm-smoke
+
+  # ===========================================================================
+  # Stage 4: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This pass adds external reachability as a
+  # warning. Flip fail_on_broken=true once the baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './labs/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [validate-notebooks, build-site, wasm-smoke-test, check-links]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🔮 Labs Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Notebook Validation | ${{ needs.validate-notebooks.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Site Build | ${{ needs.build-site.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🌐 WASM Export | ${{ needs.wasm-smoke-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.validate-notebooks.result }}" = "failure" ] || \
+             [ "${{ needs.build-site.result }}" = "failure" ] || \
+             [ "${{ needs.wasm-smoke-test.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"

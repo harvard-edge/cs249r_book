@@ -1,0 +1,800 @@
+---
+engine: jupyter
+---
+
+# Data Foundations {#sec-data-foundations}
+
+## Purpose {.unnumbered}
+
+_What makes “data” a first-class systems constraint, and how do we measure when it is silently breaking our models?_
+
+In ML systems, data is not an abstract dataset—it is physical volume that must move through disks, networks, CPUs, and accelerator memory. Many expensive training runs are limited not by FLOP/s, but by I/O bandwidth, serialization overhead, and avoidable scans of irrelevant bytes. In production, the more dangerous failure mode is quieter: distributions drift, tails dominate user experience, and accuracy degrades long before average metrics look suspicious.
+
+This appendix collects the reference calculations and statistical tools that let you reason about the data path as a systems engineer. It focuses on what you need in practice: data gravity napkin math, format and serialization costs, the algebraic primitives that create pipeline blowups (especially joins), and drift metrics that compare full distributions rather than means.
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Estimate transfer time from data volume and bandwidth, and explain why “shipping data” often fails at scale
+- Compare **serialization formats** by CPU cost and throughput, and predict when the accelerator will starve
+- Distinguish **row-oriented** from **column-oriented** storage and explain how layout affects I/O efficiency
+- Explain why **long tails** dominate user experience and how **percentile metrics** relate to session-level probabilities
+- Apply **drift metrics** (for example, KL-derived measures) to detect distribution shift before it becomes an incident
+
+:::
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix is designed as a *reference*. Use it when you are debugging “slow training,” “low accelerator utilization,” or “production accuracy drift,” and you need the quickest path from symptom to measurement.
+
+Conventions used here follow the book-wide notation (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
+
+- **When data won’t move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-data-foundations-data-engineering-foundations-0c20.
+- **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-data-foundations-row-vs-columnar-formats-bca2.
+- **When pipelines explode in cost**: Use the primitives in @sec-data-foundations-algebra-data-9792, especially join-induced shuffles.
+- **When “average looks fine” but users complain**: Use @sec-data-foundations-distributions-long-tail-901f and session-level tail probability.
+- **When accuracy drifts silently**: Use @sec-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
+
+```{python}
+#| label: data-gravity-transfer
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA GRAVITY TRANSFER TIMES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-data-gravity—why we ship compute to data
+# │
+# │ Goal:    Compute transfer times for 1 TB / 100 TB / 1 PB at three bandwidths.
+# │ Show:    Human-readable durations (Minutes, Hours, Days, Months).
+# │ How:     T = Volume/Bandwidth, formatted via helper.
+# │
+# │ Imports: mlsysim.core.constants (TB, PB, Gbps, byte, BITS_PER_BYTE, time constants)
+# │ Exports: t_1tb_1g … t_1pb_100g (9 formatted time strings)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import (
+    TB, PB, Gbps, byte,
+    BITS_PER_BYTE, SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY,
+    DAYS_PER_MONTH
+)
+from mlsysim.fmt import check
+
+class DataGravity:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    tb_bytes = (1 * TB).m_as(byte)
+    pb_bytes = (1 * PB).m_as(byte)
+    bw_1g = (1 * Gbps).m_as('bit/second')
+    bw_10g = (10 * Gbps).m_as('bit/second')
+    bw_100g = (100 * Gbps).m_as('bit/second')
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    @staticmethod
+    def _xfer(vol_bytes, bw_bps):
+        return vol_bytes / (bw_bps/BITS_PER_BYTE)
+
+    @staticmethod
+    def _fmt_time(s):
+        if s < SECONDS_PER_MINUTE:    return f"{s:.0f} Seconds"
+        if s < SEC_PER_HOUR:          return f"{s/SECONDS_PER_MINUTE:.0f} Minutes"
+        if s < SEC_PER_DAY:           return f"{s/SEC_PER_HOUR:.1f} Hours"
+        if s < SEC_PER_DAY * DAYS_PER_MONTH: return f"{s/SEC_PER_DAY:.0f} Days"
+        return f"{s / (SEC_PER_DAY * DAYS_PER_MONTH):.0f} Months"
+
+    _x = _xfer.__func__
+    _f = _fmt_time.__func__
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(_x(tb_bytes, bw_1g) > 0, "Transfer time must be positive")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    t_1tb_1g_str    = _f(_x(tb_bytes, bw_1g))
+    t_1tb_10g_str   = _f(_x(tb_bytes, bw_10g))
+    t_1tb_100g_str  = _f(_x(tb_bytes, bw_100g))
+    t_100tb_1g_str  = _f(_x(100 * tb_bytes, bw_1g))
+    t_100tb_10g_str = _f(_x(100 * tb_bytes, bw_10g))
+    t_100tb_100g_str= _f(_x(100 * tb_bytes, bw_100g))
+    t_1pb_1g_str    = _f(_x(pb_bytes, bw_1g))
+    t_1pb_10g_str   = _f(_x(pb_bytes, bw_10g))
+    t_1pb_100g_str  = _f(_x(pb_bytes, bw_100g))
+```
+
+This appendix covers the principles of data engineering and statistical monitoring that keep ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
+
+## Data Engineering Foundations {#sec-data-foundations-data-engineering-foundations-0c20}
+
+Understanding hardware constraints is only half the battle; we must also shape our data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
+
+### Napkin math: The physics of data gravity {#sec-data-foundations-napkin-math-physics-data-gravity-9ae0}
+
+Data gravity[^fn-data-gravity] is not a metaphor; it is a calculation of transfer time. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When datasets grow large enough, they effectively become stationary—moving them costs more time and energy than moving the computation to where the data already lives.
+
+[^fn-data-gravity]: **Data Gravity**: Coined by Dave McCrory in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
+
+The transfer time for moving a dataset is simply $T = \text{Data Volume} / \text{Bandwidth}$ (for the large volumes here, latency is negligible; the full equation appears in @sec-machine-foundations-bandwidth-vs-latency-5320). @tbl-data-gravity illustrates the sobering reality:
+
+| **Data Volume** |               **1 Gbps (Standard WAN)** |               **10 Gbps (High-End WAN)** |           **100 Gbps (Direct Connect)** | **Snowmobile (Truck)** |
+|:----------------|----------------------------------------:|-----------------------------------------:|----------------------------------------:|:-----------------------|
+| **1 TB**        |     `{python} DataGravity.t_1tb_1g_str` |     `{python} DataGravity.t_1tb_10g_str` |   `{python} DataGravity.t_1tb_100g_str` | N/A                    |
+| **100 TB**      |   `{python} DataGravity.t_100tb_1g_str` |   `{python} DataGravity.t_100tb_10g_str` | `{python} DataGravity.t_100tb_100g_str` | N/A                    |
+| **1 PB**        | **`{python} DataGravity.t_1pb_1g_str`** | **`{python} DataGravity.t_1pb_10g_str`** |   `{python} DataGravity.t_1pb_100g_str` | **2 Days**             |
+
+: **The Cost of Inertia.** Why we "ship compute to data" rather than "ship data to compute." If you have 1 PB, the network is often not a viable option. {#tbl-data-gravity}
+
+### The cost of serialization {#sec-data-foundations-cost-serialization-b921}
+
+```{python}
+#| label: serialization-cost
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERIALIZATION FORMAT PERFORMANCE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-serialization-cost—CPU decode overhead by format
+# │
+# │ Goal:    Show throughput and CPU cost for CSV, Protobuf, and Parquet.
+# │ Show:    MB/s and cycles-per-value for each format.
+# │ How:     Directly from representative benchmarks.
+# │
+# │ Imports: (none—values are empirical benchmarks)
+# │ Exports: csv_speed_str, parquet_speed_str, csv_cycles_str,
+# │          parquet_cycles_str, proto_speed_str, proto_cycles_str
+# └─────────────────────────────────────────────────────────────────────────────
+class SerializationCost:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    csv_speed_mb = 100
+    parquet_speed_mb = 1000
+    csv_cycles = 100
+    parquet_cycles = 10
+    proto_speed_mb = 300
+    proto_cycles = 200
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    speedup = parquet_speed_mb/csv_speed_mb
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    # (no derived values requiring guards)
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    csv_speed_str = f"~{csv_speed_mb}"
+    parquet_speed_str = f"> {parquet_speed_mb:,}"
+    csv_cycles_str = f"~{csv_cycles}"
+    parquet_cycles_str = f"~{parquet_cycles}"
+    proto_speed_str = f"~{proto_speed_mb}"
+    proto_cycles_str = f"~{proto_cycles}"
+```
+
+Even after data arrives at the machine, we face one final hurdle: the serialization tax.[^fn-serialization] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JavaScript Object Notation (JSON) or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
+
+[^fn-serialization]: **Serialization**: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering covers pipeline design strategies that minimize this overhead.
+
+| **Format**        |                               **Decoding Speed (MB/s)** |                                    **CPU Cycles per Byte** | **Suitability**         |
+|:------------------|--------------------------------------------------------:|-----------------------------------------------------------:|:------------------------|
+| **CSV/JSON**      |         `{python} SerializationCost.csv_speed_str` MB/s |         `{python} SerializationCost.csv_cycles_str` cycles | Debugging only          |
+| **Protobuf**      |       `{python} SerializationCost.proto_speed_str` MB/s |       `{python} SerializationCost.proto_cycles_str` cycles | RPC/Messages            |
+| **Parquet/Arrow** | **`{python} SerializationCost.parquet_speed_str` MB/s** | **`{python} SerializationCost.parquet_cycles_str` cycles** | **High-Scale Training** |
+
+: **Serialization Overhead.** Zero-copy formats like Arrow are 10--100$\times$ faster than row-based text formats because they align directly with internal memory structures. {#tbl-serialization-cost}
+
+### Row vs. columnar formats {#sec-data-foundations-row-vs-columnar-formats-bca2}
+
+The choice of file format determines the "physics" of how your data is read.
+
+**Row-Oriented (CSV, JSON)**: Data is stored record-by-record. To read just the `age` column, you must scan every byte of every row. This is efficient for *writing* (appending a log) but inefficient for *analytics* (training on specific features).
+
+**Column-Oriented (Parquet, Arrow)**: Data is stored column-by-column. To read the `age` column, the disk head seeks to that column's block and reads it sequentially. This enables **projection pushdown** (reading only the bytes you need) and **vectorized processing** (single instruction, multiple data (SIMD) operations on columns). Compare the two arrangements side by side in @fig-row-vs-col to see why columnar access avoids scanning unnecessary bytes.
+
+::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats pack data together by record (good for transactions). Column-oriented formats pack data by feature (good for analytics)." fig-alt="Diagram contrasting row store vs. column store. Row store shows Record 1 [ID, Name, Age] followed by Record 2. Column store shows Column 1 [ID1, ID2...] followed by Column 2 [Name1, Name2...]."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \tikzset{
+    DataBlock/.style={draw=GrayLine, line width=0.8pt, node distance=-0.8pt,
+    minimum height=8mm, minimum width=16mm, align=center, font=\small\usefont{T1}{phv}{m}{n}},
+    Label/.style={text=TextBlack, font=\small\bfseries\usefont{T1}{phv}{m}{n}}
+  }
+
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\filllcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\filllcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
+ \end{scope}
+     }
+  }
+}
+\tikzset{pics/lupa/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
+\coordinate(PO)at(-0.1,0.2);
+\node[circle,draw=white,line width=1pt,fill=\filllcirclecolor,minimum size=5mm,inner sep=0pt](LV)at(PO){};
+\node[draw=none,rotate=40,rounded corners=2pt,rectangle,minimum width=1.2mm,inner sep=1pt,
+fill=\filllcirclecolor,minimum height=6mm,anchor=north]at(PO){};
+\node[circle,draw=none,fill=white,minimum size=3.0mm,inner sep=0pt](LM)at(PO){};
+\node[font=\tiny\bfseries]at(LM){...};
+\end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+
+% Row Store
+\node[DataBlock, fill=RedFill!60] (r1a) at (0, 2.8) {ID: 1};
+\node[DataBlock, fill=cyan!20, right=of r1a] (r1b) {Age: 25};
+\node[DataBlock, fill=green!80!black!20, right=of r1b] (r1c) {Loc: US};
+%
+\node[DataBlock, fill=RedFill!60, right=7mm of r1c] (r2a) {ID: 2};
+\node[DataBlock, fill=cyan!20, right=of r2a] (r2b) {Age: 30};
+\node[DataBlock, fill=green!80!black!20, right=of r2b] (r2c) {Loc: UK};
+%%fitting arrow
+\node[draw=none,fill=none, inner ysep=3mm, inner xsep=6mm,fit=(r1a)(r2c),xshift=-3mm](A){};
+\coordinate(AL)at($($(A.north west)!0.5!(A.south west)$)+(0.6,0)$);
+\coordinate(AD)at($($(A.north east)!0.5!(A.south east)$)+(0.6,0)$);
+\scoped[on background layer]
+\draw[draw=none,fill=black!10](A.north west)--(A.north east)--(AD)--(A.south east)--(A.south west)--(AL)--cycle;
+\node[Label,anchor=south,font=\small\usefont{T1}{phv}{b}{n}] at (A.north) {Row-Oriented (CSV)};
+\node[anchor=north east]at(A.south east) {Scan reads \textbf{all fields}};
+% Column Store
+\node[DataBlock, fill=RedFill!60,below=1.5 of A.240] (c1a) {ID: 1};
+\node[DataBlock, fill=cyan!20, below=of c1a] (c2a) {Age: 25};
+\node[DataBlock, fill=green!80!black!20, below=of c2a] (c3a) {Loc: US};
+
+\node[DataBlock, fill=RedFill!60, right=of c1a] (c1b) {ID: 2};
+\node[DataBlock, fill=cyan!20, below=of c1b] (c2b) {Age: 30};
+\node[DataBlock, fill=green!80!black!20, below=of c2b] (c3b) {Loc: UK};
+%%fitting arrow
+\node[draw=none,fill=none, inner ysep=0mm, inner xsep=10mm,fit=(c2a)(c2b),xshift=-3mm](B){};
+\coordinate(BL)at($($(B.north west)!0.5!(B.south west)$)+(0.4,0)$);
+\coordinate(BD)at($($(B.north east)!0.5!(B.south east)$)+(0.4,0)$);
+\scoped[on background layer]
+\draw[draw=none,fill=black!10](B.north west)--(B.north east)--(BD)--(B.south east)--(B.south west)--(BL)--cycle;
+\node[Label,anchor=south,above=2pt of c1a.north east,font=\small\usefont{T1}{phv}{b}{n}] {Column-Oriented (Parquet)};
+\node[anchor=north west]at(B.south east) {Scan reads \textbf{\color{cyan}ONLY Age}};
+%icons
+\pic[shift={(-1.3,-0.5)}] at  (AL){data={scalefac=0.4,picname=1,filllcolor=VioletLine, Linewidth=0.6pt}};
+\pic[shift={(-0.8,-0.05)}] at  (BL){lupa={scalefac=1,picname=1,filllcirclecolor=VioletLine!60, Linewidth=0.5pt}};
+\end{tikzpicture}
+```
+:::
+
+This layout difference has direct consequences for ML pipelines where accelerator utilization depends on data loading speed.
+
+::: {.callout-perspective title="The Accelerator Starvation Problem"}
+
+The choice of file format determines whether your system is I/O bound or compute bound. As @tbl-serialization-cost shows, the serialization tax compounds with storage layout: row-oriented formats force full-row scans while columnar formats enable projection pushdown, reading only the bytes your model needs. The result is that the "Data Movement" term in the iron law can silently become the bottleneck that leaves your expensive accelerators idling.
+
+:::
+
+```{python}
+#| label: data-algebra
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA ALGEBRA COST EXAMPLES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-foundations-algebra-data-9792—projection waste, join cost
+# │
+# │ Goal:    Quantify the I/O waste of row-format projection and join cost.
+# │ Show:    Waste percentage and network traffic for joins.
+# │ How:     Scalar arithmetic from row/column sizes.
+# │
+# │ Imports: mlsysim.core.constants (KIB_TO_BYTES)
+# │ Exports: row_size_kb, int_size_bytes, waste_pct_str,
+# │          join_table_tb_str, join_network_tb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import KIB_TO_BYTES
+from mlsysim.fmt import fmt, check
+
+class DataAlgebra:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    row_size_kb = 1
+    int_size_bytes = 4
+    join_table_tb = 1
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    waste_pct = (1 - (int_size_bytes / (row_size_kb * KIB_TO_BYTES))) * 100
+    join_network_tb = 2 * join_table_tb
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(waste_pct > 99, "Row-format waste should be >99%")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    row_size_kb_str = f"{row_size_kb}"
+    int_size_bytes_str = f"{int_size_bytes}"
+    waste_pct_str = f"{waste_pct:.1f}"
+    join_table_tb_str = f"{join_table_tb}"
+    join_network_tb_str = f"~{join_network_tb}"
+```
+
+### The algebra of data {#sec-data-foundations-algebra-data-9792}
+
+Feature engineering is built on three SQL primitives. Understanding their computational cost prevents pipeline bottlenecks.
+
+1.  **Selection ($\sigma$)**: Filtering rows (for example, `WHERE age > 30`).
+    *   *Cost*: Cheap ($O(\log N)$) if indexed; expensive ($O(N)$) if full scan.
+
+2.  **Projection ($\pi$)**: Selecting columns (for example, `SELECT age`).
+    *   *Cost*: Free in columnar formats (only read relevant blocks). In row formats, you must read the entire `{python} DataAlgebra.row_size_kb_str` KB row just to extract the `{python} DataAlgebra.int_size_bytes_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` percent of I/O bandwidth.
+
+3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
+    *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
+        *   *Cost*: Massive network traffic. Joining two `{python} DataAlgebra.join_table_tb_str` TB tables requires moving `{python} DataAlgebra.join_network_tb_str` TB over the network.
+    *   **Broadcast Join**: One small table is sent to all workers.
+        *   *Cost*: Minimal network, but the small table *must* fit in RAM.
+
+Understanding data formats, serialization costs, and algebraic primitives tells us how to *move* data efficiently. But even a perfectly engineered pipeline can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
+
+## Probability and Statistics {#sec-data-foundations-probability-statistics-3934}
+
+Once data is flowing through our pipelines, we need mathematical tools to ensure its quality and consistency. Probability and statistics provide the language for monitoring system health, detecting the silent failures of data drift, and managing uncertainty.
+
+::: {.callout-perspective title="Why Statistics Matters for Systems"}
+Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
+:::
+
+```{python}
+#| label: long-tail-stats
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LONG-TAIL SCALE IMPACT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-foundations-distributions-long-tail-901f—P99 at scale
+# │
+# │ Goal:    Show how many users hit the P99 tail at production scale.
+# │ Show:    1% of 1M users = 10,000 unhappy people.
+# │ How:     Scalar multiplication.
+# │
+# │ Imports: mlsysim.core.constants (MILLION)
+# │ Exports: n_users_str, n_unhappy_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import MILLION
+from mlsysim.fmt import check
+
+class LongTailScale:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    n_users = MILLION
+    p99_ratio = 0.01
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    n_unhappy = n_users * p99_ratio
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(n_unhappy > 0, "Must have some unhappy users at scale")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    n_users_str = "1M"
+    n_unhappy_str = f"{n_unhappy:,.0f}"
+```
+
+### Distributions and the long tail {#sec-data-foundations-distributions-long-tail-901f}
+
+In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means one percent of your users experience extreme slowness, which at scale (`{python} LongTailScale.n_users_str` users) is `{python} LongTailScale.n_unhappy_str` unhappy people.
+
+```{python}
+#| label: tail-latency-probability
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TAIL-LATENCY SESSION PROBABILITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Median Experience"
+# │
+# │ Goal:    Compute probability of at least one P99 spike in a user session.
+# │ Show:    Formatted probability and inline equation.
+# │ How:     Binomial complement: P(slow) = 1 - (1 - p99)^N.
+# │
+# │ Imports: mlsysim.book (fmt_percent, fmt, md_math)
+# │ Exports: p_slow_eq, p_slow_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt_percent, fmt, md_math
+
+class TailLatency:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    p_fast = 0.99
+    n_requests = 100
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    p_all_fast = p_fast ** n_requests
+    p_slow = 1 - p_all_fast
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    # (probability must be in [0, 1])
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    p_all_fast_str = fmt(p_all_fast, precision=3, commas=False)
+    p_slow_pct_str = fmt_percent(p_slow, precision=1, commas=False)
+    p_slow_eq = md_math(
+        f"P(\\text{{Slow}}) = 1 - ({p_fast})^{{{n_requests}}} "
+        f"\\approx 1 - {p_all_fast:.3f} = {p_slow_pct_str}\\%"
+    )
+```
+
+::: {.callout-notebook title="The Median Experience"}
+If a user session involves $N=100$ requests (common for a web page load or chat session), the probability of experiencing *at least one* P99 latency spike is:
+`{python} TailLatency.p_slow_eq`
+
+Computed: P(Slow) = `{python} TailLatency.p_slow_pct_str` percent.
+For a heavy user ($N$ is large), the "tail" latency becomes their *median* experience. This is why Google and Amazon optimize for P99.9 or P99.99.
+:::
+
+```{python}
+#| label: drift-thresholds
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DRIFT AND LOGIT THRESHOLDS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-foundations-measuring-drift-divergence-a6dd (PSI threshold),
+# │          @sec-data-foundations-logits-numerical-stability-13e2 (logit overflow)
+# │
+# │ Goal:    Define PSI retraining threshold and example logit value.
+# │ Show:    PSI > 0.2 triggers alert; logit = 100 for overflow demo.
+# │ How:     Industry-standard thresholds.
+# │
+# │ Imports: (none)
+# │ Exports: psi_threshold, logit_val
+# └─────────────────────────────────────────────────────────────────────────────
+class DriftThresholds:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    psi_threshold = 0.2
+    logit_val = 100
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    psi_threshold_str = f"{psi_threshold:.1f}"
+    logit_val_str = f"{logit_val}"
+```
+
+### Measuring drift (divergence) {#sec-data-foundations-measuring-drift-divergence-a6dd}
+
+Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the *entire shape* of the distribution.
+
+How do we know if serving data ($Q$) has drifted from training data ($P$)? We measure the "distance" between their distributions.
+
+KL divergence[^fn-kl] measures how much information is lost if we approximate $P$ with $Q$ [@kullback1951information]:
+
+$$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
+
+```{python}
+#| label: kl-divergence-drift
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KL DIVERGENCE DRIFT DETECTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Worked Example: KL Divergence for Drift Detection",
+# │          @sec-data-foundations-measuring-drift-divergence-a6dd narrative.
+# │
+# │ Goal:    Compute KL(P||Q), KL(Q||P), and PSI for a worked drift example.
+# │ Show:    Step-by-step formulas, intermediate terms, and final values.
+# │ How:     Elementwise log-ratios, weighted sums, PSI symmetrization.
+# │
+# │ Imports: math (log), mlsysim.book (fmt, check, md_math)
+# │ Exports: kl_scenario_str, kl_P_vec_str, kl_Q_vec_str,
+# │          kl_pq_formula, kl_pq_calc, kl_qp_formula, kl_qp_calc,
+# │          kl_psi_eq, kl_psi_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, check, md_math
+
+class KLDrift:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    P = [0.60, 0.30, 0.10]
+    Q = [0.45, 0.40, 0.15]
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    lr = [math.log(p/q) for p, q in zip(P, Q)]
+
+    kl_pq_t = [p * l for p, l in zip(P, lr)]
+    kl_pq = sum(kl_pq_t)
+
+    kl_qp_t = [q * (-l) for q, l in zip(Q, lr)]
+    kl_qp = sum(kl_qp_t)
+
+    diffs = [p - q for p, q in zip(P, Q)]
+    psi_t = [d * l for d, l in zip(diffs, lr)]
+    psi = sum(psi_t)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(kl_pq > 0, "KL(P||Q) must be positive")
+    check(kl_qp > 0, "KL(Q||P) must be positive")
+    check(psi > 0, "PSI must be positive")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    P_pct = [f"{int(p * 100)}" for p in P]
+    Q_pct = [f"{int(q * 100)}" for q in Q]
+
+    P_str = [f"{p:.2f}" for p in P]
+    Q_str = [f"{q:.2f}" for q in Q]
+    lr_str = [f"{l:.3f}" for l in lr]
+
+    kl_pq_t_str = [f"{t:.3f}" for t in kl_pq_t]
+    kl_pq_str = f"{kl_pq:.3f}"
+
+    kl_qp_t_str = [f"{t:.3f}" for t in kl_qp_t]
+    kl_qp_str = f"{kl_qp:.3f}"
+
+    diff_str = [f"{d:.2f}" for d in diffs]
+    psi_t_str = [f"{t:.3f}" for t in psi_t]
+    psi_str = f"{psi:.3f}"
+
+    # Full equation strings (md_math for inline rendering)
+    scenario_str = (
+        f"{P_pct[0]}% of reviews were positive, {P_pct[1]}% negative, "
+        f"and {P_pct[2]}% neutral. After deployment, the serving distribution "
+        f"shifts to {Q_pct[0]}% positive, {Q_pct[1]}% negative, "
+        f"and {Q_pct[2]}% neutral"
+    )
+    P_vec_str = f"[{P_str[0]}, {P_str[1]}, {P_str[2]}]"
+    Q_vec_str = f"[{Q_str[0]}, {Q_str[1]}, {Q_str[2]}]"
+
+    kl_pq_formula = md_math(
+        f"D_{{KL}}(P || Q) = {P_str[0]} \\log\\frac{{{P_str[0]}}}{{{Q_str[0]}}} "
+        f"+ {P_str[1]} \\log\\frac{{{P_str[1]}}}{{{Q_str[1]}}} "
+        f"+ {P_str[2]} \\log\\frac{{{P_str[2]}}}{{{Q_str[2]}}}"
+    )
+    kl_pq_calc = md_math(
+        f"= {P_str[0]} \\times {lr_str[0]} "
+        f"+ {P_str[1]} \\times ({lr_str[1]}) "
+        f"+ {P_str[2]} \\times ({lr_str[2]}) "
+        f"= {kl_pq_t_str[0]} + ({kl_pq_t_str[1]}) + ({kl_pq_t_str[2]}) "
+        f"= {kl_pq_str}"
+    )
+    kl_qp_formula = md_math(
+        f"D_{{KL}}(Q || P) = {Q_str[0]} \\log\\frac{{{Q_str[0]}}}{{{P_str[0]}}} "
+        f"+ {Q_str[1]} \\log\\frac{{{Q_str[1]}}}{{{P_str[1]}}} "
+        f"+ {Q_str[2]} \\log\\frac{{{Q_str[2]}}}{{{P_str[2]}}}"
+    )
+    kl_qp_calc = md_math(
+        f"= {Q_str[0]} \\times ({-lr[0]:.3f}) "
+        f"+ {Q_str[1]} \\times {lr_str[0]} "
+        f"+ {Q_str[2]} \\times {abs(lr[2]):.3f} "
+        f"= {kl_qp_t_str[0]} + {kl_qp_t_str[1]} + {kl_qp_t_str[2]} "
+        f"= {kl_qp_str}"
+    )
+    psi_eq = md_math(
+        f"\\text{{PSI}} = \\sum (P_i - Q_i) \\log\\frac{{P_i}}{{Q_i}} "
+        f"= ({diff_str[0]})({lr_str[0]}) "
+        f"+ ({diff_str[1]})({lr_str[1]}) "
+        f"+ ({diff_str[2]})({lr_str[2]}) "
+        f"= {psi_t_str[0]} + {psi_t_str[1]} + {psi_t_str[2]} "
+        f"= {psi_str}"
+    )
+```
+
+::: {.callout-notebook title="Worked Example: KL Divergence for Drift Detection"}
+
+**Scenario**: A sentiment classifier was trained on data where `{python} KLDrift.scenario_str`.
+
+Training distribution $P$: `{python} KLDrift.P_vec_str`. Serving distribution $Q$: `{python} KLDrift.Q_vec_str`.
+
+`{python} KLDrift.kl_pq_formula`
+
+`{python} KLDrift.kl_pq_calc` nats
+
+`{python} KLDrift.kl_qp_formula`
+
+`{python} KLDrift.kl_qp_calc` nats
+
+Notice the asymmetry: $D_{KL}(P||Q) \neq D_{KL}(Q||P)$. The Population Stability Index (PSI) symmetrizes this:
+
+`{python} KLDrift.psi_eq`
+
+Since PSI = `{python} KLDrift.psi_str` < `{python} DriftThresholds.psi_threshold_str`, this drift is noticeable but does not yet trigger a retraining alert. However, monitoring should increase in frequency.
+
+:::
+
+Because KL divergence is asymmetric ($D_{KL}(P||Q) \neq D_{KL}(Q||P)$), practitioners often use PSI, a symmetric metric derived from KL divergence that is easier to threshold. A PSI > `{python} DriftThresholds.psi_threshold_str` typically triggers an alert for retraining.
+
+[^fn-kl]: **KL Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected number of extra bits needed to encode samples from $P$ using a code optimized for $Q$. In production ML, KL divergence is the theoretical backbone of most drift-detection metrics.
+
+Both KL divergence and PSI are grounded in a deeper framework—information theory—which provides the units and bounds that make these metrics principled rather than ad hoc.
+
+### Information theory for systems {#sec-data-foundations-information-theory-systems-c033}
+
+In the information roofline model (@sec-dam-taxonomy), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
+
+**Entropy ($H$)**[^fn-entropy] is the average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. A uniform distribution has maximum entropy (maximum uncertainty). This connects directly to KL divergence above: $D_{KL}$ measures excess bits needed when using the wrong distribution.
+
+**Information Density** is the amount of useful signal per unit of storage. High-quality data has high information density; noisy data has low density.
+
+**Signal-to-Noise Ratio (SNR)** is the ratio of useful information to irrelevant variance. In ML, training on low-SNR data is like trying to learn a pattern from static—you hit the information roofline where adding more compute yields no improvement.
+
+[^fn-entropy]: **Entropy**: From Greek *entropia* (transformation). Shannon borrowed the term from thermodynamics in 1948 to quantify information content. In systems terms, entropy tells you the theoretical minimum number of bits needed to encode a message from a source—directly relevant to compression ratios and data pipeline sizing.
+
+### Logits and numerical stability {#sec-data-foundations-logits-numerical-stability-13e2}
+
+Neural networks output *logits*[^fn-logit] (unnormalized scores), not probabilities. We convert them using Softmax:
+
+[^fn-logit]: **Logit**: From *log* + *unit*, coined by Joseph Berkson in 1944. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(p) = \log(p/(1-p))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
+
+$$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
+
+The problem is that if $z_i$ is large (for example, `{python} DriftThresholds.logit_val_str`), the exponential $e^{z_i}$ overflows floating-point range. The solution is to compute in log-space: the "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp]
+
+[^fn-logsumexp]: **Log-Sum-Exp**: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log(\sum e^{x_i}) = a + \log(\sum e^{x_i - a})$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
+
+The following example shows why this trick matters in practice, even for modest logit values:
+
+```{python}
+#| label: logsumexp-example
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOG-SUM-EXP NUMERICAL STABILITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Worked Example: Log-Sum-Exp in Action",
+# │          @sec-data-foundations-logits-numerical-stability-13e2 narrative.
+# │
+# │ Goal:    Demonstrate naive vs stable softmax via the Log-Sum-Exp trick.
+# │ Show:    Naive overflow risk, shifted exponentials, stable softmax values.
+# │ How:     Subtract max logit before exponentiation; compare to naive path.
+# │
+# │ Imports: math (exp, log, log10, floor), mlsysim.book (fmt, check, md_math)
+# │ Exports: lse_z_str, lse_z0..2, lse_naive0..2_str, lse_a_str,
+# │          lse_shifted_str, lse_shifted0..2, lse_sexp0..2_str,
+# │          lse_sum_str, lse_result_str, lse_sm0..2_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsysim.fmt import fmt, check, md_math
+
+class LogSumExp:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    z = [100, 101, 102]
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Naive exponentials
+    naive_exp = [math.exp(zi) for zi in z]
+
+    # Stable version: shift by max (for-loop avoids Python 3 class-scope comprehension issue)
+    a = max(z)
+    shifted = []
+    for zi in z:
+        shifted.append(zi - a)
+    stable_exp = [math.exp(s) for s in shifted]
+    stable_sum = sum(stable_exp)
+    lse = a + math.log(stable_sum)
+
+    # Softmax from stable exponentials (for-loop avoids Python 3 class-scope comprehension issue)
+    softmax = []
+    for e in stable_exp:
+        softmax.append(e/stable_sum)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(sum(softmax) - 1.0) < 1e-10, "Softmax must sum to 1")
+    check(all(0 <= s <= 1 for s in softmax), "Softmax values must be in [0,1]")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    # Use \lbrack/\rbrack for LaTeX math; md_math wraps in $...$ so prose needs no extra delimiters
+    z_str = md_math(f"\\lbrack {z[0]}, {z[1]}, {z[2]} \\rbrack")
+    a_str = f"{a}"
+
+    # Naive exponentials in scientific notation
+    def _sci(v):
+        exp = int(math.floor(math.log10(v)))
+        mantissa = v / 10**exp
+        return f"{mantissa:.1f} \\times 10^{{{exp}}}"
+
+    naive0_str = md_math(_sci(naive_exp[0]))
+    naive1_str = md_math(_sci(naive_exp[1]))
+    naive2_str = md_math(_sci(naive_exp[2]))
+
+    # Shifted logits (use \lbrack/\rbrack for LaTeX math); md_math wraps in $...$
+    shifted_str = md_math(f"\\lbrack {shifted[0]}, {shifted[1]}, {shifted[2]} \\rbrack")
+
+    # Stable exponentials
+    sexp0_str = f"{stable_exp[0]:.3f}"
+    sexp1_str = f"{stable_exp[1]:.3f}"
+    sexp2_str = f"{stable_exp[2]:.1f}"
+
+    sum_str = f"{stable_sum:.3f}"
+    lse_str = f"{lse:.3f}"
+    log_sum_str = f"{math.log(stable_sum):.3f}"
+
+    # Softmax values
+    sm0_str = f"{softmax[0]:.3f}"
+    sm1_str = f"{softmax[1]:.3f}"
+    sm2_str = f"{softmax[2]:.3f}"
+
+    # Pre-formatted exp() expressions (each is a complete $...$ block to avoid split-delimiter LaTeX errors)
+    naive_exp0_expr = md_math(f"\\exp({z[0]}) \\approx {_sci(naive_exp[0])}")
+    naive_exp1_expr = md_math(f"\\exp({z[1]}) \\approx {_sci(naive_exp[1])}")
+    naive_exp2_expr = md_math(f"\\exp({z[2]}) \\approx {_sci(naive_exp[2])}")
+
+    stable_exp0_expr = md_math(f"\\exp({shifted[0]}) \\approx {stable_exp[0]:.3f}")
+    stable_exp1_expr = md_math(f"\\exp({shifted[1]}) \\approx {stable_exp[1]:.3f}")
+    stable_exp2_expr = md_math(f"\\exp({shifted[2]}) = {stable_exp[2]:.1f}")
+
+    log_sum_expr = md_math(f"+ \\log({stable_sum:.3f}) = {lse:.3f}")
+
+    sm_expr = md_math(
+        f"\\lbrack {stable_exp[0]:.3f}/{stable_sum:.3f},\\; "
+        f"{stable_exp[1]:.3f}/{stable_sum:.3f},\\; "
+        f"{stable_exp[2]:.1f}/{stable_sum:.3f} \\rbrack = "
+        f"\\lbrack {softmax[0]:.3f},\\; {softmax[1]:.3f},\\; {softmax[2]:.3f} \\rbrack"
+    )
+```
+
+::: {.callout-notebook title="Worked Example: Log-Sum-Exp in Action"}
+
+**The setup**: A three-class classifier outputs logits $z =$ `{python} LogSumExp.z_str`.
+
+**Without the trick (naive softmax)**:
+
+`{python} LogSumExp.naive_exp0_expr`, `{python} LogSumExp.naive_exp1_expr`, `{python} LogSumExp.naive_exp2_expr`
+
+These numbers are representable in FP64 but overflow FP32 (max $\approx 3.4 \times 10^{38}$). With FP16 (max $\approx 65{,}504$), even $e^{12}$ overflows. In practice, logits of magnitude 100 are not unusual in deep networks, and FP16/BF16 is the standard training precision—so naive softmax fails routinely.
+
+**With the trick**: Subtract $a = \max(z) =$ `{python} LogSumExp.a_str`:
+
+$z - a =$ `{python} LogSumExp.shifted_str`
+
+`{python} LogSumExp.stable_exp0_expr`, `{python} LogSumExp.stable_exp1_expr`, `{python} LogSumExp.stable_exp2_expr`
+
+Sum = `{python} LogSumExp.sum_str`. LogSumExp = `{python} LogSumExp.a_str` `{python} LogSumExp.log_sum_expr`.
+
+Softmax: `{python} LogSumExp.sm_expr`
+
+All intermediate values are in $[0, 1]$—no overflow risk, even in FP16.
+
+:::
+
+::: {.callout-checkpoint title="Check Your Understanding"}
+
+1. A training pipeline reads 500 GB of CSV data over a 10 Gbps link. Estimate the transfer time. Now estimate how long it would take if the data were stored as Parquet and only twenty percent of columns were needed—what changes and why?
+
+2. Your model's average latency is 50 ms, but P99 is 800 ms. If a typical user session involves fifty requests, what is the probability that a user experiences at least one P99 spike? Does "average latency" adequately describe user experience?
+
+3. Explain why KL divergence is asymmetric and why this matters when choosing a drift metric for production monitoring. When would you prefer PSI over raw KL divergence?
+
+:::
+
+The tools in this section—tail-aware metrics, drift divergences, information-theoretic bounds, and numerical stability tricks—give us the vocabulary to diagnose data-related failures quantitatively rather than anecdotally. The fallacies that follow highlight the most common ways these tools are ignored.
+
+## Fallacies and Pitfalls {#sec-data-foundations-fallacies-pitfalls-a338}
+
+**Fallacy:** *Moving a petabyte to the cloud is just a bandwidth problem.*
+
+Transfer time is only the beginning. Data gravity encompasses not just transfer duration but also the re-engineering of pipelines, re-validation of data quality, and synchronization of dependent services. Organizations that plan only for bandwidth discover that the true cost is measured in engineering months, not network hours.
+
+**Pitfall:** *Ignoring data serialization cost.*
+
+Engineers meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. As @tbl-serialization-cost shows, text-based formats can be 10--100$\times$ slower to decode than columnar binary formats, making the CPU—not the accelerator—the bottleneck (@sec-data-foundations-data-engineering-foundations-0c20).
+
+**Fallacy:** *Average latency is a good summary of system performance.*
+
+The mean hides the tail. At scale, the P99 latency becomes the *median user experience* because each session involves many requests. Monitoring only the mean creates a dangerous blind spot where thousands of users suffer degraded service while dashboards show green.
+
+**Pitfall:** *Monitoring accuracy instead of input distributions.*
+
+A model's accuracy can remain stable even as the input distribution drifts, because the model memorizes enough of the old distribution to maintain aggregate metrics. By the time accuracy visibly degrades, the drift has often been accumulating for weeks. Monitoring input distributions with metrics like PSI catches drift earlier and allows proactive retraining.
+
+These pitfalls share a common root: treating data as a solved problem rather than a continuous engineering discipline. The following summary distills the core principles that guard against each one.
+
+## Summary {#sec-data-foundations-summary-3c72}
+
+::: {.callout-takeaways title="Data as a Physical Constraint"}
+
+- Data has *physical inertia*: transfer time scales linearly with volume and inversely with bandwidth, making petabyte-scale datasets effectively immovable. Design pipelines around data locality rather than data movement.
+- Serialization format is a first-order performance decision. Columnar binary formats (Parquet, Arrow) can be 10--100$\times$ faster to decode than text formats (CSV, JSON), directly determining whether accelerators starve or stay fed.
+- The three algebraic primitives—selection, projection, and join—have radically different I/O costs. Joins in particular can amplify network traffic by orders of magnitude; choosing between shuffle and broadcast joins depends on relative table sizes.
+- Average metrics lie. Long-tailed distributions mean that the P99 latency becomes the typical user experience at scale, and monitoring only the mean creates dangerous blind spots.
+- Drift detection requires comparing full distributions, not summary statistics. KL divergence and its symmetric derivative PSI provide principled measures of distribution shift that catch problems before accuracy metrics react.
+- Numerical stability is not optional. The log-sum-exp trick and log-space computation prevent overflow in softmax and loss calculations, making them essential building blocks of any training or inference pipeline.
+
+:::

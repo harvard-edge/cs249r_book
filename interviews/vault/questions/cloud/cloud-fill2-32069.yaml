@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-fill2-32069
+track: cloud
+level: L4
+zone: optimization
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'Expert Offloading: CPU-GPU Expert Swapping for Inference'
+scenario: You want to serve Mixtral 8×7B (93.4 GB FP16) on a single A100 (80 GB HBM2e, 2 TB/s). The model
+  doesn't fit in GPU memory. A colleague proposes keeping shared layers on GPU and swapping experts from
+  CPU RAM over PCIe 4.0 (32 GB/s). Is this viable for interactive serving (< 50ms/token target)?
+details:
+  realistic_solution: 'Shared attention layers: ~7B params = 14 GB FP16, stays on GPU. Each expert MLP:
+    ~5.3B params = 10.6 GB FP16. At batch size 1, top-2: need to load 2 experts from CPU. Transfer time
+    per expert: 10.6 GB / 32 GB/s (PCIe 4.0 x16) = 331ms. Two experts: 662ms. This far exceeds the 50ms/token
+    target — not viable for interactive serving with FP16. With INT4 quantization: each expert = 2.65
+    GB. Transfer: 2.65 / 32 = 83ms per expert. Two experts: 166ms. Still too slow. With speculative expert
+    prefetch: predict likely experts for the next token based on current routing patterns. If prediction
+    accuracy is >80%, amortize loads across tokens. But mispredictions add latency. Viable approach: INT4
+    quantization (total = 23.4 GB) fits entirely on A100. No swapping needed. Alternatively, use 2 A100s
+    with tensor parallelism: 93.4 GB / 2 = 46.7 GB per GPU, fits with room for KV cache. Expert offloading
+    is only viable for throughput-oriented batch inference (large batch, many tokens, amortized swap cost).'
+  common_mistake: Assuming you can swap experts in parallel with computation. The GPU needs the expert
+    weights before it can compute the MLP — this is a serial dependency. Prefetching the next token's
+    experts helps, but routing is data-dependent and unpredictable.
+  napkin_math: 'FP16 expert swap: 10.6 GB / 32 GB/s = 331ms. × 2 experts = 662ms/token. Target: 50ms.
+    Gap: 13×. INT4: 2.65 GB / 32 GB/s = 83ms × 2 = 166ms. Still 3× over target. Full INT4 model: 23.4
+    GB fits on 80 GB A100. No swapping needed.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

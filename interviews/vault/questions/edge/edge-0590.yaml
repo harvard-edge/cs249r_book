@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: edge-0590
+track: edge
+level: L5
+zone: specification
+topic: real-time-deadlines
+competency_area: precision
+bloom_level: evaluate
+phase: inference
+title: The Catastrophic Night-Drive Quantization Failure
+scenario: Your team is deploying a new perception model to your company's autonomous vehicle fleet. To
+  meet the strict 33ms latency budget and 30W power envelope on the Jetson AGX Orin in the vehicle, you've
+  quantized the model from FP16 to INT8. The model passed millions of miles of daytime simulation and
+  road tests. However, within days of deployment, the fleet is disabled after several near-collisions
+  at night. The logs show the model completely fails to detect the brake lights of vehicles directly ahead,
+  even though they are the brightest and most obvious objects in the camera feed. The FP16 version of
+  the model, when run on the same saved data, correctly identifies the brake lights. Evaluate the most
+  likely systems-level cause for this catastrophic, non-linear failure. Why would an optimization designed
+  to make the model faster cause it to become blind to the most salient objects in a scene, and only under
+  specific conditions?
+details:
+  realistic_solution: The root cause is catastrophic activation overflow during INT8 inference, caused
+    by a calibration range that is not representative of all operating conditions. The model was likely
+    calibrated on daytime images, where pixel and activation values have a relatively compressed dynamic
+    range. At night, brake lights and headlights create extreme activation 'spikes'—outliers that are
+    orders of magnitude larger than anything seen in the daytime calibration set. The INT8 scaling factor,
+    fixed during calibration, cannot handle this expanded range. As a result, these critical activations
+    are 'clipped' or 'saturated' at the maximum INT8 value (127). All information about their true intensity
+    and shape is lost, and the feature passed to downstream layers is a distorted, unrecognizable blob.
+    The model isn't just less accurate; it's functionally blind to the very features that are clipped
+    because their representation has been fundamentally destroyed.
+  common_mistake: 'Blaming the dataset without specifying the mechanism. A junior engineer might say,
+    ''We didn''t have enough night-driving data in our calibration set.'' While true, this doesn''t explain
+    *why* that leads to blindness. The L5 mistake is failing to connect the data distribution shift to
+    the specific mathematical failure of quantization: activation overflow. The FP16 model works, so the
+    model *can* generalize; this is a deployment and systems problem, not a training problem.'
+  napkin_math: 'Assume the model was calibrated on a dataset where the maximum activation value in a key
+    early layer was 15.0. To map the floating-point range [-15.0, 15.0] to the integer range [-128, 127],
+    the quantization scale factor is calculated: $S = 127 / 15.0 \approx 8.47$. Now, at night, a bright
+    brake light causes an activation with a true FP16 value of 60.0. When quantized, this value is calculated
+    as $60.0 \times 8.47 = 508$. This is far outside the representable INT8 range, so it''s hard-clipped
+    to 127. When the next layer de-quantizes this value to use it, the value becomes $127 / S = 127 /
+    8.47 \approx 15.0$. A signal that was actually 4x stronger (60.0 vs 15.0) than the brightest daytime
+    object is now perceived as being identical to it. The network''s ability to distinguish intense, critical
+    signals is completely destroyed by the saturation.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

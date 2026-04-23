@@ -15,13 +15,13 @@ Key Features:
 
 Usage:
     # Check single file
-    python format_tables.py --check -f quarto/contents/core/efficient_ai/efficient_ai.qmd
+    python format_tables.py --check -f quarto/contents/vol1/efficient_ai/efficient_ai.qmd
 
     # Fix single file
-    python format_tables.py --fix -f quarto/contents/core/efficient_ai/efficient_ai.qmd
+    python format_tables.py --fix -f quarto/contents/vol1/efficient_ai/efficient_ai.qmd
 
     # Check all files in a directory
-    python format_tables.py --check -d quarto/contents/core/optimizations
+    python format_tables.py --check -d quarto/contents/vol1/optimizations
 
     # Fix all chapter files
     python format_tables.py --fix --all
@@ -264,6 +264,7 @@ def detect_column_alignments(header_rows: List[List[str]], data_rows: List[List[
     Detect optimal alignment for each column based on content.
 
     Rules:
+    - FIRST COLUMN: Always left-aligned (book style guide requirement)
     - Numeric columns (>70% numbers): right-aligned
     - Text columns: left-aligned
     - Mixed: left-aligned (default)
@@ -275,6 +276,11 @@ def detect_column_alignments(header_rows: List[List[str]], data_rows: List[List[
     alignments = []
 
     for col_idx in range(num_columns):
+        # RULE: First column is ALWAYS left-aligned (book style guide)
+        if col_idx == 0:
+            alignments.append('left')
+            continue
+
         # Collect all values in this column (skip empty cells)
         column_values = []
         for row in data_rows:
@@ -609,8 +615,6 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     for header_row in parser.header_rows:
         formatted_row = []
         for cell in header_row:
-            # First escape HTML entities
-            cell = escape_html_entities(cell)
             # Then apply bolding if needed
             if bold_headers and cell.strip() and not is_bolded(cell):
                 formatted_row.append(add_bold(cell))
@@ -623,8 +627,6 @@ def format_table_lines(parser: GridTableParser, max_width: Optional[int] = None)
     for row in wrapped_data:
         new_row = []
         for i, cell in enumerate(row):
-            # First escape HTML entities
-            cell = escape_html_entities(cell)
             # Bold first column only if it has content (preserve empty cells for multiline)
             if i == 0 and bold_first_col and cell.strip() and not is_bolded(cell):
                 new_row.append(add_bold(cell))
@@ -688,6 +690,10 @@ def validate_table(parser: GridTableParser, max_width: Optional[int] = None) -> 
         (is_valid, list_of_warnings)
     """
     warnings = []
+
+    # Check first column alignment (must ALWAYS be left-aligned per style guide)
+    if parser.alignments and parser.alignments[0] != 'left':
+        warnings.append(f"First column must be left-aligned (found: {parser.alignments[0]})")
 
     # Check header bolding (check ALL header rows for multiline headers)
     unbolded_headers = []
@@ -895,7 +901,7 @@ def main():
     file_group.add_argument('-d', '--directory', type=str,
                            help='Process all .qmd files in a directory recursively')
     file_group.add_argument('--all', action='store_true',
-                           help='Process all .qmd files in quarto/contents/core')
+                           help='Process all .qmd files in quarto/contents/vol1')
 
     # Action selection
     action_group = parser.add_mutually_exclusive_group(required=False)

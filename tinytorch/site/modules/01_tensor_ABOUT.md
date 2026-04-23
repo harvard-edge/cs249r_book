@@ -1,1 +1,0 @@
-../../src/01_tensor/ABOUT.md

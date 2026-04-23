@@ -63,6 +63,7 @@ import sys
 import os
 import time
 import numpy as np
+rng = np.random.default_rng(7)
 import tracemalloc
 from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
@@ -199,9 +200,9 @@ Matrix Multiplication (M,K) @ (K,N):
         Rows Cols Inner Multiply+Add
 
 Linear Layer Forward:
-   FLOPs = batch_size x input_features x output_features x 2
-                      ↑                  ↑                 ↑
-                  Matmul cost        Bias add        Operations
+   FLOPs = input_features x output_features x 2  (per sample, batch-independent)
+                ↑                  ↑              ↑
+           Input dimension   Output dimension  Multiply+Add
 
 Convolution (simplified):
    FLOPs = output_H x output_W x kernel_H x kernel_W x in_channels x out_channels x 2
@@ -311,6 +312,15 @@ class Profiler:
         self.operation_counts = defaultdict(int)
         self.memory_tracker = None
         ### END SOLUTION
+
+    def __enter__(self):
+        """Start timing for use as a context manager."""
+        self._context_start = time.perf_counter()
+        return self
+
+    def __exit__(self, *args):
+        """Stop timing and store elapsed time in milliseconds."""
+        self.elapsed = (time.perf_counter() - self._context_start) * 1000
 
     def _count_layer_parameters(self, layer) -> int:
         """
@@ -568,7 +578,7 @@ class Profiler:
 
         parameter_memory_mb = self._calculate_parameter_memory(model)
 
-        dummy_input = Tensor(np.random.randn(*input_shape))
+        dummy_input = Tensor(rng.standard_normal(input_shape))
         activation_memory_mb = (dummy_input.data.nbytes * 2) / MB_TO_BYTES
 
         _ = model.forward(dummy_input)
@@ -604,7 +614,7 @@ class Profiler:
 
         EXAMPLE:
         >>> linear = Linear(128, 64)
-        >>> input_tensor = Tensor(np.random.randn(1, 128))
+        >>> input_tensor = Tensor(rng.standard_normal((1, 128)))
         >>> profiler = Profiler()
         >>> latency = profiler.measure_latency(linear, input_tensor)
         >>> print(f"Latency: {latency:.2f} ms")
@@ -662,7 +672,7 @@ class Profiler:
         """
         ### BEGIN SOLUTION
         # Create dummy input for latency measurement
-        dummy_input = Tensor(np.random.randn(*input_shape))
+        dummy_input = Tensor(rng.standard_normal(input_shape))
 
         # Gather all measurements
         params = self.count_parameters(layer)
@@ -757,7 +767,7 @@ class Profiler:
 
         EXAMPLE:
         >>> model = Linear(256, 128)
-        >>> input_data = Tensor(np.random.randn(32, 256))
+        >>> input_data = Tensor(rng.standard_normal((32, 256)))
         >>> profiler = Profiler()
         >>> profile = profiler.profile_forward_pass(model, input_data)
         >>> print(f"Throughput: {profile['gflops_per_second']:.2f} GFLOP/s")
@@ -853,7 +863,7 @@ class Profiler:
 
         EXAMPLE:
         >>> model = Linear(128, 64)
-        >>> input_data = Tensor(np.random.randn(16, 128))
+        >>> input_data = Tensor(rng.standard_normal((16, 128)))
         >>> profiler = Profiler()
         >>> profile = profiler.profile_backward_pass(model, input_data)
         >>> print(f"Training iteration: {profile['total_latency_ms']:.2f} ms")
@@ -921,7 +931,7 @@ def quick_profile(model, input_tensor, profiler=None):
 
     Example:
         >>> model = Linear(128, 64)
-        >>> input_data = Tensor(np.random.randn(16, 128))
+        >>> input_data = Tensor(rng.standard_normal((16, 128)))
         >>> results = quick_profile(model, input_data)
         >>> # Displays formatted output automatically
     """
@@ -1014,7 +1024,7 @@ def test_unit_helper_functions():
     # Test 1: Quick profile function
     from tinytorch.core.layers import Linear
     test_model = Linear(16, 8)
-    test_input = Tensor(np.random.randn(8, 16))
+    test_input = Tensor(rng.standard_normal((8, 16)))
     profile = quick_profile(test_model, test_input, profiler=Profiler())
 
     # Validate profile contains expected keys
@@ -1026,7 +1036,7 @@ def test_unit_helper_functions():
     # Test 2: Weight distribution analysis
     class SimpleModel:
         def __init__(self):
-            self.weight = Tensor(np.random.randn(10, 5) * 0.1)  # Small weights
+            self.weight = Tensor(rng.standard_normal((10, 5)) * 0.1)  # Small weights
 
     model = SimpleModel()
     stats = analyze_weight_distribution(model)
@@ -1097,8 +1107,8 @@ def test_unit_count_layer_parameters():
     # Test 1: Layer with weight and bias
     class LayerWithBias:
         def __init__(self):
-            self.weight = Tensor(np.random.randn(10, 5))
-            self.bias = Tensor(np.random.randn(5))
+            self.weight = Tensor(rng.standard_normal((10, 5)))
+            self.bias = Tensor(rng.standard_normal(5))
 
     layer = LayerWithBias()
     count = profiler._count_layer_parameters(layer)
@@ -1108,7 +1118,7 @@ def test_unit_count_layer_parameters():
     # Test 2: Layer with weight only (no bias)
     class LayerNoBias:
         def __init__(self):
-            self.weight = Tensor(np.random.randn(8, 4))
+            self.weight = Tensor(rng.standard_normal((8, 4)))
 
     layer_no_bias = LayerNoBias()
     count = profiler._count_layer_parameters(layer_no_bias)
@@ -1149,8 +1159,8 @@ def test_unit_parameter_counting():
     # Test 1: Simple model with known parameters
     class SimpleModel:
         def __init__(self):
-            self.weight = Tensor(np.random.randn(10, 5))
-            self.bias = Tensor(np.random.randn(5))
+            self.weight = Tensor(rng.standard_normal((10, 5)))
+            self.bias = Tensor(rng.standard_normal(5))
 
         def parameters(self):
             return [self.weight, self.bias]
@@ -1172,7 +1182,7 @@ def test_unit_parameter_counting():
     print(f"✅ No parameter model: {param_count} parameters")
 
     # Test 3: Direct tensor (no parameters)
-    test_tensor = Tensor(np.random.randn(2, 3))
+    test_tensor = Tensor(rng.standard_normal((2, 3)))
     param_count = profiler.count_parameters(test_tensor)
     assert param_count == 0, f"Expected 0 parameters for tensor, got {param_count}"
     print(f"✅ Direct tensor: {param_count} parameters")
@@ -1240,7 +1250,7 @@ def test_unit_count_linear_flops():
     # Create mock Linear layer
     class MockLinear:
         def __init__(self, in_f, out_f):
-            self.weight = Tensor(np.random.randn(in_f, out_f))
+            self.weight = Tensor(rng.standard_normal((in_f, out_f)))
             self.__class__.__name__ = 'Linear'
 
     # Test 1: Known dimensions
@@ -1341,7 +1351,7 @@ def test_unit_count_sequential_flops():
     # Create mock sequential model with two Linear layers
     class MockLinear:
         def __init__(self, in_f, out_f):
-            self.weight = Tensor(np.random.randn(in_f, out_f))
+            self.weight = Tensor(rng.standard_normal((in_f, out_f)))
             self.__class__.__name__ = 'Linear'
 
     class MockSequential:
@@ -1385,7 +1395,7 @@ def test_unit_flop_counting():
     profiler = Profiler()
 
     # Test 1: Simple tensor operations
-    test_tensor = Tensor(np.random.randn(4, 8))
+    test_tensor = Tensor(rng.standard_normal((4, 8)))
     flops = profiler.count_flops(test_tensor, (4, 8))
     expected_flops = 4 * 8  # 1 FLOP per element for generic operation
     assert flops == expected_flops, f"Expected {expected_flops} FLOPs, got {flops}"
@@ -1394,7 +1404,7 @@ def test_unit_flop_counting():
     # Test 2: Simulated Linear layer
     class MockLinear:
         def __init__(self, in_features, out_features):
-            self.weight = Tensor(np.random.randn(in_features, out_features))
+            self.weight = Tensor(rng.standard_normal((in_features, out_features)))
             self.__class__.__name__ = 'Linear'
 
     mock_linear = MockLinear(128, 64)
@@ -1470,7 +1480,7 @@ def test_unit_calculate_parameter_memory():
     class KnownModel:
         def __init__(self):
             # 1024 * 1024 = 1,048,576 parameters = exactly 4 MB at FP32
-            self.weight = Tensor(np.random.randn(1024, 1024))
+            self.weight = Tensor(rng.standard_normal((1024, 1024)))
 
     model = KnownModel()
     memory_mb = profiler._calculate_parameter_memory(model)
@@ -1553,7 +1563,7 @@ def test_unit_memory_measurement():
     profiler = Profiler()
 
     # Test 1: Basic memory measurement
-    test_tensor = Tensor(np.random.randn(10, 20))
+    test_tensor = Tensor(rng.standard_normal((10, 20)))
     from tinytorch.core.layers import Linear
     test_model = Linear(20, 10)
     memory_stats = profiler.measure_memory(test_model, (10, 20))
@@ -1650,7 +1660,7 @@ def test_unit_latency_measurement():
     # Test 1: Basic latency measurement
     from tinytorch.core.layers import Linear
     test_model = Linear(8, 4)
-    test_input = Tensor(np.random.randn(4, 8))
+    test_input = Tensor(rng.standard_normal((4, 8)))
     latency = profiler.measure_latency(test_model, test_input, warmup=2, iterations=5)
 
     assert latency >= 0, f"Latency should be non-negative, got {latency}"
@@ -1672,8 +1682,8 @@ def test_unit_latency_measurement():
     # Test 3: Size scaling
     small_model = Linear(2, 2)
     large_model = Linear(20, 20)
-    small_input = Tensor(np.random.randn(2, 2))
-    large_input = Tensor(np.random.randn(20, 20))
+    small_input = Tensor(rng.standard_normal((2, 2)))
+    large_input = Tensor(rng.standard_normal((20, 20)))
 
     small_latency = profiler.measure_latency(small_model, small_input, warmup=1, iterations=3)
     large_latency = profiler.measure_latency(large_model, large_input, warmup=1, iterations=3)
@@ -1913,7 +1923,7 @@ def test_unit_advanced_profiling():
     profiler = Profiler()
     from tinytorch.core.layers import Linear
     test_model = Linear(8, 4)
-    test_input = Tensor(np.random.randn(4, 8))
+    test_input = Tensor(rng.standard_normal((4, 8)))
 
     # Test forward pass profiling
     forward_profile = profiler.profile_forward_pass(test_model, test_input)
@@ -2008,7 +2018,7 @@ def analyze_model_scaling():
         from tinytorch.core.layers import Linear
         test_model = Linear(size, size)
         input_shape = (32, size)  # Batch of 32
-        dummy_input = Tensor(np.random.randn(*input_shape))
+        dummy_input = Tensor(rng.standard_normal(input_shape))
 
         # Simulate linear layer characteristics
         linear_params = size * size + size  # W + b
@@ -2067,7 +2077,7 @@ def analyze_batch_size_effects():
         from tinytorch.core.layers import Linear
         test_model = Linear(feature_size, feature_size)
         input_shape = (batch_size, feature_size)
-        dummy_input = Tensor(np.random.randn(*input_shape))
+        dummy_input = Tensor(rng.standard_normal(input_shape))
 
         # Measure performance
         latency = profiler.measure_latency(test_model, dummy_input, warmup=3, iterations=10)
@@ -2129,7 +2139,7 @@ def benchmark_operation_efficiency():
 
     # Test different operation types
     size = 256
-    input_tensor = Tensor(np.random.randn(32, size))
+    input_tensor = Tensor(rng.standard_normal((32, size)))
 
     # Elementwise operations (memory-bound)
     # Create a simple model wrapper for elementwise operations
@@ -2215,7 +2225,7 @@ def analyze_profiling_overhead():
     print("\n📊 Analyzing Profiling Overhead...")
 
     # Test with and without profiling
-    test_tensor = Tensor(np.random.randn(100, 100))
+    test_tensor = Tensor(rng.standard_normal((100, 100)))
     iterations = 50
 
     # Without profiling - baseline measurement
@@ -2312,7 +2322,7 @@ def test_module():
     # Create test model and data
     from tinytorch.core.layers import Linear
     test_model = Linear(16, 32)
-    test_input = Tensor(np.random.randn(8, 16))
+    test_input = Tensor(rng.standard_normal((8, 16)))
 
     # Run complete profiling workflow
     print("1. Measuring model characteristics...")
@@ -2361,7 +2371,7 @@ def test_module():
     # Simulate larger model analysis
     from tinytorch.core.layers import Linear
     large_model = Linear(512, 256)
-    large_input = Tensor(np.random.randn(32, 512))  # Larger model input
+    large_input = Tensor(rng.standard_normal((32, 512)))  # Larger model input
     large_profile = profiler.profile_forward_pass(large_model, large_input)
 
     # Verify profile contains optimization insights

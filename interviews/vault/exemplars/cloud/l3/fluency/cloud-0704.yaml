@@ -1,0 +1,31 @@
+schema_version: 1
+id: cloud-0704
+title: The Distributed Training Choke Point
+topic: data-parallelism
+status: published
+provenance: human
+scenario: You are an ML Systems Engineer scaling a 70B parameter model training job from a single 8xH100
+  server to two servers (16 GPUs total). In the single-node setup, GPUs are connected via NVLink 4.0 and
+  achieve 95% utilization. When you scale to two nodes, connected via a 400 Gbps InfiniBand NDR switch,
+  you observe that per-GPU throughput drops by nearly 50%, and profiler tools show a massive spike in
+  time spent on `AllReduce` communication operations. Diagnose the primary performance bottleneck.
+details:
+  realistic_solution: The bottleneck is the switch from the on-node NVLink fabric to the off-node InfiniBand
+    network. NVLink is a proprietary, extremely high-bandwidth, low-latency GPU-to-GPU interconnect. InfiniBand
+    is a high-performance networking standard, but it is orders of magnitude slower than NVLink. For the
+    `AllReduce` operation, gradients and weights must now traverse the much slower PCIe bus to the InfiniBand
+    NIC, travel over the wire to the other node, and back again. This introduces significant latency and
+    bandwidth constraints that were absent in the single-node NVLink mesh, causing the GPUs to spend most
+    of their time waiting for data from other nodes.
+  common_mistake: 'Engineers often underestimate the staggering performance gap between on-node and off-node
+    interconnects. They might blame the network drivers, the NCCL configuration, or the model architecture
+    itself, failing to see the fundamental physics problem: the speed-of-light and protocol limits of
+    crossing the server boundary.'
+  napkin_math: Let's compare the bandwidth for a gradient update. A 70B FP16 model has 140GB of gradients.
+    In an 8-GPU Ring AllReduce, each GPU sends and receives $2 \times \frac{7}{8} \times 140\text{GB}
+    = 245\text{GB}$ of data. On a single node, NVLink 4.0 (900 GB/s) handles this in ~0.27 seconds. Across
+    two nodes via 400 Gbps (50 GB/s) InfiniBand, the cross-node portion becomes a severe bottleneck, taking
+    ~4.9 seconds, massively increasing the communication overhead.
+last_modified: '2026-04-01'
+tags:
+- scope:Distributed Systems

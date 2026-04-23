@@ -147,6 +147,39 @@ local function chapterinfo(book, fname)
     return(info)
 end
 
+-- Convert part index to Roman numeral for display (Part I → I.1, Part II → II.1, etc.)
+local function to_roman(n)
+  local val = { 10, 9, 5, 4, 1 }
+  local sym = { "X", "IX", "V", "IV", "I" }
+  local num = tonumber(n) or 0
+  if num < 1 then return tostring(n) end
+  local s = ""
+  for i, v in ipairs(val) do
+    while num >= v do s = s .. sym[i]; num = num - v end
+  end
+  return s
+end
+
+-- Build ordered list of "part-principles" file stems (e.g. contents/vol1/parts/foundations_principles).
+-- Principles in these files are numbered by part: Part I → I.1, I.2; Part II → II.1, II.2; etc.
+local function part_principles_index(book, fname)
+  if not book or not book.render then return nil end
+  local part_stems = {}
+  for i, v in ipairs(book.render) do
+    if str(v.type) == "chapter" then
+      local f = str(v.file)
+      if f:find("/parts/") and f:find("principles") then
+        local stem = pandoc.path.split_extension(f)
+        table.insert(part_stems, stem)
+      end
+    end
+  end
+  for pno, stem in ipairs(part_stems) do
+    if stem == fname then return pno end
+  end
+  return nil
+end
+
 local function Meta_findChapterNumber(meta)
   local processedfile = pandoc.path.split_extension(PANDOC_STATE.output_file)
   fbx.isbook = meta.book ~= nil
@@ -170,8 +203,13 @@ local function Meta_findChapterNumber(meta)
     fbx.islastfile  = chinfo.islast
 
     fbx.unnumbered = false
-    -- user set chapter number overrides information from meta
-    if meta.chapno then
+    -- Principles live in part files (e.g. parts/foundations_principles.qmd). Use Roman part
+    -- as prefix so numbering is Part I → I.1, I.2; Part II → II.1, II.2; etc.
+    local partno = part_principles_index(meta.book, processedfile)
+    fbx.in_part_principles = (partno ~= nil)
+    if partno ~= nil then
+      fbx.chapno = to_roman(partno)
+    elseif meta.chapno then
       fbx.chapno = str(meta.chapno)
     else
       if chinfo.chapno ~= nil then
@@ -181,7 +219,8 @@ local function Meta_findChapterNumber(meta)
         fbx.unnumbered = true
       end
     end
-  else -- not a book.
+  else -- not a book
+    fbx.in_part_principles = false
     fbx.xreffile ="._"..processedfile.."_xref.json"
     fbx.chapno = ""
     fbx.unnumbered = true
@@ -347,18 +386,12 @@ local function fboxDiv_setAttributes(el, cls, prefix)
   cnts = fbx.counter[cntkey] +1
   fbx.counter[cntkey] = cnts
 
+  -- Numbering scope (from YAML group scope; only applies when numbered: true):
+  --   global: prefix is cleared → labels are 1, 2, 3... across the whole book (e.g. Principle 1, Principle 2).
+  --   local:  prefix is chapter number → labels are chapter.number (e.g. 4.1, 4.2 in chapter 4). Default when scope omitted.
+  local scope = replaceifnil(ClassDef.scope, "local")
+  if scope == "global" then prefix = "" end
   idnumber = ifelse(prefix ~= "", prefix .. '.' .. cnts, str(cnts))
-  --[[
-  if prefix ~="" then  idnumber = prefix .. '.' .. cnts
-    else idnumber = str(cnts)
-  end
-
-  if numbered then
-    if  not tagged then tag = idnumber
-    else tag = idnumber.."("..tag..")"
-    end
-  end
-]]--
   if numbered then tag = idnumber..ifelse(tagged, "("..tag..")", "" ) end
 
   if id == "" then
@@ -414,6 +447,8 @@ local function Pandoc_prefix_count(doc)
   local secno = 0
   local prefix = "0"
   if fbx.ishtmlbook then prefix = fbx.chapno end
+  -- PDF: part-principles files have no H1 at start; use part index so we get 1.1, 1.2; 2.1, 2.2; etc.
+  if ispdf and fbx.in_part_principles and fbx.chapno and fbx.chapno ~= "" then prefix = fbx.chapno end
 
 -- pout("this is a book?"..str(fbx.ishtmlbook))
 
@@ -475,7 +510,7 @@ local function Divs_getid(el)
    if id == nil or id =="" then
     -- try in next header
     el1 = el.content[1]
-    if el1.t=="Header" then
+    if el1 ~= nil and el1.t=="Header" then
     --    pout("--- looking at header with id "..el1.identifier)
     --    pout("--- still processing item with id ".. replaceifempty(id, "LEER"))
      -- pout("replacing id")
@@ -763,7 +798,7 @@ end -- function renderDiv
 -- TODO: make everything with walk. Looks so nice
 local function resolveref(data)
   return {
-   RawInline = function(el)
+    RawInline = function(el)
       local refid = el.text:match("\\ref{(.*)}")
       if refid then
         if data[refid] then
@@ -772,7 +807,37 @@ local function resolveref(data)
             href = data[refid].file .. '.html' .. href
           end
           return pandoc.Link(data[refid].refnum, href)
-      end  end
+        end
+      end
+    end,
+    -- Support for @id syntax (Quarto/Pandoc Cite elements)
+    Cite = function(el)
+      for _, citation in ipairs(el.citations) do
+        local refid = citation.id
+        if data[refid] then
+          local href = '#'..refid
+          if fbx.ishtmlbook then
+            href = data[refid].file .. '.html' .. href
+          end
+          -- Return link with reflabel + refnum (e.g., "Principle 1.1")
+          local linktext = data[refid].reflabel .. " " .. data[refid].refnum
+          return pandoc.Link(linktext, href)
+        end
+      end
+      -- Not our ref, return unchanged for bibliography processing
+      return nil
+    end,
+    -- Bare @pri-xxx in text (no brackets): replace Str("@pri-xxx") with Link when pri is not in Quarto crossref
+    Str = function(el)
+      local refid = el.text:match("^@(pri-[%w%-]+)$")
+      if refid and data[refid] then
+        local href = '#' .. refid
+        if fbx.ishtmlbook then
+          href = data[refid].file .. '.html' .. href
+        end
+        local linktext = data[refid].reflabel .. " " .. data[refid].refnum
+        return pandoc.Link(linktext, href)
+      end
     end
   }
 end

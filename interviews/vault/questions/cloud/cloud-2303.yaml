@@ -1,0 +1,66 @@
+schema_version: '1.0'
+id: cloud-2303
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: GQA Prefill Latency Regression
+scenario: 'To support 32K context windows for a 70B model on an 8x A100 node, your team modifies the architecture
+  from Multi-Head Attention (MHA, 64 Q heads, 64 KV heads) to Grouped-Query Attention (GQA, 64 Q, 8 KV).
+  This successfully reduces KV cache memory by 8x. However, production monitoring shows a massive failure:
+  32K context prefill latency unexpectedly spiked from 1.2 seconds to 2.8 seconds, triggering API timeouts.
+  Decode latency improved as expected. What is the root cause of the prefill regression?'
+details:
+  realistic_solution: "The root cause is a compiler-hardware mapping failure where the algorithmic optimization\
+    \ (GQA) is defeated by intermediate tensor materialization. During prefill, the inference framework\
+    \ lacked a native GQA-optimized FlashAttention kernel. To compensate, the compiler/framework implicitly\
+    \ 'upsampled' or broadcasted the 8 KV heads back to 64 KV heads in High Bandwidth Memory (HBM) *before*\
+    \ invoking the standard MHA FlashAttention kernel. \n\nMaterializing this massive 32K-length repeated\
+    \ tensor in HBM causes an enormous memory bandwidth bottleneck. The GPU wastes cycles and bandwidth\
+    \ writing the duplicated KV heads to HBM, and then reading them back into SRAM, completely eclipsing\
+    \ any compute savings from having fewer distinct KV heads. \n\nThe fix requires hardware-compiler\
+    \ co-design: integrating a fused GQA-aware FlashAttention kernel (e.g., FlashAttention-2 with GQA\
+    \ support). In this kernel, the 8 KV heads are loaded from HBM into the SM's SRAM only once per block.\
+    \ The broadcast to the 64 Q heads happens entirely on-chip within the SRAM and registers, eliminating\
+    \ the O(N x d x H) out-of-core HBM read/write overhead."
+  common_mistake: Assuming GQA intrinsically requires more FLOPs during prefill due to complex routing,
+    or blaming KV cache fragmentation.
+  napkin_math: "For 1 layer, 32K tokens, 64 heads, 128 dim, FP16 (2 bytes): \nMHA KV size: 32K * 64 *\
+    \ 128 * 2 = 524 MB. \nGQA KV size: 32K * 8 * 128 * 2 = 65 MB. \nImplicit upsample operation: Reads\
+    \ 65 MB, writes 524 MB to HBM. Then standard attention reads 524 MB. \nTotal extra HBM traffic = ~1\
+    \ GB per layer. For 80 layers: 80 GB of pure overhead memory traffic. At 2 TB/s A100 bandwidth, this\
+    \ adds at least 40ms of pure memory-copy stall time per request, plus kernel launch overheads, starving\
+    \ the tensor cores during what should be a compute-bound prefill phase."
+  options:
+  - Network congestion is solved by increasing the InfiniBand link rate from 200 Gbps to 400 Gbps; software-level
+    mitigations like gradient compression are unnecessary with modern NDR IB
+  - The best mitigation is switching from synchronous to asynchronous training, which eliminates AllReduce
+    entirely; async SGD has identical convergence properties and is strictly faster
+  - AllReduce congestion is caused by TCP/IP overhead in the NCCL transport layer; replacing NCCL with
+    raw MPI_Allreduce eliminates the software bottleneck
+  - 'Network congestion from AllReduce can be mitigated by: (1) Gradient compression — top-k sparsification
+    or quantization (FP16→FP8) to reduce AllReduce volume by 2-10×. (2) Hierarchical AllReduce — reduce
+    within nodes first (NVLink), then across nodes (IB), exploiting the bandwidth hierarchy. (3) Overlapped
+    communication — pipeline AllReduce with backward computation using gradient bucketing. (4) Reducing
+    AllReduce frequency via gradient accumulation (K steps between syncs).'
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

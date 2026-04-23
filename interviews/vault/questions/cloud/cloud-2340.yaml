@@ -1,0 +1,69 @@
+schema_version: '1.0'
+id: cloud-2340
+track: cloud
+level: L6+
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: both
+title: INT4 Weight-Only Quantization Slowdown on A100
+scenario: To save memory, your team applies INT4 weight-only quantization to a 65B parameter model deployed
+  on NVIDIA A100s. The model size shrinks from 130GB to 35GB. However, the token generation latency increases
+  from 40ms/token (BF16) to 95ms/token (INT4). Profiling shows high ALU utilization but low Tensor Core
+  utilization.
+details:
+  realistic_solution: 'The symptom (higher latency, high ALU usage, low Tensor Core usage despite smaller
+    weights) is a classic numeric-hardware mapping failure. The NVIDIA A100 architecture does NOT have
+    native INT4 Tensor Cores (these were introduced in Hopper/Ada Lovelace). Because the hardware cannot
+    natively multiply INT4 matrices, the custom kernel must fetch INT4 weights, unpack them into INT8
+    or FP16 inside the CUDA cores (ALUs) using bit-shifts and masks, and then feed the unpacked FP16 weights
+    into the Tensor Cores. This unpacking process takes multiple integer instructions per weight. For
+    a memory-bound decoding phase, the time saved fetching 35GB instead of 130GB is completely overshadowed
+    by the massive instruction overhead of unpacking 65 billion weights per token in the ALUs, shifting
+    the bottleneck from HBM bandwidth to ALU instruction throughput. Co-design fix: Upgrade to H100, or
+    use INT8 quantization (which A100 supports natively), or pre-pack weights in a format that minimizes
+    bitwise operations.'
+  common_mistake: Assuming the memory bandwidth is bottlenecked by the smaller INT4 weights, or that CPU-to-GPU
+    transfer of inputs is slowing it down.
+  napkin_math: A100 HBM BW = 2 TB/s. BF16 fetch time = 130GB / 2000 GB/s = 65ms. INT4 fetch time = 35GB
+    / 2000 GB/s = 17.5ms. Savings = 47.5ms. Unpacking INT4 requires ~3 instructions (load, shift, mask,
+    cast) per element. 65B elements * 3 = 195 billion instructions. A100 has ~19 TFLOPS of FP32/INT32
+    ALU performance. 195e9 / 19e12 = 10.2ms. But wait, thread divergence and register pressure from unpacking
+    often cause 5-10x slowdowns in effective ALU throughput, adding ~80ms of compute stall time. 17.5ms
+    (fetch) + 80ms (unpack) = 97.5ms > 65ms.
+  options:
+  - Evaluation must always run on a separate GPU cluster to avoid interfering with training; sharing GPUs
+    between training and evaluation causes gradient corruption
+  - Evaluation must use FP32 precision regardless of training precision to get accurate metrics; FP16
+    evaluation produces unreliable perplexity scores with >10% error
+  - 'Efficient large-scale evaluation requires: (1) Sharded evaluation across GPUs — split the eval dataset
+    and compute metrics in parallel with AllReduce for aggregation. (2) Overlapped evaluation — pipeline
+    eval batches with training batches to avoid GPU idle time. (3) Reduced precision — eval in FP16/INT8
+    (faster than FP32, accuracy difference negligible for eval metrics). (4) Subset evaluation — run full
+    eval suite periodically, quick proxy metrics (perplexity on 1% sample) at every checkpoint.'
+  - Evaluation should run only at the end of training to avoid wasting compute; intermediate checkpoints
+    are only useful for failure recovery, not for monitoring training progress
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- quantization
+- gpu-architecture
+- a100
+- int4

@@ -1,6 +1,31 @@
 name: '📦 Kits · 👁️ Preview (Dev)'
 
-# Builds and deploys Hardware Kits site (with PDF) to dev preview
+# =============================================================================
+# Hardware Kits — Dev Preview Deploy
+# =============================================================================
+#
+# Builds the Hardware Kits Quarto site with PDF and deploys to the dev
+# preview site via SSH.
+#
+# Flow:
+#   1. BUILD_PDF    — Compile Hardware Kits PDF (reusable workflow)
+#   2. BUILD_SITE   — Quarto render + inject PDF into site
+#   3. DEPLOY       — Push to dev preview repo via SSH
+#
+# Triggers:
+#   - push: dev branch, kits/** paths
+#   - workflow_dispatch: manual
+#
+# Deploys to: harvard-edge.github.io/{DEV_REPO}/{DEV_KITS_PATH}/
+# Secrets:    SSH_DEPLOY_KEY
+# Vars:       KITS_ROOT, BOOK_TOOLS, DEV_REPO, DEV_REPO_URL, DEV_KITS_PATH
+#
+# Related:
+#   - kits-validate-dev.yml  — Content & build validation
+#   - kits-publish-live.yml  — Production deploy to mlsysbook.ai/kits/
+#   - kits-build-pdfs.yml    — Reusable PDF build
+#
+# =============================================================================
 
 on:
   workflow_dispatch:
@@ -32,19 +57,19 @@ jobs:
 
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 🔧 Setup Quarto
         uses: quarto-dev/quarto-actions/setup@v2
 
       - name: 🔨 Build Kits Site
-        working-directory: kits
+        working-directory: ${{ vars.KITS_ROOT }}
         run: |
           quarto render
           touch _build/.nojekyll
 
       - name: 📥 Download PDF Artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         continue-on-error: true
         with:
           name: Kits-PDF
@@ -53,10 +78,10 @@ jobs:
       - name: 📁 Inject PDF into site
         run: |
           echo "📁 Injecting PDF into built site..."
-          mkdir -p kits/_build/assets/downloads
+          mkdir -p ${{ vars.KITS_ROOT }}/_build/assets/downloads
 
           if [ -f ./pdf-artifacts/Hardware-Kits.pdf ]; then
-            cp ./pdf-artifacts/Hardware-Kits.pdf kits/_build/assets/downloads/
+            cp ./pdf-artifacts/Hardware-Kits.pdf ${{ vars.KITS_ROOT }}/_build/assets/downloads/
             echo "✅ Injected Hardware-Kits.pdf"
           else
             echo "⚠️ PDF not found"
@@ -64,7 +89,10 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la kits/_build/assets/downloads/ || echo "No downloads folder"
+          ls -la ${{ vars.KITS_ROOT }}/_build/assets/downloads/ || echo "No downloads folder"
+
+      - name: 🔗 Rewrite URLs for dev site
+        run: bash .github/scripts/rewrite-dev-urls.sh kits ${{ vars.KITS_ROOT }}/_build
 
       - name: 🔧 Modify announcement for dev preview
         run: |
@@ -72,8 +100,8 @@ jobs:
           COMMIT_SHORT="${{ github.sha }}"
           COMMIT_SHORT="${COMMIT_SHORT:0:8}"
 
-          python3 book/tools/scripts/publish/modify_dev_announcement.py \
-            kits/_build \
+          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            ${{ vars.KITS_ROOT }}/_build \
             --verbose \
             --commit-hash "${{ github.sha }}" \
             --commit-short "$COMMIT_SHORT"
@@ -104,7 +132,7 @@ jobs:
           mkdir -p ${{ vars.DEV_KITS_PATH }}
 
           echo "🚚 Copying Kits site content..."
-          cp -r "${{ github.workspace }}/kits/_build/." ${{ vars.DEV_KITS_PATH }}/
+          cp -r "${{ github.workspace }}/${{ vars.KITS_ROOT }}/_build/." ${{ vars.DEV_KITS_PATH }}/
 
           echo "🔍 Validating deployment content..."
           if [ ! -f "${{ vars.DEV_KITS_PATH }}/index.html" ]; then
@@ -118,6 +146,15 @@ jobs:
           echo "📦 Committing and pushing changes..."
           git add .
           git commit -m "📦 Deploy Kits dev to /${{ vars.DEV_KITS_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
-          git push origin main
+
+          # Retry push with rebase to handle concurrent deploys
+          for i in 1 2 3; do
+            if git push origin main 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin main || true
+          done
 
           echo "✅ Kits deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_KITS_PATH }}/"

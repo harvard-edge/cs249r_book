@@ -21,6 +21,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -120,7 +121,7 @@ class TestParameterManagement:
         """
         class ParameterLayer(Layer):
             def __init__(self, input_size, output_size):
-                self.weights = Tensor(np.random.randn(input_size, output_size))
+                self.weights = Tensor(rng.standard_normal((input_size, output_size)))
                 self.bias = Tensor(np.zeros(output_size))
 
             def forward(self, x):
@@ -151,7 +152,7 @@ class TestParameterManagement:
             def __init__(self, size):
                 # Xavier initialization
                 limit = np.sqrt(6.0 / (size + size))
-                self.weights = Tensor(np.random.uniform(-limit, limit, (size, size)))
+                self.weights = Tensor(rng.uniform(-limit, limit, (size, size)))
 
             def forward(self, x):
                 return Tensor(x.data @ self.weights.data)
@@ -181,7 +182,7 @@ class TestParameterManagement:
             def __init__(self, in_features, out_features):
                 self.in_features = in_features
                 self.out_features = out_features
-                self.weights = Tensor(np.random.randn(in_features, out_features))
+                self.weights = Tensor(rng.standard_normal((in_features, out_features)))
                 self.bias = Tensor(np.zeros(out_features))
 
             def forward(self, x):
@@ -197,7 +198,7 @@ class TestParameterManagement:
         assert layer.bias.shape == (64,)
 
         # Test with batch input
-        x = Tensor(np.random.randn(16, 128))
+        x = Tensor(rng.standard_normal((16, 128)))
         output = layer(x)
         assert output.shape == (16, 64), (
             f"Output shape wrong.\n"
@@ -431,7 +432,7 @@ class TestLayerUtilities:
         """
         class CountableLayer(Layer):
             def __init__(self, in_features, out_features):
-                self.weights = Tensor(np.random.randn(in_features, out_features))
+                self.weights = Tensor(rng.standard_normal((in_features, out_features)))
                 self.bias = Tensor(np.zeros(out_features))
 
             def parameter_count(self):
@@ -469,7 +470,7 @@ class TestLayerUtilities:
 
             def forward(self, x):
                 batch_size = x.shape[0]
-                return Tensor(np.random.randn(batch_size, self.out_features))
+                return Tensor(rng.standard_normal((batch_size, self.out_features)))
 
             def output_shape(self, input_shape):
                 return (input_shape[0], self.out_features)

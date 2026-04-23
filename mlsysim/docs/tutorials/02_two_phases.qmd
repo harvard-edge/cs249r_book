@@ -1,0 +1,280 @@
+---
+title: "Two Phases, One Request"
+subtitle: "The same model on the same GPU hits two different ceilings — and that changes everything."
+description: "Discover why LLM inference has two distinct performance regimes (prefill and decode) with different bottlenecks. The foundation for all LLM serving analysis."
+categories: ["node", "intermediate"]
+---
+
+## The Question
+
+A CNN processes one image in one pass. An LLM generates text one token at a time — but
+the *first* token and the *hundredth* token are bottlenecked by completely different hardware
+resources. **Why does the same model on the same GPU have two different speed limits?**
+
+Understanding this two-phase structure is what separates a systems engineer who can
+*predict* serving costs from one who has to *discover* them in production.
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd) and
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd). You should understand memory-bound
+vs. compute-bound regimes and the roofline model.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Distinguish** the two phases of LLM inference: prefill (TTFT) and decode (ITL)
+- **Explain** why prefill is compute-bound and decode is memory-bound
+- **Predict** which hardware spec (FLOP/s or bandwidth) matters for each phase
+- **Compare** GPUs based on their serving characteristics, not just peak specs
+:::
+
+::: {.callout-tip}
+## Background: How LLM Inference Works
+
+Unlike a CNN that processes a fixed input in one forward pass, an LLM generates output
+**autoregressively** — one token at a time:
+
+1. **Prefill (Time to First Token — TTFT):** The model processes the entire input prompt
+   in a single forward pass. All prompt tokens are processed in parallel, saturating the
+   GPU's compute units. This is **compute-bound** — optimizing TTFT means getting more TFLOP/s.
+
+2. **Decode (Inter-Token Latency — ITL):** Each subsequent token requires a full forward
+   pass through the model, but processes only *one* token of new input. The model weights
+   (8 billion params × 2 bytes per FP16 param = **16 GB**) must be loaded from HBM for each token, yet only a tiny
+   amount of arithmetic is performed. This is **memory-bound** — optimizing ITL means getting
+   more GB/s of HBM bandwidth.
+
+The same GPU, the same model, two completely different bottlenecks.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+```
+
+```python
+import mlsysim
+from mlsysim import ServingModel
+```
+
+In the previous tutorials, you used `Engine.solve`, which models inference as a single
+forward pass. But LLM serving is not a single pass — it has two distinct phases with
+different bottlenecks. The `ServingModel` models each phase separately, giving you TTFT
+(time to first token) and ITL (inter-token latency) instead of a single latency number.
+
+---
+
+## 2. First Serving Prediction
+
+```{python}
+from mlsysim import ServingModel
+
+# Llama-3 8B: 8B parameters, 32 layers, 4096 hidden_dim
+model = mlsysim.Models.Llama3_8B
+
+# NVIDIA H100: 989 TFLOP/s (FP16), 3.35 TB/s HBM3, 80 GB
+hardware = mlsysim.Hardware.Cloud.H100
+
+solver = ServingModel()
+result = solver.solve(
+    model=model,
+    hardware=hardware,
+    seq_len=2048,       # 2K token context window
+    batch_size=1,       # single user
+    precision="fp16"
+)
+
+from mlsysim.show import table, info
+
+info("Phase Analysis",
+     TTFT_prefill=result.ttft.to('ms'),
+     ITL_per_token=result.itl.to('ms'))
+
+info("Memory Budget",
+     Model_weights=result.model_weights_size,
+     KV_cache=result.kv_cache_size,
+     Memory_utilization=f"{result.memory_utilization:.1%}")
+```
+
+Two numbers, two different stories:
+
+- **TTFT** is tens of milliseconds — dominated by the 989 TFLOP/s compute ceiling
+- **ITL** is a fraction of a millisecond — dominated by the 3.35 TB/s bandwidth ceiling
+
+Why the asymmetry? Prefill processes all 2048 prompt tokens in parallel — that is 2048×
+more arithmetic per weight load than decode, which processes one token at a time. Prefill's
+arithmetic intensity is ~2048 FLOP/byte, well above the ridge point. Decode's intensity
+is ~1 FLOP/byte, far below it. The same weights, loaded the same way, but two completely
+different operating regimes.
+
+---
+
+## 3. Why They Respond to Different Optimizations
+
+Now let's see how this asymmetry plays out across GPU generations. If TTFT and ITL are
+in different regimes, they should respond to different hardware specs:
+
+```{python}
+gpus = [
+    ("A100",  mlsysim.Hardware.Cloud.A100),
+    ("H100",  mlsysim.Hardware.Cloud.H100),
+    ("H200",  mlsysim.Hardware.Cloud.H200),
+]
+
+rows = []
+for name, hw in gpus:
+    r = solver.solve(model=model, hardware=hw, seq_len=2048, batch_size=1, precision="fp16")
+    rows.append([
+        name,
+        hw.compute.peak_flops.to("TFLOPs/s"),
+        hw.memory.bandwidth.to("TB/s"),
+        r.ttft.to('ms'),
+        r.itl.to('ms'),
+    ])
+
+table(["GPU", "TFLOP/s", "BW (TB/s)", "TTFT (ms)", "ITL (ms)"], rows)
+```
+
+Compare the ratios:
+
+- **A100 → H100**: FLOP/s increases 3.2×, TTFT improves ~3×. Bandwidth increases 1.7×, ITL improves ~1.7×.
+- **H100 → H200**: FLOP/s stays similar, TTFT stays similar. Bandwidth increases ~1.4×, ITL improves ~1.4×.
+
+Each metric tracks its own ceiling. TTFT scales with compute. ITL scales with bandwidth.
+
+---
+
+## 4. The Asymmetry: Where Quantization Helps
+
+Quantization (reducing numerical precision) shrinks the model weights. Since decode must
+load all weights from HBM at every step, fewer bytes means faster decode. But prefill is
+compute-bound — fewer bytes doesn't help if computation is the bottleneck.
+
+```{python}
+rows = []
+for prec in ["fp16", "int8", "int4"]:
+    r = solver.solve(model=model, hardware=hardware, seq_len=2048, batch_size=1, precision=prec)
+    rows.append([prec, r.ttft.to('ms'), r.itl.to('ms'), r.model_weights_size])
+
+table(["Precision", "TTFT (ms)", "ITL (ms)", "Weights"], rows)
+```
+
+::: {.callout-important}
+## Key Insight
+
+**LLM serving is not one problem — it is two problems in sequence.** Prefill (TTFT) is
+compute-bound and scales with FLOP/s. Decode (ITL) is memory-bound and scales with
+bandwidth. This means:
+
+- **Quantization** is a decode optimization (reduces bytes loaded per step)
+- **More TFLOP/s** is a prefill optimization (processes prompt tokens faster)
+- **The right GPU** depends on which phase dominates your latency budget
+
+A chatbot (short prompts, long responses) is ITL-dominated → buy bandwidth.
+A summarization service (long documents, short outputs) is TTFT-dominated → buy compute.
+:::
+
+::: {.callout-tip}
+## Going Further: Speculative Decoding
+
+This two-phase asymmetry also explains why **speculative decoding** works: a small draft
+model generates candidate tokens cheaply, then the large model verifies them in a single
+parallel pass (like prefill). It converts the large model's spare compute into reduced
+memory loads — attacking the decode bottleneck at the algorithmic level.
+:::
+
+---
+
+## 5. Putting It Together: SLA-Based Hardware Selection
+
+If your production SLA is TTFT < 200 ms and ITL < 50 ms/token, which GPUs qualify?
+
+```{python}
+gpus_all = [
+    ("T4",    mlsysim.Hardware.Cloud.T4),
+    ("A100",  mlsysim.Hardware.Cloud.A100),
+    ("H100",  mlsysim.Hardware.Cloud.H100),
+    ("H200",  mlsysim.Hardware.Cloud.H200),
+]
+
+TTFT_SLA = 200   # ms
+ITL_SLA = 50     # ms
+
+rows = []
+for name, hw in gpus_all:
+    r = solver.solve(model=model, hardware=hw, seq_len=4096, batch_size=1, precision="fp16")
+    ttft = r.ttft.to("ms").magnitude
+    itl = r.itl.to("ms").magnitude
+    ttft_ok = ttft <= TTFT_SLA
+    itl_ok = itl <= ITL_SLA
+    rows.append([
+        name,
+        f"{ttft:.1f} ms",
+        f"{itl:.2f} ms",
+        "✓" if ttft_ok else "✗",
+        "✓" if itl_ok else "✗",
+        "PASS" if ttft_ok and itl_ok else "FAIL",
+    ])
+
+table(["GPU", "TTFT", "ITL", "TTFT OK?", "ITL OK?", "Verdict"], rows)
+```
+
+This is the analysis every ML engineer should run before choosing serving infrastructure.
+The answer depends not just on the GPU, but on the model size, context length, batch size,
+and precision — all of which the `ServingModel` captures analytically.
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+Before running any code: for Llama-3 70B (~9× larger than 8B), predict whether TTFT or
+ITL will be more affected by the model size increase. Will both grow by ~9×? Write your
+reasoning, then solve with `mlsysim.Models.Llama3_70B` on the H100 and compare.
+
+**Exercise 2: The chatbot vs. summarizer trade-off.**
+A chatbot receives 50-token prompts and generates 500-token responses. A summarizer receives
+4000-token documents and generates 100-token summaries. For each use case, calculate: what
+fraction of total request time is TTFT vs. ITL? Which GPU spec matters more for each?
+
+**Exercise 3: Find the phase crossover.**
+Sweep `seq_len` from 128 to 32768 for Llama-3 8B on the H100. At what context length does
+TTFT exceed the total decode time for a 256-token response (i.e., 256 × ITL)? This is where
+the dominant phase shifts from decode to prefill.
+
+**Self-check:** Your boss says "We need a faster GPU for our chatbot." Which metric matters
+more: TTFT or ITL? What hardware spec should you prioritize?
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **Prefill (TTFT)** is compute-bound — it scales with TFLOP/s
+- **Decode (ITL)** is memory-bound — it scales with HBM bandwidth (GB/s)
+- **Quantization** primarily accelerates decode (fewer bytes per weight load), not prefill
+- **Hardware selection** depends on which phase dominates your workload
+- **`ServingModel`** separates these two regimes analytically, enabling SLA-based hardware decisions
+:::
+
+---
+
+## Next Steps
+
+- **[KV-Cache: The Hidden Tax](03_kv_cache.qmd)** — Discover what limits how many concurrent users you can serve
+- **[The Memory Wall](01_memory_wall.qmd)** — Why GPU generations don't deliver the speedup you expect
+- **[Quantization: Not a Free Lunch](05_quantization.qmd)** — When reducing precision helps and when it doesn't
+- **[The $9M Question](08_nine_million_dollar.qmd)** — How chain-of-thought reasoning multiplies serving costs

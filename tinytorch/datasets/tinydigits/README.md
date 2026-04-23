@@ -64,15 +64,60 @@ The sklearn digits dataset itself is derived from the UCI ML hand-written digits
 
 ## Why TinyDigits vs Full MNIST?
 
-| Metric | MNIST | TinyDigits | Benefit |
-|--------|-------|------------|---------|
-| Samples | 60,000 | 1,000 | 60× fewer samples |
-| File size | 10 MB | 310 KB | 32× smaller |
-| Train time | 5-10 min | <10 sec | 30-60× faster |
-| Test accuracy (MLP) | ~92% | ~80% | Close enough for learning |
-| Download | Network required | Ships with repo | Always available |
-| Resolution | 28×28 (784 pixels) | 8×8 (64 pixels) | Faster forward pass |
-| Edge deployment | Challenging | Perfect | Works on RasPi0 |
+<table>
+  <thead>
+    <tr>
+      <th width="25%">Metric</th>
+      <th width="20%">MNIST</th>
+      <th width="20%">TinyDigits</th>
+      <th width="35%">Benefit</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>Samples</b></td>
+      <td>60,000</td>
+      <td>1,000</td>
+      <td>60× fewer samples</td>
+    </tr>
+    <tr>
+      <td><b>File size</b></td>
+      <td>10 MB</td>
+      <td>310 KB</td>
+      <td>32× smaller</td>
+    </tr>
+    <tr>
+      <td><b>Train time</b></td>
+      <td>5-10 min</td>
+      <td>&lt;10 sec</td>
+      <td>30-60× faster</td>
+    </tr>
+    <tr>
+      <td><b>Test accuracy (MLP)</b></td>
+      <td>~92%</td>
+      <td>~80%</td>
+      <td>Close enough for learning</td>
+    </tr>
+    <tr>
+      <td><b>Download</b></td>
+      <td>Network required</td>
+      <td>Ships with repo</td>
+      <td>Always available</td>
+    </tr>
+    <tr>
+      <td><b>Resolution</b></td>
+      <td>28×28 (784 pixels)</td>
+      <td>8×8 (64 pixels)</td>
+      <td>Faster forward pass</td>
+    </tr>
+    <tr>
+      <td><b>Edge deployment</b></td>
+      <td>Challenging</td>
+      <td>Perfect</td>
+      <td>Works on RasPi0</td>
+    </tr>
+  </tbody>
+</table>
 
 ## Educational Progression
 

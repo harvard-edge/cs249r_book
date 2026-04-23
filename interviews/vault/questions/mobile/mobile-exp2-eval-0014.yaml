@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: mobile-exp2-eval-0014
+track: mobile
+level: L5
+zone: evaluation
+topic: kv-cache-management
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Evaluating PagedAttention vs Static Allocation for On-Device LLMs
+scenario: 'We are deploying a 7B parameter conversational AI on a flagship mobile device powered by the
+  Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). The system features a shared 12 GB LPDDR5X memory pool, but
+  the OS and background apps reserve roughly 4 GB, leaving a strict 8 GB budget for our application. We
+  need to support a context window of 4096 tokens. The engineering team is divided between two KV-cache
+  management proposals: statically allocating a contiguous 2 GB buffer for the maximum context length
+  upfront, or porting a server-style PagedAttention mechanism to dynamically allocate non-contiguous 16-token
+  blocks to save memory. Evaluate these two approaches for this specific hardware constraints. Which strategy
+  should we adopt and why?'
+details:
+  realistic_solution: Static allocation of a contiguous KV-cache buffer is the superior choice for this
+    mobile scenario. The Qualcomm Hexagon NPU relies heavily on predictable, sequential memory access
+    and efficient DMA transfers from the LPDDR5X memory to sustain its 45 TOPS INT8 peak performance.
+    PagedAttention scatters KV blocks across physical memory, requiring complex pointer chasing and non-contiguous
+    reads that disrupt vectorization and hardware prefetching. Since the entire 2 GB max KV-cache safely
+    fits within the remaining memory budget alongside the quantized model weights, the theoretical memory
+    savings of PagedAttention do not justify the severe latency degradation caused by stalling the NPU.
+  common_mistake: Candidates often default to recommending PagedAttention because it is the state-of-the-art
+    solution for mitigating memory fragmentation in high-throughput, multi-user server environments. They
+    fail to recognize that for a single-user mobile deployment with a batch size of 1, internal fragmentation
+    is a non-issue, and the overhead of irregular memory access patterns will severely bottleneck the
+    NPU.
+  napkin_math: 'Assume a 7B model architecture (32 layers, 32 heads, 128 head dim). Each token requires:
+    2 (K&V) * 32 layers * 32 heads * 128 dim * 2 bytes (FP16) = 524,288 bytes (~0.5 MB). For a maximum
+    context of 4096 tokens, the KV-cache requires 4096 * 0.5 MB = 2.048 GB. The 7B model weights quantized
+    to 4-bit require roughly 3.5 GB. Total memory consumption = 3.5 GB (weights) + 2 GB (KV cache) = 5.5
+    GB. With 12 GB shared LPDDR5X total and 4 GB reserved by the OS, we have 8 GB available. The 5.5 GB
+    footprint easily fits, proving that static contiguous allocation is completely viable without dynamic
+    paging.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

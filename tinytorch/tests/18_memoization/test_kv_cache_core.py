@@ -21,6 +21,7 @@ WHAT WE TEST:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -61,8 +62,8 @@ class TestKVCacheBasics:
 
         # Store some K,V pairs (cache expects one token at a time during generation)
         layer_idx = 0
-        K = Tensor(np.random.randn(1, 4, 1, 16))  # (batch, heads, 1, dim) - one new token
-        V = Tensor(np.random.randn(1, 4, 1, 16))
+        K = Tensor(rng.standard_normal((1, 4, 1, 16)))  # (batch, heads, 1, dim) - one new token
+        V = Tensor(rng.standard_normal((1, 4, 1, 16)))
 
         cache.update(layer_idx, K, V)
         cache.advance()  # Must advance after update to make values retrievable

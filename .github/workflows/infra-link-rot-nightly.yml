@@ -1,0 +1,453 @@
+name: '🔧 Infra · 🌙 Link Rot (Nightly)'
+
+# =============================================================================
+# 🌙 Link Rot — Nightly Lychee sweep with sticky-issue reporter (Tier 3)
+# =============================================================================
+#
+# Tier 1 (pre-commit) catches new internal-link breakage before it lands.
+# Tier 2 (per-site validate-dev) catches external breakage at PR/push time.
+# Tier 3 (this workflow) is the long-tail: nightly cron sweep across every
+# subsite, with results aggregated into a single sticky GitHub issue so the
+# team has one durable list of broken URLs to triage.
+#
+# Why a sticky issue:
+#   - One source of truth instead of 100 closed-then-reopened issues.
+#   - Body is rewritten each run with the current broken-link inventory.
+#   - Comments preserve trend (week-over-week count delta).
+#
+# Trigger:
+#   - schedule: 04:30 UTC daily (low-traffic window, after EU bedtime).
+#   - workflow_dispatch: manual one-off.
+#
+# Issue label:  link-rot
+# Issue title:  🔗 Link Rot Tracker (auto-updated nightly)
+#
+# =============================================================================
+
+on:
+  schedule:
+    - cron: '30 4 * * *'  # 04:30 UTC daily
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Skip issue update (just print results to job log)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: link-rot-nightly
+  cancel-in-progress: false
+
+jobs:
+  # =============================================================================
+  # Sweep each site in parallel via the reusable Lychee workflow.
+  # We deliberately reuse infra-link-check.yml so any tweak to Lychee args /
+  # ignore-file handling stays in one place.
+  # =============================================================================
+  sweep-book:
+    name: '📚 Sweep · Book'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './book/quarto/contents/**/*.qmd'
+      lycheeignore_path: 'book/config/linting/.lycheeignore'
+      max_concurrency: 12
+      fail_on_broken: false
+
+  sweep-kits:
+    name: '📦 Sweep · Kits'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './kits/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  sweep-labs:
+    name: '🔮 Sweep · Labs'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './labs/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  sweep-mlsysim:
+    name: '🧮 Sweep · MLSys·im'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './mlsysim/docs/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  sweep-slides:
+    name: '📊 Sweep · Slides'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './slides/**/*.{qmd,md}'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  sweep-instructors:
+    name: '🎓 Sweep · Instructors'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './instructors/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 5
+      fail_on_broken: false
+
+  sweep-tinytorch:
+    name: '🔥 Sweep · TinyTorch'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './tinytorch/quarto/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  sweep-site:
+    name: '🌐 Sweep · Unified Site'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './site/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  sweep-staffml:
+    name: '🎯 Sweep · StaffML'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './interviews/**/*.{md,mdx,qmd}'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      max_concurrency: 8
+      fail_on_broken: false
+
+  # =============================================================================
+  # Aggregate sweep results and act on the tracker issue ONLY when there's
+  # something to act on. Quiet success is the goal.
+  #
+  # Decision matrix:
+  #
+  #   broken sites | tracker exists | action
+  #   ─────────────|────────────────|────────────────────────────────────────
+  #   0            | no             | do nothing (silent green)
+  #   0            | yes            | close tracker with "all clear" comment
+  #   >0           | no             | open tracker with full state + samples
+  #   >0           | yes            | edit body; add comment ONLY if state changed
+  #
+  # State change = different broken-site set OR different total-count, so
+  # routine "still broken, no news" runs don't spam comments.
+  # =============================================================================
+  report:
+    name: '📝 Triage link-rot tracker issue'
+    runs-on: ubuntu-latest
+    needs:
+      - sweep-book
+      - sweep-kits
+      - sweep-labs
+      - sweep-mlsysim
+      - sweep-slides
+      - sweep-instructors
+      - sweep-tinytorch
+      - sweep-site
+      - sweep-staffml
+    if: always()
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      # -------------------------------------------------------------------
+      # 1. Aggregate sweep outputs. We read `needs.<job>.outputs.check-status`
+      #    (the lychee verdict) NOT `needs.<job>.result` (the job result).
+      #    With continue-on-error on the lychee step, the job result is
+      #    always "success" — only the output reflects link health.
+      # -------------------------------------------------------------------
+      - name: 🧮 Aggregate sweep results
+        id: aggregate
+        env:
+          # Each pair: status output from the reusable workflow.
+          STATUS_BOOK:        ${{ needs.sweep-book.outputs.check-status }}
+          STATUS_KITS:        ${{ needs.sweep-kits.outputs.check-status }}
+          STATUS_LABS:        ${{ needs.sweep-labs.outputs.check-status }}
+          STATUS_MLSYSIM:     ${{ needs.sweep-mlsysim.outputs.check-status }}
+          STATUS_SLIDES:      ${{ needs.sweep-slides.outputs.check-status }}
+          STATUS_INSTRUCTORS: ${{ needs.sweep-instructors.outputs.check-status }}
+          STATUS_TINYTORCH:   ${{ needs.sweep-tinytorch.outputs.check-status }}
+          STATUS_SITE:        ${{ needs.sweep-site.outputs.check-status }}
+          STATUS_STAFFML:     ${{ needs.sweep-staffml.outputs.check-status }}
+
+          COUNT_BOOK:        ${{ needs.sweep-book.outputs.broken-links-count }}
+          COUNT_KITS:        ${{ needs.sweep-kits.outputs.broken-links-count }}
+          COUNT_LABS:        ${{ needs.sweep-labs.outputs.broken-links-count }}
+          COUNT_MLSYSIM:     ${{ needs.sweep-mlsysim.outputs.broken-links-count }}
+          COUNT_SLIDES:      ${{ needs.sweep-slides.outputs.broken-links-count }}
+          COUNT_INSTRUCTORS: ${{ needs.sweep-instructors.outputs.broken-links-count }}
+          COUNT_TINYTORCH:   ${{ needs.sweep-tinytorch.outputs.broken-links-count }}
+          COUNT_SITE:        ${{ needs.sweep-site.outputs.broken-links-count }}
+          COUNT_STAFFML:     ${{ needs.sweep-staffml.outputs.broken-links-count }}
+
+          SAMPLE_BOOK:        ${{ needs.sweep-book.outputs.broken-links-sample }}
+          SAMPLE_KITS:        ${{ needs.sweep-kits.outputs.broken-links-sample }}
+          SAMPLE_LABS:        ${{ needs.sweep-labs.outputs.broken-links-sample }}
+          SAMPLE_MLSYSIM:     ${{ needs.sweep-mlsysim.outputs.broken-links-sample }}
+          SAMPLE_SLIDES:      ${{ needs.sweep-slides.outputs.broken-links-sample }}
+          SAMPLE_INSTRUCTORS: ${{ needs.sweep-instructors.outputs.broken-links-sample }}
+          SAMPLE_TINYTORCH:   ${{ needs.sweep-tinytorch.outputs.broken-links-sample }}
+          SAMPLE_SITE:        ${{ needs.sweep-site.outputs.broken-links-sample }}
+          SAMPLE_STAFFML:     ${{ needs.sweep-staffml.outputs.broken-links-sample }}
+
+          # Job results in case the sweep itself died (infra issue, not link rot).
+          RESULT_BOOK:        ${{ needs.sweep-book.result }}
+          RESULT_KITS:        ${{ needs.sweep-kits.result }}
+          RESULT_LABS:        ${{ needs.sweep-labs.result }}
+          RESULT_MLSYSIM:     ${{ needs.sweep-mlsysim.result }}
+          RESULT_SLIDES:      ${{ needs.sweep-slides.result }}
+          RESULT_INSTRUCTORS: ${{ needs.sweep-instructors.result }}
+          RESULT_TINYTORCH:   ${{ needs.sweep-tinytorch.result }}
+          RESULT_SITE:        ${{ needs.sweep-site.result }}
+          RESULT_STAFFML:     ${{ needs.sweep-staffml.result }}
+        run: |
+          set -euo pipefail
+
+          NOW=$(date -u +"%Y-%m-%dT%H:%MZ")
+          BODY_FILE=$(mktemp)
+          # State-fingerprint = ordered list of "site:count" pairs for sites
+          # with broken links. Used to decide whether to post a new comment.
+          FINGERPRINT=""
+          BROKEN_SITES=0
+          INFRA_FAIL=0
+          TOTAL_BROKEN=0
+
+          {
+            echo "# 🔗 Link Rot Tracker"
+            echo ""
+            echo "_Auto-updated nightly. Last sweep: **$NOW**._"
+            echo ""
+            echo "This tracker is **only opened/updated when broken links are present**. When everything is clean, it is closed automatically — silence is success."
+            echo ""
+            echo "## Per-site status"
+            echo ""
+            echo "| Site | Status | Broken |"
+            echo "|------|--------|-------:|"
+
+            # Iterate sites by parallel arrays so we can also pull samples.
+            sites=(
+              "📚 Book|BOOK"
+              "📦 Kits|KITS"
+              "🔮 Labs|LABS"
+              "🧮 MLSys·im|MLSYSIM"
+              "📊 Slides|SLIDES"
+              "🎓 Instructors|INSTRUCTORS"
+              "🔥 TinyTorch|TINYTORCH"
+              "🌐 Unified Site|SITE"
+              "🎯 StaffML|STAFFML"
+            )
+
+            for entry in "${sites[@]}"; do
+              label="${entry%%|*}"
+              key="${entry##*|}"
+              status_var="STATUS_$key"
+              count_var="COUNT_$key"
+              result_var="RESULT_$key"
+              status="${!status_var:-}"
+              count="${!count_var:-}"
+              result="${!result_var:-}"
+
+              if [ "$result" != "success" ] && [ "$result" != "failure" ]; then
+                # cancelled / skipped — sweep didn't run normally.
+                icon="🛑"; label_status="$result (no sweep)"; INFRA_FAIL=$((INFRA_FAIL+1))
+              elif [ -z "$status" ]; then
+                # Job ran but didn't produce an output — treat as infra blip.
+                icon="❓"; label_status="no output"; INFRA_FAIL=$((INFRA_FAIL+1))
+              elif [ "$status" = "success" ]; then
+                icon="✅"; label_status="clean"; count="0"
+              else
+                icon="❌"; label_status="broken"
+                BROKEN_SITES=$((BROKEN_SITES+1))
+                # Numeric add only if we have a real number.
+                if [[ "$count" =~ ^[0-9]+$ ]]; then
+                  TOTAL_BROKEN=$((TOTAL_BROKEN + count))
+                  FINGERPRINT="${FINGERPRINT}${key}:${count};"
+                else
+                  FINGERPRINT="${FINGERPRINT}${key}:?;"
+                fi
+              fi
+              echo "| $label | $icon $label_status | ${count:-—} |"
+            done
+
+            echo ""
+            echo "**Sites with broken links: $BROKEN_SITES**  ·  **Total broken URLs: $TOTAL_BROKEN**"
+            if [ "$INFRA_FAIL" -gt 0 ]; then
+              echo ""
+              echo "> ⚠️ $INFRA_FAIL sweep(s) didn't run cleanly — verdict for those sites is unknown."
+            fi
+
+            # Per-site samples (only render sites that are broken).
+            if [ "$BROKEN_SITES" -gt 0 ]; then
+              echo ""
+              echo "## First broken URLs by site"
+              echo ""
+              for entry in "${sites[@]}"; do
+                label="${entry%%|*}"
+                key="${entry##*|}"
+                status_var="STATUS_$key"
+                sample_var="SAMPLE_$key"
+                status="${!status_var:-}"
+                sample="${!sample_var:-}"
+                [ "$status" = "failure" ] || continue
+                [ -n "$sample" ] || continue
+                echo "<details><summary><b>$label</b></summary>"
+                echo ""
+                while IFS= read -r url; do
+                  [ -z "$url" ] && continue
+                  echo "- \`$url\`"
+                done <<< "$sample"
+                echo ""
+                echo "</details>"
+                echo ""
+              done
+            fi
+
+            echo ""
+            echo "## Triage notes"
+            echo ""
+            echo "- Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "- To intentionally suppress a URL pattern: add it to \`shared/config/.lycheeignore\` (cross-site) or \`book/config/linting/.lycheeignore\` (book-only)."
+            echo "- To re-trigger now: \`gh workflow run infra-link-rot-nightly.yml\`."
+            echo ""
+            echo "<!-- fingerprint: $FINGERPRINT -->"
+            echo "<sub>Run id: ${{ github.run_id }}</sub>"
+          } > "$BODY_FILE"
+
+          echo "body_file=$BODY_FILE" >> "$GITHUB_OUTPUT"
+          echo "broken_sites=$BROKEN_SITES" >> "$GITHUB_OUTPUT"
+          echo "total_broken=$TOTAL_BROKEN" >> "$GITHUB_OUTPUT"
+          echo "infra_fail=$INFRA_FAIL" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=$FINGERPRINT" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "===== Report Body (preview) ====="
+          cat "$BODY_FILE"
+          echo "================================="
+
+      - name: 🪟 Append step summary
+        run: |
+          {
+            echo "## 🌙 Link Rot Sweep"
+            echo ""
+            echo "- Broken sites: **${{ steps.aggregate.outputs.broken_sites }}**"
+            echo "- Total broken URLs: **${{ steps.aggregate.outputs.total_broken }}**"
+            echo "- Infra failures: **${{ steps.aggregate.outputs.infra_fail }}**"
+            echo ""
+            cat "${{ steps.aggregate.outputs.body_file }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # -------------------------------------------------------------------
+      # 2. Make sure the label exists. Cheap; harmless to keep on every run.
+      # -------------------------------------------------------------------
+      - name: 🏷️ Ensure link-rot label exists
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh label list --repo "${{ github.repository }}" --search link-rot --json name --jq '.[].name' | grep -qx 'link-rot'; then
+            gh label create link-rot \
+              --repo "${{ github.repository }}" \
+              --description "Aggregated nightly link-rot tracker" \
+              --color "ededed" \
+              || echo "Label already exists or could not be created (non-fatal)."
+          fi
+
+      # -------------------------------------------------------------------
+      # 3. Triage the tracker issue per the decision matrix at top of file.
+      # -------------------------------------------------------------------
+      - name: 🔁 Triage tracker issue
+        if: ${{ inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY_FILE: ${{ steps.aggregate.outputs.body_file }}
+          BROKEN_SITES: ${{ steps.aggregate.outputs.broken_sites }}
+          TOTAL_BROKEN: ${{ steps.aggregate.outputs.total_broken }}
+          INFRA_FAIL: ${{ steps.aggregate.outputs.infra_fail }}
+          FINGERPRINT: ${{ steps.aggregate.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          TITLE="🔗 Link Rot Tracker (auto-updated nightly)"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Find an existing open tracker (by label + title prefix).
+          ISSUE_NUM=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --label link-rot \
+            --search "in:title \"Link Rot Tracker\"" \
+            --json number \
+            --jq '.[0].number // empty')
+
+          # ---------- BRANCH A: nothing broken ----------
+          if [ "$BROKEN_SITES" -eq 0 ]; then
+            if [ -z "$ISSUE_NUM" ]; then
+              # Quiet green night. Don't open an issue. Don't comment.
+              echo "::notice::All sites clean and no open tracker. No action taken (silent success)."
+              exit 0
+            fi
+
+            # An old tracker exists from a previous broken run; close it now.
+            echo "All sites clean. Closing tracker #$ISSUE_NUM."
+            ALL_CLEAR_BODY=$(printf '%s\n\n%s\n' \
+              "✅ All sites clean as of nightly sweep. Auto-closing this tracker." \
+              "Run: $RUN_URL")
+            gh issue comment "$ISSUE_NUM" \
+              --repo "${{ github.repository }}" \
+              --body "$ALL_CLEAR_BODY"
+            gh issue close "$ISSUE_NUM" \
+              --repo "${{ github.repository }}" \
+              --reason completed
+            exit 0
+          fi
+
+          # ---------- BRANCH B: at least one site has broken links ----------
+
+          if [ -z "$ISSUE_NUM" ]; then
+            echo "Broken links detected and no open tracker. Creating new tracker."
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "$TITLE" \
+              --label link-rot \
+              --body-file "$BODY_FILE"
+            exit 0
+          fi
+
+          # Tracker exists and we have new findings. Always refresh body so
+          # the issue reflects current truth. Only post a comment if state
+          # actually changed since the last sweep — silence when nothing's new.
+          PREV_FP=$(gh issue view "$ISSUE_NUM" \
+            --repo "${{ github.repository }}" \
+            --json body \
+            --jq '.body' \
+            | grep -oE 'fingerprint: [^ ]*' \
+            | head -n1 \
+            | sed 's/fingerprint: //' || true)
+
+          echo "Updating tracker #$ISSUE_NUM (prev fp='${PREV_FP:-<none>}', new fp='$FINGERPRINT')."
+          gh issue edit "$ISSUE_NUM" \
+            --repo "${{ github.repository }}" \
+            --body-file "$BODY_FILE"
+
+          if [ "$PREV_FP" != "$FINGERPRINT" ]; then
+            echo "State changed — posting trend comment."
+            gh issue comment "$ISSUE_NUM" \
+              --repo "${{ github.repository }}" \
+              --body "🔄 Link state changed: **$BROKEN_SITES site(s)**, **$TOTAL_BROKEN broken URL(s)**. See [run]($RUN_URL)."
+          else
+            echo "Same broken-link fingerprint as previous sweep — body refreshed, no comment posted."
+          fi

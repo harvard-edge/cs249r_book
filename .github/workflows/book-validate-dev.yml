@@ -1,15 +1,40 @@
 name: '📚 Book · ✅ Validate (Dev)'
 
-# Cancel any running validation and start fresh when new one is triggered
-# Concurrency disabled - allow unlimited parallel builds
+# =============================================================================
+# ✅ Validate (Dev) — Lint, build, and test the book on every dev push
+# =============================================================================
+#
+# Runs pre-commit checks, then builds both volumes in all formats (HTML, PDF,
+# EPUB) on Linux and Windows using containerized Quarto. Uploads artifacts
+# for the Preview workflow to deploy.
+#
+# Flow:
+#   1. PRE_COMMIT       — Run pre-commit hooks on all files
+#   2. BUILD_CONFIG      — Determine formats, OS targets, and container settings
+#   3. CONTAINER_BUILD   — Matrix build via book-build-container.yml (up to 12 jobs)
+#   4. COLLECT_RESULTS   — Aggregate per-platform success and artifact names
+#   5. VALIDATION_SUMMARY — Report pass/fail and trigger preview deployment
+#
+# Triggers:
+#   - push: dev branch, paths under book/ and workflow files
+#   - workflow_dispatch: manual with format/OS/container options
+#
+# Deploys to: N/A (artifacts consumed by book-preview-dev.yml)
+#
+# Related:
+#   - book-build-container.yml — Reusable build matrix called by this workflow
+#   - book-preview-dev.yml     — Deploys artifacts produced here to staging
+#   - book-publish-live.yml    — Production pipeline (builds from main)
+#
+# =============================================================================
 
-# Triggers: dev branch pushes (book/ changes only) and manual testing
 on:
   push:
     branches: [dev]  # Auto-trigger for dev branch
     paths:
       - 'book/**'
-      - '.github/workflows/book-*.yml'
+      - '.github/workflows/book-validate-dev.yml'
+      - '.github/workflows/book-preview-dev.yml'
       - '!tinytorch/**'  # Exclude TinyTorch changes
   workflow_dispatch:  # Manual trigger for testing
     inputs:
@@ -38,13 +63,13 @@ on:
           - pdf
           - epub
       build_os:
-        description: '⚙️ Build OS (both, linux, windows)'
+        description: '⚙️ Build OS (linux, both, windows) — Windows disabled by default'
         required: true
-        default: 'both'
+        default: 'linux'
         type: choice
         options:
-          - both
           - linux
+          - both
           - windows
       # Container validation
       run_health_check:
@@ -52,16 +77,6 @@ on:
         required: false
         default: false
         type: boolean
-      # Build method selection
-      build_method:
-        description: 'Build method to use'
-        required: false
-        default: 'both'
-        type: choice
-        options:
-          - both
-          - container
-          - baremetal
       # Container configuration (consistent with other workflows)
       container_registry:
         description: 'Container registry URL'
@@ -78,6 +93,11 @@ permissions:
   contents: write
   pages: write
   packages: read
+  actions: read
+
+concurrency:
+  group: book-validate-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # Step 1: Pre-commit validation
@@ -87,13 +107,13 @@ jobs:
 
     steps:
       - name: 📥 Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.test_branch || github.ref }}
           fetch-depth: 0
 
       - name: 🐍 Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -102,9 +122,10 @@ jobs:
           echo "🔍 Installing and running pre-commit..."
           python -m pip install --upgrade pip
           pip install pre-commit
-          
           echo "📦 Installing project dependencies for custom hooks..."
           pip install -r requirements.txt || echo "⚠️ Could not install all requirements, continuing..."
+          echo "📦 Installing fallback hook dependencies..."
+          pip install rich requests pillow pint pandas || echo "⚠️ Could not install one or more fallback deps, continuing..."
           
           echo "🔧 Installing pre-commit hooks..."
           pre-commit install --install-hooks
@@ -143,7 +164,7 @@ jobs:
   build-config:
     name: '🎯 Build Configuration'
     needs: [pre-commit, update-contributors]
-    if: always() && needs.pre-commit.result == 'success' && (needs.update-contributors.result == 'success' || needs.update-contributors.result == 'skipped')
+    if: always() && needs.pre-commit.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       build_html: ${{ steps.config.outputs.build_html }}
@@ -151,7 +172,6 @@ jobs:
       build_epub: ${{ steps.config.outputs.build_epub }}
       build_linux: ${{ steps.config.outputs.build_linux }}
       build_windows: ${{ steps.config.outputs.build_windows }}
-      build_method: ${{ steps.config.outputs.build_method }}
       container_registry: ${{ steps.config.outputs.container_registry }}
       container_tag: ${{ steps.config.outputs.container_tag }}
       target: ${{ steps.config.outputs.target }}
@@ -164,21 +184,23 @@ jobs:
 
           # Determine what to build based on inputs (individual format flags)
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Auto-trigger: build everything
+            # Auto-trigger: build Linux only. Windows validate-dev is temporarily
+            # disabled on push — the Windows container itself is still built by
+            # infra-container-windows.yml on its own schedule/path triggers.
+            # Re-enable by flipping BUILD_WINDOWS back to "true" below.
             BUILD_HTML="true"
             BUILD_PDF="true"
             BUILD_EPUB="true"
             BUILD_LINUX="true"
-            BUILD_WINDOWS="true"
-            BUILD_METHOD="both"
+            BUILD_WINDOWS="false"
             TARGET="dev" # For push events, always target dev
             echo "📊 Trigger: Automatic (dev branch push)"
             echo "📊 HTML: $BUILD_HTML (mandatory)"
             echo "📊 PDF: $BUILD_PDF (mandatory)"
             echo "📊 EPUB: $BUILD_EPUB (mandatory)"
             echo "📊 Linux: $BUILD_LINUX (mandatory)"
-            echo "📊 Windows: $BUILD_WINDOWS (enabled by default)"
-            echo "📊 Method: $BUILD_METHOD (default)"
+            echo "📊 Windows: $BUILD_WINDOWS (temporarily disabled on dev push)"
+            echo "📊 Method: container-only"
             echo "📊 Target: $TARGET"
           else
             # Manual trigger: respect choices
@@ -205,12 +227,11 @@ jobs:
               BUILD_WINDOWS="true"
             fi
 
-            BUILD_METHOD="${{ inputs.build_method }}"
             TARGET="${{ inputs.target }}"
 
             echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
             echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
-            echo "📊 Method: $BUILD_METHOD"
+            echo "📊 Method: container-only"
             echo "📊 Target: $TARGET"
           fi
 
@@ -223,7 +244,7 @@ jobs:
           echo "  PDF: $BUILD_PDF"
           echo "  Linux: $BUILD_LINUX"
           echo "  Windows: $BUILD_WINDOWS"
-          echo "  Method: $BUILD_METHOD"
+          echo "  Method: container"
           echo "  Registry: $CONTAINER_REGISTRY"
           echo "  Tag: $CONTAINER_TAG"
           echo "  Target: $TARGET"
@@ -234,7 +255,6 @@ jobs:
           echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
           echo "build_linux=$BUILD_LINUX" >> $GITHUB_OUTPUT
           echo "build_windows=$BUILD_WINDOWS" >> $GITHUB_OUTPUT
-          echo "build_method=$BUILD_METHOD" >> $GITHUB_OUTPUT
           echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
@@ -246,8 +266,7 @@ jobs:
     needs: [build-config]
     if: |
       always() &&
-      (needs.build-config.result == 'success') &&
-      (needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both')
+      (needs.build-config.result == 'success')
     uses: ./.github/workflows/book-build-container.yml
     with:
       build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
@@ -255,48 +274,26 @@ jobs:
       build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
       build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
       build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
+      build_target: all
       target: ${{ needs.build-config.outputs.target }}
       container_registry: ${{ needs.build-config.outputs.container_registry }}
       container_tag: ${{ needs.build-config.outputs.container_tag }}
 
-  build-baremetal:
-    name: '⚠️ Baremetal Build Matrix (Legacy)'
-    needs: [build-config]
-    if: |
-      always() &&
-      (needs.build-config.result == 'success') &&
-      (needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both')
-    uses: ./.github/workflows/book-build-baremetal.yml
-    with:
-      build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
-      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
-      build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
-      build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
-      build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
-      target: ${{ needs.build-config.outputs.target }}
-
-  report-baremetal-pass:
-    name: 'Baremetal Build Status'
-    runs-on: ubuntu-latest
-    needs: [build-baremetal]
-    if: ${{ needs.build-baremetal.result == 'success' }}
-    steps:
-      - name: Report Baremetal Success
-        run: echo "✅ Baremetal build passed."
-
   # Step 4: Collect build results (needed for outputs)
   collect-results:
     name: '📊 Collect Results'
-    needs: [build-config, build-container, build-baremetal]
+    needs: [build-config, build-container]
     runs-on: ubuntu-latest
     if: always()
     outputs:
       linux_success: ${{ steps.collect.outputs.linux_success }}
       windows_success: ${{ steps.collect.outputs.windows_success }}
-      linux_html_artifact: ${{ steps.collect.outputs.linux_html_artifact }}
-      windows_html_artifact: ${{ steps.collect.outputs.windows_html_artifact }}
-      linux_pdf_artifact: ${{ steps.collect.outputs.linux_pdf_artifact }}
-      windows_pdf_artifact: ${{ steps.collect.outputs.windows_pdf_artifact }}
+      linux_html_vol1_artifact: ${{ steps.collect.outputs.linux_html_vol1_artifact }}
+      linux_html_vol2_artifact: ${{ steps.collect.outputs.linux_html_vol2_artifact }}
+      linux_pdf_vol1_artifact: ${{ steps.collect.outputs.linux_pdf_vol1_artifact }}
+      linux_pdf_vol2_artifact: ${{ steps.collect.outputs.linux_pdf_vol2_artifact }}
+      linux_epub_vol1_artifact: ${{ steps.collect.outputs.linux_epub_vol1_artifact }}
+      linux_epub_vol2_artifact: ${{ steps.collect.outputs.linux_epub_vol2_artifact }}
 
     steps:
       - name: 📊 Collect build results
@@ -306,39 +303,26 @@ jobs:
 
           # These will hold the final results, preferring container builds
           OVERALL_SUCCESS="false"
-          LINUX_HTML=""
-          WINDOWS_HTML=""
-          LINUX_PDF=""
-          WINDOWS_PDF=""
+          LINUX_HTML_VOL1=""
+          LINUX_HTML_VOL2=""
+          LINUX_PDF_VOL1=""
+          LINUX_PDF_VOL2=""
+          LINUX_EPUB_VOL1=""
+          LINUX_EPUB_VOL2=""
 
-          # Check container build results first
-          if [[ "${{ needs.build-config.outputs.build_method }}" == "container" || "${{ needs.build-config.outputs.build_method }}" == "both" ]]; then
-            if [[ "${{ needs.build-container.result }}" == "success" ]]; then
-              echo "✅ Container builds completed successfully."
-              OVERALL_SUCCESS="${{ needs.build-container.outputs.build_success }}"
-              LINUX_HTML="${{ needs.build-container.outputs.linux_html_artifact }}"
-              LINUX_PDF="${{ needs.build-container.outputs.linux_pdf_artifact }}"
-              WINDOWS_HTML="${{ needs.build-container.outputs.windows_html_artifact }}"
-              WINDOWS_PDF="${{ needs.build-container.outputs.windows_pdf_artifact }}"
-            else
-              echo "❌ Container builds failed or were skipped."
-              OVERALL_SUCCESS="false"
-            fi
-          fi
-
-          # Fallback to baremetal if container failed and method was 'both', or if method was 'baremetal'
-          if [[ "$OVERALL_SUCCESS" == "false" && ("${{ needs.build-config.outputs.build_method }}" == "baremetal" || "${{ needs.build-config.outputs.build_method }}" == "both") ]]; then
-            if [[ "${{ needs.build-baremetal.result }}" == "success" ]]; then
-              echo "✅ Baremetal builds completed successfully."
-              OVERALL_SUCCESS="${{ needs.build-baremetal.outputs.build_success }}"
-              LINUX_HTML="${{ needs.build-baremetal.outputs.linux_html_artifact }}"
-              LINUX_PDF="${{ needs.build-baremetal.outputs.linux_pdf_artifact }}"
-              WINDOWS_HTML="${{ needs.build-baremetal.outputs.windows_html_artifact }}"
-              WINDOWS_PDF="${{ needs.build-baremetal.outputs.windows_pdf_artifact }}"
-            else
-              echo "❌ Baremetal builds also failed or were skipped."
-              OVERALL_SUCCESS="false"
-            fi
+          # Container-only results
+          if [[ "${{ needs.build-container.result }}" == "success" ]]; then
+            echo "✅ Container builds completed successfully."
+            OVERALL_SUCCESS="${{ needs.build-container.outputs.build_success }}"
+            LINUX_HTML_VOL1="${{ needs.build-container.outputs.linux_html_vol1_artifact }}"
+            LINUX_HTML_VOL2="${{ needs.build-container.outputs.linux_html_vol2_artifact }}"
+            LINUX_PDF_VOL1="${{ needs.build-container.outputs.linux_pdf_vol1_artifact }}"
+            LINUX_PDF_VOL2="${{ needs.build-container.outputs.linux_pdf_vol2_artifact }}"
+            LINUX_EPUB_VOL1="${{ needs.build-container.outputs.linux_epub_vol1_artifact }}"
+            LINUX_EPUB_VOL2="${{ needs.build-container.outputs.linux_epub_vol2_artifact }}"
+          else
+            echo "❌ Container builds failed or were skipped."
+            OVERALL_SUCCESS="false"
           fi
 
           # Determine per-platform success based on overall success and which platforms were built
@@ -357,16 +341,141 @@ jobs:
           # Set outputs
           echo "linux_success=$LINUX_SUCCESS" >> $GITHUB_OUTPUT
           echo "windows_success=$WINDOWS_SUCCESS" >> $GITHUB_OUTPUT
-          echo "linux_html_artifact=$LINUX_HTML" >> $GITHUB_OUTPUT
-          echo "windows_html_artifact=$WINDOWS_HTML" >> $GITHUB_OUTPUT
-          echo "linux_pdf_artifact=$LINUX_PDF" >> $GITHUB_OUTPUT
-          echo "windows_pdf_artifact=$WINDOWS_PDF" >> $GITHUB_OUTPUT
+          echo "linux_html_vol1_artifact=$LINUX_HTML_VOL1" >> $GITHUB_OUTPUT
+          echo "linux_html_vol2_artifact=$LINUX_HTML_VOL2" >> $GITHUB_OUTPUT
+          echo "linux_pdf_vol1_artifact=$LINUX_PDF_VOL1" >> $GITHUB_OUTPUT
+          echo "linux_pdf_vol2_artifact=$LINUX_PDF_VOL2" >> $GITHUB_OUTPUT
+          echo "linux_epub_vol1_artifact=$LINUX_EPUB_VOL1" >> $GITHUB_OUTPUT
+          echo "linux_epub_vol2_artifact=$LINUX_EPUB_VOL2" >> $GITHUB_OUTPUT
+
+  # Step 4a: Epubcheck validation (Tier 1 — blocks on FATAL)
+  # The pre-commit hook `book-epub-hygiene` catches source-level issues
+  # that historically caused EPUB rejection (SVG control chars, dupe
+  # marker ids, BibTeX URL escapes). Epubcheck is the full structural
+  # validator and catches the rest: OPF manifest shape, XHTML XML
+  # validity, cross-file references, URI syntax.
+  #
+  # Failure policy: FATAL > 0 fails the job (Kindle and ClearView
+  # reject any EPUB with FATAL, so this is a ship-stopper). ERROR > 0
+  # is reported as a warning but does NOT fail the job, to let
+  # remaining legacy errors be cleaned up incrementally without
+  # blocking feature work. Tighten this by setting MAX_ERRORS=0 once
+  # the baseline is clean in both volumes.
+  epub-validate:
+    name: '📘 EPUB validate (epubcheck via binder)'
+    needs: [collect-results]
+    if: |
+      always() &&
+      needs.collect-results.outputs.linux_success == 'true' &&
+      needs.collect-results.outputs.linux_epub_vol1_artifact != '' &&
+      needs.collect-results.outputs.linux_epub_vol2_artifact != ''
+    runs-on: ubuntu-latest
+    env:
+      # Ratchet baseline — fails if epubcheck counts exceed recorded
+      # per-volume ceilings. Update with
+      #   ./binder check epub --scope epubcheck \
+      #       --baseline book/tools/audit/epubcheck-baseline.json \
+      #       --update-baseline
+      # after a cleanup lands, and commit the changed file in the
+      # same PR as the cleanup. This replaces the older flat
+      # MAX_FATAL/MAX_ERRORS approach: a ratchet prevents regression
+      # without cliff-failing during incremental cleanup.
+      #
+      # Path is relative to book/ because the run step does `cd book`
+      # before invoking the binder CLI.
+      BASELINE_PATH: 'tools/audit/epubcheck-baseline.json'
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v6
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 📥 Download vol1 EPUB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol1_artifact }}
+          # Materialize into the canonical location the binder CLI
+          # discovers (_discover_built_epubs walks
+          # book/quarto/_build/epub-vol*/).
+          path: book/quarto/_build/epub-vol1
+
+      - name: 📥 Download vol2 EPUB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.collect-results.outputs.linux_epub_vol2_artifact }}
+          path: book/quarto/_build/epub-vol2
+
+      - name: ☕ Set up Java (for the epubcheck jar)
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: ⬇️ Install book Python dependencies
+        # Installs the `epubcheck` PyPI wrapper (declared in
+        # book/tools/dependencies/requirements.txt) alongside rich,
+        # pyyaml, and the rest of the binder runtime. The wrapper
+        # bundles the epubcheck jar and exposes it on PATH.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r book/tools/dependencies/requirements.txt
+
+      - name: 📘 Run `binder check epub --scope epubcheck` with baseline ratchet
+        # Both source-level hygiene and post-build epubcheck validation
+        # live inside the binder CLI. This step invokes the same
+        # command a developer runs locally, so CI and local behaviour
+        # stay in lockstep.
+        #
+        # The --baseline ratchet means CI fails only when the per-
+        # volume FATAL/ERROR/WARNING count *exceeds* what was
+        # recorded last time the baseline was updated. Prevents
+        # regression without forcing a cliff-cleanup of every
+        # pre-existing issue on every PR.
+        env:
+          BASELINE_PATH: ${{ env.BASELINE_PATH }}
+        run: |
+          set -euo pipefail
+          cd book
+          # JSON pass: machine-readable artifact (uploaded below).
+          # GITHUB_ACTIONS=true is set automatically, so _epub_checks
+          # emits `::error` annotations inline on the PR diff.
+          ./binder check epub --scope epubcheck \
+              --baseline "${BASELINE_PATH}" \
+              --json > epubcheck-report.json || true
+          # Human pass: exit code gates the CI job via the ratchet.
+          ./binder check epub --scope epubcheck --baseline "${BASELINE_PATH}"
+
+      - name: 📤 Upload epubcheck report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: epubcheck-report
+          path: book/epubcheck-report.json
+          retention-days: 14
+
+  # Step 4b: Link integrity (Tier 2 — non-blocking baseline)
+  # Tier 1 pre-commit (shared/scripts/check-internal-links.py) already blocks
+  # broken internal links + anchors. This Lychee pass adds external reachability
+  # as a warning. Flip fail_on_broken=true once the baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    needs: [pre-commit]
+    if: always() && needs.pre-commit.result == 'success'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './book/quarto/contents/**/*.qmd'
+      lycheeignore_path: 'book/config/linting/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 10
 
   # Step 5: Final results and summary
   validation-summary:
     name: '🎯 Validation Summary'
     if: always()
-    needs: [pre-commit, build-config, collect-results]
+    needs: [pre-commit, build-config, collect-results, epub-validate, check-links]
     runs-on: ubuntu-latest
 
     steps:
@@ -406,6 +515,13 @@ jobs:
             echo "⏭️ Windows build: SKIPPED"
           fi
 
+          case "${{ needs.epub-validate.result }}" in
+            success) echo "✅ EPUB validate (epubcheck): PASSED" ;;
+            failure) echo "❌ EPUB validate (epubcheck): FAILED" ;;
+            skipped) echo "⏭️ EPUB validate (epubcheck): SKIPPED" ;;
+            *)       echo "⚠️ EPUB validate (epubcheck): ${{ needs.epub-validate.result }}" ;;
+          esac
+
           echo ""
           echo "🎯 OVERALL STATUS:"
           echo "-----------------"
@@ -439,21 +555,14 @@ jobs:
           echo "## 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
-            echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Method**: 🔄 Both container and baremetal builds (default for auto-push)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Format**: HTML + PDF + EPUB (mandatory)" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: Linux only (Windows temporarily disabled on push)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: ✅ Container builds only" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
             echo "- **Formats**: ${{ inputs.build_formats }}" >> $GITHUB_STEP_SUMMARY
             echo "- **OS**: ${{ inputs.build_os }}" >> $GITHUB_STEP_SUMMARY
-
-            if [ "${{ inputs.build_method }}" = "baremetal" ]; then
-              echo "- **Method**: ⚠️ Baremetal builds (LEGACY - deprecated)" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ inputs.build_method }}" = "both" ]; then
-              echo "- **Method**: 🔄 Both container and baremetal builds" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- **Method**: ✅ Container builds (recommended)" >> $GITHUB_STEP_SUMMARY
-            fi
+            echo "- **Method**: ✅ Container builds only" >> $GITHUB_STEP_SUMMARY
 
             echo "- **Registry**: ${{ needs.build-config.outputs.container_registry }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Tag**: ${{ needs.build-config.outputs.container_tag }}" >> $GITHUB_STEP_SUMMARY
@@ -480,3 +589,7 @@ jobs:
           else
             echo "❌ **Validation Failed** - Check the logs above" >> $GITHUB_STEP_SUMMARY
           fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🔗 Link Check (non-blocking)" >> $GITHUB_STEP_SUMMARY
+          echo "- Result: \`${{ needs.check-links.result }}\` (see job for detail)" >> $GITHUB_STEP_SUMMARY

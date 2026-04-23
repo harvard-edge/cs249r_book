@@ -1,0 +1,122 @@
+name: '🔧 Infra · 🛡️ Publish Guard'
+
+# =============================================================================
+# 🛡️ Publish Guard — Block publish-live unless dev validation is green
+# =============================================================================
+#
+# Reusable guard called from every <site>-publish-live.yml. It queries the
+# latest run of a specified validate-dev workflow on the dev branch and
+# fails the publish job if that run is not 'success'. This prevents shipping
+# from an unvalidated baseline (the staged-rollout safety net).
+#
+# Inputs:
+#   validate_workflow  Filename of the validate-dev workflow to query
+#                      (e.g. "kits-validate-dev.yml"). Required.
+#   branch             Branch whose latest run we trust (default: "dev").
+#   max_age_minutes    Refuse to trust runs older than this. Default 1440
+#                      (24h). Prevents stale green from gating publish.
+#
+# Outputs:
+#   gate_status        "ok" if the latest validate run on <branch> is green
+#                      and within max_age. The job exits non-zero otherwise.
+#
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      validate_workflow:
+        required: true
+        type: string
+        description: 'Filename of validate-dev workflow to require green (e.g. kits-validate-dev.yml).'
+      branch:
+        required: false
+        type: string
+        default: 'dev'
+        description: 'Branch whose latest validate-dev run gates the publish.'
+      max_age_minutes:
+        required: false
+        type: number
+        default: 1440
+        description: 'Maximum age (minutes) of the validate-dev run we trust. Default 24h.'
+
+    outputs:
+      gate_status:
+        description: 'ok if guard passed; otherwise the job already failed.'
+        value: ${{ jobs.guard.outputs.gate_status }}
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  guard:
+    name: '🛡️ Validate-Dev Green Gate'
+    runs-on: ubuntu-latest
+    outputs:
+      gate_status: ${{ steps.gate.outputs.gate_status }}
+    steps:
+      - name: 🔎 Query latest validate-dev run
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          WORKFLOW: ${{ inputs.validate_workflow }}
+          BRANCH: ${{ inputs.branch }}
+          MAX_AGE: ${{ inputs.max_age_minutes }}
+        run: |
+          set -euo pipefail
+          echo "Looking for the latest run of '$WORKFLOW' on branch '$BRANCH'..."
+
+          # Pull the latest run that completed (status=completed) on $BRANCH.
+          RUN_JSON=$(gh api \
+            "repos/$OWNER/$REPO/actions/workflows/$WORKFLOW/runs?branch=$BRANCH&per_page=1&status=completed" \
+            --jq '.workflow_runs[0] // empty')
+
+          if [ -z "$RUN_JSON" ]; then
+            echo "::error::No completed run of '$WORKFLOW' found on branch '$BRANCH'."
+            echo "Trigger the validate-dev workflow on $BRANCH and re-run this publish."
+            exit 1
+          fi
+
+          CONCLUSION=$(echo "$RUN_JSON" | jq -r '.conclusion')
+          UPDATED_AT=$(echo "$RUN_JSON" | jq -r '.updated_at')
+          HTML_URL=$(echo "$RUN_JSON"   | jq -r '.html_url')
+          HEAD_SHA=$(echo "$RUN_JSON"   | jq -r '.head_sha')
+
+          echo "Latest run conclusion: $CONCLUSION"
+          echo "Updated at:            $UPDATED_AT"
+          echo "Head SHA:              $HEAD_SHA"
+          echo "Run URL:               $HTML_URL"
+
+          # Age check: max_age_minutes converted to seconds.
+          NOW_EPOCH=$(date -u +%s)
+          # date -d works on GNU; use python for portability across runners.
+          RUN_EPOCH=$(python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "$UPDATED_AT")
+          AGE_MIN=$(( (NOW_EPOCH - RUN_EPOCH) / 60 ))
+          echo "Run age: ${AGE_MIN} minutes (limit: ${MAX_AGE})"
+
+          {
+            echo "## 🛡️ Publish Guard"
+            echo ""
+            echo "- **Workflow watched**: \`$WORKFLOW\`"
+            echo "- **Branch**: \`$BRANCH\`"
+            echo "- **Conclusion**: \`$CONCLUSION\`"
+            echo "- **Head SHA**: \`$HEAD_SHA\`"
+            echo "- **Age**: ${AGE_MIN}m (limit ${MAX_AGE}m)"
+            echo "- **Run**: $HTML_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::Latest '$WORKFLOW' run on '$BRANCH' is '$CONCLUSION'. Publish blocked."
+            exit 1
+          fi
+
+          if [ "$AGE_MIN" -gt "$MAX_AGE" ]; then
+            echo "::error::Latest green run on '$BRANCH' is ${AGE_MIN}m old, exceeding limit ${MAX_AGE}m. Re-run validate-dev and try again."
+            exit 1
+          fi
+
+          echo "✅ Guard cleared: validate-dev is green and fresh."
+          echo "gate_status=ok" >> "$GITHUB_OUTPUT"

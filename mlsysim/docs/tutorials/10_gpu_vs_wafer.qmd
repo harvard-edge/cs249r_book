@@ -1,0 +1,299 @@
+---
+title: "GPU vs. Wafer-Scale"
+subtitle: "Cerebras eliminates the memory wall --- then hits a completely different one."
+description: "Compare conventional GPU inference to Cerebras weight-streaming silicon. The binding constraint shifts from HBM bandwidth to injection bandwidth --- a qualitative regime change, not just a quantitative improvement."
+categories: ["analysis", "advanced"]
+---
+
+## The Question
+
+Can a fundamentally different architecture change *which* wall binds? GPUs are
+**weight-stationary**: weights live in HBM, and the bottleneck is HBM bandwidth.
+The Cerebras WSE-3 takes the opposite approach: it is **activation-stationary**,
+holding activations on 44 GB of on-wafer SRAM and streaming weights from external
+MemoryX nodes. Does this eliminate the memory wall --- or just move it somewhere else?
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd),
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd), and
+[Tutorial 9: Sensitivity Analysis](09_sensitivity.qmd). You should understand
+roofline analysis, binding constraints, and sensitivity-based investment decisions.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Compare** GPU and Cerebras architectures on the same workload using different solvers
+- **Identify** that the binding constraint **shifts** from HBM bandwidth to injection bandwidth
+- **Compute** the optimal batch size B* where injection and compute overlap perfectly
+- **Explain** why this is a qualitative regime change, not just a quantitative speedup
+:::
+
+::: {.callout-tip}
+## Background: Two Philosophies of Memory
+
+Conventional GPUs use a two-level memory hierarchy: fast but small on-chip SRAM
+(registers, L1/L2 cache) and large but slower off-chip HBM. The fundamental insight
+of wafer-scale computing is: what if you made the chip large enough that SRAM alone
+could hold the working set? The Cerebras WSE-3 is an entire silicon wafer — 46,225 mm²
+vs. ~800 mm² for an H100 die — with 44 GB of on-wafer SRAM distributed across 900,000
+cores.
+
+**GPU (weight-stationary):** Model weights live in HBM. At each decode step, the entire
+model streams from HBM to the compute units. Activations are small and transient.
+Bottleneck: HBM bandwidth.
+
+**Cerebras WSE-3 (activation-stationary):** Activations and KV-cache live on the 44 GB
+of on-wafer SRAM. But 44 GB cannot hold a 350 GB model, so weights must stream in
+layer-by-layer from external **MemoryX nodes** — dedicated memory boxes connected to the
+wafer via a high-bandwidth interconnect. Bottleneck: injection bandwidth from MemoryX.
+
+Same model, same math, completely different performance physics.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+import mlsysim
+```
+
+```python
+import mlsysim
+from mlsysim import SingleNodeModel, WeightStreamingModel, SensitivitySolver
+```
+
+---
+
+## 2. GPU Baseline: H100 Inference
+
+We use **GPT-3 (175B)** --- a model large enough that architectural differences in how
+weights reach compute become the dominant factor. At batch size 1, each decode step must
+reload the entire model from HBM.
+
+```{python}
+from mlsysim import SingleNodeModel, WeightStreamingModel, SensitivitySolver
+from mlsysim.show import table, info, banner
+
+model = mlsysim.Models.Language.GPT3
+gpu_hw = mlsysim.Hardware.Cloud.H100
+
+gpu_solver = SingleNodeModel()
+gpu_result = gpu_solver.solve(
+    model=model, hardware=gpu_hw,
+    batch_size=1, precision="fp16"
+)
+
+info("GPU Baseline",
+     Model=f"{model.name} ({model.parameters.to('Gparam'):.0f})",
+     Hardware=gpu_hw.name,
+     Bottleneck=gpu_result.bottleneck,
+     Latency=gpu_result.latency.to('ms'),
+     HBM_BW=gpu_hw.memory.bandwidth.to('TB/s'),
+     Peak_FLOPS=gpu_hw.compute.peak_flops.to('TFLOPs/s'))
+```
+
+At batch size 1, GPT-3 requires 2 FLOPs per parameter per token but must load all 175B
+parameters (350 GB at fp16) from HBM. The arithmetic intensity is approximately
+1 FLOP/byte --- far below the H100's ridge point. The 3.35 TB/s HBM bandwidth, not the
+989 TFLOP/s compute, determines the decode latency.
+
+---
+
+## 3. Cerebras Path: Weight Streaming on WSE-3
+
+Now analyze the same model on the Cerebras CS-3. Instead of loading weights from HBM,
+the WSE-3 streams them from MemoryX nodes over a dedicated interconnect.
+
+```{python}
+ws_hw = mlsysim.Hardware.Cloud.Cerebras_CS3
+ws_solver = WeightStreamingModel()
+
+ws_result = ws_solver.solve(
+    model=model, hardware=ws_hw,
+    seq_len=2048, batch_size=1, precision="fp16"
+)
+
+info("Cerebras WSE-3",
+     Hardware=ws_hw.name,
+     Feasible=ws_result.feasible,
+     Bottleneck=ws_result.bottleneck,
+     Throughput=f"{ws_result.throughput_tokens_per_sec:.0f} tokens/sec",
+     Layer_compute_time=ws_result.layer_compute_time.to('ms'),
+     Layer_injection_time=ws_result.layer_injection_time.to('ms'),
+     Optimal_batch_size=ws_result.optimal_batch_size,
+     SRAM_utilization=f"{ws_result.wafer_memory_utilization:.1%}")
+```
+
+The WSE-3 reports two times per layer: how long the wafer takes to **compute** the layer's
+output, and how long it takes to **inject** the layer's weights from MemoryX. The bottleneck
+is whichever is slower.
+
+---
+
+## 4. Side-by-Side: Where the Wall Shifts
+
+```{python}
+gpu_lat_ms = gpu_result.latency.to('ms').magnitude
+# Cerebras total decode: max(inject, compute) per layer * num_layers
+ws_layer_time = max(
+    ws_result.layer_injection_time.to('ms').magnitude,
+    ws_result.layer_compute_time.to('ms').magnitude
+)
+ws_total_ms = ws_layer_time * model.layers
+speedup = gpu_lat_ms / ws_total_ms if ws_total_ms > 0 else 0
+
+table(
+    ["Metric", "H100 (GPU)", "CS-3 (WSE)"],
+    [
+        ["Bottleneck", gpu_result.bottleneck, ws_result.bottleneck],
+        ["Total decode time (ms)", f"{gpu_lat_ms:.2f}", f"{ws_total_ms:.2f}"],
+        ["Speedup", "1.0x", f"{speedup:.1f}x"],
+        ["Optimal batch B*", "N/A", ws_result.optimal_batch_size],
+    ]
+)
+```
+
+The GPU and WSE-3 hit **fundamentally different walls**:
+
+- **GPU**: Limited by HBM bandwidth (~3.35 TB/s)
+- **WSE-3**: Limited by MemoryX injection bandwidth (~1.2 TB/s)
+
+This means the optimization strategies are completely different. For the GPU, you optimize
+by reducing bytes loaded (quantization, smaller models). For the WSE-3, you optimize by
+overlapping injection with compute (increasing batch size toward B*).
+
+::: {.callout-important}
+## Key Insight
+
+**The binding constraint is not a property of the model --- it is a property of the
+model-architecture pair.** GPUs are bound by HBM bandwidth. Cerebras WSE-3 eliminates
+the HBM wall entirely (weights never touch HBM) but introduces an injection bandwidth
+wall from MemoryX. This is a **qualitative regime change**: the wall *shifted*, it did
+not disappear. When evaluating any novel architecture, the question is not "is it faster?"
+but "which wall does it move, and what new wall does it create?"
+:::
+
+---
+
+## 5. The SRAM Ceiling: Finding B*
+
+The WSE-3 has a unique optimization knob: batch size controls whether compute or injection
+dominates. At the optimal batch size B*, the two pipelines overlap perfectly. But
+activations must fit in 44 GB of on-wafer SRAM --- this is the SRAM ceiling.
+
+```{python}
+rows = []
+for batch in [1, 2, 4, 8, 16, 32, 64, 128]:
+    r = ws_solver.solve(
+        model=model, hardware=ws_hw,
+        seq_len=2048, batch_size=batch, precision="fp16"
+    )
+    rows.append([
+        batch, r.bottleneck,
+        f"{r.throughput_tokens_per_sec:.0f}/s",
+        f"{r.wafer_memory_utilization:.1%}",
+        "YES" if r.feasible else "OOM"
+    ])
+
+table(["Batch", "Bottleneck", "Throughput", "SRAM Util", "Feasible"], rows)
+```
+
+Watch for where the bottleneck transitions from injection-bound to compute-bound. At that
+transition (B*), neither pipeline is idle, and throughput per token is maximized. Beyond B*,
+SRAM fills up and the configuration eventually becomes infeasible (OOM).
+
+---
+
+## 6. Sensitivity Confirmation: Different Walls, Different Levers
+
+Use the `SensitivitySolver` on the GPU to confirm that the binding constraint is
+bandwidth, then contrast with the Cerebras architecture conceptually.
+
+```{python}
+sens_solver = SensitivitySolver()
+gpu_sens = sens_solver.solve(
+    model=model, hardware=gpu_hw, precision="fp16"
+)
+
+banner(f"GPU Sensitivity ({gpu_hw.name})")
+info(Baseline_latency=gpu_sens.baseline_latency.to('ms'),
+     Binding_constraint=gpu_sens.binding_constraint)
+
+sens_rows = [[param, f"{val:+.4f}"] for param, val in gpu_sens.sensitivities.items()]
+table(["Parameter", "Sensitivity"], sens_rows)
+
+banner("Cerebras WSE-3")
+info(Binding_constraint="injection bandwidth (MemoryX -> wafer)",
+     Optimization_lever="increase batch size to overlap inject/compute")
+
+print()
+print("Different architectures -> different walls -> different strategies.")
+```
+
+::: {.callout-warning}
+## The deeper lesson
+
+When evaluating novel architectures (wafer-scale, photonic, analog, neuromorphic), do not
+ask "Is it faster?" Ask: **"Which wall does it move, and what new wall does it create?"**
+Every architecture eliminates one bottleneck by introducing another.
+:::
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+Does the Cerebras advantage grow or shrink for smaller models? Before running code,
+predict whether the WSE-3 speedup over H100 will be larger or smaller for
+`mlsysim.Models.Llama3_8B` (8B parameters) compared to GPT-3 (175B). Then verify
+with both solvers. Explain your finding in terms of injection bandwidth utilization.
+
+**Exercise 2: The SRAM ceiling.**
+At what model size does the 44 GB SRAM ceiling become the binding constraint on Cerebras?
+Try `mlsysim.Models.Llama3_70B` at increasing sequence lengths (512, 1024, 2048, 4096,
+8192). At what point does SRAM utilization exceed 100% (OOM)? What does this mean for
+serving long-context models on wafer-scale silicon?
+
+**Exercise 3: TCO comparison.**
+If an H100 costs ~$30,000 and a Cerebras CS-3 costs ~$2,000,000, how many H100s would
+you need to match the Cerebras throughput for GPT-3 inference? Use the throughput numbers
+from this tutorial to compute the fleet size, then compare the total hardware cost.
+Which is more cost-effective at 100 queries per second?
+
+**Self-check:** If the WSE-3 injection bandwidth is 1.2 TB/s and GPT-3 weights are
+350 GB (fp16), what is the minimum per-layer injection time for a 96-layer model?
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **Weight streaming** inverts the GPU memory hierarchy: activations stay on-wafer (SRAM),
+  weights stream in from external memory nodes
+- **The binding constraint shifts** from HBM bandwidth (GPU) to injection bandwidth
+  (WSE-3) --- a qualitative change in system physics
+- **Optimal batch size B*** exists for weight-streaming architectures, perfectly overlapping
+  injection with compute
+- **Architecture evaluation** requires asking "which wall moves?" not "which is faster?"
+:::
+
+---
+
+## Next Steps
+
+- **[Sensitivity Analysis](09_sensitivity.qmd)** --- Dive deeper into partial derivatives and inverse synthesis
+- **[Full-Stack Audit](12_full_stack_audit.qmd)** --- Compose all solvers into a complete systems analysis
+- **[The Memory Wall](01_memory_wall.qmd)** --- Revisit the foundational GPU memory wall tutorial
+- **[Silicon Zoo](../zoo/hardware.qmd)** --- Compare the Cerebras CS-3, GPU fleet, and other accelerators

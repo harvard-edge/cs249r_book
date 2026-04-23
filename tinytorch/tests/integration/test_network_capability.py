@@ -4,6 +4,7 @@ Tests that networks can solve non-linear problems
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -117,7 +118,7 @@ class TestMLPCapabilities:
             Linear(6, 1)
         ]
 
-        x = Tensor(np.random.randn(16, 100))
+        x = Tensor(rng.standard_normal((16, 100)))
 
         # Forward through all layers
         for layer in layers:

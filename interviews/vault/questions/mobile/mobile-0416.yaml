@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: mobile-0416
+track: mobile
+level: L3
+zone: diagnosis
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: The Mobile GPU's Memory-Go-Round
+scenario: You are optimizing a custom keyword-spotting model on an iPhone with an Apple A17 Pro chip.
+  The profiler shows that a sequence of three operations (`Conv2D`, `BatchNorm`, `ReLU`) is taking up
+  a significant portion of your 1.5ms latency budget, even though the model is small. The intermediate
+  activation tensor between each operation is 1MB. Using the hardware constants for an A17 Pro, diagnose
+  why this sequence is slow and apply the most effective optimization.
+details:
+  realistic_solution: The bottleneck is not compute; it's memory bandwidth. Each separate operator in
+    the sequence writes its 1MB result to the main LPDDR5 memory, and the next operator must read it back.
+    These round-trips are extremely slow compared to on-chip computation. The solution is Operator Fusion.
+    By fusing `Conv2D`, `BatchNorm`, and `ReLU` into a single kernel, the intermediate 1MB tensors never
+    leave the GPU's fast on-chip memory (registers/L1 cache), eliminating the slow round-trips to LPDDR5
+    and dramatically reducing latency.
+  common_mistake: Engineers often focus only on the computational complexity (FLOPs) of operators, assuming
+    that if the FLOPs are low, the operator must be fast. They neglect the massive overhead of memory
+    access, especially for sequences of small, memory-bound operations where data is repeatedly written
+    to and read from main memory.
+  napkin_math: 'The A17 Pro''s LPDDR5 memory bandwidth is 51.2 GB/s (or 51.2 MB/ms). A 1MB tensor read
+    or write takes 1MB / 51.2 MB/ms ≈ 0.0195 ms. An unfused sequence of 3 operations requires reading
+    the input and writing the output for each op: Conv2D (write 1MB intermediate), BatchNorm (read 1MB,
+    write 1MB), ReLU (read 1MB, write 1MB). This is roughly 5 memory transfers of the 1MB intermediate
+    tensors. 5 * 0.0195 ms ≈ 0.1 ms just in ideal memory transfer time, not accounting for kernel launch
+    overheads or non-ideal bandwidth utilization, which easily balloons to a large fraction of the 1.5ms
+    budget. Fusing them removes the intermediate reads/writes to main memory entirely.'
+  options:
+  - The 1MB activation tensor is too large and causing memory swapping, so the model needs to be pruned.
+  - The A17 Pro's Neural Engine is not powerful enough; the workload should be moved to the CPU.
+  - The latency is dominated by memory bandwidth overhead from multiple kernel launches; fuse the operations
+    into a single kernel.
+  - The Conv2D operation is too computationally expensive; it should be replaced with a depthwise separable
+    convolution.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+chains:
+- id: mobile-chain-099
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

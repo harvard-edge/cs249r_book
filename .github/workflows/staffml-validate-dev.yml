@@ -1,0 +1,305 @@
+name: '🎯 StaffML · ✅ Validate (Dev)'
+
+# =============================================================================
+# StaffML — Build & Validation
+# =============================================================================
+#
+# Validates the StaffML Next.js interview-prep app before the preview/publish
+# workflows touch it. Mirrors the build-side checks already done in
+# staffml-preview-dev.yml so they fail fast in CI without paying the deploy
+# cost. Adds a Tier 2 link-check pass.
+#
+# Flow:
+#   1. TYPECHECK_AND_TEST — npm ci + tsc --noEmit + npm test
+#   2. BUILD              — Next.js static export (no deploy)
+#   3. SMOKE              — Vault integrity + corpus invariants
+#   4. CHECK_LINKS        — Lychee external-link reachability (non-blocking)
+#   5. SUMMARY            — Aggregate results
+#
+# Triggers:
+#   - push: dev branch, interviews/staffml/** paths
+#   - pull_request: interviews/staffml/** changes
+#   - workflow_dispatch: manual
+#
+# Deploys to: N/A (validate only)
+#
+# Related:
+#   - staffml-preview-dev.yml  — Dev preview deploy
+#   - staffml-publish-live.yml — Production deploy
+#
+# =============================================================================
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'interviews/staffml/**'
+      - '.github/workflows/staffml-validate-dev.yml'
+      - '.github/workflows/staffml-preview-dev.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'interviews/staffml/**'
+      - '.github/workflows/staffml-validate-dev.yml'
+      - '.github/workflows/staffml-preview-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staffml-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Type-check + unit tests
+  # ===========================================================================
+  typecheck-and-test:
+    name: '🔍 Typecheck + Tests'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: interviews/staffml
+        run: npm ci
+
+      - name: 🔍 Type check
+        working-directory: interviews/staffml
+        run: npx tsc --noEmit
+
+      - name: 🧪 Run tests
+        working-directory: interviews/staffml
+        run: npm test
+
+  # ===========================================================================
+  # Stage 2: Static build (no deploy)
+  # ===========================================================================
+  build:
+    name: '🔨 Build StaffML'
+    runs-on: ubuntu-latest
+    needs: typecheck-and-test
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: interviews/staffml
+        run: npm ci
+
+      - name: 🔨 Build StaffML (static export)
+        working-directory: interviews/staffml
+        env:
+          # Validation-only build; matches dev preview env so we exercise the
+          # same code paths but no deploy follows.
+          NEXT_PUBLIC_BASE_PATH: /cs249r_book_dev/staffml
+          NEXT_PUBLIC_ECOSYSTEM_BASE: https://harvard-edge.github.io/cs249r_book_dev
+        run: npm run build
+
+      - name: 🔍 Validate build output
+        run: |
+          if [ ! -f "interviews/staffml/out/index.html" ]; then
+            echo "❌ CRITICAL: index.html missing from build output."
+            exit 1
+          fi
+          MISSING=0
+          for page in practice gauntlet progress about 404; do
+            if [ ! -f "interviews/staffml/out/${page}.html" ]; then
+              echo "❌ MISSING: ${page}.html"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ "$MISSING" -gt 0 ]; then
+            echo "❌ $MISSING critical pages missing."
+            exit 1
+          fi
+          echo "✅ StaffML built: $(find interviews/staffml/out -name '*.html' | wc -l) pages"
+
+  # ===========================================================================
+  # Stage 2.5: Headless-Chromium end-to-end smoke
+  # ===========================================================================
+  # Would have caught the hydration shape-mismatch bug from PR #1440
+  # before merge. Loads a handful of critical routes in a real browser
+  # and fails on uncaught page errors / console.error / missing content.
+  # See interviews/staffml/scripts/e2e-smoke.py for the allowlist +
+  # assertion catalog.
+  e2e-smoke:
+    name: '🎭 E2E Smoke (headless Chromium)'
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: interviews/staffml/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: interviews/staffml
+        run: npm ci
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 🛠️ Install vault-cli
+        run: pip install -e interviews/vault-cli/
+
+      - name: 🔄 Regenerate corpus from YAMLs
+        # Ensures the E2E build sees current YAML state (same as preview/
+        # publish workflows do).
+        run: vault build --vault-dir interviews/vault --release-id e2e-smoke --legacy-json
+
+      - name: 🔨 Build StaffML for E2E (no base-path)
+        working-directory: interviews/staffml
+        # Builds at the root path so we can serve out/ locally without
+        # mirroring the /cs249r_book_dev/staffml/ prefix. Base-path
+        # fidelity is already validated by the main `build` job above.
+        env:
+          NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
+        run: npm run build
+
+      - name: 🎭 Install Playwright + Chromium
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: 🧪 Run E2E smoke
+        run: python3 interviews/staffml/scripts/e2e-smoke.py
+
+  # ===========================================================================
+  # Stage 3: Vault integrity + corpus smoke tests
+  # ===========================================================================
+  smoke:
+    name: '🧪 Vault + Corpus Smoke Tests'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 🐍 Install PyYAML (for schema drift check)
+        run: pip install pyyaml
+
+      - name: 🔐 Validate vault integrity
+        run: python3 interviews/staffml/scripts/validate-vault.py
+
+      - name: 🧬 Vault schema drift check (enums.py ↔ LinkML)
+        run: python3 interviews/vault-cli/scripts/check_schema_sync.py
+
+      - name: 🧪 Corpus invariants
+        run: |
+          python3 - <<'PYEOF'
+          import json, sys
+
+          with open('interviews/staffml/src/data/corpus.json') as f:
+              corpus = json.load(f)
+          assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)} questions'
+          print(f'✅ Corpus: {len(corpus)} questions')
+
+          required = ['id', 'title', 'level', 'track', 'scenario',
+                      'competency_area', 'topic', 'zone', 'details']
+          missing = []
+          for q in corpus:
+              for field in required:
+                  if not q.get(field):
+                      missing.append(f"{q.get('id', '???')} missing {field}")
+          if missing:
+              print(f'⚠️ {len(missing)} questions with missing fields (non-fatal)')
+              for m in missing[:5]:
+                  print(f'   {m}')
+
+          valid_levels = {'L1','L2','L3','L4','L5','L6','L6+'}
+          bad = [q['id'] for q in corpus if q.get('level') not in valid_levels]
+          assert not bad, f'{len(bad)} invalid levels: {bad[:3]}'
+          print('✅ All levels valid (L1-L6+)')
+
+          with open('interviews/staffml/src/data/vault-manifest.json') as f:
+              manifest = json.load(f)
+          assert manifest.get('questionCount') == len(corpus), \
+              f"Manifest count mismatch: {manifest.get('questionCount')} vs {len(corpus)}"
+          print(f"✅ Manifest: v{manifest['version']} ({manifest['questionCount']} Qs)")
+          PYEOF
+
+  # ===========================================================================
+  # Stage 4: Link integrity (Tier 2 — non-blocking baseline)
+  # ===========================================================================
+  # The StaffML app is a Next.js TSX codebase, so the markdown link checker
+  # only catches links inside .md/.mdx prose (READMEs, paper). External link
+  # validation through Lychee covers the rest. Flip fail_on_broken=true once
+  # baseline is clean.
+  check-links:
+    name: '🔗 Check Links'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './interviews/**/*.{md,mdx,qmd}'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: false
+      max_concurrency: 8
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: '📊 Summary'
+    runs-on: ubuntu-latest
+    needs: [typecheck-and-test, build, e2e-smoke, smoke, check-links]
+    if: always()
+
+    steps:
+      - name: 📊 Generate Summary
+        run: |
+          echo "## 🎯 StaffML Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔍 Typecheck + Tests | ${{ needs.typecheck-and-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔨 Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🎭 E2E Smoke | ${{ needs.e2e-smoke.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Vault Smoke Tests | ${{ needs.smoke.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔗 Link Check | ${{ needs.check-links.result }} (non-blocking) |" >> $GITHUB_STEP_SUMMARY
+
+      - name: ❌ Check for failures
+        run: |
+          if [ "${{ needs.typecheck-and-test.result }}" = "failure" ] || \
+             [ "${{ needs.build.result }}" = "failure" ] || \
+             [ "${{ needs.e2e-smoke.result }}" = "failure" ] || \
+             [ "${{ needs.smoke.result }}" = "failure" ]; then
+            echo "❌ Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.check-links.result }}" = "failure" ]; then
+            echo "⚠️ Link check found issues (non-blocking)"
+          fi
+          echo "✅ Core checks passed"

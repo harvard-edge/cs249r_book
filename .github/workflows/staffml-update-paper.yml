@@ -1,0 +1,139 @@
+name: '🎯 StaffML · 📑 Update Paper PDF'
+
+# =============================================================================
+# StaffML — Paper PDF Build & Deploy
+# =============================================================================
+#
+# Rebuilds the StaffML research paper from LaTeX source and deploys
+# the PDF to gh-pages for download from the site.
+#
+# Flow:
+#   1. STATS    — Analyze corpus → generate figures
+#   2. SVGS     — Convert SVG figures to PDF via Inkscape
+#   3. COMPILE  — Compile paper with pdfLaTeX + BibTeX
+#   4. DEPLOY   — Copy PDF to gh-pages downloads folder
+#
+# Triggers:
+#   - workflow_dispatch: manual
+#   - push to dev branch on interviews/paper/** or interviews/vault/corpus.json
+#
+# Deploys to: mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf
+# =============================================================================
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'interviews/paper/**'
+      - 'interviews/vault/corpus.json'
+      # Also regenerate when YAMLs change — analyze_corpus.py needs a
+      # fresh corpus.json. The vault-cli step below regenerates it from
+      # the YAMLs before calling analyze_corpus.py.
+      - 'interviews/vault/questions/**'
+      - 'interviews/vault/chains.json'
+
+permissions:
+  contents: write
+
+jobs:
+  build-paper:
+    name: '📑 Build StaffML Paper'
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r interviews/paper/requirements.txt
+          pip check
+
+      - name: 🛠️ Install vault-cli (for corpus regen from YAMLs)
+        run: pip install -e interviews/vault-cli/
+
+      - name: 🔄 Regenerate corpus.json from YAMLs
+        # Ensures analyze_corpus sees current YAML state even if the
+        # committed corpus.json drifted.
+        run: vault build --vault-dir interviews/vault --release-id paper-refresh --legacy-json
+
+      - name: 📊 Analyze corpus & generate figures
+        working-directory: interviews/paper
+        run: |
+          python3 scripts/analyze_corpus.py
+          python3 scripts/generate_figures.py
+
+
+      - name: 🖼️ Install Inkscape for SVG→PDF
+        run: sudo apt-get install -y inkscape
+
+      - name: 🖼️ Convert SVGs to PDFs
+        working-directory: interviews/paper
+        run: |
+          # SVGs whose PDFs are included in paper.tex (see interviews/paper/Makefile)
+          for svg in figures/fig-competency-model.svg figures/fig-four-axes.svg \
+                     figures/fig-generation-pipeline.svg figures/fig-quality-pipeline.svg \
+                     figures/fig-backward-design.svg figures/fig-prereq-subset.svg; do
+            if [ -f "$svg" ]; then
+              inkscape "$svg" --export-type=pdf --export-filename="${svg%.svg}.pdf" 2>/dev/null
+              echo "✅ Converted $svg"
+            fi
+          done
+
+      - name: 📑 Compile Paper
+        uses: xu-cheng/latex-action@v4
+        with:
+          root_file: paper.tex
+          working_directory: interviews/paper
+
+      - name: 📤 Upload PDF
+        uses: actions/upload-artifact@v6
+        with:
+          name: StaffML-Paper
+          path: interviews/paper/paper.pdf
+          retention-days: 30
+
+  deploy-pdf:
+    name: '🚀 Deploy PDF to gh-pages'
+    runs-on: ubuntu-latest
+    needs: [build-paper]
+    if: github.ref == 'refs/heads/dev' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: 📥 Checkout gh-pages
+        uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: 📥 Download Paper PDF
+        uses: actions/download-artifact@v7
+        with:
+          name: StaffML-Paper
+          path: ./artifacts/paper
+
+      - name: 📁 Copy PDF to gh-pages
+        run: |
+          cd gh-pages
+          mkdir -p staffml/downloads
+          cp ../artifacts/paper/paper.pdf staffml/downloads/StaffML-Paper.pdf
+          echo "✅ StaffML-Paper.pdf deployed"
+          ls -la staffml/downloads/
+
+      - name: 🚀 Push to gh-pages
+        working-directory: gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add staffml/downloads/
+          git commit -m "📄 Update StaffML Paper PDF" || echo "No changes to commit"
+          git push origin gh-pages

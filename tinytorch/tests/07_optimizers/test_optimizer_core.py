@@ -27,6 +27,7 @@ CONNECTION TO OTHER MODULES:
 
 import pytest
 import numpy as np
+rng = np.random.default_rng(7)
 import sys
 from pathlib import Path
 
@@ -256,9 +257,9 @@ class TestMultipleParameters:
         parts of the model to never learn.
         """
         # Simulate a 2-layer network's parameters
-        weights1 = Tensor(np.random.randn(3, 2), requires_grad=True)
+        weights1 = Tensor(rng.standard_normal((3, 2)), requires_grad=True)
         bias1 = Tensor(np.zeros(2), requires_grad=True)
-        weights2 = Tensor(np.random.randn(2, 1), requires_grad=True)
+        weights2 = Tensor(rng.standard_normal((2, 1)), requires_grad=True)
         bias2 = Tensor(np.zeros(1), requires_grad=True)
 
         params = [weights1, bias1, weights2, bias2]

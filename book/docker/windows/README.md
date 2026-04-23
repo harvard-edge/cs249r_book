@@ -6,10 +6,10 @@ This directory contains the Windows Server 2022 container configuration for buil
 
 - **Base Image**: Windows Server 2022 LTSC
 - **PowerShell**: 7.4.1 (ZIP install, container-safe)
-- **Quarto**: 1.7.31 (ZIP install)
+- **Quarto**: 1.9.27 (Scoop)
 - **Python**: 3.13.1 + production dependencies
 - **TeX Live**: 2025 snapshot with required packages
-- **R**: 4.3.2 + R Markdown packages
+- **R**: 4.5.2 + R Markdown packages
 - **Graphics**: Ghostscript + Inkscape (via Chocolatey)
 
 ## 🔧 Key Fixes Applied
@@ -40,20 +40,20 @@ This directory contains the Windows Server 2022 container configuration for buil
 - 20GB+ free disk space
 
 ## Local Build
-To build the Windows container locally, run the following command from the repository root:
+To build the Windows container locally, run the following command from the repository root (context is the repo root, same as CI):
 ```powershell
-docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+docker build -f book/docker/windows/Dockerfile -t mlsysbook-windows .
 ```
 
 ### Testing
-To test the Dockerfile before building, you can use the provided PowerShell script:
+After a successful build, a quick smoke test:
 ```powershell
-./docker/windows/test_dockerfile.ps1
+docker run --rm mlsysbook-windows pwsh -NoProfile -Command "quarto --version; python --version"
 ```
 
 ## Workflow
-The container is built and pushed to the GitHub Container Registry via the [`.github/workflows/build-windows-container.yml`](../../.github/workflows/build-windows-container.yml) workflow.
-This workflow is triggered manually or on a weekly schedule.
+The container is built and pushed to the GitHub Container Registry via the [`infra-container-windows.yml`](../../../.github/workflows/infra-container-windows.yml) workflow.
+This workflow is triggered manually or on a schedule.
 
 ## Notes
 - Building the Windows container can take a significant amount of time (often over 2 hours).
@@ -69,7 +69,7 @@ This workflow is triggered manually or on a weekly schedule.
 6. **Python**: 3.13.1 + production requirements
 7. **Graphics**: Ghostscript + Inkscape
 8. **TeX Live**: 2025 snapshot + packages
-9. **R**: 4.3.2 + R Markdown packages
+9. **R**: 4.5.2 + R Markdown packages
 10. **Cleanup**: Remove temporary files
 
 ## 🔍 Verification Steps

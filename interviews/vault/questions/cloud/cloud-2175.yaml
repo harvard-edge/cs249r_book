@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-2175
+track: cloud
+level: L5
+zone: evaluation
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: The Dataflow Stationary Strategy
+scenario: You are designing a custom GEMM kernel for a systolic-array-like accelerator. The operation
+  is $C_{M \times N} = A_{M \times K} \times B_{K \times N}$ where M=1 (single-token decode), K=4096,
+  N=4096. You must choose between output-stationary (each PE accumulates one output element, streaming
+  A and B), weight-stationary (weights stay in PEs, inputs stream through), and input-stationary (inputs
+  stay, weights stream). Which dataflow minimizes total data movement for this specific GEMV shape, and
+  how does the answer change when M increases to 1024 (prefill/training)?
+details:
+  realistic_solution: 'For M=1 (decode GEMV): Weight-stationary is optimal. The weight matrix B (K x N
+    = 4096 x 4096 = 16M elements) dominates data volume. In weight-stationary mode, B is loaded once and
+    held in the PE array''s local storage. The input vector A (1 x K = 4,096 elements = 8 KB in FP16)
+    is broadcast to all PEs — tiny overhead. Output C (1 x N = 4,096 elements) is collected once. Total
+    data movement: 16M elements (weights, loaded once) + 4K elements (input broadcast) + 4K elements (output)
+    ≈ 16M elements. For M=1024 (prefill/training GEMM): Output-stationary becomes optimal. Now A is 1024
+    x 4096, and each output element reuses its row of A and column of B. The output matrix (1024 x 4096)
+    provides massive parallelism and each PE''s accumulation amortizes the weight and input loads across
+    M=1024 multiply-accumulates.'
+  common_mistake: Picking output-stationary because it is the default for large GEMMs without considering
+    how the M=1 degeneracy changes the data reuse patterns. For M=1, the 'matrix' A is actually a single
+    vector, fundamentally changing which dimension offers reuse.
+  napkin_math: 'M=1 weight-stationary: Load B once = 4096 x 4096 x 2 bytes = 32 MB. Broadcast A = 4096
+    × 2 = 8,192 bytes (8 KB). Total: ~32 MB. M=1 output-stationary: Load B once = 32 MB. Broadcast A once
+    = 8 KB. Similar total, but partial sum accumulation has no reuse (K accumulations per output, but
+    only 1 output per PE). M=1024 output-stationary: Each output element reuses A row 1x and B column
+    1x, but across M=1024 outputs sharing the same B column, B is reused 1024x. Total unique data: A (1024
+    x 4096 × 2 = 8 MB) + B (32 MB) + C (1024 x 4096 × 2 = 8 MB) = 48 MB. Arithmetic: 2 x 1024 x 4096 ×
+    4096 = 34.4 GFLOP. AI = 34.4G / 48M = 716 FLOPs/byte — deeply compute-bound.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-458
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 4096 x 2 bytes is 8,192 bytes (8 KB), not 8,192 KB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

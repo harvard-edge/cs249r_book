@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2581
+track: cloud
+level: L5
+zone: evaluation
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Cloud Megatron Parallelism L5 0
+scenario: 'For a 70B model on 64 GPUs (8 nodes × 8 GPUs), you must choose: (A) TP=8 within each node,
+  DP=8 across nodes, or (B) TP=4 within node, PP=2 within node, DP=8 across nodes. Evaluate throughput
+  trade-offs.'
+details:
+  realistic_solution: 'Option A (TP=8, DP=8): each layer''s weights split across 8 GPUs. All-reduce per
+    layer on NVLink (fast). But TP=8 means each GPU processes 1/8 of each matmul — very small tiles, potentially
+    poor GPU utilization on tensor cores. DP gradient sync across nodes: 1 AllReduce of sharded gradients
+    per GPU = 17.5 GB chunk. Ring All-Reduce transfers 2*(7/8)*17.5 GB = 30.6 GB at node interconnect
+    speed. Option B (TP=4, PP=2, DP=8): TP=4 gives larger tiles per GPU (2x vs TP=8), better GPU utilization.
+    PP=2 splits model into 2 stages of 40 layers each, introducing pipeline bubbles (bubble fraction ≈
+    1/(micro_batches) per step). With 8 micro-batches: bubble = 12.5%. GPU utilization: TP=4 has ~90%
+    utilization vs TP=8 at ~75%. Net: B trades pipeline bubble (12.5%) for better per-GPU utilization
+    (+15%). B wins if bubble overhead < utilization gain.'
+  common_mistake: Maximizing tensor parallelism degree without considering per-GPU matmul size. TP=8 on
+    an 8192-dim model means each GPU computes 1024-wide matmuls, which underutilize tensor cores. TP=4
+    with pipeline parallelism can be more efficient.
+  napkin_math: 'A: TP=8, each GPU handles 1/8 of 8192 = 1024-dim matmul. Small tile → ~75% tensor core
+    util. DP gradient sync: each GPU all-reduces 17.5 GB (1/8 of 140GB). Ring All-Reduce = 2*(7/8)*17.5
+    GB = 30.6 GB. B: TP=4, each GPU handles 2048-dim matmul → ~90% util. Pipeline bubble: 12.5%. Net B:
+    0.9 × 0.875 = 78.75% effective. Net A: 0.75 × 1.0 = 75%. B wins by ~5%.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-491
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Math text is truncated at the end (''Net B: 0.9 × 0.875 ='').'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

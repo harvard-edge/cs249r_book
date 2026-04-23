@@ -1,0 +1,71 @@
+schema_version: '1.0'
+id: tinyml-0447
+track: tinyml
+level: L3
+zone: fluency
+topic: attention-scaling
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: 'The Transformer''s Memory Spike: Attention Scaling & Variants'
+scenario: 'You are trying to deploy a person-detection model on a microcontroller with 1MB of SRAM. You
+  have two models with similar parameter counts (~250K): a MobileNet-based CNN and a tiny Vision Transformer
+  (ViT). The input is a 96x96 grayscale image, and the ViT uses a patch size of 8x8. During inference,
+  the CNN runs fine, but the ViT immediately crashes with an out-of-memory error. Diagnose the most likely
+  cause of the ViT''s memory spike.'
+details:
+  realistic_solution: 'The root cause is quadratic scaling of self-attention activation memory. For the
+    ViT: 96x96 input, 8x8 patches, sequence length N = (96/8)^2 = 144. Attention matrix per head: 144*144
+    = 20,736 elements. At INT8: 20.25 KB/head. With 4 heads: 81 KB. Plus projections: 144*128*4 bytes
+    = 72 KB. ViT activation peak: ~153 KB. CNN (MobileNetV2): largest feature map = 24*24*64 = 36.9 KB
+    (INT8). DW+PW activation: 2*36.9 = 73.8 KB peak. ViT needs 153 KB vs CNN 74 KB — 2.1x more. On 1 MB
+    SRAM both technically fit, but ViT leaves less room for weights if loaded to SRAM. At higher resolution
+    (192x192): ViT sequence = 576, attention = 576*576 = 331 KB per head = 1.3 MB total (exceeds 1 MB
+    SRAM). CNN scales linearly: 48*48*64 = 147 KB.'
+  common_mistake: Engineers often compare models based on parameter count alone, assuming it's the primary
+    driver of memory usage. They forget that intermediate activation tensors, especially in memory-intensive
+    architectures like Transformers, can vastly exceed the parameter memory and are stored in SRAM during
+    inference. They might incorrectly blame the MLP blocks or the embedding layer without quantifying
+    the specific bottleneck.
+  napkin_math: '**1. Sequence Length (N):** N = (96 × 96) / (8 × 8) = 9,216 / 64 = **144 patches**. **2.
+    Attention matrix size per head:** N × N = 144 × 144 = 20,736 elements. At FP32 (4 bytes): 20,736 ×
+    4 = 82,944 B ≈ **81 KiB per head**. At INT8 (1 byte): 20,736 B ≈ **20.25 KiB per head**. **3. Multi-head
+    attention:** With 4 heads (typical for tiny ViT): 4 × 81 KiB = 324 KiB (FP32) or 4 × 20.25 = 81 KiB
+    (INT8). **4. Q, K, V matrices:** Each is N × d_head. With d_head=32 and 4 heads: 3 × 144 × 128 × 4
+    bytes = 221 KiB (FP32). **5. Total attention layer peak:** Attention matrices + Q/K/V ≈ 324 + 221
+    = **545 KiB (FP32)** for ONE layer. This single attention layer exceeds the CNN''s entire 250K-parameter
+    footprint in SRAM. With multiple layers, the ViT is completely infeasible on 1 MB SRAM. The CNN''s
+    peak activation (e.g., 48×48×32 = 73,728 elements = 288 KiB) is far smaller because convolutions process
+    local patches, never materializing an N×N matrix.'
+  options:
+  - The ViT's MLP blocks have far more parameters than the CNN's convolutional layers, causing the memory
+    overflow.
+  - The ViT crashes because its self-attention mechanism creates a large (N x N) activation tensor that
+    scales quadratically with the number of image patches.
+  - The patch embedding layer of the ViT requires storing the entire 96x96 image in a special format that
+    exceeds the 1MB SRAM.
+  - The ViT is a newer architecture that requires special hardware acceleration not present on the microcontroller.
+  correct_index: 1
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+deletion_reason: Duplicate of tinyml-cnn-vs-transformer-the-transformer's-memory-spike-301 (same title
+  + track)
+validated: false
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The 'Napkin Math' for ViT activation memory incorrectly calculates '3 * 144 * 128 * 4 bytes' as 'N *
+  d_head' where 'd_head' is already for a single head and the multiplication by 4 is for bytes, but the
+  overall result of 221 KiB is for FP32 for Q, K, V combined, which needs to be clearer.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The 'Napkin Math' calculation uses an input size of 40x40 and patch size of 4x4, which contradicts the
+  scenario's specified 96x96 input and 8x8 patch size.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -151,6 +151,7 @@ Let's build a benchmarking and submission system worthy of production ML!
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| export
 import numpy as np
+rng = np.random.default_rng(7)
 import time
 import json
 from pathlib import Path
@@ -414,9 +415,9 @@ class SimpleMLP:
 
         # Initialize with small random weights
         # Linear layer expects weight shape: (in_features, out_features)
-        self.fc1.weight.data = np.random.randn(input_size, hidden_size) * 0.01
+        self.fc1.weight.data = rng.standard_normal((input_size, hidden_size)) * 0.01
         self.fc1.bias.data = np.zeros(hidden_size)
-        self.fc2.weight.data = np.random.randn(hidden_size, output_size) * 0.01
+        self.fc2.weight.data = rng.standard_normal((hidden_size, output_size)) * 0.01
         self.fc2.bias.data = np.zeros(output_size)
         ### END SOLUTION
 
@@ -967,9 +968,9 @@ def run_example_benchmark():
 
     # Step 1: Create toy dataset
     print("\n🔧 Step 1: Creating toy dataset...")
-    np.random.seed(42)
-    X_test = Tensor(np.random.randn(100, 10))
-    y_test = np.random.randint(0, 3, 100)
+    rng = np.random.default_rng(7)
+    X_test = Tensor(rng.standard_normal((100, 10)))
+    y_test = rng.integers(0, 3, 100)
     print(f"  Dataset: {X_test.shape[0]} samples, {X_test.shape[1]} features, 3 classes")
 
     # Step 2: Create baseline model
@@ -1104,19 +1105,19 @@ def run_optimization_workflow_example():
         magnitude_prune = None
 
     try:
-        from tinytorch.benchmarking import Benchmark, BenchmarkResult
+        from tinytorch.perf.benchmarking import BenchmarkSuite, BenchmarkResult
         print("  ✅ Module 19 (Benchmarking) imported")
     except ImportError:
         print("  ⚠️  Module 19 (Benchmarking) not available - using basic benchmarking")
-        Benchmark = None
+        BenchmarkSuite = None
 
     # Step 1: Create dataset
     print("\n" + "="*70)
     print("STEP 1: Create Test Dataset")
     print("="*70)
-    np.random.seed(42)
-    X_test = Tensor(np.random.randn(100, 10))
-    y_test = np.random.randint(0, 3, 100)
+    rng = np.random.default_rng(7)
+    X_test = Tensor(rng.standard_normal((100, 10)))
+    y_test = rng.integers(0, 3, 100)
     print(f"  Dataset: {X_test.shape[0]} samples, {X_test.shape[1]} features, 3 classes")
 
     # Step 2: Create and profile baseline model
@@ -1280,8 +1281,8 @@ def test_unit_simple_mlp():
     assert param_count == expected_params, f"Expected {expected_params} parameters, got {param_count}"
 
     # Test forward pass
-    np.random.seed(42)
-    X = Tensor(np.random.randn(5, 10))  # 5 samples, 10 features
+    rng = np.random.default_rng(7)
+    X = Tensor(rng.standard_normal((5, 10)))  # 5 samples, 10 features
     output = model.forward(X)
 
     assert output.shape == (5, 3), f"Expected output shape (5, 3), got {output.shape}"
@@ -1320,10 +1321,10 @@ def test_unit_benchmark_report():
     assert 'python_version' in report.system_info, "Should have Python version"
 
     # Create test data
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(np.random.randn(50, 10))
-    y_test = np.random.randint(0, 3, 50)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
 
     # Benchmark model
     metrics = report.benchmark_model(model, X_test, y_test, num_runs=10)
@@ -1368,10 +1369,10 @@ def test_unit_submission_generation():
     print("🧪 Unit Test: Submission Generation...")
 
     # Create baseline report
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(np.random.randn(50, 10))
-    y_test = np.random.randint(0, 3, 50)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
 
     baseline_report = BenchmarkReport(model_name="baseline_model")
     baseline_report.benchmark_model(model, X_test, y_test, num_runs=10)
@@ -1470,10 +1471,10 @@ def test_unit_submission_schema():
     print("🧪 Unit Test: Submission Schema...")
 
     # Create valid submission
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(np.random.randn(50, 10))
-    y_test = np.random.randint(0, 3, 50)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
 
     report = BenchmarkReport(model_name="test_model")
     report.benchmark_model(model, X_test, y_test, num_runs=10)
@@ -1522,10 +1523,10 @@ def test_unit_submission_with_optimization():
     print("🧪 Unit Test: Submission with Optimization...")
 
     # Create baseline
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     baseline_model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(np.random.randn(50, 10))
-    y_test = np.random.randint(0, 3, 50)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
 
     baseline_report = BenchmarkReport(model_name="baseline")
     baseline_report.benchmark_model(baseline_model, X_test, y_test, num_runs=10)
@@ -1650,10 +1651,10 @@ def test_unit_json_serialization():
     print("🧪 Unit Test: JSON Serialization...")
 
     # Create submission
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(np.random.randn(50, 10))
-    y_test = np.random.randint(0, 3, 50)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
 
     report = BenchmarkReport(model_name="test_model")
     report.benchmark_model(model, X_test, y_test, num_runs=10)
@@ -1729,10 +1730,10 @@ def test_module():
 
     # Test complete workflow
     print("🧪 Integration Test: Complete Workflow...")
-    np.random.seed(42)
+    rng = np.random.default_rng(7)
     model = SimpleMLP(input_size=10, hidden_size=20, output_size=3)
-    X_test = Tensor(np.random.randn(50, 10))
-    y_test = np.random.randint(0, 3, 50)
+    X_test = Tensor(rng.standard_normal((50, 10)))
+    y_test = rng.integers(0, 3, 50)
 
     report = BenchmarkReport(model_name="integration_test")
     report.benchmark_model(model, X_test, y_test, num_runs=10)
@@ -1803,7 +1804,7 @@ Effective benchmarking requires rigorous methodology that bridges scientific mea
 ```
 1. REPEATABILITY (Same Experiment → Same Result)
    ┌─────────────────────────────────────────┐
-   │ • Fixed random seeds (np.random.seed)   │
+   │ • Fixed random seeds (default_rng)       │
    │ • Same test dataset across runs         │
    │ • Consistent environment (same hardware)│
    │ • Multiple runs to capture variance     │

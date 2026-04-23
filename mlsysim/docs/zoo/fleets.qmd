@@ -1,0 +1,90 @@
+---
+title: "The Fleet Zoo"
+subtitle: "Vetted System Archetypes and Multi-Node Clusters"
+---
+The Fleet Zoo defines the **Structural Context** of ML systems—from single microcontrollers to
+warehouse-scale supercomputers. Fleets combine hardware nodes, network fabric, and a count to
+form a complete system that the `DistributedModel` can analyze.
+
+::: {.callout-note}
+## Understanding System Hierarchy
+A **Fleet** = Node × Count + Fabric. The **Node** specifies which accelerator and how many per
+server box. The **Fabric** specifies how nodes talk to each other (NVLink for intra-node,
+InfiniBand for inter-node). Use the [3D Parallelism tutorial](../tutorials/index.qmd) to see
+how these parameters affect training time.
+:::
+
+```{python}
+#| echo: false
+#| output: asis
+import mlsysim  # installed via `pip install mlsysim` (see workflow)
+
+def print_tier_table(title, tier_class):
+    print(f"### {title}")
+    print("| Tier | RAM | Storage | Latency Budget |")
+    print("|:---|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(tier_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(tier_class, attr_name)
+        if "DeploymentTier" in type(item).__name__:
+            print(f"| **{item.name}** | {item.ram:~P} | {item.storage:~P} | {item.typical_latency_budget:~P} |")
+    print("\n")
+
+def print_node_table(title, node_class):
+    print(f"### {title}")
+    print("| Node Name | Accelerator | Count | Intra-Node BW |")
+    print("|:---|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(node_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(node_class, attr_name)
+        if "Node" in type(item).__name__ and not "HardwareNode" in type(item).__name__:
+            print(f"| **{item.name}** | {item.accelerator.name} | {item.accelerators_per_node} | {item.intra_node_bw:~P} |")
+    print("\n")
+
+def print_fleet_table(title, fleet_class):
+    print(f"### {title}")
+    print("| Cluster Name | Node Type | Node Count | Total GPUs | Fabric |")
+    print("|:---|:---:|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(fleet_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(fleet_class, attr_name)
+        if "Fleet" in type(item).__name__:
+            print(f"| **{item.name}** | {item.node.name} | {item.count} | {item.total_accelerators} | {item.fabric.name} |")
+    print("\n")
+
+reg = getattr(mlsysim, 'Systems', None)
+if reg:
+    if hasattr(reg, 'Tiers'): print_tier_table("Deployment Tiers", reg.Tiers)
+    if hasattr(reg, 'Nodes'): print_node_table("Reference Nodes", reg.Nodes)
+    if hasattr(reg, 'Clusters'): print_fleet_table("Production Clusters", reg.Clusters)
+else:
+    print("Error: Systems registry not found in mlsysim.")
+```
+
+---
+
+## How to Read the Fleet Zoo
+
+### Why Fleet Size Matters
+
+Distributed training performance is dominated by **communication overhead**. As you add more nodes, each all-reduce synchronization step must transfer gradient data across the fabric. The `DistributedModel` models this trade-off using the ring all-reduce formula [@dean2012large]:
+
+$$T_{\text{dp}} = 2(N-1) \cdot \left(\frac{M/N}{BW} + L\right)$$
+
+where $N$ is the GPU count, $M$ is the model size in bytes, and $BW$ is the fabric bandwidth.
+
+### The Fabric Matters More Than You Think
+
+Compare the two clusters above: both use DGX H100 nodes, but one uses 100 GbE while the other uses InfiniBand NDR. The 20x bandwidth difference dramatically changes scaling efficiency. Try both in the [Scaling to 1000 GPUs tutorial](../tutorials/06_scaling_1000_gpus.qmd) to see the effect.
+
+### Deployment Tiers
+
+The deployment tiers (Cloud, Edge, Mobile, Tiny) define the resource envelope for different deployment scenarios. Each tier specifies a RAM budget, storage capacity, and latency target — constraints that determine which models are feasible.
+
+### Textbook Connection
+
+The *Distributed Training* and *Collective Communication* chapters use fleet configurations to analyze scaling efficiency and communication bottlenecks. The *Compute Infrastructure* chapter covers the hardware composition of these clusters.
+
+---
+
+*Note: For cluster MTBF and bisection bandwidth details, see the [Fleet API Reference](../api/systems.types.Fleet.qmd).*

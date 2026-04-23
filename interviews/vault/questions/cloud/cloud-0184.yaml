@@ -1,0 +1,100 @@
+schema_version: '1.0'
+id: cloud-0184
+track: cloud
+level: L6+
+zone: mastery
+topic: batching-strategies
+competency_area: latency
+bloom_level: create
+phase: inference
+title: The Earnings Call Meltdown
+scenario: You are the Staff ML Systems Engineer at a fintech company that provides real-time transcription
+  for Wall Street earnings calls. The product promise is a live, streaming transcript with a P99 Time-To-First-Token
+  (TTFT) under 500ms.
+details:
+  realistic_solution: The current architecture of processing one request at a time is a classic Head-of-Line
+    Blocking problem. The system's service rate is fixed by the time it takes to process one full request.
+    When the arrival rate of requests exceeds this service rate, a queue builds up infinitely (in theory).
+    A new request might have to wait for 19 other requests to complete their *entire* generation sequence,
+    which can take many seconds each.
+  common_mistake: The most common mistake is to blame the model or the GPU speed. Junior engineers might
+    say 'We need a faster GPU like a B200' or 'We need to distill the model to be smaller.' While these
+    might help, they don't address the fundamental architectural flaw. The system isn't slow because the
+    GPU is slow; it's slow because it's idle, waiting for a serialized, request-level lock to be released.
+    This is a systems and queueing failure, not a raw compute problem.
+  napkin_math: '**Setup:** 70B model on H100, sequential request processing.
+
+
+    **Time per decode step (memory-bound):**
+
+    Model weights FP16 = 70×10^9 × 2 = 140 GB.
+
+    H100 HBM3 bandwidth = 3.35 TB/s.
+
+    Decode latency per token = 140 GB / 3.35 TB/s = 41.8 ms/token.
+
+
+    **Prefill time for 100-token prompt:**
+
+    FLOPs = 2 × 70×10^9 × 100 = 14 TFLOPs.
+
+    H100 FP16 peak = 989 TFLOPS.
+
+    Prefill time = 14×10^12 / 989×10^12 = 14.2 ms.
+
+    (Note: short prompts are still compute-bound — 14.2 ms is significant, not negligible.)
+
+
+    **Per-request time (100 prompt + 100 output tokens):**
+
+    Prefill: 14.2 ms.
+
+    Decode: 100 × 41.8 ms = 4,180 ms ≈ 4.2 seconds.
+
+    Total per request ≈ 4.2 seconds.
+
+
+    **Head-of-line blocking with 20 queued requests:**
+
+    Sequential processing: each request takes ~4.2s.
+
+    A new request must wait for all ahead of it.
+
+    Worst-case wait = 19 × 4.2s = 79.8 seconds TTFT >> 500 ms SLO.
+
+    Even with 5 ahead: 5 × 4.2s = 21 seconds TTFT.
+
+
+    **With continuous batching (batch size B):**
+
+    All B requests decode in parallel; each decode step still takes ~41.8 ms (memory-bound, weight load
+    is shared).
+
+    Each step produces B tokens (one per request).
+
+    TTFT for a new request ≈ 1 decode step wait + prefill = 41.8 ms + 14.2 ms ≈ 56 ms.
+
+    Throughput: B tokens / 41.8 ms → for B=20: 20/0.0418 ≈ 478 tokens/s.
+
+    P99 TTFT now dominated by prefill of the new request (~14 ms), not queue depth.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- The 'Napkin Math' section is empty, despite promising to analyze the failure and the solution quantitatively.
+- The reasoning mode 'tradeoff-analysis' is a weak fit; 'failure-to-root-cause' would be more accurate.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

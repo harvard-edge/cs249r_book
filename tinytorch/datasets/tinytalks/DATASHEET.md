@@ -180,7 +180,7 @@ Yes, the primary use case:
 
 ### 26. Is there a repository that links to any or all papers or systems that use the dataset?
 
-The dataset is hosted at: https://github.com/VJ/TinyTorch/tree/main/datasets/tinytalks
+The dataset is hosted at: https://github.com/harvard-edge/cs249r_book/tree/main/tinytorch/datasets/tinytalks
 
 Usage examples:
 - `milestones/05_2017_transformer/tinybot_demo.py` - Main training script
@@ -232,7 +232,7 @@ Yes. TinyTalks is **open-source** and freely available to everyone under CC BY 4
 
 ### 31. How will the dataset be distributed?
 
-- **GitHub repository**: https://github.com/VJ/TinyTorch/tree/main/datasets/tinytalks
+- **GitHub repository**: https://github.com/harvard-edge/cs249r_book/tree/main/tinytorch/datasets/tinytalks
 - **Included with TinyTorch**: Ships with the framework (no download required)
 - **Format**: Plain text files (.txt)
 
@@ -270,9 +270,9 @@ Primary maintainer: VJ (@profvjreddi on GitHub)
 
 ### 37. How can the owner/curator/manager of the dataset be contacted?
 
-- **GitHub Issues**: https://github.com/VJ/TinyTorch/issues
-- **GitHub Discussions**: https://github.com/VJ/TinyTorch/discussions
-- **Email**: tinytorch@example.com
+- **GitHub Issues**: https://github.com/harvard-edge/cs249r_book/issues
+- **GitHub Discussions**: https://github.com/harvard-edge/cs249r_book/discussions
+- **Email**: info@mlsysbook.ai
 
 ### 38. Is there an erratum?
 

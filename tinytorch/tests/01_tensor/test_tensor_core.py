@@ -21,6 +21,7 @@ WHAT STUDENTS LEARN:
 """
 
 import numpy as np
+rng = np.random.default_rng(7)
 import pytest
 import sys
 from pathlib import Path
@@ -112,7 +113,7 @@ class TestTensorCreation:
         ]
 
         for shape, description in test_cases:
-            data = np.random.randn(*shape)
+            data = rng.standard_normal(shape)
             t = Tensor(data)
             assert t.shape == shape, (
                 f"Shape mismatch for {description}.\n"
@@ -307,7 +308,7 @@ class TestTensorMemory:
         STUDENT LEARNING: Memory efficiency matters at scale.
         """
         # Create a 1000×1000 tensor (1 million elements)
-        data = np.random.randn(1000, 1000)
+        data = rng.standard_normal((1000, 1000))
         t = Tensor(data)
 
         assert t.shape == (1000, 1000)
@@ -362,7 +363,7 @@ class TestTensorReshaping:
 
         STUDENT LEARNING: flatten() is shorthand for reshape(-1)
         """
-        t = Tensor(np.random.randn(2, 3, 4))  # 2×3×4 = 24 elements
+        t = Tensor(rng.standard_normal((2, 3, 4)))  # 2×3×4 = 24 elements
 
         if hasattr(t, 'flatten'):
             flat = t.flatten()
@@ -466,6 +467,91 @@ class TestTensorBroadcasting:
             f"  Got: {result.data}\n"
             "Each row should have [10,20,30] added to it."
         )
+
+
+class TestTensorPyTorchCompat:
+    """
+    Tests for PyTorch-compatible API additions (issue #1298).
+
+    WHY THESE MATTER: Students transitioning from PyTorch hit AttributeError
+    when calling .ndim, .numel(), .view(), .contiguous(), or .masked_fill()
+    on TinyTorch tensors. These additions make the two APIs interchangeable
+    for the patterns that appear in transformer training pipelines.
+    """
+
+    def test_ndim(self):
+        """ndim matches len(shape) for tensors of every rank."""
+        assert Tensor(5.0).ndim == 0
+        assert Tensor([1, 2, 3]).ndim == 1
+        assert Tensor([[1, 2], [3, 4]]).ndim == 2
+        assert Tensor([[[1]]]).ndim == 3
+
+    def test_numel(self):
+        """numel() returns total element count, same as .size."""
+        t = Tensor([[1, 2, 3], [4, 5, 6]])
+        assert t.numel() == 6
+        assert t.numel() == t.size
+
+    def test_view_same_as_reshape(self):
+        """view() is a reshape alias and produces the correct shape and data."""
+        t = Tensor([1, 2, 3, 4, 5, 6])
+        v = t.view(2, 3)
+        assert v.shape == (2, 3)
+        assert np.array_equal(v.data, t.reshape(2, 3).data)
+
+    def test_view_with_minus_one(self):
+        """view() passes -1 inference through to reshape."""
+        t = Tensor([1, 2, 3, 4, 5, 6])
+        v = t.view(3, -1)
+        assert v.shape == (3, 2)
+
+    def test_contiguous_returns_correct_data(self):
+        """contiguous() returns a new Tensor with identical values."""
+        t = Tensor([[1, 2, 3], [4, 5, 6]])
+        c = t.contiguous()
+        assert c.shape == t.shape
+        assert np.array_equal(c.data, t.data)
+
+    def test_contiguous_is_c_contiguous(self):
+        """contiguous() guarantees C-order memory layout."""
+        t = Tensor([[1, 2, 3], [4, 5, 6]])
+        transposed = t.transpose()
+        c = transposed.contiguous()
+        assert c.data.flags["C_CONTIGUOUS"]
+
+    def test_masked_fill_basic(self):
+        """masked_fill replaces True positions with the fill value."""
+        t = Tensor([[1.0, 2.0, 3.0]])
+        mask = Tensor([[0.0, 1.0, 0.0]])
+        result = t.masked_fill(mask, -1.0)
+        expected = np.array([[1.0, -1.0, 3.0]], dtype=np.float32)
+        assert np.array_equal(result.data, expected)
+
+    def test_masked_fill_attention_pattern(self):
+        """masked_fill with -inf matches the attention mask pattern in transformers."""
+        scores = Tensor([[1.0, 2.0, 3.0, 4.0]])
+        pad_mask = Tensor([[0.0, 0.0, 1.0, 1.0]])
+        masked = scores.masked_fill(pad_mask, float("-inf"))
+        assert np.isfinite(masked.data[0, 0])
+        assert np.isfinite(masked.data[0, 1])
+        assert masked.data[0, 2] == float("-inf")
+        assert masked.data[0, 3] == float("-inf")
+
+    def test_masked_fill_does_not_mutate_original(self):
+        """masked_fill returns a new tensor without modifying the original."""
+        t = Tensor([[1.0, 2.0, 3.0]])
+        mask = Tensor([[1.0, 0.0, 1.0]])
+        _ = t.masked_fill(mask, 0.0)
+        assert np.array_equal(t.data, np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
+
+    def test_tensor_from_tensor_list(self):
+        """Tensor([t1, t2]) stacks tensors along a new leading dimension."""
+        t1 = Tensor([1.0, 2.0, 3.0])
+        t2 = Tensor([4.0, 5.0, 6.0])
+        stacked = Tensor([t1, t2])
+        assert stacked.shape == (2, 3)
+        assert np.array_equal(stacked.data[0], t1.data)
+        assert np.array_equal(stacked.data[1], t2.data)
 
 
 if __name__ == "__main__":

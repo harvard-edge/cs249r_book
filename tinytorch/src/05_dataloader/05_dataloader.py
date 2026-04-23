@@ -50,7 +50,8 @@ Let's transform scattered data into organized learning batches!
 ```python
 # How to use this module:
 from tinytorch.core.dataloader import Dataset, DataLoader, TensorDataset
-from tinytorch.core.dataloader import download_mnist, download_cifar10
+# Note: Dataset download utilities (download_mnist, download_cifar10) will be
+# available in a future release.
 ```
 
 **Why this matters:**
@@ -71,6 +72,7 @@ from abc import ABC, abstractmethod
 from typing import Iterator, List, Tuple
 
 import numpy as np
+rng = np.random.default_rng(7)
 
 # Import real Tensor class from tinytorch package
 from tinytorch.core.tensor import Tensor
@@ -862,20 +864,20 @@ class RandomHorizontalFlip:
             is_tensor = isinstance(x, Tensor)
             data = x.data if is_tensor else x
 
-            # Determine width axis for HW/HWC/CHW (and batched variants)
+            # Determine width axis for HW/CHW/HWC.
+            # Convention (matching _pad_image and RandomCrop): check shape[0]
+            # for channels-first (C, H, W) where C <= 4. This is the standard
+            # TinyTorch/PyTorch NCHW convention for 3D image tensors.
             if data.ndim == 2:
                 # (H, W)
                 axis = -1
-            elif data.ndim >= 3:
-                if data.shape[-1] <= 4:
-                    # Channels-last: (..., H, W, C)
-                    axis = -2
-                elif data.shape[-3] <= 4:
-                    # Channels-first: (..., C, H, W)
+            elif data.ndim == 3:
+                if data.shape[0] <= 4:
+                    # Channels-first: (C, H, W) — flip width (last axis)
                     axis = -1
                 else:
-                    # Fallback to width as last axis
-                    axis = -1
+                    # Channels-last: (H, W, C) — flip width (second-to-last)
+                    axis = -2
             else:
                 raise ValueError(
                     f"RandomHorizontalFlip requires at least 2D input\n"
@@ -1049,11 +1051,11 @@ def _random_crop_region(padded_h, padded_w, target_h, target_w):
     >>> top, left = _random_crop_region(40, 40, 32, 32)
     >>> # top in [0, 8], left in [0, 8]
 
-    HINT: np.random.randint(0, high+1) gives values in [0, high] inclusive
+    HINT: rng.integers(0, high+1) gives values in [0, high] inclusive
     """
     ### BEGIN SOLUTION
-    top = np.random.randint(0, padded_h - target_h + 1)
-    left = np.random.randint(0, padded_w - target_w + 1)
+    top = rng.integers(0, padded_h - target_h + 1)
+    left = rng.integers(0, padded_w - target_w + 1)
     return top, left
     ### END SOLUTION
 
@@ -1185,7 +1187,7 @@ class RandomCrop:
 
         EXAMPLE:
         >>> crop = RandomCrop(32, padding=4)
-        >>> img = np.random.randn(3, 32, 32)
+        >>> img = rng.standard_normal((3, 32, 32))
         >>> out = crop(img)
         >>> print(out.shape)  # (3, 32, 32)
 
@@ -1291,12 +1293,12 @@ def test_unit_augmentation():
     crop = RandomCrop(32, padding=4)
 
     # Test with (C, H, W) format (CIFAR-10 style)
-    img_chw = np.random.randn(3, 32, 32)
+    img_chw = rng.standard_normal((3, 32, 32))
     cropped = crop(img_chw)
     assert cropped.shape == (3, 32, 32), f"CHW crop shape wrong: {cropped.shape}"
 
     # Test with (H, W) format
-    img_hw = np.random.randn(28, 28)
+    img_hw = rng.standard_normal((28, 28))
     crop_hw = RandomCrop(28, padding=4)
     cropped_hw = crop_hw(img_hw)
     assert cropped_hw.shape == (28, 28), f"HW crop shape wrong: {cropped_hw.shape}"
@@ -1308,13 +1310,13 @@ def test_unit_augmentation():
         RandomCrop(32, padding=4)
     ])
 
-    img = np.random.randn(3, 32, 32)
+    img = rng.standard_normal((3, 32, 32))
     augmented = transforms(img)
     assert augmented.shape == (3, 32, 32), f"Compose output shape wrong: {augmented.shape}"
 
     # Test 4: Transforms work with Tensor
     print("  Testing Tensor compatibility...")
-    tensor_img = Tensor(np.random.randn(3, 32, 32))
+    tensor_img = Tensor(rng.standard_normal((3, 32, 32)))
 
     flip_result = RandomHorizontalFlip(p=1.0)(tensor_img)
     assert isinstance(flip_result, Tensor), "Flip should return Tensor when given Tensor"
@@ -1669,8 +1671,8 @@ def analyze_dataloader_performance():
 
     for size in sizes:
         # Create synthetic dataset
-        features = Tensor(np.random.randn(size, 100))  # 100 features
-        labels = Tensor(np.random.randint(0, 10, size))
+        features = Tensor(rng.standard_normal((size, 100)))  # 100 features
+        labels = Tensor(rng.integers(0, 10, size))
         dataset = TensorDataset(features, labels)
 
         print(f"\nDataset size: {size} samples")
@@ -1694,8 +1696,8 @@ def analyze_dataloader_performance():
     print("\n🔄 Shuffle Overhead Analysis:")
 
     dataset_size = 10000
-    features = Tensor(np.random.randn(dataset_size, 50))
-    labels = Tensor(np.random.randint(0, 5, dataset_size))
+    features = Tensor(rng.standard_normal((dataset_size, 50)))
+    labels = Tensor(rng.integers(0, 5, dataset_size))
     dataset = TensorDataset(features, labels)
 
     batch_size = 64
@@ -1755,8 +1757,8 @@ def analyze_memory_usage():
     print("\n🧪 Actual Tensor Memory Usage:")
 
     # Create different sized tensors
-    tensor_small = Tensor(np.random.randn(32, 784))    # Small batch
-    tensor_large = Tensor(np.random.randn(512, 784))   # Large batch
+    tensor_small = Tensor(rng.standard_normal((32, 784)))    # Small batch
+    tensor_large = Tensor(rng.standard_normal((512, 784)))   # Large batch
 
     # Measure actual memory (data array + object overhead)
     small_bytes = tensor_small.data.nbytes
@@ -1787,8 +1789,8 @@ def analyze_collation_overhead():
     # Test different batch sizes to see collation cost
     dataset_size = 1000
     feature_size = 100
-    features = Tensor(np.random.randn(dataset_size, feature_size))
-    labels = Tensor(np.random.randint(0, 10, dataset_size))
+    features = Tensor(rng.standard_normal((dataset_size, feature_size)))
+    labels = Tensor(rng.integers(0, 10, dataset_size))
     dataset = TensorDataset(features, labels)
 
     print("\n⚡ Collation Time by Batch Size:")
@@ -1936,8 +1938,8 @@ def test_unit_training_integration():
     num_classes = 5
 
     # Synthetic classification data
-    features = Tensor(np.random.randn(num_samples, num_features))
-    labels = Tensor(np.random.randint(0, num_classes, num_samples))
+    features = Tensor(rng.standard_normal((num_samples, num_features)))
+    labels = Tensor(rng.integers(0, num_classes, num_samples))
 
     dataset = TensorDataset(features, labels)
 
@@ -2045,8 +2047,8 @@ def test_module():
     ])
 
     # Simulate CIFAR-style images (C, H, W)
-    images = np.random.randn(100, 3, 8, 8)
-    labels = np.random.randint(0, 10, 100)
+    images = rng.standard_normal((100, 3, 8, 8))
+    labels = rng.integers(0, 10, 100)
 
     # Apply augmentation manually (how you'd use in practice)
     augmented_images = np.array([train_transforms(img) for img in images])
@@ -2284,7 +2286,7 @@ def demo_dataloader():
     print("=" * 45)
 
     # Create a dataset
-    X = Tensor(np.random.randn(100, 64))
+    X = Tensor(rng.standard_normal((100, 64)))
     y = Tensor(np.arange(100))
     dataset = TensorDataset(X, y)
 
@@ -2334,7 +2336,7 @@ Export with: `tito module complete 05`
 - Milestone 03: Train MLP on real MNIST digits
 - Milestone 04: Train CNN on CIFAR-10 images
 
-**Then continue with:** Module 09 (Convolutions) for Conv2d layers!
+**Then continue with:** Module 06 (Autograd) for automatic differentiation!
 
 ### Real-World Connection
 You've implemented the same patterns used in:
