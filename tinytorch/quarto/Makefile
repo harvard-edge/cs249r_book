@@ -96,11 +96,14 @@ figures: $(PDFS) ## Convert all SVG diagrams to PDF (for LaTeX embedding).
 # the _build/ path; there is no duplicate copy.
 PDF_OUT := pdf/_build/TinyTorch-Guide.pdf
 
-# Self-heal note: when Quarto's post-render cleanup errors (trying to
-# remove ../modules/*_files dirs outside the project root), Quarto skips
-# the move-to-output-dir step and leaves the PDF at the top-level pdf/
-# working dir instead of pdf/_build/. The `mv` below recovers.
-pdf: figures ## Build the TinyTorch Lab Guide PDF (at pdf/_build/TinyTorch-Guide.pdf).
+# Single canonical PDF output — the ONLY shippable file.
+# pre-build: rm any stray top-level pdf/TinyTorch-Guide.pdf from a
+#            past build (don't confuse the author).
+# post-build: self-heal if Quarto's cleanup error leaves the PDF at
+#             pdf/ top level instead of pdf/_build/.
+#             Verify no duplicate copies exist.
+pdf: figures ## Build the TinyTorch Lab Guide PDF — ONE file at pdf/_build/TinyTorch-Guide.pdf.
+	@rm -f pdf/TinyTorch-Guide.pdf
 	@set +e; \
 	  cd pdf && $(QUARTO) render; \
 	  quarto_exit=$$?; \
@@ -113,20 +116,29 @@ pdf: figures ## Build the TinyTorch Lab Guide PDF (at pdf/_build/TinyTorch-Guide
 	    echo "ERROR: $(PDF_OUT) was not produced (quarto exit=$$quarto_exit)"; \
 	    exit 1; \
 	  fi; \
+	  if [ -f "pdf/TinyTorch-Guide.pdf" ]; then \
+	    rm -f pdf/TinyTorch-Guide.pdf; \
+	    echo "  (removed stray top-level pdf/TinyTorch-Guide.pdf)"; \
+	  fi; \
 	  if [ $$quarto_exit -ne 0 ]; then \
 	    echo "  note: quarto exited $$quarto_exit on post-render cleanup (benign — see Makefile)"; \
 	  fi; \
 	  size=$$(du -h "$(PDF_OUT)" | cut -f1); \
-	  echo "  built $(PDF_OUT) ($$size)"
+	  echo ""; \
+	  echo "  ┌────────────────────────────────────────────────────────────┐"; \
+	  echo "  │  FINAL PDF (the only shippable file):                      │"; \
+	  echo "  │  $(PDF_OUT)  ($$size)"; \
+	  echo "  └────────────────────────────────────────────────────────────┘"
 
 site: ## Build the website (HTML).
 	@$(QUARTO) render
 
 # ── Maintenance ───────────────────────────────────────────────────────
-clean: ## Remove Quarto caches + generated diagram PDFs.
-	@rm -rf _tmp pdf/_build pdf/index_files modules/*_files
+clean: ## Remove Quarto caches + generated diagram PDFs + any stray top-level PDF.
+	@rm -rf _tmp pdf/_build pdf/index_files modules/*_files pdf/.quarto
 	@rm -f $(DIAGRAM_DIR)/*.pdf
-	@echo "  cleaned caches and generated diagram PDFs"
+	@rm -f pdf/TinyTorch-Guide.pdf pdf/index.tex pdf/index.log pdf/index.aux pdf/index.toc pdf/index.out
+	@echo "  cleaned caches, generated diagram PDFs, and any stray PDF copies"
 
 distclean: clean ## Also remove website output. (clean already removes pdf/_build/.)
 	@rm -rf _site
