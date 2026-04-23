@@ -101,6 +101,13 @@ pdf: figures ## Build the TinyTorch Lab Guide PDF (at pdf/_build/TinyTorch-Guide
 	  cd pdf && $(QUARTO) render; \
 	  quarto_exit=$$?; \
 	  cd ..; \
+	  # When the post-render cleanup fails (see note below), Quarto skips \
+	  # the move-to-output-dir step and leaves the PDF at the top-level \
+	  # pdf/ working dir instead of pdf/_build/. Self-heal by moving it. \
+	  if [ ! -f "$(PDF_OUT)" ] && [ -f "pdf/TinyTorch-Guide.pdf" ]; then \
+	    mkdir -p pdf/_build; \
+	    mv pdf/TinyTorch-Guide.pdf "$(PDF_OUT)"; \
+	  fi; \
 	  if [ ! -f "$(PDF_OUT)" ]; then \
 	    echo "ERROR: $(PDF_OUT) was not produced (quarto exit=$$quarto_exit)"; \
 	    exit 1; \
