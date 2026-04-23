@@ -65,6 +65,26 @@ def validate(json_path: Path, qmd_path: Path) -> tuple[list[str], list[str]]:
     if not meta.get("source_file"):
         warnings.append("metadata.source_file is missing")
 
+    # Cross-check declared metadata counts against actual entry counts
+    sections_list = data.get("sections", []) or []
+    actual_sections = sum(1 for s in sections_list if s.get("level") == "section")
+    actual_subsections = sum(1 for s in sections_list if s.get("level") == "subsection")
+    declared_sections = meta.get("total_sections")
+    declared_subsections = meta.get("total_subsections")
+    declared_total = meta.get("total_quizzes")
+    if declared_sections is not None and declared_sections != actual_sections:
+        errors.append(
+            f"metadata.total_sections={declared_sections} but {actual_sections} level='section' entries found"
+        )
+    if declared_subsections is not None and declared_subsections != actual_subsections:
+        errors.append(
+            f"metadata.total_subsections={declared_subsections} but {actual_subsections} level='subsection' entries found"
+        )
+    if declared_total is not None and declared_total != len(sections_list):
+        errors.append(
+            f"metadata.total_quizzes={declared_total} but {len(sections_list)} entries found"
+        )
+
     # Anchors
     anchors = chapter_anchors(qmd_path)
     if not anchors:
