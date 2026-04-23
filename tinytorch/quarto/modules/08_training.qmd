@@ -1,6 +1,8 @@
 
 # Module 08: Training
 
+The inner loop is four lines: forward, loss, backward, step. A training system is everything wrapped around it. Schedules, clipping, evaluation modes, and checkpoints are what turn one `step()` into a million without human babysitting. This is where the framework becomes something you can leave running overnight.
+
 :::{.callout-note title="Module Info"}
 
 **FOUNDATION TIER** | Difficulty: ●●○○ | Time: 5-7 hours | Prerequisites: 01-07
@@ -484,6 +486,8 @@ def train_epoch(self, dataloader, accumulation_steps=1):
     return avg_loss
 ```
 
+: **Listing 8.1 — `Trainer.train_epoch()` orchestrates the inner loop: forward, loss, backward, clip, step, zero-grad, with gradient accumulation and scheduler update.** {#lst-08-training-train-epoch}
+
 Each iteration processes one batch: the model turns inputs into predictions, the loss function scores them against targets, the backward pass fills `.grad` on every parameter, the clipper bounds the global norm, and the optimizer applies the step. Total loss divided by batch count is the average training loss you watch to see convergence.
 
 While this implementation reads like standard sequential Python, scaling this loop to production hardware transforms it into a highly asynchronous, choreographed dance between the host CPU (dispatching kernel instructions) and the target GPU (executing them massively in parallel).
@@ -543,6 +547,8 @@ def evaluate(self, dataloader):
 
     return avg_loss, accuracy
 ```
+
+: **Listing 8.2 — `Trainer.evaluate()` flips the model to eval mode, runs forward-only passes, and reports average loss and accuracy without touching parameters.** {#lst-08-training-evaluate}
 
 Notice what's missing: no `loss.backward()`, no `optimizer.step()`, no gradient updates. Evaluation measures current model performance without changing parameters. This separation is crucial: if you accidentally left `training = True` during evaluation, dropout would randomly zero activations, giving you noisy accuracy measurements that don't reflect true model quality.
 
@@ -616,6 +622,8 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     return float(total_norm)
 ```
 
+: **Listing 8.3 — `clip_grad_norm()` rescales gradients uniformly when the global norm exceeds `max_norm`, preserving their relative magnitudes.** {#lst-08-training-clip-grad-norm}
+
 Consider gradients `[100, 200, 50]` with global norm √(100² + 200² + 50²) ≈ 229. With `max_norm=1.0`, the clip coefficient is `1.0 / 229 ≈ 0.00437`, and every gradient is scaled by it: `[0.437, 0.873, 0.218]`. The new norm is exactly 1.0, but the relative magnitudes survive — the second gradient is still twice the first.
 
 This uniform scaling is crucial. If we clipped each gradient independently to 1.0, we'd get `[1.0, 1.0, 1.0]`, destroying the information that the second parameter needs larger updates than the first. Global norm clipping prevents explosions while respecting the gradient's message about relative importance.
@@ -644,6 +652,8 @@ def save_checkpoint(self, path: str):
         pickle.dump(checkpoint, f)
 ```
 
+: **Listing 8.4 — `Trainer.save_checkpoint()` pickles the full training state: parameters, optimizer buffers, scheduler, epoch/step counters, and history.** {#lst-08-training-save-checkpoint}
+
 Model state is straightforward: copy all parameter tensors. Optimizer state is more subtle: SGD with momentum stores velocity buffers (one per parameter), Adam stores two moment buffers (first and second moments). Scheduler state captures current learning rate progression. Training metadata includes epoch counter and loss history.
 
 Loading reverses the process:
@@ -667,6 +677,8 @@ def load_checkpoint(self, path: str):
     if 'scheduler_state' in checkpoint:
         self._set_scheduler_state(checkpoint['scheduler_state'])
 ```
+
+: **Listing 8.5 — `Trainer.load_checkpoint()` reverses the save: unpickle, restore counters and history, then rehydrate model, optimizer, and scheduler state.** {#lst-08-training-load-checkpoint}
 
 After loading, training resumes as if the interruption never happened. The next `train_epoch()` call starts at the correct epoch, uses the correct learning rate, and continues optimizing from the exact parameter values where you stopped.
 

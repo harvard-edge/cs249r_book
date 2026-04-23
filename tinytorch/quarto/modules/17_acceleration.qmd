@@ -1,6 +1,8 @@
 
 # Module 17: Acceleration
 
+Most neural networks spend more time waiting on memory than computing. Acceleration is the art of rearranging work so the ALUs never idle: SIMD vectorization, cache tiling, and kernel fusion that keeps intermediates in registers instead of round-tripping through HBM. Here you build the primitives that close the gap between theoretical peak FLOPS and measured throughput on real silicon.
+
 :::{.callout-note title="Module Info"}
 
 **OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
@@ -344,7 +346,7 @@ Acceleration comes first because it is general — vectorization and kernel fusi
 
 
 
-::: {#fig-17_acceleration-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Acceleration System**: Vectorized kernels and SIMD optimization." fig-alt="Diagram showing SIMD operations, vectorized kernels, and thread management."}
+::: {#fig-17_acceleration-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Acceleration System**: Vectorized kernels and SIMD optimization." fig-alt="Block diagram of the TinyTorch acceleration stack: tensor inputs flow into BLAS-backed vectorized matmul, cache-aware tiled matmul, and a fused GELU kernel, with SIMD lanes and multi-threaded execution feeding the output."}
 
 ![](../assets/images/diagrams/17_acceleration-diag-1.svg)
 
@@ -452,6 +454,8 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     return Tensor(result_data)
 ```
 
+: **Listing 17.1 — Vectorized matmul delegating to BLAS GEMM**. {#lst-17-acceleration-vectorized-matmul}
+
 The magic happens inside `np.matmul`. NumPy delegates to BLAS (Basic Linear Algebra Subprograms) libraries like OpenBLAS or Intel MKL. These libraries have been optimized over decades to exploit every hardware feature: SIMD instructions, cache hierarchies, and multiple cores. The same Python code that takes 800ms with naive loops completes in 8ms with BLAS.
 
 ### BLAS and LAPACK
@@ -497,6 +501,8 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
     return Tensor(result_data)
 ```
 
+: **Listing 17.2 — Cache-aware tiled matmul API**. {#lst-17-acceleration-tiled-matmul}
+
 ### Kernel Fusion
 
 Element-wise operations like GELU are memory-bound: they spend more time moving data than computing on it. Consider the GELU formula:
@@ -524,6 +530,8 @@ def unfused_gelu(x: Tensor) -> Tensor:
     return result
 ```
 
+: **Listing 17.3 — Unfused GELU creating seven intermediate tensors**. {#lst-17-acceleration-unfused-gelu}
+
 Every temporary writes to memory and the next operation reads it back. For a 4,000,000-element tensor, the unfused version issues 56 million memory operations (7 reads + 7 writes per element). At 50 GB/s — typical desktop CPU bandwidth — moving 214 MB takes 4.48 ms. That's just the memory traffic, before any actual arithmetic.
 
 Kernel fusion combines all operations into a single expression:
@@ -540,6 +548,8 @@ def fused_gelu(x: Tensor) -> Tensor:
 
     return Tensor(result_data)
 ```
+
+: **Listing 17.4 — Fused GELU collapsing all ops into a single kernel**. {#lst-17-acceleration-fused-gelu}
 
 Now there are only two memory operations: read the input, write the output. For the same `{python} fusion_tensor_elements` element tensor, that's just `{python} fusion_fused_traffic_mb` MB of memory traffic, completing in `{python} fusion_fused_time_ms` milliseconds. The fused version is `{python} fusion_speedup`x faster purely from memory bandwidth reduction, even though both versions perform the exact same arithmetic.
 

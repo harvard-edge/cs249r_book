@@ -1,5 +1,7 @@
 # Module 13: Transformers
 
+A transformer block's cost profile has two regimes that fight for the same HBM: attention at O(N²) memory in sequence length, and MLPs at O(N · d²) compute in hidden width. Stack twelve blocks and the attention matrices alone can exceed the weight matrices once N crosses a few thousand tokens, which is why every production LLM ships with KV caching, activation checkpointing, and attention kernels tuned for the SRAM hierarchy. This module wires LayerNorm, MLPs, and causal self-attention into a working GPT so you can see exactly which components hit which wall first.
+
 :::{.callout-note title="Module Info"}
 
 **ARCHITECTURE TIER** | Difficulty: ●●●● | Time: 8-10 hours | Prerequisites: 01-08, 10-12
@@ -483,6 +485,8 @@ class LayerNorm:
         return normalized * self.gamma + self.beta
 ```
 
+: **Listing 13.1 — LayerNorm implementation**. Computes per-sample mean and variance over the feature axis, then applies a learnable affine transform. {#lst-13-layernorm}
+
 The formula is small: `output = (x - μ) / σ * γ + β`. The effect is large. Forcing every activation back to a consistent scale keeps gradients in a sane range, which is the difference between a 12-layer model that trains and a 12-layer model that diverges in the first 100 steps. The learnable `gamma` and `beta` let the model recover any distribution it needs, so the normalization step costs you no expressiveness.
 
 The `eps = 1e-5` guards against the rare case where every feature in a row is identical and variance hits zero. Without it, you divide by zero on the first batch.
@@ -510,6 +514,8 @@ def forward(self, x, mask=None):
     return output
 ```
 
+: **Listing 13.2 — Pre-norm transformer block forward pass**. LayerNorm runs before each sub-layer while residual additions write back into the unnormalized stream. {#lst-13-pre-norm-forward}
+
 Notice the asymmetry: each sub-layer *reads* a normalized copy of the input but *writes* its contribution back into the unnormalized residual stream. The normalized path keeps the sub-layer well-behaved; the residual path keeps information flowing intact across the depth of the network.
 
 ### The MLP: Computational Capacity Through Expansion
@@ -534,6 +540,8 @@ class MLP:
         output = self.linear2.forward(hidden)
         return output
 ```
+
+: **Listing 13.3 — Position-wise MLP**. Expands to 4x hidden width, applies GELU, and projects back. Holds most of the block's parameters. {#lst-13-mlp}
 
 GELU replaced ReLU in transformer models because it gates smoothly instead of with a hard cutoff at zero, which gives cleaner gradients for language modeling. The choice matters less than the width: most modern variants (GELU, SwiGLU, GeGLU) train to similar loss curves at this scale.
 
@@ -588,6 +596,8 @@ class TransformerBlock:
 
         return output
 ```
+
+: **Listing 13.4 — Complete TransformerBlock class**. Wires MultiHeadAttention, two LayerNorms, and an MLP into a single pre-norm block with residual connections. {#lst-13-transformer-block}
 
 Think of the data flow as a *residual stream*: the input embeddings enter, and every sub-layer adds its contribution on top without overwriting what came before. By the final block, the stream is the original embeddings plus contributions from every attention and MLP sub-layer in the stack — like a stack of transparencies, each adding detail to the same underlying image.
 

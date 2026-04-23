@@ -1,6 +1,8 @@
 
 # Module 14: Profiling
 
+You cannot optimize what you have not measured. Profiling is the systems skill that turns "I think this is slow" into "this layer spends 62% of its time waiting on HBM reads at 5% of peak GFLOP/s." Before you reach for quantization, kernel fusion, or KV caching, you need numbers: parameter count, FLOPs per forward pass, peak activation memory, median latency, and an arithmetic-intensity reading on the roofline. This module builds those instruments end-to-end so every subsequent optimization module has ground truth to point at.
+
 :::{.callout-note title="Module Info"}
 
 **OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-13
@@ -356,7 +358,7 @@ You can't optimize what you can't measure. Profiling comes first because every o
 
 
 
-::: {#fig-14_profiling-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Profiling System**: Tools for measuring execution time and memory allocation." fig-alt="Diagram showing Timer, MemoryProfiler, and summary report generation."}
+::: {#fig-14_profiling-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Profiling System**: Tools for measuring execution time and memory allocation." fig-alt="Block diagram with a Timer component feeding latency measurements and a MemoryProfiler component feeding parameter and activation footprints into a consolidated summary report."}
 
 ![](../assets/images/diagrams/14_profiling-diag-1.svg)
 
@@ -475,6 +477,8 @@ def measure_latency(self, model, input_tensor, warmup: int = 10, iterations: int
     return float(median_latency)
 ```
 
+: **Listing 14.1 — measure_latency with warmup and median**. Runs warmup iterations to reach steady state, then times a fixed number of forward passes and returns the median to reject OS-noise outliers. {#lst-14-measure-latency}
+
 The warmup phase is critical. The first few runs are artificially slow due to cold CPU caches, Python interpreter overhead, and NumPy initialization. Running 10+ warmup iterations forces the system into a steady state, yielding reliable baseline measurements.
 
 Median, not mean. A single OS interrupt or garbage-collection pause during measurement can blow the mean apart; the median ignores it. Median captures typical performance, which is what you want to compare across runs. (For SLA work you also report p95 or p99 — but that's a separate question.)
@@ -524,6 +528,8 @@ def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float
         'memory_efficiency': min(memory_efficiency, 1.0)
     }
 ```
+
+: **Listing 14.2 — measure_memory breakdown**. Uses tracemalloc to capture peak allocation during a forward pass, then separates parameter, activation, and peak footprints. {#lst-14-measure-memory}
 
 Parameter memory is persistent and batch-independent. A 125M-parameter model uses 500 MB (125M × 4 bytes per float32) whether you process one sample or a thousand.
 

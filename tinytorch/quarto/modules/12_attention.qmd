@@ -1,5 +1,7 @@
 # Module 12: Attention
 
+Attention's O(N²) compute cost is only half the story. Its O(N²) memory footprint for the scores matrix and O(N) KV-cache growth during decoding are what actually limit real inference workloads, turning attention from a FLOP problem into an HBM bandwidth problem. This module builds scaled dot-product attention, multi-head attention, and causal masking from scratch so you can see exactly where the quadratic wall comes from before FlashAttention and friends try to climb it.
+
 :::{.callout-note title="Module Info"}
 
 **ARCHITECTURE TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-08, 10-11
@@ -334,7 +336,7 @@ The shift attention introduced is simple to state. RNNs squeeze a whole sequence
 
 
 
-::: {#fig-12_attention-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Attention Mechanism**: Information retrieval paradigm where similarity scores between Queries and Keys determine how much of each Value is retrieved." fig-alt="Diagram showing Query, Key, and Value inputs being processed through dot-product similarity, softmax normalization, and weighted combination."}
+::: {#fig-12_attention-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**Attention Mechanism**: Information retrieval paradigm where similarity scores between Queries and Keys determine how much of each Value is retrieved." fig-alt="Three input tensors (Query, Key, Value) flow into a dot-product block that computes QK^T scores, feeding a softmax normalization stage that weights the Value tensor to produce the attended output."}
 
 ![](../assets/images/diagrams/12_attention-diag-1.svg)
 
@@ -450,6 +452,8 @@ K = self.k_proj.forward(x)  # Transform input to keys
 V = self.v_proj.forward(x)  # Transform input to values
 ```
 
+: **Listing 12.1 — Query, key, value projections**. Three learned Linear layers turn one input into three role-specific tensors for attention. {#lst-12-qkv-projections}
+
 Three projections, three roles, one input. The same embedding plays all three parts at every position — and what those parts mean is whatever the optimizer settles on.
 
 ### Scaled Dot-Product Attention: Similarity as Relevance
@@ -474,6 +478,8 @@ scores = Q.matmul(K_t)     # (batch, seq_len, seq_len) - the O(n²) matrix
 scale_factor = 1.0 / math.sqrt(d_model)
 scores = scores * scale_factor
 ```
+
+: **Listing 12.2 — Scaled dot-product score matrix**. Computes `QK^T / √d_k`, producing the O(N²) scores tensor that dominates attention memory. {#lst-12-scaled-scores}
 
 The resulting `scores` tensor is the attention matrix before normalization. Element `[i,j]` represents how much position i should attend to position j. The vectorized `matmul` operation computes all n² query-key pairs simultaneously—while much faster than Python loops, it still creates the full O(n²) attention matrix that dominates memory usage at scale.
 
@@ -502,6 +508,8 @@ attention_weights = softmax(scores, dim=-1)  # Normalize along last dimension
 # Apply to values: weighted combination
 output = attention_weights.matmul(V)
 ```
+
+: **Listing 12.3 — Masked softmax and value-weighted sum**. Adds `-1e9` at masked positions, normalizes via softmax, then weights values to produce the attended output. {#lst-12-masked-softmax}
 
 The mask trick is worth pausing on. Masked positions get `-1e9` added to their score; after `exp`, that's a number indistinguishable from zero, so they receive no attention weight at all. Allowed positions get `+0` and pass through unchanged. The whole operation stays differentiable — there is no `if` in the gradient path — and the constraint is enforced exactly.
 
@@ -541,6 +549,8 @@ concat_output = attended.reshape(batch_size, seq_len, self.embed_dim)
 # Mix information across heads with output projection
 output = self.out_proj.forward(concat_output)
 ```
+
+: **Listing 12.4 — Multi-head attention forward pass**. Reshape splits the embedding across heads, attention runs in parallel per head, then reshape and out_proj recombine. {#lst-12-multihead-forward}
 
 The reshape-transpose-attend-transpose-reshape dance separates heads for independent processing, then recombines their outputs. The final output projection learns how to mix information discovered by different heads, creating a rich representation that captures multiple relationship types simultaneously.
 

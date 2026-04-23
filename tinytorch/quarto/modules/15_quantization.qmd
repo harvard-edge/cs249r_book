@@ -1,6 +1,8 @@
 
 # Module 15: Quantization
 
+Quantization does not change the O(MNK) complexity of a matmul. It shrinks the constant factor: 4x less HBM bandwidth per weight, 4x more values per SIMD register (64 INT8 lanes vs 16 FP32 lanes in AVX-512), and a 4x smaller cache footprint that keeps hot weights on-chip. For the memory-bound workloads that dominate autoregressive decoding and on-device inference, that constant-factor win is what makes a 400 MB model fit on a 512 MB IoT device. This module builds asymmetric INT8 quantization, calibration, and a model-level pass that converts every Linear layer in place.
+
 :::{.callout-note title="Module Info"}
 
 **OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 4-6 hours | Prerequisites: 01-14
@@ -336,7 +338,7 @@ The math you implement is the same math TensorFlow Lite, PyTorch Mobile, and ONN
 
 
 
-::: {#fig-15_quantization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Quantization System**: Methods for converting models to lower precision." fig-alt="Diagram showing observer-based calibration and weights/activations quantization."}
+::: {#fig-15_quantization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Quantization System**: Methods for converting models to lower precision." fig-alt="Pipeline diagram: FP32 weights feed into a quantizer block producing INT8 weights with scale and zero-point. A parallel calibration path runs sample activations through an observer to produce input scale and zero-point. Both feed the QuantizedLinear layer."}
 
 ![](../assets/images/diagrams/15_quantization-diag-1.svg)
 
@@ -473,6 +475,8 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     return Tensor(quantized_data), scale, zero_point
 ```
 
+: **Listing 15.1 — Asymmetric INT8 quantize function**. Derives scale and zero-point from the tensor's min/max range, then maps FP32 values into `[-128, 127]` with rounding and clipping. {#lst-15-quantize-int8}
+
 The algorithm finds the minimum and maximum values in the tensor, then calculates a scale that maps this range to [-128, 127]. The zero-point determines which INT8 value represents FP32 zero, ensuring minimal quantization error at zero (important for ReLU activations and sparse patterns).
 
 ### Scale and Zero-Point
@@ -520,6 +524,8 @@ class QuantizedLinear:
         self.input_zero_point = None
 ```
 
+: **Listing 15.2 — QuantizedLinear constructor**. Wraps a trained Linear layer, quantizes weights and biases immediately, and reserves input quantization parameters for calibration. {#lst-15-quantized-linear-init}
+
 During inference, the forward pass dequantizes weights on-the-fly, performs the standard FP32 matrix multiplication, and returns FP32 outputs. While this educational approach clarifies the math, production implementations keep the data in 8-bit format entirely, leveraging specialized INT8 GEMM (general matrix multiply) hardware instructions for maximum speed:
 
 ```python
@@ -538,6 +544,8 @@ def forward(self, x: Tensor) -> Tensor:
 
     return result
 ```
+
+: **Listing 15.3 — QuantizedLinear forward pass**. Dequantizes weights and bias on the fly for the matmul. Production kernels skip this step and run the matmul directly in INT8. {#lst-15-quantized-linear-forward}
 
 ### Calibration Strategy
 
@@ -565,6 +573,8 @@ def calibrate(self, sample_inputs: List[Tensor]):
         self.input_zero_point = int(np.round(INT8_MIN_VALUE - min_val / self.input_scale))
         self.input_zero_point = np.clip(self.input_zero_point, INT8_MIN_VALUE, INT8_MAX_VALUE)
 ```
+
+: **Listing 15.4 — Activation calibration**. Aggregates sample inputs to fit input scale and zero-point from an empirical activation range before inference. {#lst-15-calibrate}
 
 Calibration typically requires 100-1000 representative samples. Too few samples might miss important distribution characteristics; too many waste time with diminishing returns. The goal is capturing the typical range of activations the model will see during inference.
 

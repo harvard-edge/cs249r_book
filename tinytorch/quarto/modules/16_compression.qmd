@@ -1,6 +1,8 @@
 
 # Module 16: Compression
 
+Compression is the negotiation between model footprint and model quality. Every technique here (pruning, distillation, low-rank approximation) buys memory and bandwidth savings at some cost to accuracy, and hardware only cashes the savings when the sparsity pattern matches what the silicon can skip. The ratio is the thing; this module makes it measurable.
+
 :::{.callout-note title="Module Info"}
 
 **OPTIMIZATION TIER** | Difficulty: ●●●○ | Time: 5-7 hours | Prerequisites: 01-14
@@ -333,7 +335,7 @@ The trick is that trained networks are mostly dead weight. Studies routinely fin
 
 
 
-::: {#fig-16_compression-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Compression System**: Reducing model size via pruning and distillation." fig-alt="Diagram showing pruning strategies and the teacher-student distillation process."}
+::: {#fig-16_compression-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Compression System**: Reducing model size via pruning and distillation." fig-alt="Block diagram of the TinyTorch compression pipeline: input model flows through magnitude pruning, structured channel pruning, knowledge distillation from a teacher to a smaller student, and low-rank SVD approximation, producing a compressed output model."}
 
 ![](../assets/images/diagrams/16_compression-diag-1.svg)
 
@@ -465,6 +467,8 @@ def magnitude_prune(model, sparsity=0.9):
     return model
 ```
 
+: **Listing 16.1 — Magnitude pruning via a global percentile threshold**. {#lst-16-compression-magnitude-prune}
+
 The elegance is in the percentile-based threshold. Setting `sparsity=0.9` means "remove the bottom 90% of weights by magnitude." NumPy's `percentile` function finds the exact value that splits the distribution, and then a binary mask zeros out everything below that threshold.
 
 To understand why this works, consider a typical weight distribution after training:
@@ -538,6 +542,8 @@ def structured_prune(model, prune_ratio=0.5):
     return model
 ```
 
+: **Listing 16.2 — Structured pruning by L2 norm of output channels**. {#lst-16-compression-structured-prune}
+
 The L2 norm `||W[:,i]||_2 = sqrt(sum(w_j^2))` measures the total magnitude of a channel. Channels with small norms contribute less to the output, so dropping them costs the least. Removing whole channels also creates *block* sparsity, which hardware can vectorize over the channels that remain.
 
 The key insight in structured pruning is that you remove entire computational units, not scattered weights. When you zero out channel `i` in layer `l`, you're eliminating:
@@ -592,6 +598,8 @@ def distillation_loss(self, student_logits, teacher_logits, true_labels):
     return total_loss
 ```
 
+: **Listing 16.3 — Temperature-scaled distillation loss combining soft and hard targets**. {#lst-16-compression-distillation-loss}
+
 Dividing logits by temperature before softmax spreads probability mass across classes. At `temperature=1` you get the usual peaked softmax. At `temperature=3` the distribution flattens, exposing the teacher's relative uncertainty between classes. The student learns both what the teacher picks *and* what it almost picked.
 
 The combined loss balances two pressures. The soft loss (weighted `alpha=0.7`) pushes the student to imitate the teacher's reasoning. The hard loss (weighted `1-alpha=0.3`) keeps it anchored to the ground truth. With this recipe, students routinely match teachers at 10x compression with 2–5% accuracy loss.
@@ -621,6 +629,8 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
 
     return U_truncated, S_truncated, V_truncated
 ```
+
+: **Listing 16.4 — Low-rank approximation via truncated SVD**. {#lst-16-compression-low-rank}
 
 SVD identifies the principal "directions" in the weight matrix through singular values. Larger singular values capture more variance, so keeping the top k preserves most of the matrix's information at a fraction of the parameter cost.
 

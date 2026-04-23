@@ -1,5 +1,7 @@
 # Module 18: Memoization
 
+Autoregressive inference recomputes the same attention keys and values for every new token, billions of times across a production fleet. The KV cache is the memoization trick that turns that O(N^2) redundancy into O(N) by trading GPU HBM for saved compute. This module builds the cache, and the fragmentation problem at long context that makes production systems reach for PagedAttention.
+
 :::{.callout-note title="Module Info"}
 
 **OPTIMIZATION TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-14
@@ -339,7 +341,7 @@ Memoization is the opposite move: a single, narrow optimization that targets one
 
 
 
-::: {#fig-18_memoization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch KV Caching**: Reusing previous computations to speed up text generation." fig-alt="Diagram showing cache storage and retrieval logic for keys and values."}
+::: {#fig-18_memoization-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch KV Caching**: Reusing previous computations to speed up text generation." fig-alt="Diagram of the TinyTorch KV cache: each transformer layer holds pre-allocated key and value tensors, new token projections append at the current sequence position, and cached K and V are retrieved together for attention computation during autoregressive generation."}
 
 ![](../assets/images/diagrams/18_memoization-diag-1.svg)
 
@@ -448,6 +450,8 @@ def update(self, layer_idx: int, key: Tensor, value: Tensor) -> None:
     value_cache.data[:, :, self.seq_pos:self.seq_pos+1, :] = value.data
 ```
 
+: **Listing 18.1 — O(1) KV cache append into pre-allocated per-layer storage**. {#lst-18-memoization-update}
+
 This O(1) update operation writes directly to a pre-allocated position in the cache. No array resizing, no data copying, just an indexed assignment. The use of `.data` accesses the underlying NumPy array directly, avoiding gradient tracking overhead since caching is inference-only.
 
 The computational savings compound across generation steps. For a 100-token sequence:
@@ -528,6 +532,8 @@ def reset(self) -> None:
         key_cache.data.fill(0.0)
         value_cache.data.fill(0.0)
 ```
+
+: **Listing 18.2 — Cache reset clearing per-layer K and V storage between sequences**. {#lst-18-memoization-reset}
 
 The reset operation returns the sequence position to zero and clears the cache data. This is called when starting to generate a new sequence, ensuring no stale data from previous generations affects the current one.
 

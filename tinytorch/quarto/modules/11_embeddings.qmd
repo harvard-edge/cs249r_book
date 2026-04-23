@@ -1,5 +1,7 @@
 # Module 11: Embeddings
 
+Embeddings are the largest single tensor in most language models (GPT-3's 2.3 GB) but every forward pass only touches a handful of rows. That makes them a row-sparse scatter/gather problem, not a matmul, and it puts them squarely in the memory-bandwidth regime of the roofline. This module builds the lookup table, the positional encodings, and the sparse-gradient backward pass that every transformer input layer depends on.
+
 :::{.callout-note title="Module Info"}
 
 **ARCHITECTURE TIER** | Difficulty: ●●○○ | Time: 3-5 hours | Prerequisites: 01-08, 10
@@ -331,7 +333,7 @@ Your tokenizer from Module 10 produces IDs like `[42, 7, 15]`. By the end of thi
 
 
 
-::: {#fig-11_embeddings-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Embedding System**: Mapping tokens and positions to learned continuous representations." fig-alt="Diagram showing Embedding, learned PositionalEncoding, and mathematical Sinusoidal PE components combining into a complete EmbeddingLayer."}
+::: {#fig-11_embeddings-diag-1 fig-env="figure" fig-pos="htb" fig-cap="**TinyTorch Embedding System**: Mapping tokens and positions to learned continuous representations." fig-alt="Three component blocks (token Embedding lookup table, learned PositionalEncoding table, and fixed Sinusoidal PE formula) feed into a combined EmbeddingLayer that outputs position-aware dense vectors."}
 
 ![](../assets/images/diagrams/11_embeddings-diag-1.svg)
 
@@ -492,6 +494,8 @@ def forward(self, indices: Tensor) -> Tensor:
     return result
 ```
 
+: **Listing 11.1 — Embedding forward pass**. NumPy fancy indexing replaces a one-hot matmul, making lookup O(1) per token. {#lst-11-embedding-forward}
+
 The work happens in `self.weight.data[indices.data.astype(int)]`. NumPy's fancy indexing pulls rows 1, 42, and 7 in a single operation, broadcasting cleanly over batched inputs of any shape. It is mathematically equivalent to multiplying a one-hot matrix against the weight table — but it is orders of magnitude faster and allocates no intermediate tensor.
 
 ### Embedding Table Mechanics
@@ -557,6 +561,8 @@ def forward(self, x: Tensor) -> Tensor:
     return result
 ```
 
+: **Listing 11.2 — PositionalEncoding forward pass**. Slices position embeddings to current sequence length and adds them to token embeddings while preserving gradient flow. {#lst-11-positional-forward}
+
 The slicing operation `self.position_embeddings[:seq_len]` preserves gradient tracking because TinyTorch's Tensor `__getitem__` (from Module 01) maintains the connection to the original parameter. This allows backpropagation to update only the position embeddings actually used in the forward pass.
 
 The advantage is flexibility: the model can learn task-specific positional patterns. The disadvantage is memory cost and a hard maximum sequence length.
@@ -580,6 +586,8 @@ pe = np.zeros((max_seq_len, embed_dim), dtype=np.float32)
 pe[:, 0::2] = np.sin(position * div_term)
 pe[:, 1::2] = np.cos(position * div_term)
 ```
+
+: **Listing 11.3 — Sinusoidal positional encoding construction**. Builds a fixed position matrix from trigonometric functions at geometrically spaced frequencies. {#lst-11-sinusoidal-pe}
 
 This creates a unique vector for each position where low-index dimensions oscillate rapidly (high frequency) and high-index dimensions change slowly (low frequency). The pattern allows the model to learn relative positions through dot products, and crucially, can extrapolate to sequences longer than seen during training.
 
