@@ -83,61 +83,29 @@ jobs:
       - name: 📦 Install Mermaid CLI
         run: npm install -g @mermaid-js/mermaid-cli
 
-      - name: 📚 Install LaTeX packages
-        # Explicit tlmgr install so the book render does not depend on
-        # Quarto's on-the-fly auto-install (which occasionally stalls
-        # on cold CI runners). The list covers everything the preamble
-        # and cover page actually need: TeX Gyre font family, custom
-        # header/chapter/section formatting, TikZ + tcolorbox for the
-        # cover and callouts, microtype, and adjustbox for the global
-        # \includegraphics size cap.
-        run: |
-          tlmgr update --self
-          tlmgr install \
-            tex-gyre \
-            fontspec \
-            xetex \
-            microtype \
-            adjustbox \
-            collectbox \
-            titlesec \
-            fancyhdr \
-            tcolorbox \
-            pgf \
-            environ \
-            trimspaces \
-            newunicodechar \
-            fontawesome5 \
-            koma-script \
-            booktabs \
-            xcolor \
-            hyperref \
-            caption \
-            etoolbox \
-            svg \
-            transparent
+      - name: 📦 Install build dependencies (apt + TeX)
+        # Single-source deps: make install-deps reads
+        # tinytorch/quarto/pdf/apt-requirements.txt and tex-requirements.txt
+        # and installs everything. Same command works locally.
+        working-directory: tinytorch/quarto
+        run: make install-deps
 
-      - name: 📚 Render Guide PDF (Quarto + XeLaTeX)
-        # Quarto's post-render cleanup fails (non-fatal) because this
-        # book project reads chapters at ../ — outside its project
-        # root — so Quarto refuses to remove their auxiliary _files/
-        # directories. XeLaTeX still writes the PDF successfully; we
-        # verify explicitly below and treat the cleanup error as benign.
+      - name: 📚 Render Guide PDF (make pdf → Quarto + XeLaTeX)
+        # Delegate to the Makefile so CI and local dev share one build
+        # recipe. `make pdf` runs `figures` first (rsvg-convert SVG → PDF
+        # for every diagram), then `quarto render pdf/`, then the
+        # self-heal that moves the artifact to pdf/_build/ when Quarto's
+        # post-render cleanup errors on chapter *_files directories
+        # outside the project root.
         #
-        # Output path: pdf/_build/TinyTorch-Guide.pdf per the
-        # output-dir: _build setting in pdf/_quarto.yml — consistent
-        # with every other Quarto project in this repo (kits, slides,
-        # site, labs, etc. all use _build/ as their render target).
+        # Canonical output: pdf/_build/TinyTorch-Guide.pdf
         working-directory: tinytorch/quarto
         run: |
-          set +e
-          quarto render pdf/
-          quarto_exit=$?
-          set -e
-          if [ ! -f pdf/_build/TinyTorch-Guide.pdf ]; then
-            echo "::error::PDF missing — Quarto exit $quarto_exit and no pdf/_build/TinyTorch-Guide.pdf was produced"
+          make pdf
+          test -f pdf/_build/TinyTorch-Guide.pdf || {
+            echo "::error::pdf/_build/TinyTorch-Guide.pdf was not produced"
             exit 1
-          fi
+          }
           echo "PDF produced at pdf/_build/TinyTorch-Guide.pdf ($(du -h pdf/_build/TinyTorch-Guide.pdf | cut -f1))"
           if [ $quarto_exit -ne 0 ]; then
             echo "::notice::Quarto exit $quarto_exit (post-render cleanup) — PDF still produced successfully"

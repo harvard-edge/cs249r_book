@@ -60,6 +60,21 @@ QUARTO := quarto
 
 all: pdf
 
+install-deps: ## Install system + LaTeX packages needed to build the PDF.
+	@# apt packages (requires sudo on CI / Linux; no-op elsewhere)
+	@if [ -f pdf/apt-requirements.txt ] && command -v apt-get >/dev/null 2>&1; then \
+	  echo "  installing apt packages from pdf/apt-requirements.txt"; \
+	  sudo apt-get update -y; \
+	  grep -v '^#' pdf/apt-requirements.txt | grep -v '^$$' | xargs -r sudo apt-get install -y; \
+	fi
+	@# TinyTeX / LaTeX packages (tlmgr from the Quarto TinyTeX install)
+	@if [ -f pdf/tex-requirements.txt ] && command -v tlmgr >/dev/null 2>&1; then \
+	  echo "  installing TeX packages from pdf/tex-requirements.txt"; \
+	  tlmgr update --self || true; \
+	  grep -v '^#' pdf/tex-requirements.txt | grep -v '^$$' | xargs -r tlmgr install; \
+	fi
+	@echo "  dependencies installed"
+
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "Targets:\n"} \
 	      /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' \
