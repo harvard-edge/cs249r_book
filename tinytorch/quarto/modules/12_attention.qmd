@@ -346,6 +346,8 @@ The shift attention introduced is simple to state. RNNs squeeze a whole sequence
 
 **Implementation roadmap:**
 
+@tbl-12-attention-implementation-roadmap lays out the implementation in order, one part at a time.
+
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `scaled_dot_product_attention()` | Core attention mechanism with QK^T similarity |
@@ -411,6 +413,8 @@ Creates multi-head attention with `embed_dim // num_heads` dimensions per head.
 
 **Core Methods:**
 
+@tbl-12-attention-multihead-api lists the methods on `MultiHeadAttention`.
+
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `forward` | `forward(x, mask=None) -> Tensor` | Apply multi-head attention to input |
@@ -440,6 +444,8 @@ Attention treats sequence processing as a soft database lookup. Three roles, all
 
 To translate this into code, your implementation creates these three components using dedicated linear projections, mapping the input sequence into distinct representations for querying, indexing, and retrieving:
 
+The code in @lst-12-qkv-projections makes this concrete.
+
 ```python
 # From MultiHeadAttention.__init__
 self.q_proj = Linear(embed_dim, embed_dim)  # Learn what to search for
@@ -463,6 +469,8 @@ The core computation asks one question: how similar is each query to each key? A
 The `1/√d_k` factor exists for a specific, fixable failure. If the components of Q and K are roughly unit-variance, then `Q[i] · K[j]` is a sum of `d_k` independent products — its variance grows linearly with `d_k`, so its standard deviation grows like `√d_k`. At `d_k = 64` the typical score is around 8; at `d_k = 512` it's around 23. Feed that to softmax and one entry takes essentially all the probability mass, while every other entry sits in the flat tail of `exp` where the gradient is nearly zero. Training stalls. Dividing by `√d_k` cancels exactly that growth, holding score variance at roughly 1 regardless of head dimension.
 
 Your implementation computes this using vectorized matrix operations:
+
+The code in @lst-12-scaled-scores makes this concrete.
 
 ```python
 # From scaled_dot_product_attention (lines 303-319)
@@ -490,6 +498,8 @@ Raw similarity scores need to become a probability distribution. Softmax transfo
 The softmax operation `exp(scores[i,j]) / Σ_k exp(scores[i,k])` has important properties. It's differentiable, allowing gradients to flow during training. It amplifies differences: a score of 2.0 becomes much more prominent than 1.0 after exponentiation. And it's translation-invariant: adding the same constant to all scores doesn't change the output (exploited for numerical stability).
 
 Here's the complete attention weight computation with masking support:
+
+The code in @lst-12-masked-softmax makes this concrete.
 
 ```python
 # From scaled_dot_product_attention
@@ -520,6 +530,8 @@ A single attention head learns one similarity function — one notion of "what c
 The crucial design choice is to *split* the embedding dimension across heads, not duplicate it. With `embed_dim=512` and `num_heads=8`, each head operates on `512/8 = 64` dimensions. Parameter count stays the same as a single 512-dim head, but you get 8 narrower attention mechanisms running in parallel instead of one wide one. In practice, heads specialize on their own — visualizations of trained models show one head tracking adjacent tokens, another tracking subject–verb pairs across long distances, others doing things no one has named.
 
 Your implementation handles this through reshape and transpose operations:
+
+The code in @lst-12-multihead-forward makes this concrete.
 
 ```python
 # From MultiHeadAttention.forward
@@ -574,6 +586,8 @@ Combined with the `-1e9` trick from the previous section, exactly the upper tria
 Attention's power comes from all-to-all connectivity: every position can attend to every other position. But this creates quadratic scaling in both computation and memory. For sequence length n, the attention matrix has n² elements. The vectorized `Q @ K^T` operation computes all n² similarity scores in one matrix multiplication, softmax normalizes n² values, and applying attention to values multiplies n² weights by the value vectors.
 
 The memory cost is the part that bites first. For GPT-3 with 2048-token context, a single attention matrix stores `2048² = 4,194,304` float32 values — 16 MB. With 96 layers stacked, attention matrices alone consume 1.5 GB before you account for activations, gradients, Q/K/V projections, or anything else. That is the quadratic wall, and it is the reason every long-context system you've heard of has a paper attached to it.
+
+@tbl-12-attention-step-complexity summarises the time and memory cost of the core operations.
 
 | Operation | Time Complexity | Memory Complexity | Dominates When |
 |-----------|----------------|-------------------|----------------|
@@ -639,6 +653,8 @@ This can happen if you create new Tensor objects incorrectly, breaking the autog
 ### Your Implementation vs. PyTorch
 
 Your TinyTorch attention and PyTorch's `nn.MultiheadAttention` implement the same mathematical operations. The differences are in implementation efficiency, features, and flexibility. PyTorch uses highly optimized C++ kernels, supports additional attention variants, and integrates with production training systems.
+
+@tbl-12-attention-vs-pytorch places your implementation side by side with the production reference for direct comparison.
 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
@@ -938,6 +954,8 @@ You have built the engine. Module 13 builds the chassis around it. The question 
 :::
 
 **Preview — how your attention gets used in future modules:**
+
+@tbl-12-attention-downstream-usage traces how this module is reused by later parts of the curriculum.
 
 | Module | What It Does | Your Attention In Action |
 |--------|--------------|--------------------------|
