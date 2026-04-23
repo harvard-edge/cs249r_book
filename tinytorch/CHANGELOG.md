@@ -13,7 +13,7 @@ for the canonical list.
 
 ## [Unreleased]
 
-## [0.10.0] — 2026-04 (planned)
+## [0.1.10] — 2026-04 (planned)
 
 The first release tracked under `vX.Y.0` (rather than `v0.1.x`) to reflect
 the package's maturity heading into the Volume II launch. This is *not* a
@@ -29,7 +29,7 @@ room to breathe alongside the textbook's release cadence.
   TinyTorch *software* and the surrounding *educational content*.
 - **Explicit-version release path.** `tinytorch-publish-live` workflow now
   accepts an `explicit_version` input that bypasses the major/minor/patch
-  auto-bump for non-incremental jumps (used for this 0.1.x → 0.10.0
+  auto-bump for non-incremental jumps (used for this 0.1.x → 0.1.10
   release). Ordinary releases continue to use `release_type`.
 - **`settings.ini` covered by automated bumps.** The publish workflow
   previously updated `pyproject.toml`, `install.sh`, the Quarto
@@ -37,7 +37,7 @@ room to breathe alongside the textbook's release cadence.
   silently drifted. The workflow now keeps it in sync with each release.
 
 ### Changed
-- Version bumped from `0.1.9` → `0.10.0` in `pyproject.toml`,
+- Version bumped from `0.1.9`    → `0.1.10` in `pyproject.toml`,
   `settings.ini`, and the legacy site announcement banner.
 
 ### Notes for downstreams
