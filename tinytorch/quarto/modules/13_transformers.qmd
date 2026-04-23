@@ -623,6 +623,19 @@ The attention bottleneck is why long context is expensive. For a batch of 4 sequ
 
 Double the sequence length, quadruple the memory — *per layer*. A 12-layer model at 4K context burns 24 GB just on attention matrices. This is the wall that drove FlashAttention, sparse attention, and linear attention into existence.
 
+Per transformer block, the cost profile decomposes cleanly into two regimes:
+
+- **Attention:** compute is **O(N² · d)**, memory is **O(N²)** — quadratic in sequence length `N`.
+- **MLP:** compute is **O(N · d²)**, memory is **O(N · d)** — linear in `N` but quadratic in the hidden width `d`.
+
+Attention overtakes the MLP the moment `N > d`, which for every production LLM (where `N` is thousands of tokens and `d` is a few hundred to a few thousand) is always. That crossover is why the attention matrix — not the weight matrices — is the first thing that blows up your HBM budget.
+
+:::{.callout-note title="Systems Implication: KV-Cache Memory Growth During Autoregressive Decoding"}
+The O(N²) scaling story above is about *training*. Autoregressive *inference* has a different — and equally brutal — memory problem: the **KV cache**. When generating tokens one at a time, naive attention would recompute the keys and values for every previous token at every step (the 66× overhead shown in the generation efficiency question below). Production inference instead caches `K` and `V` for every token ever seen, trading compute for memory.
+
+The cache size per request is `2 × num_layers × num_heads × head_dim × seq_len × bytes` — two copies (K and V), one per layer, per head. For a 70 B Llama-style model at 32K context in FP16, that is roughly **20 GB per request**, often larger than the model's own weight footprint. At scale this is the dominant cost: inference servers are memory-bound on the KV cache, not FLOP-bound on the matmuls. This is why recent architectures use **multi-query attention** (MQA) and **grouped-query attention** (GQA) — they share keys and values across heads to shrink the cache by 4–8×, trading a small amount of model quality for a huge cut in serving memory. Every optimization in modern LLM inference stacks — paged attention, prefix caching, speculative decoding — is ultimately a strategy for managing the KV cache.
+:::
+
 ## Production Context
 
 ### Your Implementation vs. PyTorch
@@ -695,7 +708,18 @@ The architecture you just built is the same one that runs at the frontier. The d
 
 Those numbers exist because the architecture you built has no free lunch baked in: every doubling of context squares the attention cost, every doubling of width squares the parameter count. The next chapter is where you start measuring those costs in your own model — and the chapters after that are where you start beating them down.
 
-## Check Your Understanding
+:::{.callout-tip title="Check Your Understanding — Transformers"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Why the residual connection around attention+FFN (`x + f(x)`) is critical for gradient flow through deep stacks — the `+1` in `∂y/∂x = 1 + ∂f/∂x` is a shortcut that lets signal reach early layers even when the sub-layer Jacobian is tiny.
+- [ ] How **pre-norm** (LayerNorm *before* each sub-layer) differs from the original *post-norm* transformer, and why it's what lets modern models train 24, 48, or 100+ layers without learning-rate warmup tricks.
+- [ ] Why the attention block's O(N²) memory cost dominates over the MLP's O(N · d²) the moment `N > d` — and what that means for context-window choices in every production LLM.
+- [ ] How the **KV cache** turns autoregressive decoding from O(N²) recomputation into O(N) per step, why the cache itself can exceed the model's weight footprint, and why MQA/GQA/paged attention exist to shrink it.
+
+If any of these feels fuzzy, revisit the *Core Concepts* section (especially *Pre-Norm Architecture and Residual Connections* and *Parameter Scaling and Memory Requirements*) before moving on.
+:::
+
+## Self-Check Questions
 
 Test your understanding of transformer architecture and scaling with these systems thinking questions.
 
@@ -817,6 +841,15 @@ Why do transformers use layer normalization instead of batch normalization? Cons
 
 **Why it matters**: transformers process variable-length sequences. Layer norm treats each position on its own, which makes it robust to length variation and batch composition. Batch norm depends on its batch; layer norm does not.
 :::
+
+## Key Takeaways
+
+- **A transformer block is a recipe, not a mystery:** pre-norm → attention → residual, pre-norm → MLP → residual. Stack twelve of those between embeddings and a language head and you have GPT.
+- **Residuals are the gradient highway:** `x + f(x)` gives backprop a `+1` shortcut that keeps signal alive through arbitrarily deep stacks — without them, a 24-layer network's gradients decay to zero.
+- **Attention's O(N²) memory is the first wall you hit:** doubling sequence length quadruples attention memory per layer; long context is expensive because of geometry, not implementation.
+- **The KV cache dominates inference memory:** at serving time, `2 × layers × heads × head_dim × seq_len × bytes` often eclipses the model weights themselves, which is why MQA, GQA, and paged attention now ship in every production LLM stack.
+
+**Coming next:** Module 14 opens the Optimization Tier with measurement — profiling your transformer's forward pass to see exactly where time and memory are spent before you try to cut either.
 
 ## Further Reading
 

@@ -782,7 +782,19 @@ Your DataLoader provides the interface that enables these optimizations. Add `nu
 
 ## Check Your Understanding
 
-Five quantitative questions. Work them out before opening the answers — back-of-envelope estimation is the systems skill the rest of the book leans on.
+:::{.callout-tip title="Check Your Understanding — DataLoader"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Why the `Dataset` contract is just `__len__` and `__getitem__` — and how that minimal interface lets the same DataLoader handle tensors in RAM or JPEGs on disk.
+- [ ] Why shuffling permutes *indices*, not samples: 8 MB of integers instead of the full dataset, paid once per epoch, with no movement of the underlying bytes.
+- [ ] How the generator-based `__iter__` keeps peak memory at `batch_size × sample_size` instead of `dataset_size × sample_size`, regardless of how many batches you iterate.
+- [ ] Why disk-backed datasets introduce the `Disk → RAM → PCIe → VRAM` latency cliff, and how `num_workers` (process-based prefetch) and `pin_memory` (DMA-friendly allocation) hide it.
+- [ ] Why `np.stack` in `_collate_batch` produces a contiguous batch tensor — and why that contiguity is what makes downstream matmul cache-friendly.
+
+If any of these feels fuzzy, revisit Core Concepts (Dataset Abstraction, Shuffling and Randomization, Iterator Protocol and Generator Pattern, Memory-Efficient Loading) before moving on.
+:::
+
+The collapsible Q&A below grounds each point in concrete ImageNet/CIFAR-scale numbers.
 
 **Q1: Memory Calculation**
 
@@ -872,6 +884,16 @@ Batch of 128 samples: 128 × 588 KB = **75,264 KB ≈ 73.5 MB**.
 
 Larger batches pay a higher *absolute* collation cost (more bytes to move) but a lower *per-sample* cost — one big copy beats 128 small ones because the memory subsystem is happiest moving long, contiguous runs.
 :::
+
+## Key Takeaways
+
+- **A two-method contract scales to every dataset you will ever meet:** `__len__` + `__getitem__` is enough for the DataLoader to treat in-memory tensors, disk-backed JPEGs, or streaming sources interchangeably.
+- **Shuffle indices, never bytes:** permuting an 8-byte integer array is O(n) and essentially free; permuting the data array costs dataset-sized I/O and defeats the whole point of batching.
+- **Generators keep peak memory at one batch:** `yield` pauses the iterator between batches, so only the current batch is alive — which is how a 100 GB dataset trains on an 8 GB machine.
+- **Collation exists to make batches contiguous:** `np.stack` produces a single flat buffer the GPU can stream, turning 128 scattered samples into one cache-friendly tensor.
+- **The I/O wall is the real enemy at scale:** without prefetching, the GPU stalls at 50% utilization waiting for `Disk → RAM → PCIe → VRAM`; `num_workers` + `pin_memory` are what make that latency disappear.
+
+**Coming next:** Module 06 builds automatic differentiation on top of this iterator — every batch tensor the DataLoader yields becomes a leaf of a computation graph that `loss.backward()` traces back to fill `param.grad` for every weight.
 
 ## Further Reading
 

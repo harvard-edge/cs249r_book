@@ -523,6 +523,12 @@ Different optimization goals require different metrics. Choosing the wrong metri
 
 **Throughput (Inputs per Second)**: Measures total processing capacity. Critical for batch processing systems like translating millions of documents. Higher throughput means more efficient hardware utilization. Measured in samples per second or frames per second. While throughput and latency both measure performance, maximizing one often severely degrades the other.
 
+The tension between them is formalized by **Little's Law**: for any stable queueing system,
+
+$$L = \lambda W$$
+
+where L is the average number of in-flight requests, λ is throughput (requests per second), and W is the average latency (seconds per request). The law is deceptively simple but fully general — it holds for any arrival process, any service-time distribution, and any scheduling policy. Its operational complexity is O(1): you measure any two of the three, and the third follows. The consequence for ML serving is unavoidable: if you want to double throughput without doubling hardware, you must either halve latency (hard) or double the number of concurrent requests (which inflates latency unless the accelerator has spare parallelism). Benchmarking that reports only one of the three tells you nothing about where you actually sit on this curve.
+
 :::{.callout-note title="Systems Implication: Throughput vs. Latency and Little's Law"}
 It is a common misconception that optimizing for latency automatically improves throughput. In modern hardware accelerators, these two metrics are fundamentally in tension. Processing inputs one-by-one minimizes per-request latency but leaves massive parallel vector units (ALUs) starved for data, resulting in abysmal GPU utilization. Conversely, batching inputs together drastically increases throughput and hardware utilization, but it artificially inflates latency because the first input must wait for the entire batch to finish processing. This trade-off is formalized in queueing theory by **Little's Law** ($L = \lambda W$): to increase throughput ($\lambda$) while keeping latency ($W$) fixed, you must increase the number of requests processed concurrently ($L$). Professional benchmarking is essential precisely because it maps where your system currently sits on this unforgiving mathematical curve.
 :::
@@ -783,6 +789,17 @@ This is why fair benchmarking is a discipline, not a courtesy. The next chapter 
 
 ## Check Your Understanding
 
+:::{.callout-tip title="Check Your Understanding — Benchmarking"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Little's Law (L = λW) applied to throughput vs latency trade-offs under fixed parallelism, and why you cannot improve both without adding concurrency.
+- [ ] Why a single measurement is worthless: warmup, variance, and 95% confidence intervals turn a sample into a defensible claim.
+- [ ] How to read a Pareto frontier across (latency, accuracy, memory) and identify which models are dominated vs optimal.
+- [ ] The four measurement traps (wrong thing, system noise, cold start, batch-size confusion) and the specific protocol that defuses each.
+
+If any of these feels fuzzy, revisit the Core Concepts section (especially Benchmarking Methodology and Statistical Validity) before moving on.
+:::
+
 Test your understanding of benchmarking statistics and methodology with these quantitative questions. Work each one with a calculator before opening the answer.
 
 **Q1: Statistical Significance**
@@ -877,6 +894,15 @@ Your timer has 1μs overhead per measurement. You measure a 50μs operation 1000
 
 **Lesson**: Timer overhead is negligible for operations longer than ~50μs but dominates for microsecond-scale operations. That is why we use `time.perf_counter()` (nanosecond resolution, minimal overhead). For operations under 10μs, time a batch and divide.
 :::
+
+## Key Takeaways
+
+- **L = λW is the serving-curve law:** pick any two of (concurrency, throughput, latency) and the third follows — optimizing one in isolation is meaningless.
+- **Variance is the signal, not the noise:** a "faster" mean inside an overlapping confidence interval is not faster; reporting std and 95% CI is the floor, not extra credit.
+- **Warmup is mandatory:** JIT compilation, cache warming, and CPU frequency scaling all skew the first measurements — discard them, or you are benchmarking initialization, not steady state.
+- **Pareto frontiers beat single-axis wins:** a 2× speedup that costs 5% accuracy may not be a win; only the frontier view reveals which optimizations dominate the others.
+
+**Coming next:** Module 20 puts the harness to work — the TorchPerf Olympics capstone asks you to stack every optimization you built and defend the resulting numbers against the same statistical scrutiny.
 
 ## Further Reading
 

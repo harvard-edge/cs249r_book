@@ -502,6 +502,25 @@ self.metrics = {
 
 Each metric answers a different question. Parameter count indicates model capacity. Model size determines deployment cost. Accuracy measures task performance. Latency affects user experience. Throughput determines batch processing capacity. Optimizations create trade-offs between these dimensions, so measuring all of them prevents hiding downsides.
 
+### End-to-End Inference Complexity
+
+Before tuning any single knob, it helps to write down the whole inference cost in one place. For a transformer-style model serving a request at batch size B, sequence length S, hidden dimension D, and L layers, the end-to-end cost decomposes as:
+
+$$T_{\text{inference}} = \underbrace{T_{\text{preproc}}}_{O(S)} \;+\; \underbrace{L \cdot (T_{\text{attn}} + T_{\text{ffn}})}_{\text{layer stack}} \;+\; \underbrace{T_{\text{postproc}}}_{O(1)}$$
+
+- Attention per layer: $O(B \cdot S^2 \cdot D)$ FLOPs, $O(B \cdot S \cdot D)$ memory reads with KV caching, $O(B \cdot S^2 \cdot D)$ without.
+- Feed-forward per layer: $O(B \cdot S \cdot D^2)$ FLOPs, $O(D^2)$ weight bytes read per layer (amortized across B·S tokens).
+- Total: $O(L \cdot B \cdot S \cdot D \cdot (S + D))$ FLOPs dominate training and prefill; at decode time, $O(L \cdot B \cdot D^2)$ weight reads per generated token dominate — which is why decode is memory-bound.
+
+Each optimization from Modules 14–18 attacks a specific term:
+
+- **Quantization (15)** shrinks the weight-byte constant 4× — wins on decode and embedding lookups.
+- **Compression (16)** reduces the effective D (structured) or the nonzero count (unstructured) — wins on FFN cost.
+- **Acceleration (17)** collapses memory complexity for element-wise ops (Θ(kN) → Θ(N)) and raises the GEMM constant toward peak.
+- **Memoization (18)** turns the $S^2$ attention term into $S$ during decode — wins more as context grows.
+
+A capstone submission must measure the *composite* effect. Optimizations interact — pruning that enables lower rank may hurt the quantization scale; kernel fusion that assumes dense tensors may defeat sparsity — and only an end-to-end benchmark reveals whether the stack actually compounds.
+
 ### Latency vs Throughput: A Critical Distinction
 
 Many beginners confuse latency and throughput because both relate to speed. They measure fundamentally different things.
@@ -745,6 +764,17 @@ Reproducible benchmarking isn't academic. It's how engineers defend a decision i
 
 ## Check Your Understanding
 
+:::{.callout-tip title="Check Your Understanding — Capstone"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Why an MLPerf-style submission requires reproducibility infrastructure — system metadata, schema validation, versioned artifacts — not just a trained model.
+- [ ] How end-to-end inference complexity decomposes across attention, FFN, and decode terms, and which optimization from Modules 14–18 attacks each.
+- [ ] The three pillars — repeatability, comparability, completeness — and what fails when any one is missing.
+- [ ] Why compounded optimizations (prune → quantize → fuse → cache) must be measured end-to-end, since their interactions can defeat each other.
+
+If any of these feels fuzzy, revisit the Core Concepts section (especially The Three Pillars of Reliable Benchmarking and Schema Validation) before moving on.
+:::
+
 Test yourself with these systems thinking questions about benchmarking and performance measurement.
 
 **Q1: Memory Calculation**
@@ -865,6 +895,15 @@ With schema:
 
 **Real example:** Papers with Code leaderboards require strict schemas. Thousands of submissions from different teams aggregate automatically because everyone follows the same format.
 :::
+
+## Key Takeaways
+
+- **A submission is an artifact, not a number:** reproducibility infrastructure — system metadata, schema-validated JSON, versioned code — is what makes a claim defensible a year later.
+- **End-to-end measurement beats per-optimization microbenchmarks:** optimizations interact, and only the composite benchmark reveals whether the stack compounds or collides.
+- **Three pillars are non-negotiable:** repeatability (many runs, variance reported), comparability (platform recorded), completeness (all six metrics, no cherry-picks).
+- **The trade-off triangle is real:** fast + small + accurate is not simultaneously achievable with current techniques; every submission picks a corner, and the schema forces you to own the choice.
+
+**Coming next:** the framework is finished. The Conclusion chapter steps back to review which abstractions paid off, which trade-offs recur, and how what you built compares to the production systems that inspired it — read it with your `results.json` open.
 
 ## Further Reading
 

@@ -429,6 +429,8 @@ INT8 collapses that continuous range to 256 discrete levels (−128 to 127). The
 
 The storage math is unforgiving. One FP32 parameter is 4 bytes; one INT8 parameter is 1 byte. A 100M-parameter model is the difference between 381 MB (FP32) and 95 MB (INT8). The 4× ratio is fixed because the bit-width ratio is fixed: 32 down to 8.
 
+Crucially, quantization does *not* change the asymptotic complexity of matrix multiplication — a dense M×N by N×K matmul is still O(MNK) FLOPs and O(MN + NK + MK) bytes of traffic whether operands are FP32 or INT8. What changes is the *constant factor*: INT8 operands use one quarter of the memory bandwidth and pack 4× more operations into the same SIMD register (64 INT8 lanes vs. 16 FP32 lanes in AVX-512), yielding a 2–4× wall-clock speedup in practice. For memory-bound workloads like embedding lookups and decode-phase attention, that constant-factor win is the difference between fitting on the device and not.
+
 ### Quantization Schemes
 
 Symmetric quantization uses a linear mapping where FP32 zero maps to INT8 zero (zero-point = 0). This simplifies hardware implementation and works well for weight distributions centered around zero. Asymmetric quantization allows the zero-point to shift, better capturing ranges like [0, 1] or [-1, 3] where the distribution is not symmetric.
@@ -649,6 +651,17 @@ As neural networks scale, they inevitably hit the **memory wall** of the Rooflin
 
 ## Check Your Understanding
 
+:::{.callout-tip title="Check Your Understanding — Quantization"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Why INT8 inference breaks the memory wall on weight-dominated and embedding-heavy workloads (4× bandwidth reduction) even though the matmul complexity class is unchanged.
+- [ ] How asymmetric quantization picks scale and zero-point from a tensor's min/max, and why that choice bounds the round-trip error by ±scale/2.
+- [ ] Why activation quantization needs calibration data but weight quantization does not.
+- [ ] Why theoretical 4× speedup from 4× SIMD lanes collapses to 2–3× in practice (dequant overhead, memory ceiling, non-GEMM ops).
+
+If any of these feels fuzzy, revisit the Core Concepts section (especially Scale and Zero-Point and Calibration Strategy) before moving on.
+:::
+
 Five questions to lock in the trade-offs — memory, precision, calibration, I/O, and hardware. Work them out on paper before unfolding the answers.
 
 **Q1: Memory Calculation**
@@ -769,6 +782,15 @@ Modern CPUs have AVX-512 VNNI instructions that can perform INT8 matrix multiply
 
 **Key insight**: INT8 wins biggest when matrix multiplications dominate (transformers, large MLPs). For convolutions with tiny kernels, memory bandwidth caps the gains long before compute does.
 :::
+
+## Key Takeaways
+
+- **4× bandwidth, not 4× FLOPs:** quantization preserves the O(MNK) matmul complexity but shrinks every constant (memory, cache footprint, SIMD width) by 4× — that is why it wins on memory-bound workloads.
+- **Scale and zero-point are per-tensor decisions:** a single tensor with a poorly fit scale wastes resolution or clips values; calibration makes this data-driven instead of guessed.
+- **Weights quantize statically, activations quantize with calibration:** weights are fixed after training; activations depend on input distribution and need 100–1000 representative samples.
+- **Hardware lottery applies:** the 4× theoretical speedup becomes 2–3× in practice because dequant overhead, non-GEMM ops, and memory ceilings all tax the gain.
+
+**Coming next:** Module 16 attacks a different axis — instead of shrinking each weight, it removes weights entirely via pruning. Composed with quantization, the stack is ~16× smaller than the FP32 original.
 
 ## Further Reading
 

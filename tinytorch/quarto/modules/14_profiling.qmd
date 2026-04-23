@@ -527,13 +527,17 @@ Gradient memory matches parameter memory exactly. Every parameter has one gradie
 
 The single most critical insight a profiler yields is whether a workload is **compute-bound** or **memory-bound**. This classification dictates your entire optimization trajectory. Engineers formalize this relationship using the **Roofline Model**, a visual performance framework that plots a system's peak compute throughput (the horizontal "roof") against its memory bandwidth (the sloped "attic").
 
-A workload's placement under the roof is determined by its **arithmetic intensity**—the ratio of FLOPs executed per byte of memory accessed.
+A workload's placement under the roof is determined by its **arithmetic intensity**—the ratio of FLOPs executed per byte of memory accessed. The asymptotic complexity of the operation itself dictates where on the roofline it lands: an element-wise add is O(N) FLOPs on O(N) bytes (intensity ≈ 0.08 FLOPs/byte, memory-bound), while a dense N×N matmul is O(N³) FLOPs on O(N²) bytes (intensity grows linearly with N, compute-bound once N is large). Profiling resolves which regime you're actually in, not just which regime the asymptotics predict.
 
 **Compute-bound** workloads possess high arithmetic intensity. They reside under the flat roof of the model, limited entirely by the arithmetic logic units (e.g., Tensor Cores or SIMD registers). The hardware has ample data but cannot crunch the numbers fast enough. Optimizations here require dense vectorization, kernel fusion, and lower-precision math (like INT8 or FP8).
 
 **Memory-bound** workloads have low arithmetic intensity, trapped under the sloping memory bandwidth line. The processor's arithmetic units sit idle, starved of data because the hardware cannot fetch information from High Bandwidth Memory (HBM) fast enough. Embedding lookups (sparse gathers) and autoregressive generation (token-by-token processing) notoriously fall here. Optimizations must ruthlessly target data movement: improving cache locality, exploiting SRAM tiling, and reducing the precision footprint.
 
 Your profiler calculates this exact dynamic: if you register a meager GFLOP/s despite running on hardware with massive theoretical throughput, your arithmetic intensity is too low—you have hit the memory wall.
+
+:::{.callout-warning title="Systems Implication: Reading the Roofline to Pick the Right Optimization"}
+The roofline is not just a diagnostic — it is a decision tree. A workload's position under the roof tells you which lever to pull and which to leave alone. Sitting on the sloped memory bandwidth line? Reducing FLOPs is wasted effort; the chip is already idle waiting on DRAM. You need kernel fusion (Module 17), quantization to shrink per-byte traffic (Module 15), or caching to eliminate redundant reads (Module 18). Sitting under the flat compute roof? Memory is cheap and arithmetic is scarce; reach for structured sparsity, lower precision, or vectorized kernels that keep the ALUs fed. The single most common performance mistake is optimizing the wrong axis: rewriting a compute-bound matmul for better cache locality buys nothing, and fusing a compute-bound kernel can actively hurt by lengthening the critical path. The profiler's job is to tell you *which axis* — every subsequent module assumes you have read the roofline correctly.
+:::
 
 ### Profiling Tools
 
@@ -631,7 +635,18 @@ In each case the profiler did not invent the optimization — it told the engine
 
 ## Check Your Understanding
 
-Test yourself with these systems thinking questions about profiling and performance measurement.
+:::{.callout-tip title="Check Your Understanding — Profiling"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] How to read a FLOP/byte roofline and identify whether a kernel is compute-bound or memory-bound.
+- [ ] Why median latency is the honest statistic to report for typical performance, and when p95/p99 matter instead.
+- [ ] How training memory decomposes into parameters + gradients + optimizer state, and why Adam roughly quadruples the raw model footprint.
+- [ ] Why warmup iterations are not optional — what JIT, cache, and frequency-scaling effects they absorb before steady-state measurement.
+
+If any of these feels fuzzy, revisit the Core Concepts section (especially the Roofline Model and Timing Operations subsections) before moving on.
+:::
+
+Work through the following quantitative exercises. Answers are hidden — try each on paper first.
 
 **Q1: Parameter Memory Calculation**
 
@@ -710,6 +725,15 @@ The mean (12.3 ms) is skewed by the outlier (45.2 ms), likely caused by OS inter
 
 For production SLA planning, you might also report p95 or p99 latency (95th or 99th percentile) to capture worst-case behavior without being skewed by extreme outliers.
 :::
+
+## Key Takeaways
+
+- **Measure before you optimize:** intuition about bottlenecks is usually wrong, and a week of profiling saves a month of chasing the wrong layer.
+- **Arithmetic intensity decides the axis:** FLOPs-per-byte places a workload on the roofline and tells you whether to attack compute or memory — the two optimizations are almost never both correct.
+- **Statistical rigor is not pedantry:** warmup + median + confidence intervals are the difference between a real speedup and a noise-driven illusion.
+- **Training memory is dominated by optimizer state, not weights:** Adam multiplies the model footprint ~4× before activations, which is why optimizer sharding (ZeRO/FSDP) exists.
+
+**Coming next:** Module 15 takes the bottlenecks you just surfaced and attacks the most common one — memory pressure — by compressing FP32 weights to INT8, with your profiler acting as the before/after ground truth.
 
 ## Further Reading
 

@@ -478,6 +478,8 @@ The critical insight is that weight distributions in trained networks are heavil
 
 The memory impact is immediate. A model with 10 million parameters at 90% sparsity has only 1 million active weights. With sparse storage formats (like scipy's CSR matrix), that translates to a 90% memory reduction. The compute savings come from skipping zero multiplications, but cashing them in requires sparse-computation libraries — which is exactly why structured pruning exists.
 
+**Complexity of pruning itself:** finding the global magnitude threshold is O(N log N) for a sort (or O(N) with quickselect / `np.partition`) across N total weights — a one-shot cost that dominates nothing. The *compression ratio* as a function of sparsity level s (fraction removed) is simply 1/(1-s): at s=0.5 you halve the storage, at s=0.9 you get 10× compression, at s=0.99 you get 100×. But the *compute* ratio only tracks this if the sparse kernel can actually skip the zeros — and on dense accelerators it cannot, which motivates the structured/unstructured distinction below.
+
 ### Structured vs Unstructured Pruning
 
 Magnitude pruning creates unstructured sparsity: zeros scattered randomly throughout weight matrices. This achieves high compression ratios but creates irregular memory access patterns that modern hardware struggles to accelerate. Structured pruning solves this by removing entire computational units like channels, neurons, or attention heads.
@@ -731,6 +733,17 @@ A 100 MB model pruned to 90% sparsity becomes 10 MB with sparse storage, which f
 
 ## Check Your Understanding
 
+:::{.callout-tip title="Check Your Understanding — Compression"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] The Hardware Lottery: why structured sparsity beats unstructured for real-world speedups on dense accelerators, even at lower compression ratios.
+- [ ] How magnitude pruning picks a threshold from the global weight distribution, and why compression ratio = 1/(1 - sparsity).
+- [ ] Why knowledge distillation's soft targets (teacher logits under temperature) teach more than one-hot labels per gradient step.
+- [ ] When low-rank approximation pays off (wide matrices, low intrinsic rank) and when SVD is wasted effort.
+
+If any of these feels fuzzy, revisit the Core Concepts section (especially Structured vs Unstructured Pruning and Compression Trade-offs) before moving on.
+:::
+
 Test yourself with these systems-thinking questions. They're built to sharpen the intuition you'll need every time you compress a model in production.
 
 **Q1: Sparsity Calculation**
@@ -821,6 +834,15 @@ Reasoning:
 
 **Production insight**: High sparsity ≠ high speedup. Hardware capabilities matter more than compression ratio for latency-critical applications.
 :::
+
+## Key Takeaways
+
+- **Compression ratio is 1/(1 − sparsity):** the arithmetic is trivial; the engineering question is whether the underlying kernel can actually skip zeros.
+- **Structured > unstructured on dense hardware:** 30–50% structured sparsity beats 90% unstructured sparsity in wall-clock time, because modern accelerators execute dense tiles and pay indexing overhead for scattered zeros.
+- **Distillation compresses by transferring knowledge, not zeroing weights:** the student is a new, smaller network trained on the teacher's soft outputs — worth the extra training budget when size-for-accuracy is the goal.
+- **SVD pays off for wide, low-rank matrices:** pick the rank ratio from the singular-value spectrum, not by guessing.
+
+**Coming next:** Module 17 answers the question every pruning pass begs — why isn't the model 10× faster? — by building the vectorized kernels, cache-aware tiling, and kernel fusion that turn structured sparsity into measurable wall-clock speedup.
 
 ## Further Reading
 

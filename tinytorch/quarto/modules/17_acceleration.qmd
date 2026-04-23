@@ -535,7 +535,9 @@ def fused_gelu(x: Tensor) -> Tensor:
     return Tensor(result_data)
 ```
 
-Now there are only two memory operations: read the input, write the output. For the same `{python} fusion_tensor_elements` element tensor, that's just `{python} fusion_fused_traffic_mb` MB of memory traffic, completing in `{python} fusion_fused_time_ms` milliseconds. The fused version is `{python} fusion_speedup`x faster purely from memory bandwidth reduction, even though both versions perform the exact same arithmetic. But bandwidth is only half the story when deploying on parallel hardware.
+Now there are only two memory operations: read the input, write the output. For the same `{python} fusion_tensor_elements` element tensor, that's just `{python} fusion_fused_traffic_mb` MB of memory traffic, completing in `{python} fusion_fused_time_ms` milliseconds. The fused version is `{python} fusion_speedup`x faster purely from memory bandwidth reduction, even though both versions perform the exact same arithmetic.
+
+**Complexity framing:** both versions perform Θ(N) FLOPs on an N-element tensor — the asymptotic compute class is identical. What fusion changes is the *memory complexity*: the unfused chain is Θ(kN) bytes transferred for a k-op pipeline (one read + one write per intermediate), while the fused kernel is Θ(N) bytes (one read of x, one write of the result). Seven intermediates yields roughly 7× the traffic. Since element-wise ops are memory-bound, memory complexity — not FLOP count — is what determines wall-clock time. But bandwidth is only half the story when deploying on parallel hardware.
 
 :::{.callout-warning title="Systems Implication: Kernel Fusion and Warp Divergence"}
 On modern GPUs, kernel fusion does more than just save memory bandwidth—it preserves computational harmony. GPUs execute threads in lockstep groups called "warps" (typically 32 threads in NVIDIA architectures). If an unfused series of operations introduces complex branching logic (e.g., the `if x > 0` condition in a ReLU activation), threads within the same warp might evaluate the condition differently, taking divergent execution paths. This causes "warp divergence." When a warp diverges, the GPU cannot execute the branches simultaneously; it must serialize the execution of each branch while masking out inactive threads, severely degrading hardware utilization. Expertly authored fused kernels are designed to minimize divergent branches and keep data continuously in registers, ensuring the entire warp executes the math in perfect, high-throughput unison without stalling for memory or serialized branches.
@@ -725,6 +727,17 @@ At this scale, the percent improvements you ship in this module compound into mi
 
 ## Check Your Understanding
 
+:::{.callout-tip title="Check Your Understanding — Acceleration"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] What kernel fusion actually fuses, and how warp divergence on GPUs can erase the memory-bandwidth gain.
+- [ ] Why matrix multiplication sits at ~171 FLOPs/byte (compute-bound) while GELU sits at ~1 FLOPs/byte (memory-bound), and what each regime demands.
+- [ ] How BLAS Level 1/2/3 operations differ in arithmetic intensity, and why every ML framework ultimately routes through GEMM.
+- [ ] Why cache-aware tiling matters once the working set exceeds L2, and how to pick a tile size from the cache budget.
+
+If any of these feels fuzzy, revisit the Core Concepts section (especially Kernel Fusion and Arithmetic Intensity) before moving on.
+:::
+
 Test your understanding of acceleration techniques with these quantitative questions.
 
 **Q1: Arithmetic Intensity**
@@ -801,6 +814,15 @@ Both versions perform the same arithmetic, so the gap is memory bandwidth:
 
 Nearly **69% of the unfused version's runtime was spent waiting for memory.** That's typical for element-wise operations with low arithmetic intensity.
 :::
+
+## Key Takeaways
+
+- **Arithmetic intensity decides the ceiling:** FLOPs-per-byte places every operation on the roofline and tells you whether vectorization (compute-bound) or fusion (memory-bound) is the right lever.
+- **Fusion changes memory complexity, not FLOP complexity:** Θ(kN) bytes collapses to Θ(N) bytes when k element-wise ops are fused — identical arithmetic, dramatically less traffic.
+- **GEMM dominates because it is compute-bound:** ~171 FLOPs/byte at N=1024 is why decades of hardware design revolve around matrix multiplication and why BLAS Level-3 is the hot path in every framework.
+- **Hardware-aware, not clever:** acceleration rarely needs a new algorithm — it needs code that stops fighting the cache, the SIMD lanes, and the warp scheduler.
+
+**Coming next:** Module 18 closes the loop by eliminating the call entirely — KV caching turns autoregressive generation from O(n²) to O(n) work by memoizing past keys and values.
 
 ## Further Reading
 

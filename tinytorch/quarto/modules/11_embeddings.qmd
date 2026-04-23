@@ -505,6 +505,10 @@ This initialization scale ensures gradients neither explode nor vanish at the st
 
 During training, gradients flow back through the lookup operation to update only the embeddings that were accessed. If your batch contains tokens `[5, 10, 10, 5]`, only rows 5 and 10 of the embedding table receive gradient updates. This sparse gradient pattern is handled by the `EmbeddingBackward` gradient function, making embedding updates extremely efficient even for vocabularies with millions of tokens.
 
+:::{.callout-note title="Systems Implication: Sparse Gradient Updates and Embedding Memory Layout"}
+The embedding table is the largest *single* tensor in most language models — GPT-3's token embeddings alone consume 2.3 GB — yet a forward pass only touches the handful of rows corresponding to tokens in the current batch. Treating the embedding step as a **row-sparse scatter/gather** (rather than a dense matmul against a one-hot matrix) is what keeps training tractable: you never materialize the `(batch × seq, vocab)` one-hot tensor, you never multiply by it, and the backward pass only writes gradients into the rows that were read. Production frameworks go further — they store the embedding matrix in row-major layout so each lookup is one contiguous HBM transaction per token, use sparse gradient tensors in the optimizer (Adam state for only the accessed rows), and in distributed training shard the table across devices so no single GPU has to hold all 2.3 GB. Every one of these optimizations is a direct consequence of the lookup-as-sparse-scatter pattern you just implemented.
+:::
+
 ### Learned vs Fixed Embeddings
 
 Positional information can be added to token embeddings in two fundamentally different ways: learned position embeddings and fixed sinusoidal encodings.
@@ -781,7 +785,18 @@ The numbers behind a modern language model make the design pressures concrete:
 
 Embeddings take only **10–15% of training time** but consume **30–40% of model memory** at large vocabularies. They are cheap to *run* and expensive to *store* — exactly the opposite profile of attention.
 
-## Check Your Understanding
+:::{.callout-tip title="Check Your Understanding — Embeddings"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Why the embedding table is a **lookup** (sparse row scatter/gather), not a matmul against a one-hot matrix, and how this reshapes training memory: only the touched rows receive gradient updates.
+- [ ] How memory scales: embedding storage is `vocab × dim × bytes` (linear in both), while attention cost downstream is quadratic in *sequence length* — two independent budgets that fight for the same VRAM.
+- [ ] The learned-vs-sinusoidal positional encoding trade: learned PE is flexible but has a hard `max_seq_len` ceiling; sinusoidal PE is parameter-free and extrapolates, enabling variable-length inference.
+- [ ] Why GPT-3's 2.3 GB embedding table is only ~0.35% of its parameters but sits on the **critical path of every forward pass**, making embedding lookup a memory-bandwidth problem rather than a FLOP problem.
+
+If any of these feels fuzzy, revisit the *Core Concepts* section (especially *Embedding Table Mechanics* and *Embedding Dimension Trade-offs*) before moving on.
+:::
+
+## Self-Check Questions
 
 Test yourself with these systems thinking questions. They're designed to build intuition for the performance and memory characteristics you'll encounter in production.
 
@@ -866,6 +881,15 @@ Learned PE creates a fixed embedding table of shape `(max_seq_len, embed_dim)`. 
 
 This is why many production models use sinusoidal or relative positional encodings that can handle variable lengths.
 :::
+
+## Key Takeaways
+
+- **Embedding lookup is sparse, not dense:** rows are indexed directly (O(1) per token), only accessed rows receive gradients, and no one-hot tensor is ever materialized.
+- **Positional encoding is additive geometry, not metadata:** learned PE is flexible but length-capped; sinusoidal PE extrapolates but is fixed — same shape, very different deployment behavior.
+- **Memory scales linearly with `vocab × dim`:** doubling either component doubles both storage and memory-bandwidth traffic, which is why dimension choices are always weighed against HBM budget.
+- **Embeddings are cheap to *compute* and expensive to *store*:** they take ~10–15% of training time but 30–40% of model memory in large-vocab models — the opposite profile of attention.
+
+**Coming next:** Module 12 builds scaled dot-product attention, the mechanism that turns the static `(B, S, D)` embedding tensor from this module into a context-aware representation where every position has been shaped by every other.
 
 ## Further Reading
 

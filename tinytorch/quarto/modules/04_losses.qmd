@@ -488,6 +488,8 @@ The critical detail is calling `log_softmax` directly instead of `log(softmax(..
 
 Cross-entropy's gradient pressure is asymmetric on purpose. Predict 0.99 for the correct class and the loss is `-log(0.99) ≈ 0.01`; predict 0.01 and the loss is `-log(0.01) ≈ 4.6` — 460× larger for the same gap in probability. The further the model is from "confident and right," the harder cross-entropy pulls — which is exactly the dynamic you want for classification.
 
+**Complexity.** Cross-entropy loss is **O(B × C)** in both time and memory, where B is batch size and C is the number of classes. Every logit must be exponentiated (to form softmax) and every log-probability must be read back out to pick the target's score. MSE and BCE are **O(B × D)** where D is the feature dimension — cheaper, because there is no normalizing sum over classes. This is why large-vocabulary language models (C = 50,000+) spend a disproportionate share of training time in the loss, and why hierarchical and sampled softmax variants exist to drop effective C.
+
 ### Numerical Stability in Loss Computation
 
 The log-sum-exp trick is the single most important numerical-stability technique in classification. The problem it solves is structural: softmax requires exponentiating every logit, but `exp` overflows float32 at inputs above ~88. Real models routinely produce logits in the hundreds.
@@ -667,7 +669,19 @@ The loss computation typically accounts for **5-10% of total training time** in 
 
 ## Check Your Understanding
 
-Test yourself with these systems thinking questions. They're designed to build intuition for the performance characteristics you'll encounter in production ML.
+:::{.callout-tip title="Check Your Understanding — Losses"}
+Before moving on, verify you can articulate each of the following:
+
+- [ ] Why MSE squares the error (positivity + smooth gradient + outlier amplification) and when that aggressive outlier weighting becomes a liability with noisy labels.
+- [ ] Why CrossEntropyLoss expects raw logits, not probabilities — and why calling `log(softmax(...))` materializes the same `inf`/`nan` that `log_softmax(...)` structurally avoids.
+- [ ] How the log-sum-exp shift is algebraically exact but numerically transformative: subtracting `max(x)` pulls every exponent into a safe range without changing the answer.
+- [ ] Why cross-entropy is O(B × C) in time and memory, and why a 50k-token vocabulary forces hierarchical or sampled softmax in production.
+- [ ] When to pick BinaryCrossEntropyLoss (independent binary decisions) vs. CrossEntropyLoss (mutually exclusive classes), and why mixing them up yields silently wrong probability semantics.
+
+If any of these feels fuzzy, revisit Core Concepts (Mean Squared Error, Cross-Entropy Loss, Numerical Stability in Loss Computation) before moving on.
+:::
+
+The collapsible Q&A below works each of these through with production-scale numbers.
 
 **Q1: Memory Calculation - Large Vocabulary Language Model**
 
@@ -819,6 +833,16 @@ optimizer.step()  # Update once with accumulated gradients (4×32 = 128 effectiv
 
 This gives you the gradient quality of batch 128 with only the memory cost of batch 32!
 :::
+
+## Key Takeaways
+
+- **The loss is the only signal optimization sees:** every architectural choice above it — layers, activations, batch size — is wasted if the loss measures the wrong thing.
+- **MSE and cross-entropy encode different priors:** MSE penalizes Euclidean distance and loves outliers; cross-entropy penalizes information-theoretic surprise and pulls hardest on confident-and-wrong predictions. Pick by task, not by habit.
+- **Log-sum-exp is the safeguard that separates training from `nan`:** subtract `max(x)` before exponentiating, fuse `log` and `softmax` into one op, and never materialize `exp(100)`. Every production framework does this; you just implemented it.
+- **Cross-entropy is O(B × C) — and C is the expensive axis:** a 50k-vocab language-model loss can burn 73 MB per batch in float32. Sampled softmax, hierarchical softmax, and FP16 all exist to make that bill payable.
+- **Mean reduction is the universal default:** dividing by batch size makes learning rates transferable across batch sizes. Switch to `sum` and you must rescale the LR by the same factor.
+
+**Coming next:** Module 05 builds the DataLoader that feeds batches of `(predictions, targets)` pairs into this loss every step — turning a single-sample error into the mini-batch gradient signal that modern training relies on.
 
 ## Further Reading
 
