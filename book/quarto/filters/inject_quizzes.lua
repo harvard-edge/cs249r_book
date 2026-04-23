@@ -2,6 +2,14 @@
 ---@diagnostic disable-next-line: undefined-global
 PANDOC_DOCUMENT = PANDOC_DOCUMENT
 
+-- Self-guard: this filter is HTML-only. If it is ever loaded under a non-HTML
+-- format (pdf/latex/epub/beamer/docx/etc.), return an empty filter table so it
+-- becomes a no-op. Belt-and-suspenders with the per-format filters.yml lists.
+if quarto and quarto.doc and quarto.doc.is_format then
+  if not quarto.doc.is_format("html") then
+    return {}
+  end
+end
 
 local json  = require("pandoc.json")
 local utils = pandoc.utils
