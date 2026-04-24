@@ -1,0 +1,637 @@
+{
+  "metadata": {
+    "source_file": "book/quarto/contents/vol2/data_storage/data_storage.qmd",
+    "schema_version": 2,
+    "generated_by": "quiz-refresh/generate_quizzes.py",
+    "generated_on": "2026-04-24",
+    "model": "gpt-5.4",
+    "improved_by": "quiz-refresh/improve-mode",
+    "total_sections": 10,
+    "sections_with_quizzes": 10,
+    "sections_without_quizzes": 0
+  },
+  "sections": [
+    {
+      "section_id": "#sec-storage-fuel-line",
+      "section_title": "The Fuel Line",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "storage-compute bandwidth gap",
+            "checkpoint volume at frontier scale",
+            "storage as the third infrastructure pillar",
+            "physics-economics tradeoff in data delivery"
+          ],
+          "question_strategy": "Use a foundational MCQ on the chapter's core framing, then move to quantitative and architectural implications of the HBM-to-NVMe gap, checkpoint volume, and why a hierarchy is required.",
+          "difficulty_progression": "Start with the central bottleneck concept, then ask the reader to reason about utilization loss and multi-tier design, ending with an integrative question connecting storage to the Fleet Stack and accelerator utilization.",
+          "integration": "Connects compute infrastructure and network fabrics from prior chapters to storage as the fuel supply that completes the infrastructure foundation.",
+          "ranking_explanation": "This opening section introduces the chapter's governing problem, quantitative anchors, and systems framing, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does the chapter describe storage as the 'fuel line' for a 1,000-accelerator training fleet?",
+            "choices": [
+              "Because storage determines whether data, checkpoints, and model state arrive quickly enough to keep accelerators from idling",
+              "Because storage mainly provides redundancy for failures, while compute throughput determines utilization",
+              "Because storage capacity automatically scales with GPU count, so it becomes the natural control plane for the fleet",
+              "Because storage replaces the need for networking once datasets are staged locally"
+            ],
+            "answer": "The correct answer is A. The section's core claim is that accelerators can compute far faster than storage can feed them, so training data, model weights, and checkpoints must be delivered through a well-designed pipeline or expensive GPUs sit idle. An answer focused only on redundancy misses the utilization problem that dominates day-to-day performance.",
+            "learning_objective": "Identify why storage throughput, not just storage capacity, constrains accelerator utilization in large-scale ML systems"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a single fast storage technology cannot solve the chapter's central storage problem for frontier training.",
+            "answer": "No single technology simultaneously provides HBM-class bandwidth, object-store-scale capacity, and low cost. A fast tier close to the accelerator is too small and expensive, while a cheap large tier is too slow and distant. For example, HBM can feed computation but cannot store multi-terabyte datasets or checkpoint history. The practical consequence is a tiered pipeline that stages data upward just in time instead of trying to solve everything with one device class.",
+            "learning_objective": "Explain why ML storage architectures require multiple tiers that trade off bandwidth, capacity, latency, and cost"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a node has very high FLOPS and a fast interconnect, storage can be treated as a secondary concern because benchmarked accelerator performance already captures end-to-end training speed.",
+            "answer": "False. The section explicitly argues that isolated accelerator benchmarks hide the real bottleneck: streaming training data, loading weights, and saving checkpoints. End-to-end utilization depends on the data path, not just peak compute or network capability.",
+            "learning_objective": "Analyze why isolated compute benchmarks can misrepresent end-to-end ML system performance"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team upgrades its cluster to faster GPUs but keeps the same storage design. Which outcome is most consistent with the section's argument?",
+            "choices": [
+              "Training speed improves linearly because faster compute always dominates end-to-end throughput",
+              "The storage pipeline becomes more critical because the gap between accelerator consumption and storage delivery widens",
+              "Checkpoint traffic becomes irrelevant because faster GPUs reduce the amount of model state written",
+              "The need for prefetching decreases because each batch spends less time in the system"
+            ],
+            "answer": "The correct answer is B. Faster accelerators increase the rate at which data must arrive, so unchanged storage leaves more time with GPUs waiting for input. The linear-scaling idea ignores the chapter's central claim that compute has improved faster than storage, widening rather than shrinking the bottleneck.",
+            "learning_objective": "Predict how improving accelerator performance changes the pressure on the storage pipeline"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 30-day run writes large checkpoints every 30 minutes and streams training data continuously. Explain why the section says storage problems are shaped by both physics and economics.",
+            "answer": "Physics determines that data closer to the accelerator has lower latency and higher bandwidth, but those tiers have limited capacity. Economics determines that cheaper tiers can hold more data and more checkpoint history, but they are slower and farther away. In this run, keeping everything in top-tier memory would be impossible and unaffordable, while keeping everything only in cheap remote storage would starve GPUs. The system consequence is a staged hierarchy tuned to keep expensive compute busy while minimizing storage cost.",
+            "learning_objective": "Analyze the joint role of physical proximity and cost in ML storage design"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-workload-inversion",
+      "section_title": "*How* ML Workloads Invert Storage Assumptions",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "sequential streaming vs random IOPS",
+            "lack of temporal locality",
+            "bursty checkpoint writes",
+            "training vs inference access patterns",
+            "small-file and shard-level shuffling tradeoffs"
+          ],
+          "question_strategy": "Cover the major workload inversions with a mix of misconception-checking and scenario analysis, including shuffling, cache failure, burst writes, and rollout/cold-start implications.",
+          "difficulty_progression": "Begin with the primary inversion relative to databases, then move through cache and write-pattern consequences, ending with a synthesis across training and inference.",
+          "integration": "Builds on earlier data engineering and storage concepts by applying them to ML-specific access patterns and lifecycle phases.",
+          "ranking_explanation": "This section introduces the chapter's key conceptual inversion and several durable design consequences, so it needs a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which storage procurement choice is most likely to be wasteful for large-scale pretraining on an immutable dataset?",
+            "choices": [
+              "Buying for very high random-read IOPS while under-provisioning sustained sequential bandwidth",
+              "Aggregating samples into large shards to reduce metadata overhead",
+              "Using local NVMe as a warm cache for repeated multi-epoch reads",
+              "Treating checkpoint writes as a burst workload rather than a steady one"
+            ],
+            "answer": "The correct answer is A. The section argues that ML training inverts database assumptions: it needs large sequential streaming throughput, not database-style random IOPS. Aggregating samples into shards and using local warm caches are exactly the kinds of optimizations the chapter recommends for this access pattern.",
+            "learning_objective": "Compare traditional storage procurement priorities with the bandwidth-first needs of ML training"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A large DRAM cache managed by LRU will usually recover high hit rates for pretraining after the first epoch, because the same samples are revisited in later epochs.",
+            "answer": "False. The section's point is not that data is never reused, but that reuse arrives only after the rest of the dataset has been streamed, so recently accessed samples are no longer in cache. LRU assumes short-term temporal locality, which uniformly streamed epochs largely destroy.",
+            "learning_objective": "Evaluate why traditional cache policies fail on uniformly streamed ML datasets even when epochs revisit the same data"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why shard-level shuffling is a practical compromise for ML training, and what trade-off it introduces.",
+            "answer": "Full random shuffling would force random access across the entire dataset and destroy the sequential I/O pattern storage hardware relies on. Shard-level shuffling preserves sequential reads by randomizing shard order and mixing within local buffers instead. For example, a loader can stream a 256 MB shard sequentially while still shuffling samples inside that buffer. The practical consequence is slightly less perfect randomness in exchange for dramatically better throughput.",
+            "learning_objective": "Justify the use of coarse-grained shuffling to balance convergence needs against storage efficiency"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A serving team deploys a new 175B model version to 100 replicas. Which storage challenge from the section becomes dominant during rollout?",
+            "choices": [
+              "Repeated writes of tiny durable transactions",
+              "A fan-out burst where many replicas read the same weights simultaneously",
+              "Lack of consistency guarantees across replicas during normal inference",
+              "Poor cache locality from repeatedly re-reading hot user features every millisecond"
+            ],
+            "answer": "The correct answer is B. The section explains that model rollout in inference is like a checkpoint storm in reverse: many replicas must read the same model weights at once. The tiny-transaction idea describes OLTP-style systems, not bulk model distribution events.",
+            "learning_objective": "Analyze how inference rollout creates a distributed fan-out storage event distinct from steady-state serving"
+          },
+          {
+            "question_type": "FILL",
+            "question": "When adding more GPUs stops improving end-to-end training speed because storage cannot supply batches fast enough, the chapter calls that limit the ____.",
+            "answer": "I/O Wall. It is the point where storage throughput, not extra compute, sets the system's training rate, so scaling accelerators further only increases idle time.",
+            "learning_objective": "Identify the chapter's name for the storage-throughput bottleneck that caps training scaling"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Compare the dominant storage concern for large-scale training with the dominant storage concern for large-scale inference startup.",
+            "answer": "Training is dominated by sustained sequential reads through large datasets plus bursty checkpoint writes, so throughput and write absorption matter most. Inference startup is dominated by cold-start latency when large model weights must be loaded into memory before serving begins. For example, repeatedly streaming epochs stresses the data path continuously, while loading a 350 GB model stresses startup time and rollout logistics. The system implication is that the same storage stack is optimized differently for training and serving.",
+            "learning_objective": "Compare training and inference storage bottlenecks across lifecycle phases"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-hierarchy",
+      "section_title": "The ML Storage Hierarchy",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "six storage tiers and their tradeoffs",
+            "bandwidth cliffs and prefetch buffers",
+            "roles of HBM, DRAM, NVMe, PFS, object, and archive",
+            "data format choices across tiers"
+          ],
+          "question_strategy": "Sample across the subsections: hierarchy principle, bandwidth cliffs, specific roles of HBM/DRAM/NVMe/PFS/object/archive, and the data-format landscape. Use one ordering question to reinforce tier ordering and several application questions on tier choice.",
+          "difficulty_progression": "Start with the hierarchy order, then ask about specific tier roles and failure modes, and end with integrative reasoning about formats and cross-tier movement.",
+          "integration": "Extends prior memory-hierarchy knowledge into a storage hierarchy specialized for ML data, checkpoint, and cost constraints.",
+          "ranking_explanation": "This section is a core technical spine of the chapter, introducing the main hierarchy and its tier-specific behaviors, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "ORDER",
+            "question": "Order the following storage tiers from closest to the accelerator to farthest: (1) Local NVMe, (2) Object storage, (3) Host DRAM, (4) GPU HBM, (5) Parallel file system, (6) Archive and cold storage.",
+            "answer": "The correct order is: (4) GPU HBM, (3) Host DRAM, (1) Local NVMe, (5) Parallel file system, (2) Object storage, (6) Archive and cold storage. This sequence follows the chapter's bandwidth-capacity-cost gradient: each step away from the accelerator trades lower latency and higher bandwidth for greater capacity and lower cost. Swapping object storage ahead of the parallel file system, for example, would ignore the shared high-throughput role the PFS serves for active training.",
+            "learning_objective": "Order the six ML storage tiers by proximity, bandwidth, and operational role"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does the chapter describe host DRAM as the critical staging area in the hierarchy?",
+            "choices": [
+              "Because it is the most durable tier for checkpoints and therefore must hold the source of truth",
+              "Because it is where data is decoded, augmented, collated, and buffered before transfer to the accelerator",
+              "Because it offers higher bandwidth than HBM for mixed compute and I/O workloads",
+              "Because it eliminates the need for NUMA-aware placement when multiple sockets are used"
+            ],
+            "answer": "The correct answer is B. Host DRAM is where compressed bytes are transformed into compute-ready batches and held in prefetch buffers. The durability claim confuses staging with persistence, and the bandwidth claim reverses the hierarchy because HBM remains the fastest compute-facing tier.",
+            "learning_objective": "Explain the staging, transformation, and buffering roles of host DRAM in ML data pipelines"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team stores 200 million training images as separate files on a parallel file system and sees throughput collapse despite ample OSS bandwidth. What is the most likely root cause?",
+            "choices": [
+              "The object store's erasure coding adds too much read latency",
+              "The GPUs are consuming HBM too quickly for DRAM to refill",
+              "The metadata path is saturated by the small file problem rather than the data path being full",
+              "The archive tier is retrieving files too slowly for the parallel file system to cache them"
+            ],
+            "answer": "The correct answer is C. The section explains that millions of small files overwhelm metadata servers with open, stat, and close operations, collapsing effective throughput well before bulk data bandwidth is exhausted. Erasure coding belongs to object storage, not the metadata bottleneck described here.",
+            "learning_objective": "Diagnose metadata saturation as a primary throughput limiter in file-based ML datasets"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why local NVMe is described as a warm cache rather than the source of truth for training data.",
+            "answer": "Local NVMe is valuable because it provides node-local, high-throughput reads after data is staged from shared storage, but it is not the durable canonical copy. If a drive fails, immutable training data can be re-staged from the parallel file system or object storage. For example, using RAID 0 on NVMe is acceptable for cached training shards but not for irreplaceable local state. The system consequence is that NVMe can be optimized for throughput instead of durability.",
+            "learning_objective": "Justify the use of local NVMe as a performance cache backed by durable shared tiers"
+          },
+          {
+            "question_type": "FILL",
+            "question": "When millions of 10 KB-to-100 KB training samples are stored as separate files and the metadata server saturates long before the data links do, the chapter calls this the ____.",
+            "answer": "small file problem. It is a metadata bottleneck where open, stat, and close overhead dominate, so the fix is to aggregate samples into large sequential shards that amortize those operations.",
+            "learning_objective": "Identify the metadata-driven failure mode caused by storing ML samples as many small files"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A multimodal training job mixes text, images, and video. Explain why format and tier choices must be coordinated rather than chosen independently for each storage level.",
+            "answer": "Different tiers favor different representations: compressed shards are economical in lower tiers, while compute-ready tensors are needed close to the accelerator. In a multimodal job, video may dominate bandwidth and capacity even if text contributes more model value, so the whole hierarchy must be provisioned for the sum of modality demands. For example, object storage may favor maximum compression, DRAM may hold decoded and collated batches, and HBM must hold only the immediate compute-ready subset. The practical implication is that format conversion becomes part of pipeline design, not a separate preprocessing afterthought.",
+            "learning_objective": "Analyze how modality mix and data format interact with tier selection across the storage hierarchy"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-pipeline-equation",
+      "section_title": "The Data Pipeline Equation",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "throughput equation variables and implications",
+            "data stall ratio",
+            "prefetch depth sizing",
+            "multi-worker loading",
+            "data locality and versioning/orchestration"
+          ],
+          "question_strategy": "Ask the reader to apply the equation conceptually, reason about stall ratio and buffer depth, and connect prefetching, worker count, data placement, and versioned orchestration into a single pipeline view.",
+          "difficulty_progression": "Start with the meaning of the throughput equation, then move to pipelining and prefetch depth, then to multi-worker and locality tradeoffs, ending with versioned data orchestration at fleet scale.",
+          "integration": "Connects storage to utilization, profiling, orchestration, and earlier chapter concepts like data versioning, workflow orchestration, and distributed training.",
+          "ranking_explanation": "This section contains a chapter learning objective and the chapter's main quantitative design tool, so it clearly warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "According to the data pipeline throughput equation, which change directly increases required storage bandwidth if all other terms stay fixed?",
+            "choices": [
+              "Increasing the number of GPUs participating in training",
+              "Increasing iteration time per step",
+              "Lowering target utilization",
+              "Reducing local batch size"
+            ],
+            "answer": "The correct answer is A. The required bandwidth scales linearly with the number of GPUs, so adding accelerators increases aggregate data demand. Increasing iteration time gives storage more time to deliver a batch, while lowering utilization or shrinking batch size reduces the required bandwidth instead.",
+            "learning_objective": "Apply the throughput equation to predict how training configuration changes affect storage demand"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why pipelining can reduce but not always eliminate data stalls.",
+            "answer": "Pipelining overlaps I/O for batch N+1 with compute on batch N, so average storage latency can be hidden when reads finish before compute does. It cannot eliminate stalls when I/O remains slower than compute or when tail-latency spikes drain the prefetch queue. For example, a 250 ms read overlapped with 200 ms compute still leaves exposed stall time. The system consequence is that overlap helps, but bandwidth and buffer design still matter.",
+            "learning_objective": "Explain the limits of latency hiding through pipelining in ML data delivery"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A pipeline has 200 ms compute time per batch and 500 ms P99 I/O latency from the active storage tier. What does the prefetch-depth rule imply?",
+            "choices": [
+              "One batch ahead is sufficient because average latency is hidden",
+              "Two batches are sufficient because compute and I/O partially overlap",
+              "At least three batches must be in flight before adding any safety margin",
+              "Prefetch depth is irrelevant once multi-worker loading is enabled"
+            ],
+            "answer": "The correct answer is C. Using the chapter's rule, the minimum depth is the ceiling of P99 I/O latency divided by compute time, so ceiling(500/200) = 3. Multi-worker loading helps generate parallelism, but it does not remove the need to size the queue against tail latency.",
+            "learning_objective": "Calculate minimum prefetch depth from compute time and tail I/O latency"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a training job's aggregate GB/s matches the target from the throughput equation on average, storage is unlikely to be responsible for poor utilization.",
+            "answer": "False. The section stresses that stalls can come from tail latency, metadata serialization, shallow prefetch queues, or worker-side bottlenecks even when average bandwidth looks healthy. Meeting the average GB/s target does not guarantee that every batch arrives on time.",
+            "learning_objective": "Evaluate why average throughput alone is insufficient for diagnosing storage bottlenecks"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why can locality-aware scheduling improve a distributed training job even when the shared storage system is already fast?",
+            "answer": "Locality-aware scheduling places work on nodes that already cache the needed shards, eliminating staging time and reducing repeated reads from shared tiers. For example, resuming on a node with the right local NVMe cache can avoid several seconds of re-staging after a failure or restart. The practical consequence is lower startup delay and less pressure on the shared file system for the whole fleet.",
+            "learning_objective": "Analyze how data placement and scheduler decisions affect pipeline efficiency in distributed training"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does the section emphasize dataset versioning and pipeline orchestration at 10,000-GPU scale?",
+            "choices": [
+              "Because versioning mainly improves compression ratios for local NVMe caches",
+              "Because large fleets need cryptographic and orchestration guarantees that every worker sees the same snapshot and shuffle definition",
+              "Because orchestration removes the need for local caches by turning all reads into object-store streams",
+              "Because versioning lets workers independently choose the freshest data without central coordination"
+            ],
+            "answer": "The correct answer is B. At long training horizons, silent differences in shard contents, preprocessing code, or shuffle seeds can masquerade as model behavior changes, so exact snapshot coordination matters. The idea of workers choosing the freshest data would create inconsistency, which is precisely the failure the section warns against.",
+            "learning_objective": "Explain why large-scale training requires coordinated versioned data snapshots rather than ad hoc file access"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-gds",
+      "section_title": "GPU Direct Storage and the CPU Bypass",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "traditional data path vs GDS path",
+            "CPU overhead and bounce buffers",
+            "when GDS helps most",
+            "complete end-to-end data path"
+          ],
+          "question_strategy": "Use questions that contrast traditional copies with DMA-based bypass, test when GDS materially helps, and connect the optimization to the complete chapter-wide data path and checkpoint path.",
+          "difficulty_progression": "Start with the architectural difference, move to workload sensitivity, and end with whole-pipeline reasoning.",
+          "integration": "Connects to earlier network-fabric ideas like RDMA and to the chapter's broader theme of removing unnecessary CPU mediation from the critical path.",
+          "ranking_explanation": "This section introduces a concrete architectural optimization with clear systems consequences, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What is the central architectural change introduced by GPU Direct Storage?",
+            "choices": [
+              "It replicates training data into host DRAM so the CPU can perform more aggressive caching",
+              "It lets NVMe devices transfer data directly into GPU memory via DMA, bypassing CPU-mediated bounce-buffer copies",
+              "It compresses model checkpoints on the GPU before they leave HBM",
+              "It converts remote object storage into a POSIX file system visible to CUDA kernels"
+            ],
+            "answer": "The correct answer is B. GDS removes the extra host-memory copy path and reduces CPU involvement in the critical data path. The host-DRAM replication idea describes the traditional staging path rather than the bypass that GDS is designed to provide.",
+            "learning_objective": "Identify the key mechanism by which GDS reduces storage-to-GPU data movement overhead"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why GDS is especially beneficial for workloads that issue many small transfers rather than a few very large sequential reads.",
+            "answer": "GDS removes a mostly fixed per-transfer overhead from CPU coordination, kernel buffering, and extra copies. When transfers are small and numerous, that fixed overhead dominates total time, so bypassing it yields a large benefit. For example, repeatedly moving many small image objects wastes far more CPU time than streaming one multi-gigabyte shard. The practical implication is that GDS improves both latency and CPU headroom most strongly in transfer-heavy pipelines.",
+            "learning_objective": "Analyze why constant per-transfer overhead makes GDS more valuable for small-object I/O patterns"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a pipeline is dominated by cross-network object-store latency before data reaches the node, enabling GDS by itself is likely to remove most of the exposed wait time.",
+            "answer": "False. GDS shortens the local storage-to-GPU path, but it does not eliminate the network and service latency incurred before bytes arrive at the node. Those delays still require staging, caching, or deeper prefetching.",
+            "learning_objective": "Distinguish local CPU-bypass gains from the remaining latency of remote storage tiers"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which pipeline would benefit least from GDS according to the section's reasoning?",
+            "choices": [
+              "A node reading many small training samples whose transfer overhead consumes multiple CPU cores",
+              "A tokenized-text pipeline where data is already in a GPU-consumable representation",
+              "A highly optimized node where the main remaining bottleneck is CPU mediation of storage transfers",
+              "A pipeline whose dominant bottleneck is remote object-store tail latency before data ever reaches the node"
+            ],
+            "answer": "The correct answer is D. GDS cannot remove the upstream network and object-store latency that occurs before the local transfer path matters. The other scenarios all match cases where CPU-bypass of local transfer overhead directly helps throughput or frees CPU time.",
+            "learning_objective": "Evaluate when GDS is not the right lever because the dominant bottleneck lies outside the local transfer path"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Walk through the complete data path for training data in this section's steady-state view, and explain where GDS can shorten it.",
+            "answer": "In steady state, data is staged from a lower durable tier to local NVMe, read into the node's pipeline, transformed as needed, and delivered into GPU memory for compute; checkpoints then move back out through local and shared storage. GDS shortens the storage-to-GPU path by removing extra CPU-mediated copies between NVMe and HBM when the format is suitable. For example, token IDs or GPU-decodable image formats can avoid unnecessary host-buffer handling. The system consequence is lower transfer overhead on the critical path and more CPU budget for augmentation or orchestration.",
+            "learning_objective": "Explain where GDS fits into the end-to-end ML data path and what portion of the pipeline it optimizes"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-economics",
+      "section_title": "Storage Economics",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "total cost of data delivery",
+            "egress and hidden costs",
+            "tiering strategies",
+            "emerging technologies",
+            "training vs inference economics"
+          ],
+          "question_strategy": "Test the shift from simple $/GB thinking to total-cost reasoning, then cover tiering decisions, emerging technologies that compress hierarchy gaps, and different economics for inference.",
+          "difficulty_progression": "Begin with the hidden-cost idea, then move to break-even intuition and tiering, ending with a synthesis on inference and new technologies.",
+          "integration": "Connects storage design to responsible engineering concerns around TCO and to earlier lifecycle and deployment concepts.",
+          "ranking_explanation": "This section introduces the economic decision framework that determines where data should live and why, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does the section argue that the cheapest storage tier is not always the cheapest overall design choice?",
+            "choices": [
+              "Because expensive tiers always reduce model loss directly",
+              "Because total cost also includes transfer fees, request charges, and the opportunity cost of idle accelerators",
+              "Because archive storage cannot store model artifacts at all",
+              "Because object storage is always slower than parallel file systems by the same fixed factor"
+            ],
+            "answer": "The correct answer is B. The section's core economic move is from storage price alone to total cost of data delivery, including egress, IOPS-style request charges, and lost GPU productivity. The claim that expensive tiers always improve model quality confuses infrastructure efficiency with algorithmic accuracy.",
+            "learning_objective": "Evaluate storage decisions using total cost of data delivery rather than $/GB alone"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team trains for many epochs on the same 50 TB dataset in the cloud. Explain why staging to local NVMe can be cheaper overall than streaming from object storage each epoch, even though NVMe costs more per gigabyte.",
+            "answer": "Repeated streaming multiplies egress and request costs every epoch, while staging pays the transfer cost once and then reuses local reads. For a multi-epoch run, the savings from avoiding repeated object-store reads can exceed the added rental cost of NVMe capacity. The practical consequence is that a more expensive storage tier can lower total annual spend when reuse is high.",
+            "learning_objective": "Justify local caching as an economic optimization for repeated dataset reuse"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which automated tiering policy best matches the section's recommended strategy?",
+            "choices": [
+              "Keep all checkpoints permanently on the parallel file system to avoid migration overhead",
+              "Move all data immediately to archive after each training epoch to minimize storage cost",
+              "Use policy-driven promotion and demotion so active data moves to warm or hot tiers when needed and drops to colder tiers after inactivity",
+              "Pin all training data in host DRAM for the lifetime of the project to eliminate future staging"
+            ],
+            "answer": "The correct answer is C. The section recommends automated lifecycle movement based on access patterns so expensive tiers hold only active data. Keeping everything on the PFS or in DRAM wastes high-cost capacity, while immediate archival would make active reuse impractical.",
+            "learning_objective": "Design a policy-based storage tiering strategy aligned with workload recency and access patterns"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The section argues that storage decisions should minimize the total cost of data ____ rather than only the nominal storage price.",
+            "answer": "delivery. The term emphasizes that moving and serving data can cost more than storing it, especially once egress, request fees, and idle compute are included.",
+            "learning_objective": "Identify the broader cost objective used to compare storage architectures"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Compare why storage economics for inference cold starts differ from storage economics for repeated multi-epoch training.",
+            "answer": "Inference is dominated by startup latency for loading model weights quickly enough to meet availability goals, so paying for warm replicas or faster load paths can be justified even if the model is read infrequently. Multi-epoch training is dominated by repeated dataset reads, so transfer and reuse economics often dominate over one-time startup delay. For example, training benefits from staging reusable data locally, while serving may justify extra DRAM just to cut cold-start time. The system consequence is that the same tier can be economically rational for different reasons in training and inference.",
+            "learning_objective": "Compare how training and inference create different economic objectives for storage provisioning"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-checkpointing",
+      "section_title": "Checkpoint Storage",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "checkpoint storms",
+            "tiered staging to local NVMe then durable storage",
+            "retention policy",
+            "distributed checkpoint coordination"
+          ],
+          "question_strategy": "Cover both the write-path architecture and the coordination/retention consequences. Include a misconception-check on average vs burst sizing and a scenario question on why local-first writes minimize T_save.",
+          "difficulty_progression": "Start with the idea of a checkpoint storm, then move to local staging and retention, ending with distributed coordination and redundancy reduction.",
+          "integration": "Connects to fault tolerance and reliability chapters, especially checkpoint interval tradeoffs and distributed training state partitioning.",
+          "ranking_explanation": "Checkpoint storage is a chapter learning objective and a distinct burst-write systems problem with major operational consequences, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does writing checkpoints to local NVMe before copying them to shared storage reduce training pause time?",
+            "choices": [
+              "Because local NVMe is more durable than object storage and removes the need for replication",
+              "Because the training pipeline only needs the fast local write to finish before resuming, while the durable copy can proceed asynchronously",
+              "Because local NVMe compresses optimizer state automatically during writes",
+              "Because shared storage can only be used for reads, not writes, during active training"
+            ],
+            "answer": "The correct answer is B. The section's key insight is that T_save from the training pipeline's point of view is the local write latency, not the full durable replication latency. The durability-first claim gets the direction wrong: local NVMe is fast but not the canonical durable endpoint by itself.",
+            "learning_objective": "Explain why tiered checkpoint staging lowers exposed training interruption during checkpoint saves"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A checkpoint path sized for average write bandwidth can still cause major training slowdowns if many nodes save at the same step.",
+            "answer": "True. Checkpoint traffic arrives as a synchronized burst, so the relevant constraint is peak write absorption during the storm, not the long-run average. A design that looks adequate on average can still stretch T_save badly when all ranks write together.",
+            "learning_objective": "Evaluate why checkpoint infrastructure must be sized for burst behavior rather than long-run averages"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain what makes a checkpoint storm different from ordinary background I/O contention.",
+            "answer": "A checkpoint storm is synchronized and periodic: many nodes write model state at the same time because the training framework triggers a save at a common step. That makes the burst both more damaging and more predictable than random contention. For example, 1,024 nodes each writing their shard can overwhelm shared bandwidth in one event even if average traffic looks modest. The practical implication is that the storage design must explicitly absorb coordinated peaks.",
+            "learning_objective": "Analyze the systems characteristics that make checkpoint storms uniquely disruptive"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which change most directly reduces per-node checkpoint I/O volume in distributed training?",
+            "choices": [
+              "Saving a fully replicated copy of model weights from every node for redundancy",
+              "Switching all dataset reads from NVMe to object storage",
+              "Using zero-redundancy or sharded checkpointing so each rank writes only its partition of the distributed state",
+              "Increasing prefetch buffer depth in the training input pipeline"
+            ],
+            "answer": "The correct answer is C. The section explains that modern distributed checkpointing avoids redundant full-state writes by having each rank persist only its shard. Fully replicated copies increase rather than reduce I/O, and the data input pipeline settings do not shrink checkpoint state size.",
+            "learning_objective": "Identify distributed checkpointing mechanisms that reduce redundant write volume"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why is a retention policy necessary for checkpoints even if the organization can technically store all of them?",
+            "answer": "Checkpoint volume grows into the petabyte range over long runs, so keeping every snapshot on expensive active tiers wastes storage and can interfere with recovery-focused operations. A retention policy keeps only a few recent checkpoints on fast shared storage while archiving sparse historical snapshots for audit or analysis. For example, retaining the latest three on the PFS and every hundredth in object storage preserves both fast recovery and lineage. The practical consequence is lower active-tier footprint without sacrificing reproducibility.",
+            "learning_objective": "Design a checkpoint retention strategy that balances fast recovery, auditability, and storage cost"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-fallacies",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "common storage misconceptions",
+            "small-file and metadata failures",
+            "egress and burst-write oversights",
+            "compression and bottleneck misdiagnosis",
+            "retrieval/vector-search contrast"
+          ],
+          "question_strategy": "Use misconception-driven questions, since this section explicitly organizes itself around false intuitions and operational traps. Include one question on retrieval infrastructure's different bottleneck profile.",
+          "difficulty_progression": "Begin with a common mistaken belief, then move through operational traps, ending with a cross-workload contrast between training pipelines and retrieval systems.",
+          "integration": "Synthesizes the whole chapter and contrasts sequential training storage with retrieval-oriented serving infrastructure.",
+          "ranking_explanation": "Although synthetic in style, this section adds practical system-level lessons and real failure modes, so it merits a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which belief is the chapter most directly warning against when it says NVMe alone is not enough?",
+            "choices": [
+              "That fast local SSD bandwidth removes the need for pipelining, prefetching, and multi-stage buffering",
+              "That local storage is useful only for checkpoints and not for training data",
+              "That RAID 0 can improve sequential throughput for cached immutable data",
+              "That object storage is cheaper per gigabyte than HBM"
+            ],
+            "answer": "The correct answer is A. The section emphasizes that even very fast NVMe remains far slower than HBM, so architecture around the device still matters. The other statements either agree with the chapter or concern a different comparison entirely.",
+            "learning_objective": "Identify why raw device speed does not eliminate the need for pipeline design in ML storage"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why prefetching does not fully solve the problem of object storage latency.",
+            "answer": "Prefetching mainly hides average delay, but long-tail latency spikes can still drain the queue if they exceed the time covered by the prefetch depth. For example, occasional hundreds-of-milliseconds pauses in object storage can still expose a stall during a long training run even when average performance looks fine. The practical implication is that buffer depth must be sized for tail latency and often paired with staging to NVMe.",
+            "learning_objective": "Analyze why tail latency remains a bottleneck even in prefetched object-store pipelines"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team versions each 10 TB dataset snapshot by making a full physical copy, even though only 5 percent of samples changed. What pitfall is this an example of?",
+            "choices": [
+              "Confusing checkpoint storms with metadata storms",
+              "Using random IOPS metrics to size sequential reads",
+              "Versioning by full duplication instead of content-addressable or delta-based storage",
+              "Overestimating the benefit of RAID 0 for local caches"
+            ],
+            "answer": "The correct answer is C. The section explicitly warns that naive full-copy versioning is economically unsustainable and recommends delta-style approaches that store only changed content. The other options describe unrelated storage design mistakes.",
+            "learning_objective": "Evaluate why naive full-copy dataset versioning scales poorly in large ML organizations"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a training pipeline is already CPU-bound on decode and augmentation, switching to heavier compression can reduce end-to-end throughput even though fewer bytes are read from storage.",
+            "answer": "True. The section argues that compression is beneficial only when I/O is the bottleneck. When CPU work is already limiting throughput, added decompression can make the pipeline slower even while storage traffic falls.",
+            "learning_objective": "Evaluate compression as a bottleneck-dependent trade-off rather than a universal optimization"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "How does the retrieval-infrastructure subsection illustrate a storage profile that differs from the chapter's main training pipeline?",
+            "answer": "Most of the chapter focuses on sequential streaming throughput for training, but retrieval systems such as vector search shift the bottleneck toward random-access IOPS and memory residency for graph traversal. For example, keeping upper routing layers in DRAM matters more than maximizing long sequential reads. The practical consequence is that a storage design that is ideal for pretraining shards may be poor for semantic retrieval latency.",
+            "learning_objective": "Compare sequential training storage bottlenecks with random-access retrieval infrastructure bottlenecks"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-synthetic-fuel",
+      "section_title": "The Synthetic Fuel Line",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "synthetic data as verified data",
+            "provenance chain",
+            "storage amplification from verification",
+            "model collapse risk"
+          ],
+          "question_strategy": "This is a shorter forward-looking section, so use a minimal quiz focused on synthesis: why synthetic data changes storage from a bit bucket to a provenance engine.",
+          "difficulty_progression": "Start with the main architectural shift, then move to the reason provenance matters, ending with the storage-amplification implication.",
+          "integration": "Connects the chapter's storage themes to future data-generation regimes and to data quality and lineage ideas from earlier chapters.",
+          "ranking_explanation": "This section is concise and forward-looking rather than introducing a large body of new machinery, so a minimal synthesis quiz is appropriate."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does the section argue that synthetic data changes storage from a simple repository into a provenance engine?",
+            "choices": [
+              "Because synthetic datasets are always smaller than human-generated datasets and therefore dominated by metadata",
+              "Because each synthetic sample must be stored together with lineage, verification results, and generation context to avoid self-poisoning the training loop",
+              "Because synthetic data can only be stored in archive tiers for compliance reasons",
+              "Because synthetic data eliminates the need for dataset versioning and shuffle control"
+            ],
+            "answer": "The correct answer is B. The section's core idea is that synthetic data must carry the 'why' and 'who' behind each sample so future training does not amplify unverified model mistakes. The claim that synthetic datasets are simply small or archive-only misses the provenance and verification burden that actually drives the architectural change.",
+            "learning_objective": "Explain why storing synthetic data safely requires lineage and verification metadata alongside payload bytes"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain how provenance and multi-model verification help prevent model collapse in a synthetic data pipeline.",
+            "answer": "Without provenance, a future training run cannot tell whether a sample came from a reliable generation path or from an earlier model's unchecked mistake. Verification by independent judge models adds a filter that distinguishes high-confidence synthetic data from self-reinforcing errors. For example, keeping hashes, generation logs, and verification scores allows bad synthetic branches to be excluded later. The practical consequence is higher storage overhead in exchange for safer long-term data quality.",
+            "learning_objective": "Analyze how provenance tracking and verification reduce the risk of recursive degradation in synthetic-data training loops"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In a synthetic-data regime, the storage burden is mainly the raw payload size of generated tokens or samples.",
+            "answer": "False. The section emphasizes that verification passes and provenance metadata amplify storage far beyond raw payload size. Synthetic data is valuable only when its lineage and validation record are preserved.",
+            "learning_objective": "Evaluate why metadata and verification overhead dominate the storage design of synthetic-data pipelines"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-storage-summary",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "chapter-wide synthesis",
+            "pipeline equation and hierarchy principle",
+            "metadata bottlenecks and checkpoint staging",
+            "economics-driven tiering"
+          ],
+          "question_strategy": "Use a minimal integrative quiz that checks whether the reader can connect the full chapter argument rather than recall isolated details.",
+          "difficulty_progression": "Start with the chapter's core hierarchy claim, then move to a cross-cutting systems consequence, ending with an integrative economic/operational trade-off.",
+          "integration": "Synthesizes the chapter and connects it to the next chapter on distributed training systems.",
+          "ranking_explanation": "This is a synthesis section that recaps and integrates prior material rather than introducing much new content, so a minimal quiz is appropriate."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best captures the chapter's central design rule for ML storage?",
+            "choices": [
+              "Keep all active training data in the cheapest durable tier and rely on average throughput to smooth over gaps",
+              "Use a multi-tier hierarchy so the right data is on the right tier at the right time, keeping HBM fed without storing everything near the accelerator",
+              "Optimize first for random IOPS because ML access patterns eventually become database-like at scale",
+              "Treat checkpointing as a secondary reliability feature that can be layered on after the training pipeline is tuned"
+            ],
+            "answer": "The correct answer is B. The chapter repeatedly argues that no single tier can satisfy bandwidth, capacity, cost, and durability simultaneously, so orchestrated placement across tiers is the governing principle. The cheapest-tier-first view ignores the latency and utilization costs that the chapter treats as first-order concerns.",
+            "learning_objective": "Synthesize the chapter's hierarchy principle into a single storage design rule"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A cluster shows low GPU utilization after upgrading to faster accelerators. Use the chapter's framework to explain two storage-side reasons this can happen.",
+            "answer": "Faster accelerators reduce compute time per batch, which raises required storage bandwidth and makes any existing I/O gap more visible. The problem may also come from metadata or tail-latency bottlenecks that average bandwidth dashboards miss, such as small-file opens or insufficient prefetch depth. For example, a pipeline that barely kept A100s fed may stall H100s because T_compute shrank while T_I/O did not. The practical consequence is that accelerator upgrades require re-auditing the data path, not just swapping hardware.",
+            "learning_objective": "Analyze post-upgrade utilization regressions using the chapter's storage hierarchy and pipeline framework"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why does the chapter conclude that checkpoint staging and data formatting matter as much as raw storage bandwidth?",
+            "answer": "Bandwidth only helps if the system can actually realize it without being blocked by metadata overhead, bad formats, or burst-write pauses. Large sequential shards turn theoretical bandwidth into effective throughput, while local-first checkpoint staging keeps save time off the critical path. For example, a fast file system can still underperform if workers open millions of tiny files or write checkpoints directly to shared storage. The system implication is that architecture and representation determine whether purchased bandwidth becomes real accelerator utilization.",
+            "learning_objective": "Evaluate how data format and checkpoint path design determine realized storage performance"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,568 @@
+{
+  "metadata": {
+    "source_file": "book/quarto/contents/vol2/compute_infrastructure/compute_infrastructure.qmd",
+    "schema_version": 2,
+    "generated_by": "quiz-refresh/generate_quizzes.py",
+    "generated_on": "2026-04-24",
+    "model": "gpt-5.4",
+    "total_sections": 9,
+    "sections_with_quizzes": 9,
+    "sections_without_quizzes": 0,
+    "improved_by": "quiz-refresh/improve-mode"
+  },
+  "sections": [
+    {
+      "section_id": "#sec-compute-memory-wall",
+      "section_title": "The Memory Wall",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "HBM physical architecture and why it improves bandwidth and energy efficiency",
+            "Roofline diagnosis using arithmetic intensity and ridge point",
+            "Tensor Cores, tiling, sustained vs peak throughput, and MFU",
+            "Token latency as a memory-bandwidth-limited phenomenon"
+          ],
+          "question_strategy": "Use a mix of foundational diagnosis, numeric reasoning about token latency and roofline placement, and integrative questions tying HBM, roofline, and Tensor Core utilization together across the three subsections.",
+          "difficulty_progression": "Begins with identifying why HBM outperforms DDR, moves to applying roofline reasoning to inference vs training scenarios, then ends with a synthesis question about why peak TFLOPS often fail to improve real workload performance.",
+          "integration": "Builds directly on prior chapters on arithmetic intensity, roofline analysis, mixed precision, quantization, kernel fusion, and training utilization metrics, but applies them to datacenter-scale accelerator memory behavior.",
+          "ranking_explanation": "This is a core Tier 1 section: it introduces one of the chapter's central physical constraints, provides quantitative anchors used throughout the chapter, and teaches a reusable diagnostic framework for hardware selection and optimization."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does HBM deliver much higher bandwidth than DDR5 for accelerator workloads?",
+            "choices": [
+              "Because HBM uses vertically stacked dies, very short TSV signal paths, and a much wider interface on-package rather than long PCB traces",
+              "Because HBM runs at far higher clock frequencies than DDR5, so bandwidth comes mainly from faster signaling",
+              "Because HBM stores model weights in compressed form, reducing the number of bytes that must be transferred",
+              "Because HBM eliminates the need for caches and shared memory inside the accelerator"
+            ],
+            "answer": "The correct answer is A. HBM's advantage comes from topology, not just clock rate: vertically stacked dies, TSVs, on-package placement, and very wide buses shorten signal paths and reduce energy per bit. An explanation based on higher clock frequency alone misses that HBM wins mainly by moving more bits in parallel over much shorter distances.",
+            "learning_objective": "Explain why HBM's physical packaging and interface structure increase memory bandwidth relative to DDR5"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team proposes upgrading from an H100 to a future accelerator with much higher peak TFLOPS but nearly unchanged memory bandwidth for batch-1 LLM decoding. Explain why the latency improvement may be negligible.",
+            "answer": "Batch-1 autoregressive decoding has very low arithmetic intensity, so it sits deep in the memory-bound region of the Roofline Model. The accelerator already spends most of its time streaming weights from HBM, not multiplying them. In this scenario, more Tensor Core throughput barely changes token latency, while more memory bandwidth or fewer bytes moved through quantization would directly help.",
+            "learning_objective": "Analyze why increasing compute throughput does not materially improve memory-bound inference workloads"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a 70B model fits entirely in HBM, then increasing HBM capacity alone will substantially reduce per-token latency during batch-1 decoding.",
+            "answer": "False. Capacity determines whether the weights fit, but bandwidth determines how fast those weights can be streamed for each token. Once the model already fits, extra capacity does little unless it is paired with more bandwidth or enables a different serving strategy.",
+            "learning_objective": "Distinguish between memory capacity and memory bandwidth in LLM inference performance"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "An H100 has a ridge point around hundreds of FLOP/byte, while batch-1 LLM decode is around 1 FLOP/byte. What does that imply?",
+            "choices": [
+              "The workload is compute-bound, so doubling Tensor Core count should nearly double throughput",
+              "The workload is memory-bound, so raising arithmetic intensity or memory bandwidth matters more than raising peak FLOPS",
+              "The workload is balanced at the ridge point, so either bandwidth or compute upgrades help equally",
+              "The workload is limited mainly by host CPU preprocessing, not by the accelerator"
+            ],
+            "answer": "The correct answer is B. A workload far below the ridge point lies on the bandwidth slope of the roofline, so memory traffic governs attainable performance. A compute-bound interpretation confuses high advertised TFLOPS with the actual limiting resource for low-intensity decode.",
+            "learning_objective": "Apply ridge-point reasoning to classify a workload as memory-bound or compute-bound"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following data path from slowest memory tier to the arithmetic unit during a tiled GPU matrix operation: (1) shared memory / SRAM, (2) HBM, (3) Tensor Core register operands.",
+            "answer": "The correct order is: (2) HBM, (1) shared memory / SRAM, (3) Tensor Core register operands. Data is first fetched from off-chip HBM, staged into faster on-chip SRAM/shared memory, and then loaded into registers feeding the Tensor Cores. Swapping SRAM and HBM would remove the reuse that tiling depends on, and skipping register staging would leave the arithmetic units starved by slower memory tiers.",
+            "learning_objective": "Order the memory staging steps that enable tiled matrix multiplication on modern accelerators"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "An unfused attention implementation writes the attention matrix to HBM and then reads it back for softmax. Why can FlashAttention-like fusion be much faster?",
+            "choices": [
+              "It increases HBM capacity, allowing more of the model to reside on-chip permanently",
+              "It replaces Tensor Cores with general-purpose CUDA cores so branch-heavy code runs faster",
+              "It keeps intermediate tensors in fast on-chip memory instead of writing them out to HBM and reading them back",
+              "It turns attention into a compute-bound operator regardless of sequence length or batch size"
+            ],
+            "answer": "The correct answer is C. Fusion improves locality by avoiding repeated HBM round-trips for intermediates, so both latency and energy spent on data movement fall. An answer focused on adding capacity confuses where data is stored with how often it must be moved during execution.",
+            "learning_objective": "Explain how kernel fusion raises effective utilization by reducing off-chip memory traffic"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-tdp",
+      "section_title": "Thermal Design Power",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "TDP as a cooling requirement rather than a software power limit",
+            "Post-Dennard scaling and why power now rises with performance",
+            "DVFS, thermal throttling, and power-normalized performance",
+            "Workload-dependent accelerator selection and precision trade-offs"
+          ],
+          "question_strategy": "Combine conceptual questions about TDP and Dennard scaling with scenario-based hardware selection and trade-off analysis across the accelerator-selection subsection.",
+          "difficulty_progression": "Starts with defining the operational meaning of TDP, then applies it to facility and workload choices, and finishes with a synthesis about matching accelerator type and precision to workload economics.",
+          "integration": "Connects earlier material on roofline, quantization, mixed precision, and benchmarking to physical power and cooling limits that govern real deployment choices.",
+          "ranking_explanation": "This Tier 1 section introduces the power wall, ties silicon trends to datacenter constraints, and directly informs accelerator procurement and deployment strategy."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What does an accelerator's Thermal Design Power (TDP) primarily specify?",
+            "choices": [
+              "The maximum sustained heat load that the cooling system must remove for rated performance",
+              "The exact electrical power the chip will consume on every workload",
+              "The maximum amount of host power supply capacity that can be safely left unused",
+              "The amount of arithmetic throughput guaranteed regardless of the cooling solution"
+            ],
+            "answer": "The correct answer is A. TDP is a thermal design requirement: it tells you what the cooling system must continuously dissipate. A statement that treats TDP as fixed workload power is too literal because real workloads vary and can transiently spike above the sustained thermal budget.",
+            "learning_objective": "Explain the operational meaning of TDP in accelerator and datacenter design"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Because newer accelerators are more efficient in TFLOPS per watt, datacenter planners can assume future generations will require less total facility power.",
+            "answer": "False. Efficiency improves, but absolute power per accelerator has also risen sharply because performance gains outpace voltage-scaling benefits. Frontier workloads usually expand to consume the extra compute, so total facility power often still increases.",
+            "learning_objective": "Evaluate why efficiency gains do not eliminate the datacenter power wall"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a training cluster can lose throughput even when no component has failed and all GPUs still appear busy.",
+            "answer": "A cluster can silently lose throughput when thermal limits force DVFS or throttling, lowering clock frequencies without causing hard failures. This often happens if cooling degrades or TDP is exceeded during heavy GEMM phases. The practical consequence is lower MFU and longer wall-clock training time even though monitoring dashboards may still report high device utilization.",
+            "learning_objective": "Analyze how thermal and power management can reduce sustained throughput without causing hard failures"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which workload is most likely to justify prioritizing memory bandwidth per dollar over peak TFLOPS per dollar when choosing an accelerator?",
+            "choices": [
+              "Large-batch LLM training with tensor parallelism across many GPUs",
+              "CNN training with large spatial dimensions and high arithmetic intensity",
+              "Single-request autoregressive LLM inference at batch size 1",
+              "Diffusion inference with many denoising steps and high compute reuse"
+            ],
+            "answer": "The correct answer is C. Batch-1 autoregressive decode is strongly memory-bound because each token streams weights again, so bandwidth dominates cost-effectiveness. The large-batch and diffusion cases have much higher arithmetic intensity, so they make better use of extra compute throughput.",
+            "learning_objective": "Select an accelerator metric that matches the dominant bottleneck of a target workload"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The post-2006 breakdown of ____ means that shrinking transistors no longer automatically lowers voltage enough to keep power density constant, so higher performance now comes with rising thermal demands.",
+            "answer": "Dennard scaling. This concept explains why modern accelerators gain performance with much higher power draw, making cooling and facility power co-equal constraints with raw compute throughput.",
+            "learning_objective": "Identify the scaling principle whose breakdown explains rising accelerator power density"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Your organization trains large Transformers in BF16 but is considering FP8-enabled hardware and software support. Explain why this is an infrastructure decision, not just a numerical-accuracy decision.",
+            "answer": "Precision changes the effective compute density of the fleet: moving from BF16 to FP8 can roughly double Tensor Core throughput on the same hardware. That can reduce cluster size, shorten training time, or fit more work under a fixed power budget. The system consequence is that model, compiler, and facility planning become linked through precision choice.",
+            "learning_objective": "Justify why numerical precision affects cluster sizing and infrastructure economics"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-node",
+      "section_title": "The Node",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Why the node exists as a capacity and bandwidth aggregation unit",
+            "Bandwidth hierarchy from HBM to NVLink to PCIe to InfiniBand",
+            "Dense node topologies such as NVSwitch crossbar and alternatives",
+            "Node memory partitioning and data-loading pipeline constraints"
+          ],
+          "question_strategy": "Cover the whole section by sampling the role of the node, communication hierarchy, memory budgeting, and I/O pipeline design. Include both topology selection and operational trade-offs.",
+          "difficulty_progression": "Starts with why a node is needed, moves through bandwidth-aware parallelism and memory partitioning, and ends with an integrative data-path and placement question.",
+          "integration": "Builds on earlier chapters on tensor parallelism, ZeRO, activation checkpointing, GPUDirect, data loading, and distributed training communication patterns.",
+          "ranking_explanation": "This is a central Tier 1 systems section because it explains the basic building block of modern training clusters and the communication and memory laws that govern distributed training efficiency."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why is the node, rather than the single accelerator, the fundamental unit for frontier-model training?",
+            "choices": [
+              "Because host CPUs cannot run training code unless at least eight GPUs are installed",
+              "Because a single accelerator lacks enough HBM capacity for the full model state, while a node aggregates compute and memory behind a fast local fabric",
+              "Because InfiniBand requires exactly one network adapter per accelerator inside a node",
+              "Because model weights cannot be partitioned across accelerators within a node"
+            ],
+            "answer": "The correct answer is B. Frontier models exceed the capacity of one accelerator once weights, gradients, optimizer state, and activations are considered, so the node aggregates multiple GPUs into a usable training unit. The idea that weights cannot be partitioned contradicts tensor parallelism, which is exactly how the node is exploited.",
+            "learning_objective": "Explain why the node is the minimum practical capacity and communication unit for frontier-model training"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team wants to run tensor parallelism across nodes over InfiniBand instead of within nodes over NVLink. What is the main problem with this plan?",
+            "choices": [
+              "Tensor parallelism requires no communication, so InfiniBand would be wasted",
+              "Tensor parallelism only works for inference, not training",
+              "The per-layer synchronization pattern of tensor parallelism is too frequent for the much slower inter-node tier, so communication would dominate step time",
+              "InfiniBand cannot carry floating-point tensors, only integer messages"
+            ],
+            "answer": "The correct answer is C. Tensor parallelism performs high-frequency collectives after layers, so it depends on the abundant bandwidth of the intra-node domain. A claim that tensor parallelism needs no communication misses the entire reason topology matters: it is communication-intensive and therefore highly sensitive to bandwidth cliffs.",
+            "learning_objective": "Analyze why tensor parallelism is typically confined to the high-bandwidth intra-node domain"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following communication tiers from fastest to slowest for data movement in the node hierarchy: (1) InfiniBand NDR, (2) HBM, (3) NVLink, (4) PCIe Gen5.",
+            "answer": "The correct order is: (2) HBM, (3) NVLink, (4) PCIe Gen5, (1) InfiniBand NDR. HBM is the on-package bandwidth tier, NVLink is the fast intra-node fabric, PCIe is the host and device I/O tier, and InfiniBand is the slower inter-node fabric. Swapping NVLink with InfiniBand would erase the physical basis for hierarchy-aware parallelism.",
+            "learning_objective": "Order the major data-movement tiers that shape node and cluster parallelism strategy"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a training framework might place optimizer state in host DRAM while keeping weights and active activations in HBM.",
+            "answer": "Weights and active activations are touched constantly during forward and backward passes, so they need HBM's much higher bandwidth. Optimizer states are accessed less frequently, mainly during the update step, so they can tolerate slower tiers such as host DRAM. The practical payoff is fitting a larger model without paying HBM capacity costs for rarely accessed state.",
+            "learning_objective": "Justify memory-tier placement decisions for different parts of training state"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Your model uses frequent all-to-all style exchanges among GPUs inside one chassis. Why is an NVSwitch-based dense node a better fit than a simple ring?",
+            "choices": [
+              "Because NVSwitch eliminates the need for collective communication entirely",
+              "Because NVSwitch provides non-blocking any-GPU-to-any-GPU bandwidth, avoiding the multi-hop penalties a ring imposes on all-to-all style traffic",
+              "Because ring topologies can only support four GPUs, while NVSwitch can support eight",
+              "Because NVSwitch increases HBM bandwidth on every GPU"
+            ],
+            "answer": "The correct answer is B. Tensor-parallel communication benefits from high-bandwidth any-to-any exchange, and NVSwitch provides that without forcing data through multiple intermediate hops. A response about raising HBM bandwidth confuses off-chip memory capacity and bandwidth with inter-GPU communication fabric design.",
+            "learning_objective": "Compare intra-node topologies in terms of their effect on tensor-parallel communication efficiency"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If GPU kernels are highly optimized, the data-loading and I/O pipeline can usually be treated as a secondary concern because storage bandwidth is rarely the real bottleneck.",
+            "answer": "False. If preprocessing, host-to-device transfer, or shared storage cannot keep batches ready ahead of time, expensive GPUs stall waiting for input. A fast compute path does not compensate for an underprovisioned I/O pipeline.",
+            "learning_objective": "Evaluate the role of data-loading and I/O throughput in end-to-end node utilization"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-rack",
+      "section_title": "The Rack",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Rack-scale power delivery and conversion losses",
+            "Cooling architectures and PUE",
+            "High-density rack design constraints including ToR and liquid loops",
+            "Reliability and failure consequences at rack scale"
+          ],
+          "question_strategy": "Emphasize applied systems reasoning: converting chip TDP into rack and facility implications, comparing cooling architectures, and examining reliability and physical design trade-offs.",
+          "difficulty_progression": "Begins with what a rack changes physically, moves into power and cooling math and design trade-offs, and ends with failure-domain reasoning.",
+          "integration": "Connects with prior vocabulary on PUE, power wall, observability, and operational reliability while grounding them in rack-scale physical design.",
+          "ranking_explanation": "This is Tier 1 because it translates chip-level constraints into facility engineering decisions and exposes why modern ML infrastructure is bounded by power and cooling as much as by compute."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does a rack of modern ML nodes often require liquid cooling rather than traditional air cooling?",
+            "choices": [
+              "Because liquid cooling is required whenever a rack contains InfiniBand switches",
+              "Because air cooling cannot economically remove the heat at modern rack power densities without huge fan overhead and thermal limits",
+              "Because liquid cooling increases arithmetic intensity and therefore raises MFU directly",
+              "Because HBM stacks can function only when submerged in coolant"
+            ],
+            "answer": "The correct answer is B. Modern ML racks concentrate tens to over one hundred kilowatts of heat, and air's poor heat-transfer properties make fan-based removal inefficient or impossible at those densities. An explanation based on arithmetic intensity confuses thermal infrastructure with a workload-level performance metric.",
+            "learning_objective": "Explain why rack power density pushes ML facilities from air cooling to liquid cooling"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A facilities team sizes its cooling system for the average GPU power draw during training rather than for TDP-level peaks. Explain why this is risky.",
+            "answer": "Training power draw is bursty: synchronized GEMMs can push many GPUs near TDP at the same time. If cooling is sized for the average instead of the peak, temperatures rise during those bursts and trigger thermal throttling. The consequence is lower sustained clock speed and reduced throughput even without any obvious hardware failure.",
+            "learning_objective": "Analyze why cooling systems must be designed for peak thermal load rather than average load"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The metric ____ compares total facility power to IT-equipment power, so a value above 1.0 captures the overhead from cooling and power distribution.",
+            "answer": "PUE. This ratio quantifies facility overhead and is crucial for converting accelerator power draw into actual datacenter electricity demand and operating cost.",
+            "learning_objective": "Identify the metric used to quantify datacenter infrastructure overhead beyond IT load"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What is the main engineering reason synchronous ML training stresses datacenter power systems more than typical web-serving workloads?",
+            "choices": [
+              "ML training always uses more total energy than web serving, so power systems fail from cumulative consumption alone",
+              "ML training avoids voltage regulation, so the grid sees raw chip current draw directly",
+              "Training jobs create highly correlated power ramps as many accelerators enter compute-heavy phases together, producing sharp transients",
+              "Web serving cannot be cooled efficiently, while training can"
+            ],
+            "answer": "The correct answer is C. Synchronous training causes many devices to ramp power nearly at once, stressing VRMs, UPS systems, and substations with fast transients. A cumulative-energy explanation misses the temporal correlation that makes the electrical behavior qualitatively different from ordinary datacenter traffic.",
+            "learning_objective": "Explain why synchronized training workloads create unusual power-delivery challenges"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A low PUE by itself implies that a datacenter has a low environmental impact.",
+            "answer": "False. PUE only measures how efficiently facility power reaches IT equipment. A low-PUE facility powered by carbon-intensive electricity can still have a larger environmental footprint than a less efficient site powered by low-carbon energy.",
+            "learning_objective": "Distinguish facility efficiency from environmental impact in datacenter evaluation"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a rack-level cooling failure in a tightly coupled training cluster can cost far more than the hardware directly affected.",
+            "answer": "In synchronous distributed training, one failed rack can stall the whole job because all workers must advance together. The direct hardware outage may affect only a subset of nodes, but the opportunity cost includes the idle time of the rest of the cluster plus checkpoint rollback and restart overhead. That makes rack-level redundancy economically justified.",
+            "learning_objective": "Evaluate why rack failures propagate into cluster-wide training losses in synchronous jobs"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-pod",
+      "section_title": "The Pod",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Pod-scale networking and WSC architecture principles",
+            "Scaling efficiency and communication/computation trade-offs",
+            "Fleet monitoring, observability, and gray failures",
+            "Case-study differences across SuperPOD, TPU Pod, and other fleet designs"
+          ],
+          "question_strategy": "Use a broad section-level quiz that samples pod topology, scaling efficiency, WSC thinking, and observability. Include one synthesis question comparing architecture choices across organizations.",
+          "difficulty_progression": "Starts with the pod as a warehouse-scale computer, then moves to quantitative scaling-efficiency reasoning, and ends with system-design and reliability synthesis.",
+          "integration": "Draws on prior chapters on distributed training, all-reduce, model/pipeline/data parallelism, observability, and MLOps while extending them to warehouse-scale infrastructure.",
+          "ranking_explanation": "This Tier 1 section is foundational for Vol2 systems thinking because it shows how building-scale choices determine whether thousands of accelerators function as one computer or as an expensive collection of stragglers."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What is the most important conceptual shift behind treating a pod as a warehouse-scale computer rather than as a collection of independent servers?",
+            "choices": [
+              "Each server becomes valuable mainly as part of a tightly coordinated system whose network, storage, and scheduling act like computer subsystems",
+              "The pod eliminates the need for distributed software because all machines are effectively one CPU",
+              "A warehouse-scale computer is defined mainly by building size, not by communication behavior",
+              "Once a cluster reaches pod scale, hardware failures become so rare that fault tolerance matters less"
+            ],
+            "answer": "The correct answer is A. The WSC view treats the network like a system bus, storage like a shared subsystem, and orchestration like an operating system, so system-level coordination dominates. The idea that failures matter less is backwards: failures become routine and must be engineered around.",
+            "learning_objective": "Explain the warehouse-scale computer perspective and its implications for system design"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team doubles cluster size but sees only a modest reduction in training time. Explain how scaling efficiency reveals whether the extra hardware was worthwhile.",
+            "answer": "Scaling efficiency compares actual speedup with ideal linear speedup, so it exposes how much added hardware is lost to communication, synchronization, and bubbles. If efficiency drops sharply, the new GPUs are spending too much time waiting rather than computing. The practical implication is that more hardware can raise cost per useful FLOP even while wall-clock time falls slightly.",
+            "learning_objective": "Analyze whether cluster scale-out is economically justified using scaling efficiency"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why might an organization choose a fat-tree fabric for one pod and a torus-like topology for another?",
+            "choices": [
+              "Because topology is mostly a branding decision and has little effect on workloads",
+              "Because different workloads favor different communication patterns, so the optimal topology depends on whether flexibility or locality dominates",
+              "Because torus networks are always faster than fat-trees once the cluster exceeds one rack",
+              "Because fat-trees can be used only with GPUs, while torus networks can be used only with TPUs"
+            ],
+            "answer": "The correct answer is B. Fat-trees favor broad any-to-any flexibility, while torus-style designs can be more cost-efficient for locality-heavy, predictable communication patterns. A claim that one topology is always faster ignores that the best choice depends on the workload's collective communication structure.",
+            "learning_objective": "Compare pod topologies based on workload communication requirements"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following design principles of warehouse-scale training systems as a causal chain from system scale to operational response: (1) checkpoint and recovery become first-class concerns, (2) large clusters experience component failures routinely, (3) the pod must be treated as a single coordinated computer.",
+            "answer": "The correct order is: (3) the pod must be treated as a single coordinated computer, (2) large clusters experience component failures routinely, (1) checkpoint and recovery become first-class concerns. Once the system is operated as one tightly coupled machine, failures anywhere propagate to the training job; because such failures become routine at scale, robust checkpointing and recovery are mandatory. Reversing the middle steps would hide why reliability engineering becomes unavoidable.",
+            "learning_objective": "Order the logic connecting warehouse-scale coupling, routine failures, and checkpoint-driven reliability design"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In a large synchronous training fleet, hard failures are the main operational threat, while gray failures usually matter only for local node performance.",
+            "answer": "False. Gray failures can quietly reduce throughput across the whole job because synchronous training waits for stragglers. A single degraded node, link, or cooling path can lower cluster-wide efficiency without triggering an obvious crash.",
+            "learning_objective": "Evaluate the cluster-wide effect of gray failures in synchronous training"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why fleet observability must correlate signals across GPUs, networks, and facility systems rather than monitoring each metric in isolation.",
+            "answer": "Many failures reveal themselves only through cross-layer patterns: rising GPU temperatures across one rack may indicate a coolant or CDU issue, while throughput loss paired with link retries may indicate network degradation rather than model inefficiency. Correlation lets operators diagnose the actual failure domain quickly. Without it, teams chase hundreds of local symptoms instead of fixing one root cause.",
+            "learning_objective": "Justify why pod-scale observability requires cross-layer correlation rather than isolated metric monitoring"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-tco",
+      "section_title": "Economics: Total Cost of Ownership",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "CapEx vs OpEx in ML infrastructure",
+            "Build-vs-buy economics and utilization-dependent break-even",
+            "Depreciation, refresh cycles, and power efficiency trajectory",
+            "Procurement timelines, cloud options, and infrastructure planning methodology"
+          ],
+          "question_strategy": "Ask for economic reasoning rather than accounting recall: utilization thresholds, depreciation consequences, and infrastructure-planning trade-offs across cloud, on-prem, and hardware refresh cycles.",
+          "difficulty_progression": "Starts with the basic TCO lens, moves into build-vs-buy break-even and depreciation trade-offs, and ends with planning methodology that integrates technical and financial constraints.",
+          "integration": "Connects technical ideas from the chapter to prior MLOps and responsible-engineering topics such as TCO, utilization, carbon, and operational planning.",
+          "ranking_explanation": "This is Tier 1 because the section translates every technical constraint in the chapter into deployment and organizational decisions; it is one of the chapter's explicit Learning Objectives."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why can sustained utilization determine whether on-premises ML infrastructure is cheaper than the cloud?",
+            "choices": [
+              "Because cloud providers charge only for electricity, while on-premises costs are mostly free after purchase",
+              "Because on-premises clusters carry large fixed costs that are spread over useful GPU-hours only if the hardware stays busy",
+              "Because utilization changes accelerator peak TFLOPS, altering the silicon's physical efficiency",
+              "Because cloud instances cannot be used continuously for long-running jobs"
+            ],
+            "answer": "The correct answer is B. On-premises ownership includes large fixed CapEx and staffing/facility costs, so idle time makes each useful GPU-hour much more expensive. A response centered on electricity alone ignores that hardware amortization and facility overhead dominate the break-even analysis.",
+            "learning_objective": "Explain why utilization is the key variable in build-vs-buy infrastructure economics"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "An organization trains one frontier model per year and leaves its cluster mostly idle otherwise. Explain why this pattern weakens the case for owning a large on-premises fleet.",
+            "answer": "The hardware still depreciates, the facility still incurs fixed costs, and staff still must operate the environment even when GPUs are idle. That means the cost per useful GPU-hour becomes very high. Cloud rental can be cheaper in this regime because the organization pays only during the short training bursts instead of carrying the fixed cost year-round.",
+            "learning_objective": "Analyze why bursty demand weakens the economics of owned ML infrastructure"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why do ML accelerators depreciate unusually quickly compared with traditional servers?",
+            "choices": [
+              "Because accelerators physically wear out faster under matrix multiplication than CPUs do under ordinary workloads",
+              "Because new generations rapidly improve performance per watt, making older hardware economically obsolete long before it stops functioning",
+              "Because accelerator memory cannot be reused for inference once training ends",
+              "Because accounting rules require all accelerators to be fully written off after exactly one year"
+            ],
+            "answer": "The correct answer is B. The key issue is economic obsolescence: newer accelerators deliver much more useful work per watt, so older generations become expensive to operate relative to output. A hardware-wear explanation confuses reliability with the faster depreciation driven by generational efficiency jumps.",
+            "learning_objective": "Explain why accelerator refresh cycles are driven by economics as much as by hardware failure"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The one-time cost category that covers hardware purchases, facility construction, and initial network build-out is called ____.",
+            "answer": "CapEx. This term distinguishes upfront infrastructure investment from recurring operating costs such as electricity, maintenance, and staffing in TCO analysis.",
+            "learning_objective": "Identify the financial category used for one-time infrastructure acquisition costs"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: A lower cloud price per GPU-hour automatically means a lower cost per useful computation across hardware generations.",
+            "answer": "False. GPU-hours are not equivalent across generations because throughput and efficiency differ greatly. The relevant comparison is cost per useful FLOP-hour or per completed workload, not just cost per rented hour.",
+            "learning_objective": "Evaluate why GPU-hour pricing alone is insufficient for comparing infrastructure options"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why must infrastructure planning for a new training fleet begin with workload characterization rather than with selecting the newest accelerator?",
+            "answer": "The workload determines whether compute, bandwidth, capacity, communication pattern, or utilization is the true bottleneck. Those factors then drive accelerator choice, node design, network topology, power needs, and TCO. Starting from the newest hardware instead risks paying for resources the workload cannot exploit and building a facility mismatched to actual demand.",
+            "learning_objective": "Justify a workload-first methodology for infrastructure planning and procurement"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-emerging",
+      "section_title": "Emerging Infrastructure Technologies",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "CXL and memory pooling",
+            "Optical interconnects and bandwidth-hierarchy flattening",
+            "Disaggregated and composable architectures",
+            "Wafer-scale integration and advanced packaging trade-offs"
+          ],
+          "question_strategy": "Treat this as a synthesis-oriented Tier 2 section: ask what each technology relaxes, what trade-off it introduces, and how it could change the current node/pod boundaries.",
+          "difficulty_progression": "Begins with identifying the wall each technology attacks, then compares architectures, and finishes with a synthesis about how these technologies could reshape the current hierarchy.",
+          "integration": "Links earlier chapter concepts\u2014memory wall, communication wall, node boundaries, and topology constraints\u2014to forward-looking infrastructure design directions.",
+          "ranking_explanation": "This section is a Tier 2 overview: it introduces fewer immediately operational details than the core sections, but it meaningfully synthesizes how current constraints may change and therefore warrants a short quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What problem is CXL memory pooling most directly intended to relieve in ML systems?",
+            "choices": [
+              "The shortage of Tensor Core throughput for compute-bound GEMMs",
+              "The inability of a single accelerator's fast local memory to provide enough capacity for all training state",
+              "The need for liquid cooling in high-density racks",
+              "The requirement that all pod topologies use external switches"
+            ],
+            "answer": "The correct answer is B. CXL extends the memory hierarchy by making larger pooled capacity more accessible, which is especially useful for optimizer state and capacity pressure beyond local HBM. It does not solve compute throughput directly, and it is far too slow to replace HBM for bandwidth-critical tensor access.",
+            "learning_objective": "Explain which infrastructure bottleneck CXL memory pooling is designed to relieve"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why optical interconnects could change parallelism strategy even if they do not change accelerator arithmetic units at all.",
+            "answer": "If inter-node links become much faster and more power-efficient, the bandwidth cliff between within-node and across-node communication shrinks. That could let communication-intensive strategies such as tensor parallelism span more than one node without collapsing efficiency. The practical effect is that current node boundaries become less rigid as network physics improves.",
+            "learning_objective": "Analyze how faster interconnects could reshape the mapping between parallelism strategies and physical hierarchy"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Disaggregated architectures mainly aim to bundle compute, memory, and networking more tightly into fixed node ratios so that management becomes simpler.",
+            "answer": "False. Disaggregation aims to decouple those resources so they can scale independently and be recomposed per workload. The benefit is flexibility in capacity ratios, though it adds orchestration and fabric complexity.",
+            "learning_objective": "Distinguish disaggregated architectures from fixed-ratio node designs"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-fallacies-pitfalls",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Misconceptions about scaling, peak FLOPS, and network upgrades",
+            "Planning mistakes around cooling, data loading, and facility readiness",
+            "Economic and operational errors in TCO and hardware selection"
+          ],
+          "question_strategy": "Use misconception-oriented questions that force the reader to diagnose why an apparently intuitive infrastructure claim is wrong.",
+          "difficulty_progression": "Starts with a classic scaling myth, then probes bottleneck misdiagnosis and operational planning failures, ending with a broader synthesis about workload-aware infrastructure choices.",
+          "integration": "This section consolidates the chapter's major lessons by inverting them into realistic failure modes and bad decisions practitioners commonly make.",
+          "ranking_explanation": "This is Tier 2: it is largely synthetic and corrective, but it tests whether the reader can apply the chapter's ideas to reject bad reasoning."
+        },
+        "questions": [
+          {
+            "question_type": "TF",
+            "question": "True or False: If a training job is slower than expected, adding more GPUs is usually the safest first fix because training speed scales roughly linearly with hardware count.",
+            "answer": "False. Communication, synchronization, and data-loading overhead often grow with scale, so extra GPUs can add cost faster than they add useful throughput. Scaling efficiency must be checked before assuming more hardware will help.",
+            "learning_objective": "Evaluate the misconception that adding GPUs automatically produces near-linear training speedup"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team serving a 70B model at batch size 1 sees poor latency on H100s and considers upgrading to a much higher-TFLOPS accelerator. Which hidden assumption is most likely wrong?",
+            "choices": [
+              "That the main bottleneck is arithmetic throughput rather than repeatedly streaming weights from memory",
+              "That a liquid-cooled rack can host dense accelerators safely",
+              "That checkpoint storage should be included in system planning",
+              "That multi-node clusters need a budget for network switches"
+            ],
+            "answer": "The correct answer is A. Batch-1 LLM inference is usually memory-bound, so buying more peak compute can leave the real bottleneck untouched. The other choices are generally examples of sound systems planning rather than mistaken assumptions.",
+            "learning_objective": "Diagnose why peak-performance specifications can mislead infrastructure decisions when the true bottleneck is elsewhere"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why neglecting facility readiness and commissioning can delay a training program even after the hardware has been purchased.",
+            "answer": "Power, cooling, cabling, firmware compatibility, and burn-in testing all sit on the critical path between hardware delivery and production use. A cluster can be physically present yet unusable if the datacenter cannot supply the power, dissipate the heat, or sustain the expected network behavior. The result is idle capital and delayed model schedules.",
+            "learning_objective": "Analyze how installation and facility-readiness failures create hidden delays in ML infrastructure deployment"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-compute-summary",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Integrating the chapter's stack-level argument from accelerator to pod to economics",
+            "Reinforcing the recurring role of physical constraints",
+            "Connecting technical and organizational decisions"
+          ],
+          "question_strategy": "Use a minimal synthesis quiz that checks whether the reader can restate the chapter's governing logic rather than recall isolated facts.",
+          "difficulty_progression": "Starts with the recurring pattern behind the stack, then ends with an integrative application of that pattern to infrastructure planning.",
+          "integration": "This section ties together the memory wall, power wall, communication hierarchy, TCO, and warehouse-scale systems perspective from the full chapter.",
+          "ranking_explanation": "This is a Tier 2 summary section: it synthesizes the chapter's argument rather than introducing much novel content, so a short integrative quiz is appropriate."
+        },
+        "questions": [
+          {
+            "question_type": "SHORT",
+            "question": "Explain the recurring engineering pattern that connects the accelerator, node, rack, and pod levels of the compute infrastructure stack.",
+            "answer": "At each level, a physical constraint becomes intolerable and forces the creation of the next level: limited on-chip memory leads to multi-accelerator nodes, node communication and density create rack-scale power and cooling problems, and rack aggregation creates pod-scale networking and reliability challenges. The system consequence is that infrastructure must be designed as a chain of coupled responses to physics, not as isolated parts.",
+            "learning_objective": "Explain the chapter's stack-level causal pattern from one infrastructure layer to the next"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best captures the chapter's overall lesson about ML infrastructure planning?",
+            "choices": [
+              "Choose the fastest available accelerator first, then let networking, cooling, and economics adapt afterward",
+              "Infrastructure planning is mainly a procurement problem, because software can usually work around physical constraints later",
+              "The right design emerges only by jointly reasoning about workload bottlenecks, memory and communication hierarchy, power and cooling, and total cost of ownership",
+              "Once a model fits in memory, the rest of the stack matters mainly for operational convenience"
+            ],
+            "answer": "The correct answer is C. The chapter's main argument is that compute infrastructure is a coupled system whose bottlenecks span silicon, memory, networking, facilities, and economics. A hardware-first or memory-fit-only view misses the cross-layer constraints that actually determine performance and cost.",
+            "learning_objective": "Synthesize the chapter's integrated methodology for ML infrastructure planning"
+          }
+        ]
+      }
+    }
+  ]
+}
