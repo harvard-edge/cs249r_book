@@ -245,6 +245,8 @@ def build_coverage(questions: list[Question], chains: list[dict[str, Any]]) -> d
         "track_level": counter_to_dict(count_by(questions, "track", "level")),
         "track_zone": counter_to_dict(count_by(questions, "track", "zone")),
         "track_phase": counter_to_dict(count_by(questions, "track", "phase")),
+        "track_area_level": counter_to_dict(count_by(questions, "track", "competency_area", "level")),
+        "track_area_zone": counter_to_dict(count_by(questions, "track", "competency_area", "zone")),
         "track_area": {f"{k[0]}:{k[1]}": v for k, v in sorted(track_area.items())},
         "topic_track": topic_track,
         "topic_track_zone": {
@@ -729,6 +731,14 @@ def write_markdown_reports(
     phase_counts = coverage["phase_counts"]
     thin_pairs = [r for r in coverage["topic_track"] if r["classification"] == "thin"]
     suspect_pairs = [r for r in coverage["topic_track"] if r["classification"] == "suspect"]
+    low_track_area_level = [
+        {"cell": k, "count": v}
+        for k, v in sorted(coverage["track_area_level"].items(), key=lambda item: item[1])[:80]
+    ]
+    low_track_area_zone = [
+        {"cell": k, "count": v}
+        for k, v in sorted(coverage["track_area_zone"].items(), key=lambda item: item[1])[:80]
+    ]
 
     (OUTPUT_DIR / "coverage_report.md").write_text(
         "\n".join(
@@ -759,6 +769,14 @@ def write_markdown_reports(
                 "## Thin Topic-Track Pairs",
                 "",
                 table_rows(thin_pairs[:80], ["topic", "track", "competency_area", "count", "classification"]),
+                "",
+                "## Lowest Track-Area-Level Cells",
+                "",
+                table_rows(low_track_area_level, ["cell", "count"]),
+                "",
+                "## Lowest Track-Area-Zone Cells",
+                "",
+                table_rows(low_track_area_zone, ["cell", "count"]),
                 "",
                 "## Suspect Topic-Track Pairs",
                 "",

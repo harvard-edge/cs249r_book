@@ -161,6 +161,7 @@ function PracticePage() {
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [napkinOnly, setNapkinOnly] = useState(false);
+  const [visualOnly, setVisualOnly] = useState(false);
   // "Chains only" restricts the pool to questions that are part of a
   // deepening chain (L1→L6+ on one topic). 890 chains cover ~30% of
   // the corpus. This toggle is the minimum-viable discoverability
@@ -345,13 +346,14 @@ function PracticePage() {
       skipFilterCount.current--;
       return;
     }
-    const filters: { track?: string; level?: string; competency_area?: string; zone?: string; chainsOnly?: boolean } = {
+    const filters: { track?: string; level?: string; competency_area?: string; zone?: string; chainsOnly?: boolean; visualOnly?: boolean } = {
       track: selectedTrack,
       level: selectedLevel,
     };
     if (selectedArea) filters.competency_area = selectedArea;
     if (selectedZone) filters.zone = selectedZone;
     if (chainsOnly) filters.chainsOnly = true;
+    if (visualOnly) filters.visualOnly = true;
     let q = getQuestionsByFilter(filters);
     if (napkinOnly) q = q.filter(question => !!question.details.napkin_math);
     setPool(q);
@@ -363,7 +365,7 @@ function PracticePage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly, visualOnly]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
@@ -858,6 +860,17 @@ function PracticePage() {
           <span className="text-[11px] text-textSecondary font-medium">Napkin math only</span>
         </label>
 
+        {/* Visual-only toggle — useful for diagram/topology/timing practice. */}
+        <label className="flex items-center gap-2 cursor-pointer" title="Restrict pool to questions with diagrams or visual prompts">
+          <input
+            type="checkbox"
+            checked={visualOnly}
+            onChange={() => setVisualOnly(!visualOnly)}
+            className="accent-accentBlue"
+          />
+          <span className="text-[11px] text-textSecondary font-medium">Visual questions only</span>
+        </label>
+
         {/* Chains-only toggle — discoverability affordance for the 890
             curated chain sequences (L1→L6+ on one topic). Separate from
             the gated `/chains` browse page — this is the minimum
@@ -876,6 +889,7 @@ function PracticePage() {
         <div className="text-[10px] font-mono text-textTertiary mt-auto">
           {pool.length} questions in pool
           {chainsOnly && <span className="ml-1 text-accentBlue">· chains</span>}
+          {visualOnly && <span className="ml-1 text-accentBlue">· visuals</span>}
         </div>
       </aside>
 

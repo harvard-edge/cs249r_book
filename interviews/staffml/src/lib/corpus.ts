@@ -153,6 +153,8 @@ export function getQuestionsByFilter(filters: {
   zone?: string;
   /** When true, restrict results to questions that are part of a chain. */
   chainsOnly?: boolean;
+  /** When true, restrict results to questions with an attached visual. */
+  visualOnly?: boolean;
 }): Question[] {
   return questions.filter((q) => {
     if (filters.track && q.track !== filters.track) return false;
@@ -161,6 +163,7 @@ export function getQuestionsByFilter(filters: {
     if (filters.topic && q.topic !== filters.topic) return false;
     if (filters.zone && q.zone !== filters.zone) return false;
     if (filters.chainsOnly && (!q.chain_ids || q.chain_ids.length === 0)) return false;
+    if (filters.visualOnly && !q.visual) return false;
     return true;
   });
 }
