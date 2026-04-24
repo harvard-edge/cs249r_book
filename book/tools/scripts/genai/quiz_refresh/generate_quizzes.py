@@ -140,6 +140,187 @@ def load_spec() -> str:
     return SPEC_PATH.read_text(encoding="utf-8")
 
 
+def build_audit_prompt(vol: str, chapter: str, qmd_path: Path) -> str:
+    """Assemble the per-chapter prompt for AUDIT mode.
+
+    Audit reads the existing canonical quiz JSON and produces a
+    structured assessment: per-question issues, build-up compliance
+    (does it use prior vocab vs. redefine it), distribution quality,
+    and an overall grade. Used to identify what still needs improvement
+    after generate + improve passes.
+    """
+    position = next(
+        (i + 1 for i, (v, c) in enumerate(READING_ORDER) if v == vol and c == chapter),
+        None,
+    )
+    total_chapters = len(READING_ORDER)
+    existing_json_path = canonical_json_new_path(vol, chapter).with_suffix("")
+    if not existing_json_path.is_file():
+        raise FileNotFoundError(
+            f"audit mode requires an existing canonical quiz JSON at {existing_json_path}"
+        )
+    existing_data = json.loads(existing_json_path.read_text(encoding="utf-8"))
+    chapter_text = qmd_path.read_text(encoding="utf-8")
+    prior_vocab_data = build_prior_vocab_for(vol, chapter)
+    prior_terms = [
+        {"term": t["term"], "first_seen": t["first_seen"]}
+        for t in prior_vocab_data["terms"]
+    ]
+    prior_terms_brief = (
+        f"{len(prior_terms)} terms from chapters 1..{position - 1}"
+        if position and position > 1
+        else "(this is chapter 1 — no prior chapters)"
+    )
+
+    return f"""You are auditing the quizzes for chapter **{vol}/{chapter}** \
+(position {position} of {total_chapters} in the reading order).
+
+This is an **audit pass** — you do NOT change the quiz file. You PRODUCE \
+a structured assessment that surfaces questions still needing \
+improvement after a generate + improve cycle. The auditor catches what \
+the generator and improver missed.
+
+## Audit dimensions (assess each)
+
+### 1. Per-question quality
+
+For each question, check it against the spec's six-point quality bar \
+(grounded, reasoning over recall, concrete numbers, explanatory \
+answer, Bloom's-verb LO, plausible distractors). Specifically hunt for:
+
+- MCQ distractors that are obviously wrong (no informed reader would \
+  pick) — they reduce a 4-option MCQ to a 3-option test.
+- FILL questions that test pure term recall instead of conceptual \
+  inference.
+- TF questions whose answer is obvious from grammar alone.
+- Templated/formulaic stems ("Which best captures…", "What is the \
+  best interpretation…") used too often.
+- LOs that tautologically restate the question stem.
+- Questions that test memorization of a date/name/quote rather than \
+  systems reasoning.
+- Answers that miss explaining WHY a plausible distractor is wrong.
+
+### 2. Build-up compliance (the critical audit)
+
+For each question, check the prior-chapter vocabulary list. Flag:
+
+- **Re-definition violation (HIGH)**: question whose ENTIRE point is \
+  defining or testing the definition of a term first established in a \
+  previous chapter. (Application of a prior-chapter term in this \
+  chapter's context is fine; testing the definition itself is not.)
+- **Missed-build-up opportunity (MEDIUM)**: question that re-explains \
+  a prior-chapter concept in the question text or answer when it \
+  should have assumed reader familiarity, padding the question \
+  unnecessarily.
+- **Forward-reference (HIGH)**: question that requires knowledge from \
+  a LATER chapter (you may need to flag based on whether a term \
+  appears in the chapter text or in prior_vocab — if neither, it's \
+  forward-referenced).
+
+Also assess at the chapter level:
+- Does the chapter appropriately *leverage* prior-chapter vocabulary, \
+  or does it feel like it was written in isolation?
+- Is the difficulty appropriate for chapter position {position}/33? \
+  (Chapters 1–5 foundational; 6–10 intermediate; 11–15 advanced; \
+  16+ specialized.)
+
+### 3. Distribution
+
+- Type-mix balance per chapter against the spec target \
+  (MCQ 40% / SHORT 30% / TF 13% / FILL 8% / ORDER 9%).
+- Per-section question count distribution (should be 4–6, with 2–3 \
+  for tier-2 minimal quizzes).
+
+## Prior vocabulary — {prior_terms_brief}
+
+```json
+{json.dumps(prior_terms, indent=2)}
+```
+
+## Chapter source — `{qmd_path.relative_to(REPO_ROOT)}`
+
+```qmd
+{chapter_text}
+```
+
+## Quiz JSON to audit
+
+```json
+{json.dumps(existing_data, indent=2)}
+```
+
+## Required output format
+
+Return a single JSON object with this exact structure (no prose \
+before or after):
+
+```jsonc
+{{
+  "metadata": {{
+    "chapter": "{vol}/{chapter}",
+    "position": {position},
+    "total_chapters": {total_chapters},
+    "questions_audited": <int>,
+    "audit_date": "YYYY-MM-DD"
+  }},
+  "overall": {{
+    "quality_grade": "A|B|C|D|F",  // A=excellent, B=good with minor issues, C=acceptable but multiple issues, D=substantial issues, F=needs regeneration
+    "summary": "1–3 sentence overall assessment"
+  }},
+  "build_up": {{
+    "prior_terms_appropriately_used": [
+      // list of prior-chapter terms that THIS chapter's questions
+      // correctly leverage (use without redefining)
+    ],
+    "redefinition_violations": [
+      // questions that wrongly redefine prior-chapter terms
+      {{"section_id": "...", "question_index": <int>, "term": "...",
+        "explanation": "..."}}
+    ],
+    "missed_buildup_opportunities": [
+      // questions that re-explain a prior-chapter concept unnecessarily
+      {{"section_id": "...", "question_index": <int>, "concept": "...",
+        "explanation": "..."}}
+    ],
+    "forward_reference_violations": [
+      // questions requiring later-chapter knowledge
+      {{"section_id": "...", "question_index": <int>, "concept": "...",
+        "explanation": "..."}}
+    ],
+    "chapter_level_assessment": "1–2 sentences on whether the chapter feels appropriately built on prior context"
+  }},
+  "distribution": {{
+    "type_mix": {{"MCQ": <count>, "SHORT": <count>, "TF": <count>, "FILL": <count>, "ORDER": <count>}},
+    "type_mix_assessment": "matches target | over-MCQ | under-FILL | etc.",
+    "section_count_outliers": [
+      // sections with question counts outside the 4–6 / 2–3 windows
+      {{"section_id": "...", "count": <int>, "expected": "4–6"}}
+    ]
+  }},
+  "per_question_issues": [
+    // List ONLY genuinely problematic questions. Do not list strong
+    // questions. Aim for the ones that would benefit from another
+    // pass. Empty list is fine if the chapter is clean.
+    {{
+      "section_id": "...",
+      "question_index": <int>,
+      "issue_type": "throwaway_distractor|trivia_fill|easy_tf|vague_lo|tautological_lo|missing_explanation|build_up_violation|forward_reference|recall_only|other",
+      "severity": "high|medium|low",
+      "description": "1–2 sentences explaining the issue",
+      "suggested_fix": "1–2 sentences proposing a specific edit"
+    }}
+  ],
+  "recommended_action": "merge_as_is | minor_fixes_recommended | targeted_improvements_needed | requires_regeneration"
+}}
+```
+
+Be honest in your assessment. The point is to surface real issues, \
+not to hand out gold stars. A chapter with grade B and 5 minor \
+issues is more useful than a chapter with grade A and 0 issues if \
+the issues are real.
+"""
+
+
 def build_improve_prompt(vol: str, chapter: str, qmd_path: Path) -> str:
     """Assemble the per-chapter prompt for the IMPROVE mode.
 
@@ -600,6 +781,8 @@ def generate_for_chapter(
         qmd = qmd_path_for(vol, chapter)
         if mode == "improve":
             user_prompt = build_improve_prompt(vol, chapter, qmd)
+        elif mode == "audit":
+            user_prompt = build_audit_prompt(vol, chapter, qmd)
         else:
             user_prompt = build_user_prompt(vol, chapter, qmd)
         result["prompt_chars"] = len(user_prompt)
@@ -611,12 +794,26 @@ def generate_for_chapter(
         data = call_model(provider, system_prompt, user_prompt, model, api_key)
         finalize_metadata(data, vol, chapter, model)
         if mode == "improve":
-            # Improved JSONs land at a staging suffix so humans can diff
-            # before renaming to canonical.
             out = canonical_json_new_path(vol, chapter).with_suffix(".improved")
+        elif mode == "audit":
+            audit_dir = HERE / "_audit"
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            out = audit_dir / f"{chapter}_audit.json"
         else:
             out = canonical_json_new_path(vol, chapter)
         out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        if mode == "audit":
+            # Audit JSONs do not need to pass the quiz validator (they
+            # have a different schema). Skip validation/memo for audits.
+            result.update({
+                "status": "ok",
+                "output": str(out.relative_to(REPO_ROOT)),
+                "grade": data.get("overall", {}).get("quality_grade"),
+                "issues": len(data.get("per_question_issues") or []),
+                "recommended_action": data.get("recommended_action"),
+            })
+            result["elapsed_s"] = round(time.time() - t0, 1)
+            return result
         rc, vout = run_validator(out, qmd)
         memo = write_memo(chapter, vol, data, vout)
         result.update(
@@ -678,7 +875,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--mode",
-        choices=["generate", "improve"],
+        choices=["generate", "improve", "audit"],
         default="generate",
         help=(
             "generate=fresh generation (default). improve=read existing "
