@@ -24,6 +24,10 @@ export type AnalyticsEvent =
   | { type: 'question_contributed'; topic: string; track: string }
   | { type: 'answer_response_time'; questionId: string; topic: string; level: string; seconds: number; napkinGrade?: string; hadUserAnswer: boolean }
   | { type: 'answer_revealed'; topic: string; zone: string; hadUserAnswer: boolean }
+  // Submit-gradient safeguard — fires when a Reveal is intercepted
+  // because elapsed<15s AND chars<50. Tracks under-engagement with
+  // the scenario; should trend down as deliberation habits form.
+  | { type: 'think_guard_triggered' }
   // Gauntlet
   | { type: 'gauntlet_started'; track: string; level: string; questionCount: number }
   | { type: 'gauntlet_completed'; track: string; level: string; pct: number; questionCount: number }
