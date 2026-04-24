@@ -54,11 +54,16 @@ def verify_page(page: Page, url: str) -> tuple[int, int]:
     page.goto(url)
     page.wait_for_load_state("networkidle")
 
-    # (1) Question + answer callouts
+    # (1) Question + answer callouts — Quarto renders them as
+    # ``<div class="callout callout-quiz-question" id="quiz-question-...">``.
+    # The answer div wraps a collapsed ``<details>`` that the reader
+    # expands to reveal the answer.
     q_count = page.locator("div.callout-quiz-question").count()
     a_count = page.locator("div.callout-quiz-answer").count()
+    # Chapter ``##`` headings use ``data-anchor-id`` (id is on the
+    # enclosing ``<section>``). Exclude the generated answer-key section.
     h2_sections = page.locator(
-        "main h2[id^='sec-']:not(#self-check-answers)"
+        "main h2[data-anchor-id^='sec-']:not([data-anchor-id='self-check-answers'])"
     ).count()
 
     if q_count == 0:
@@ -66,10 +71,16 @@ def verify_page(page: Page, url: str) -> tuple[int, int]:
     if q_count != a_count:
         err(f"question/answer callout mismatch: {q_count} questions vs {a_count} answers")
 
-    # (2) Self-check-answers heading
-    answers_heading = page.locator("h2#self-check-answers")
-    if answers_heading.count() == 0:
-        err("missing `## Self-Check Answers` heading (id=self-check-answers)")
+    # (2) Self-check-answers section — the id lives on the <section>.
+    answers_section = page.locator("section#self-check-answers")
+    if answers_section.count() == 0:
+        err("missing `<section id=self-check-answers>` — end-of-chapter answer key not present")
+    else:
+        nested_answers = page.locator("section#self-check-answers div.callout-quiz-answer").count()
+        if nested_answers == 0:
+            warn("self-check-answers section exists but contains no quiz-answer callouts")
+        elif nested_answers != a_count:
+            warn(f"only {nested_answers}/{a_count} answer callouts are inside the self-check-answers section")
 
     # (3) Pair question ids with answer ids
     q_ids = page.evaluate(
@@ -114,7 +125,7 @@ def verify_page(page: Page, url: str) -> tuple[int, int]:
 
     print(
         f"  summary:  ## sections={h2_sections}  Q={q_count}  A={a_count}  "
-        f"self-check-answers={'yes' if answers_heading.count() > 0 else 'no'}"
+        f"self-check-answers={'yes' if answers_section.count() > 0 else 'no'}"
     )
     return errors, warnings
 
