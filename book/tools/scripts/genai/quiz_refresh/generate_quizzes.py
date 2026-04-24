@@ -137,10 +137,16 @@ def build_user_prompt(vol: str, chapter: str, qmd_path: Path) -> str:
     return f"""You are generating quizzes for chapter **{vol}/{chapter}** \
 (position {position} of {total_chapters} in the reading order).
 
-## Anchor map — the authoritative list of ``section_id`` / ``parent_section_id`` values
+## Anchor map
 
-You MUST use these exact identifiers. {len(sections)} section-level (``##``) \
-and {len(subsections)} subsection-level (``###``) anchors are available.
+You MUST use these exact identifiers. The chapter has \
+{len(sections)} section-level (``##``) anchors and {len(subsections)} \
+subsection-level (``###``) anchors.
+
+**Important**: per the spec §1, ONLY ``##`` anchors are quiz candidates. \
+The ``###`` anchors listed here are the **scope** the parent section's \
+quiz must cover, not standalone quiz entries. Never emit a quiz entry \
+whose ``section_id`` is a ``###`` anchor; the validator will reject it.
 
 ```json
 {json.dumps(anchor_data["anchors"], indent=2)}
@@ -166,8 +172,9 @@ chapter's context.
 
 Read the full text below before drafting questions. Find the Learning \
 Objectives callout and use it to constrain what your questions should \
-assess. Note which `##` sections and `###` subsections are substantive \
-enough to warrant a quiz vs. administrative/recap (per spec §3).
+assess. Determine per spec §3 which ``##`` sections warrant a full quiz \
+(Tier 1, 4–6 questions), a minimal quiz (Tier 2, 2–3 questions), or no \
+quiz at all (Tier 3, `quiz_needed: false`).
 
 ```qmd
 {chapter_text}
@@ -175,12 +182,17 @@ enough to warrant a quiz vs. administrative/recap (per spec §3).
 
 ## Your task
 
-For every `##` and `###` anchor listed above, decide per the spec §3 \
-whether a quiz is needed. For quizzed entries, write 4–6 questions \
-(section) or 2–3 questions (subsection) per the spec §1, following the \
-five-type taxonomy (§4), per-type answer format (§5), quality bar (§6), \
-difficulty progression (§7), knowledge-boundary rules (§8), and \
-anti-patterns (§9) — including the anti-shuffle-bug rules (§10).
+For every ``##`` anchor listed above (and ONLY for ``##`` anchors), emit \
+exactly one entry in the output's ``sections`` array. The entry's \
+``section_id`` MUST be a ``##`` anchor; the entry's questions MUST draw \
+on the entire ``##`` section including every ``###`` subsection nested \
+under it (per spec §1 and §8). Sample questions across the full span of \
+the section — not just its opening paragraph — so one quiz surveys the \
+whole argumentative arc.
+
+Follow the five-type taxonomy (§4), per-type answer format (§5), quality \
+bar (§6), difficulty progression (§7), knowledge-boundary rules (§8), \
+and anti-patterns (§9) — including the anti-shuffle-bug rules (§10).
 
 Distribute MCQ correct answers evenly across A, B, C, D as you \
 construct each question. Explain MCQ distractors by their CONTENT, \
@@ -188,9 +200,9 @@ NEVER by their letter.
 
 Return the output as a single JSON object matching the schema in §11. \
 The JSON object must be the entire response; no prose before or after. \
-Set `metadata.total_sections`, `metadata.total_subsections`, and \
-`metadata.total_quizzes` to EXACTLY match your actual entry counts — \
-the validator cross-checks these.
+Set ``metadata.total_sections``, ``metadata.sections_with_quizzes``, and \
+``metadata.sections_without_quizzes`` to EXACTLY match your actual \
+entry counts — the validator cross-checks these.
 """
 
 
@@ -238,11 +250,12 @@ def call_claude(
 
 
 def finalize_metadata(data: dict[str, Any], vol: str, chapter: str, model: str) -> None:
-    """Fix metadata counts to match actual entries (defense against the
-    off-by-one mistake the Wave 1 pilot made)."""
+    """Fix metadata counts to match actual entries (defense against model
+    off-by-one reporting). ``total_sections`` = total ``##`` entries;
+    ``sections_with_quizzes`` = entries with ``quiz_needed: true``."""
     sections = data.get("sections", []) or []
-    n_sec = sum(1 for s in sections if s.get("level") == "section")
-    n_sub = sum(1 for s in sections if s.get("level") == "subsection")
+    total = len(sections)
+    with_quiz = sum(1 for s in sections if (s.get("quiz_data") or {}).get("quiz_needed"))
     meta = data.setdefault("metadata", {})
     meta["source_file"] = str(
         (CONTENTS_DIR / vol / chapter / f"{chapter}.qmd").relative_to(REPO_ROOT)
@@ -251,9 +264,12 @@ def finalize_metadata(data: dict[str, Any], vol: str, chapter: str, model: str) 
     meta["generated_by"] = "quiz-refresh/generate_quizzes.py"
     meta["generated_on"] = date.today().isoformat()
     meta["model"] = model
-    meta["total_sections"] = n_sec
-    meta["total_subsections"] = n_sub
-    meta["total_quizzes"] = n_sec + n_sub
+    meta["total_sections"] = total
+    meta["sections_with_quizzes"] = with_quiz
+    meta["sections_without_quizzes"] = total - with_quiz
+    # Remove any stale v2-draft fields that no longer belong
+    for stale in ("total_subsections", "total_quizzes"):
+        meta.pop(stale, None)
 
 
 def run_validator(json_path: Path, qmd_path: Path) -> tuple[int, str]:
@@ -271,8 +287,6 @@ def write_memo(
 ) -> Path:
     REVIEWS_DIR.mkdir(parents=True, exist_ok=True)
     sections = data.get("sections", []) or []
-    secs = [s for s in sections if s.get("level") == "section"]
-    subs = [s for s in sections if s.get("level") == "subsection"]
     quizzed = [s for s in sections if s.get("quiz_data", {}).get("quiz_needed")]
     skipped = [s for s in sections if not s.get("quiz_data", {}).get("quiz_needed")]
     all_qs = [
@@ -290,7 +304,7 @@ def write_memo(
         f"- **Chapter**: {vol}/{chapter}",
         f"- **Generated on**: {data.get('metadata', {}).get('generated_on')}",
         f"- **Model**: {data.get('metadata', {}).get('model')}",
-        f"- **Anchors processed**: {len(secs)} sections + {len(subs)} subsections = {len(sections)} entries",
+        f"- **`##` sections processed**: {len(sections)} entries",
         f"- **Quizzes written**: {len(quizzed)} active, {len(skipped)} skipped (quiz_needed=false)",
         f"- **Questions written**: {len(all_qs)} total ({', '.join(f'{n} {t}' for t, n in type_mix.most_common())})",
         "",
@@ -359,7 +373,7 @@ def generate_for_chapter(
                 "output": str(out.relative_to(REPO_ROOT)),
                 "memo": str(memo.relative_to(REPO_ROOT)),
                 "sections": data.get("metadata", {}).get("total_sections"),
-                "subsections": data.get("metadata", {}).get("total_subsections"),
+                "quizzed": data.get("metadata", {}).get("sections_with_quizzes"),
                 "questions": sum(
                     len(s.get("quiz_data", {}).get("questions") or [])
                     for s in data.get("sections", []) or []

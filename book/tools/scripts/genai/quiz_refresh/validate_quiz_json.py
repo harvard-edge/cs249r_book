@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""Validate a quiz JSON file against schema v2 and the chapter's anchors.
+"""Validate a quiz JSON file against the canonical spec and the chapter's anchors.
 
-Run this after every sub-agent completes, and again before merging the
-regenerated JSONs into the main build. It surfaces two classes of issues:
+Per ``.claude/rules/quiz-generation.md`` §1 and §11: one quiz per ``##``
+section only; material spans the whole section including its ``###``
+subsections but ``###`` anchors are never valid ``section_id`` values.
 
-* **errors** — the file is malformed or references an anchor that does
-  not exist in the chapter, and must not be merged.
-* **warnings** — the file is merge-safe but violates a quality guideline
-  (question count outside the 4–6 / 2–3 window, MCQ with too few
-  choices, etc.). Review but do not block.
+Run this after every generator pass, and again before commit. It
+surfaces two classes of issues:
+
+* **errors** — malformed file, section_id missing or pointing at a
+  ``###`` anchor, metadata counts disagree with actual entry counts.
+  Blocks merge.
+* **warnings** — merge-safe but flagged for human review: question
+  count outside the 4–6 window (full) or 2–3 (tier 2), MCQ choice
+  count outside 3–5, MCQ answer with a letter-reference pattern
+  (``Option [A-D]``, ``Choice [A-D]``, ``Answer [A-D]``, ``([A-D])``)
+  that the anti-shuffle-bug rule in spec §10 disallows.
 
 Usage
 -----
     python3 validate_quiz_json.py <chapter>_quizzes.json <chapter>.qmd
 
-Exits with status 1 if any errors are found, 0 otherwise.
+Exits 1 if any errors are found, 0 otherwise.
 """
 from __future__ import annotations
 
@@ -24,29 +31,38 @@ import sys
 from pathlib import Path
 
 REQUIRED_QUESTION_FIELDS = ("question_type", "question", "answer", "learning_objective")
-VALID_QUESTION_TYPES = {"MCQ", "SHORT", "TF"}
-EXPECTED_COUNTS = {"section": (4, 6), "subsection": (2, 3)}
+VALID_QUESTION_TYPES = {"MCQ", "SHORT", "TF", "FILL", "ORDER"}
 
-ANCHOR_RE = re.compile(r"^#{2,3}\s+.+?\{#(?P<anchor>[^\s}]+)[^}]*\}\s*$")
+# Heading match — captures the hash count separately so we can tell ## vs. ### apart.
+HEADING_RE = re.compile(r"^(?P<hashes>#{2,6})\s+.+?\{#(?P<anchor>[^\s}]+)[^}]*\}\s*$")
+
+# Anti-shuffle-bug patterns (spec §10 — any of these in an MCQ answer is a warning).
+LETTER_REFS = (
+    re.compile(r"\bOption [A-D]\b", re.IGNORECASE),
+    re.compile(r"\bChoice [A-D]\b", re.IGNORECASE),
+    re.compile(r"\bAnswer [A-D]\b", re.IGNORECASE),
+    re.compile(r"\([A-D]\)"),
+)
 
 
-def chapter_anchors(qmd_path: Path) -> set[str]:
-    anchors: set[str] = set()
+def chapter_anchor_levels(qmd_path: Path) -> dict[str, str]:
+    """Map each chapter anchor id to its heading level ("section" for ##,
+    "subsection" for ###, etc.).
+    """
+    levels: dict[str, str] = {}
     for line in qmd_path.read_text(encoding="utf-8").splitlines():
-        m = ANCHOR_RE.match(line)
-        if m:
-            anchors.add(f"#{m.group('anchor')}")
-    return anchors
-
-
-def anchor_level(qmd_path: Path, anchor_id: str) -> str | None:
-    """Return ``"section"`` or ``"subsection"`` for the given anchor in ``qmd_path``."""
-    needle = anchor_id[1:]  # strip leading '#'
-    for line in qmd_path.read_text(encoding="utf-8").splitlines():
-        m = re.match(r"^(#{2,3})\s+.+?\{#(\S+)", line)
-        if m and m.group(2) == needle:
-            return "section" if len(m.group(1)) == 2 else "subsection"
-    return None
+        m = HEADING_RE.match(line)
+        if not m:
+            continue
+        hashes = m.group("hashes")
+        anchor = f"#{m.group('anchor')}"
+        if len(hashes) == 2:
+            levels[anchor] = "section"
+        elif len(hashes) == 3:
+            levels[anchor] = "subsection"
+        else:
+            levels[anchor] = "deeper"
+    return levels
 
 
 def validate(json_path: Path, qmd_path: Path) -> tuple[list[str], list[str]]:
@@ -58,44 +74,50 @@ def validate(json_path: Path, qmd_path: Path) -> tuple[list[str], list[str]]:
     except json.JSONDecodeError as e:
         return [f"JSON parse error in {json_path.name}: {e}"], []
 
-    # Metadata block
+    # Chapter anchors
+    levels = chapter_anchor_levels(qmd_path)
+    section_anchors = {a for a, lvl in levels.items() if lvl == "section"}
+    if not section_anchors:
+        errors.append(f"no ## anchors with {{#sec-...}} found in {qmd_path.name}")
+        return errors, warnings
+
+    # Metadata sanity
     meta = data.get("metadata", {})
     if meta.get("schema_version") != 2:
-        warnings.append("metadata.schema_version != 2 (recommended for refreshed files)")
+        warnings.append("metadata.schema_version != 2")
     if not meta.get("source_file"):
         warnings.append("metadata.source_file is missing")
 
-    # Cross-check declared metadata counts against actual entry counts
-    sections_list = data.get("sections", []) or []
-    actual_sections = sum(1 for s in sections_list if s.get("level") == "section")
-    actual_subsections = sum(1 for s in sections_list if s.get("level") == "subsection")
-    declared_sections = meta.get("total_sections")
-    declared_subsections = meta.get("total_subsections")
-    declared_total = meta.get("total_quizzes")
-    if declared_sections is not None and declared_sections != actual_sections:
-        errors.append(
-            f"metadata.total_sections={declared_sections} but {actual_sections} level='section' entries found"
-        )
-    if declared_subsections is not None and declared_subsections != actual_subsections:
-        errors.append(
-            f"metadata.total_subsections={declared_subsections} but {actual_subsections} level='subsection' entries found"
-        )
-    if declared_total is not None and declared_total != len(sections_list):
-        errors.append(
-            f"metadata.total_quizzes={declared_total} but {len(sections_list)} entries found"
-        )
-
-    # Anchors
-    anchors = chapter_anchors(qmd_path)
-    if not anchors:
-        errors.append(f"no ## or ### anchors with {{#sec-…}} found in {qmd_path.name}")
-        return errors, warnings
-
-    sections = data.get("sections", [])
+    # Shape
+    sections = data.get("sections")
     if not isinstance(sections, list):
         errors.append("top-level 'sections' must be a list")
         return errors, warnings
 
+    # Declared vs. actual counts
+    actual_total = len(sections)
+    actual_with = sum(
+        1 for s in sections if (s.get("quiz_data") or {}).get("quiz_needed")
+    )
+    actual_without = actual_total - actual_with
+
+    declared_total = meta.get("total_sections")
+    declared_with = meta.get("sections_with_quizzes")
+    declared_without = meta.get("sections_without_quizzes")
+    if declared_total is not None and declared_total != actual_total:
+        errors.append(
+            f"metadata.total_sections={declared_total} but {actual_total} entries found"
+        )
+    if declared_with is not None and declared_with != actual_with:
+        errors.append(
+            f"metadata.sections_with_quizzes={declared_with} but {actual_with} entries have quiz_needed=true"
+        )
+    if declared_without is not None and declared_without != actual_without:
+        errors.append(
+            f"metadata.sections_without_quizzes={declared_without} but {actual_without} entries have quiz_needed=false"
+        )
+
+    # Per-entry validation
     seen_ids: set[str] = set()
     for i, sec in enumerate(sections):
         ctx = f"sections[{i}] id={sec.get('section_id', '?')}"
@@ -106,40 +128,32 @@ def validate(json_path: Path, qmd_path: Path) -> tuple[list[str], list[str]]:
         if sid in seen_ids:
             errors.append(f"{ctx}: duplicate section_id")
         seen_ids.add(sid)
-        if sid not in anchors:
+        anchor_level = levels.get(sid)
+        if anchor_level is None:
             errors.append(f"{ctx}: section_id not found in chapter anchors")
-
-        level = sec.get("level")
-        if level and level not in EXPECTED_COUNTS:
-            errors.append(f"{ctx}: level='{level}' must be 'section' or 'subsection'")
-        # Cross-check declared level against actual heading level in the .qmd
-        actual_level = anchor_level(qmd_path, sid) if sid in anchors else None
-        if level and actual_level and level != actual_level:
-            errors.append(
-                f"{ctx}: declared level='{level}' but anchor is actually {actual_level}"
-            )
-
-        if level == "subsection":
-            parent = sec.get("parent_section_id")
-            if not parent:
-                warnings.append(f"{ctx}: subsection missing parent_section_id")
-            elif parent not in anchors:
-                errors.append(f"{ctx}: parent_section_id not found in chapter anchors")
-
-        qd = sec.get("quiz_data", {}) or {}
-        if qd.get("quiz_needed") is False:
             continue
-        questions = qd.get("questions", [])
+        if anchor_level != "section":
+            errors.append(
+                f"{ctx}: section_id points to a `{anchor_level}` (###) anchor; "
+                "per spec §1 only `##` anchors are quiz candidates"
+            )
+            continue
+
+        # Questions
+        qd = sec.get("quiz_data") or {}
+        if not qd.get("quiz_needed"):
+            continue
+        questions = qd.get("questions") or []
         if not isinstance(questions, list) or not questions:
             errors.append(f"{ctx}: quiz_needed=true but no questions")
             continue
 
-        # Question count window
-        effective_level = level or actual_level or "section"
-        lo, hi = EXPECTED_COUNTS.get(effective_level, (1, 99))
-        if not lo <= len(questions) <= hi:
+        # Count windows: tier 1 (full) = 4–6; tier 2 (minimal) = 2–3.
+        # Validator allows 2–6 as acceptable, flags anything outside that.
+        n = len(questions)
+        if not 2 <= n <= 6:
             warnings.append(
-                f"{ctx}: {len(questions)} questions (expected {lo}–{hi} for {effective_level})"
+                f"{ctx}: {n} questions (expected 2–6 — 4–6 full or 2–3 minimal)"
             )
 
         for j, q in enumerate(questions):
@@ -156,13 +170,26 @@ def validate(json_path: Path, qmd_path: Path) -> tuple[list[str], list[str]]:
                     warnings.append(
                         f"{qctx}: MCQ has {len(choices)} choices (expected 3–5)"
                     )
+                # Anti-shuffle-bug: flag letter-reference patterns in MCQ answers
+                ans = q.get("answer", "")
+                for pat in LETTER_REFS:
+                    hit = pat.search(ans)
+                    if hit:
+                        warnings.append(
+                            f"{qctx}: MCQ answer contains letter-reference '{hit.group(0)}' "
+                            "(spec §5/§10 requires content-based distractor references)"
+                        )
+                        break
 
     return errors, warnings
 
 
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
-        print("usage: validate_quiz_json.py <chapter_quizzes.json> <chapter.qmd>", file=sys.stderr)
+        print(
+            "usage: validate_quiz_json.py <chapter_quizzes.json> <chapter.qmd>",
+            file=sys.stderr,
+        )
         return 2
     json_path, qmd_path = Path(argv[1]), Path(argv[2])
     if not json_path.is_file():
@@ -177,10 +204,8 @@ def main(argv: list[str]) -> int:
         print(f"ERROR: {e}")
     for w in warnings:
         print(f"WARN:  {w}")
-
     if not errors and not warnings:
         print(f"OK: {json_path.name} passes schema + anchor validation")
-
     return 1 if errors else 0
 
 
