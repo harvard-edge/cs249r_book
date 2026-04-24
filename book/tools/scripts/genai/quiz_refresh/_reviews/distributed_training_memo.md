@@ -1,11 +1,11 @@
-# model_serving quiz-refresh memo
+# distributed_training quiz-refresh memo
 
-- **Chapter**: vol1/model_serving
+- **Chapter**: vol2/distributed_training
 - **Generated on**: 2026-04-24
 - **Model**: gpt-5.4
 - **`##` sections processed**: 12 entries
 - **Quizzes written**: 12 active, 0 skipped (quiz_needed=false)
-- **Questions written**: 59 total (37 MCQ, 12 SHORT, 6 TF, 3 FILL, 1 ORDER)
+- **Questions written**: 56 total (30 MCQ, 15 SHORT, 9 TF, 1 ORDER, 1 FILL)
 
 ## Skipped entries (`quiz_needed: false`)
 
@@ -14,5 +14,5 @@ _None._
 ## Validator output
 
 ```
-OK: model_serving_quizzes.json.new passes schema + anchor validation
+OK: distributed_training_quizzes.json.new passes schema + anchor validation
 ```

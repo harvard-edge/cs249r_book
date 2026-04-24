@@ -516,6 +516,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="build prompts but do not call the API",
     )
+    p.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help=(
+            "skip any chapter whose canonical ``{chapter}_quizzes.json`` "
+            "already exists. Useful for resuming after a partial --all run."
+        ),
+    )
     return p.parse_args()
 
 
@@ -540,6 +548,25 @@ def main() -> int:
         chapters: list[tuple[str, str]] = [(parts[0], parts[1])]
     else:
         chapters = list(READING_ORDER)
+
+    if args.skip_existing:
+        # Skip a chapter only if its canonical ``_quizzes.json`` was already
+        # produced by THIS pipeline (metadata.generated_by matches
+        # "quiz-refresh/generate_quizzes.py"). Chapters with stale
+        # pre-refresh canonicals still get regenerated.
+        def already_refreshed(vol: str, chap: str) -> bool:
+            path = canonical_json_new_path(vol, chap).with_suffix("")
+            if not path.exists():
+                return False
+            try:
+                meta = json.loads(path.read_text()).get("metadata", {}) or {}
+            except Exception:
+                return False
+            return "quiz-refresh" in (meta.get("generated_by") or "")
+
+        before = len(chapters)
+        chapters = [(v, c) for v, c in chapters if not already_refreshed(v, c)]
+        print(f"--skip-existing: {before - len(chapters)} refreshed skipped, {len(chapters)} to run")
 
     print(f"spec: {SPEC_PATH.relative_to(REPO_ROOT)} ({len(system_prompt)} chars)")
     print(f"chapters: {len(chapters)}")

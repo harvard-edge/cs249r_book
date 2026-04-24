@@ -1,0 +1,702 @@
+{
+  "metadata": {
+    "source_file": "book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd",
+    "schema_version": 2,
+    "generated_by": "quiz-refresh/generate_quizzes.py",
+    "generated_on": "2026-04-24",
+    "model": "gpt-5.4",
+    "total_sections": 12,
+    "sections_with_quizzes": 12,
+    "sections_without_quizzes": 0
+  },
+  "sections": [
+    {
+      "section_id": "#sec-performance-engineering-memory-wall",
+      "section_title": "The Memory Wall and the Efficiency Frontier",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "iron law of ML performance and bottleneck diagnosis",
+            "GPU memory hierarchy and energy/bandwidth implications",
+            "roofline model and arithmetic intensity",
+            "batch size, workload placement, and prefill-decode decomposition"
+          ],
+          "question_strategy": "Use a full quiz that starts with classifying bottlenecks via the iron law, then applies roofline reasoning with chapter numbers, then tests how batch size and prefill/decode shift arithmetic intensity and optimization choices across subsections.",
+          "difficulty_progression": "Begin with foundational identification of which term dominates, move to scenario-based roofline and memory-hierarchy reasoning, then end with an integrative comparison of prefill versus decode and the role of batch size.",
+          "integration": "Connects earlier chapter concepts such as arithmetic intensity, batching, tensor parallelism, and the iron law of ML systems to this chapter's performance-engineering diagnosis framework.",
+          "ranking_explanation": "This is the chapter's conceptual core: it introduces the governing performance equation, the memory wall, the roofline model, workload placement, and the prefill-decode split. It clearly warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "An LLM decode kernel on an H100 has arithmetic intensity near 1 FLOP/byte. Which optimization is most likely to improve throughput immediately?",
+            "choices": [
+              "Increase peak FLOPS by moving to a higher clock rate while keeping memory bandwidth unchanged",
+              "Reduce bytes moved per weight read using INT4 or FP8-style precision reduction",
+              "Replace the GPU with one that has the same bandwidth but lower compute throughput",
+              "Focus first on making the GEMM use more Tensor Core instructions without changing memory traffic"
+            ],
+            "answer": "The correct answer is B. At roughly 1 FLOP/byte, decode is far below the H100 ridge point, so it is memory-bound. Reducing bytes per weight read directly attacks the memory-access term, whereas more Tensor Core throughput or clock speed does little when the processor is waiting on HBM.",
+            "learning_objective": "Analyze a roofline-based bottleneck and select the optimization that targets the dominant term"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why increasing batch size is described as the universal control knob for LLM serving performance, and why memory capacity limits how far this strategy can go.",
+            "answer": "Increasing batch size amortizes the cost of loading model weights across more requests, so arithmetic intensity rises and decode moves closer to the compute-bound regime. For example, batch-1 decode is deeply memory-bound, but much larger batches can approach the H100 ridge point. The practical limit is KV cache memory: each extra request needs its own cache, so weights and KV state must still fit in GPU memory.",
+            "learning_objective": "Explain how batch size changes arithmetic intensity and justify the memory constraint that bounds its benefit"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a workload is compute-bound, memory bandwidth no longer matters anywhere in the system.",
+            "answer": "False. Compute-bound means the compute term dominates at that operating point, not that memory is irrelevant in all circumstances. Changes in batch size, hardware generation, or implementation can shift the same workload back into the memory-bound regime.",
+            "learning_objective": "Evaluate a common misconception about compute-bound versus memory-bound workloads"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best explains why newer GPU generations make performance engineering techniques like fusion and quantization more important rather than less important?",
+            "choices": [
+              "Newer GPUs reduce HBM capacity, so every model becomes capacity-bound instead of bandwidth-bound",
+              "The widening gap means compute throughput rises faster than memory bandwidth, so more operations fall below the ridge point",
+              "Newer GPUs eliminate kernel launch overhead, so memory optimization becomes the only remaining concern",
+              "Arithmetic intensity is fixed by the model architecture, so hardware changes cannot alter the bottleneck regime"
+            ],
+            "answer": "The correct answer is B. The chapter's widening-gap table shows ridge points increasing sharply across generations because compute scales faster than bandwidth. That means workloads that were once compute-bound can become memory-bound, increasing the payoff from fusion, tiling, and reduced-precision data movement.",
+            "learning_objective": "Compare hardware generations using ridge-point reasoning to predict bottleneck shifts"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A serving team is deciding whether to optimize prefill or decode first. Which pairing is most accurate for a single-request LLM workload?",
+            "choices": [
+              "Prefill is usually memory-bound, while decode is usually compute-bound because decode revisits prior tokens",
+              "Both phases are equally overhead-bound, so CUDA Graphs should be the first optimization for each",
+              "Prefill is typically compute-bound because it processes the prompt in parallel, while decode is typically memory-bound because it reads weights to emit one token at a time",
+              "Both phases are typically compute-bound because transformer layers are dominated by GEMMs"
+            ],
+            "answer": "The correct answer is C. Prefill uses large prompt-length matrix operations with high arithmetic intensity, so Tensor Core throughput matters most. Decode, especially at batch size 1, reloads large weights to produce a single token, so bandwidth dominates and memory-oriented optimizations are more effective.",
+            "learning_objective": "Differentiate prefill and decode phases and classify their dominant bottlenecks"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-fusion",
+      "section_title": "Operator Fusion and Kernel Engineering",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "kernel launch overhead and HBM round-trips",
+            "fusion categories",
+            "CUDA Graphs constraints and benefits",
+            "FlashAttention tiling and online softmax"
+          ],
+          "question_strategy": "Cover both overhead reduction and memory-traffic reduction: one question on launch-bound execution, one on fusion categories, one on CUDA Graphs determinism, and one integrative question on why FlashAttention gains grow with sequence length.",
+          "difficulty_progression": "Start with the basic motivation for fusion, then move through categories and CUDA Graphs trade-offs, ending with algorithmic reasoning about FlashAttention and memory complexity.",
+          "integration": "Builds on earlier concepts of kernel fusion, memory hierarchy, arithmetic intensity, and attention from previous chapters, now applying them to concrete GPU execution patterns.",
+          "ranking_explanation": "This section introduces major performance-engineering mechanisms\u2014fusion, CUDA Graphs, and FlashAttention\u2014with quantitative systems consequences. It warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does fusing a sequence like GEMM \u2192 GELU \u2192 LayerNorm often speed up inference even when the total mathematical function is unchanged?",
+            "choices": [
+              "It reduces redundant HBM reads and writes of intermediate tensors and can also cut kernel launch overhead",
+              "It changes the algorithm from memory-bound to communication-bound, which is easier for GPUs to handle",
+              "It lowers the number of model parameters, so fewer weights need to be stored",
+              "It guarantees higher numerical precision by keeping every operation in FP32"
+            ],
+            "answer": "The correct answer is A. Fusion keeps intermediates in registers or shared memory instead of materializing them in HBM, and it replaces many small launches with fewer kernels. Claims about reducing parameter count or forcing FP32 miss the point: fusion changes data movement and overhead, not model size.",
+            "learning_objective": "Explain how operator fusion improves performance through reduced memory traffic and launch overhead"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following steps in FlashAttention's tiled computation: (1) update the running maximum and rescale prior partial results, (2) compute a local score tile from Q and K blocks, (3) accumulate the tile's contribution into the running output.",
+            "answer": "The correct order is: (2) compute a local score tile from Q and K blocks, (1) update the running maximum and rescale prior partial results, (3) accumulate the tile's contribution into the running output. The score tile must exist before the algorithm can compare its local maximum against the running one. Rescaling must happen before accumulation; otherwise partial outputs would be normalized against inconsistent maxima and the final softmax would be wrong.",
+            "learning_objective": "Apply the logical sequence of online softmax operations in tiled attention"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which workload is the best fit for CUDA Graphs as described in this section?",
+            "choices": [
+              "A research notebook where control flow changes every iteration and sequence lengths vary unpredictably",
+              "A decode loop with repetitive per-token execution, fixed shapes, and stable memory addresses across replays",
+              "An MoE model whose routing decisions change the executed operators for each token",
+              "A prefill service whose prompt lengths and batch sizes vary widely from request to request"
+            ],
+            "answer": "The correct answer is B. CUDA Graphs work best when the operation sequence, tensor shapes, and addresses remain identical across iterations, which matches repetitive decode. Dynamic-shape prefill and routing-dependent execution break the determinism requirement and reduce graph replay usefulness.",
+            "learning_objective": "Classify when CUDA Graphs are appropriate based on execution determinism constraints"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why FlashAttention's speedup tends to grow with sequence length, especially compared with naive attention.",
+            "answer": "Naive attention materializes quadratic-size score and probability matrices in HBM, so its memory traffic grows with O(N^2). FlashAttention tiles the computation and keeps running statistics in SRAM, so it avoids those quadratic intermediates. At long sequence lengths such as 8K or 32K, that gap dominates execution time, freeing memory for larger batches and producing much larger wall-clock gains than at short contexts.",
+            "learning_objective": "Analyze how sequence length changes the relative advantage of tiled attention over naive attention"
+          },
+          {
+            "question_type": "FILL",
+            "question": "FlashAttention makes exact tiled attention possible by maintaining running normalization statistics with an ____ softmax algorithm instead of materializing the full score matrix.",
+            "answer": "online. The term denotes incremental softmax computation that updates maxima and sums tile by tile, allowing exact attention with O(N) memory rather than storing O(N^2) intermediates in HBM.",
+            "learning_objective": "Identify the algorithmic mechanism that enables tiled exact attention"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-precision",
+      "section_title": "Precision Engineering",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "block-wise quantization and outlier handling",
+            "PTQ versus QAT trade-offs",
+            "KV cache compression",
+            "weight-only versus weight-activation quantization"
+          ],
+          "question_strategy": "Mix conceptual and deployment-oriented questions: one on outlier-aware schemes, one on PTQ versus QAT economics, one on operating-point-dependent quantization choices, and one on how precision changes batch-size economics through KV cache.",
+          "difficulty_progression": "Begin with identifying the core quantization challenge, then compare methods, and end with a systems-level decision about deployment regimes and memory budgets.",
+          "integration": "Connects earlier quantization concepts from prior chapters to large-model inference constraints, especially batch size, KV cache pressure, and memory-bound versus compute-bound operating points.",
+          "ranking_explanation": "This section contains substantial new technical content and production trade-offs around quantization strategy, outlier handling, and memory economics, so it deserves a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why do large language models often require outlier-aware quantization methods rather than a single uniform per-tensor INT8 scale?",
+            "choices": [
+              "Because tensor cores can only execute quantized kernels if every hidden dimension has identical variance",
+              "Because a small number of activation dimensions can be much larger than the rest, so one global scale either clips them or wastes precision on typical values",
+              "Because LLMs always require activation quantization and cannot be served with weight-only quantization",
+              "Because block-wise scales increase arithmetic intensity enough to make decode compute-bound"
+            ],
+            "answer": "The correct answer is B. The section emphasizes that a few hidden dimensions become extreme outliers; a single scale must either preserve those at the expense of most values or clip them and lose critical information. Claims about mandatory activation quantization or arithmetic-intensity shifts confuse the core numerical issue.",
+            "learning_objective": "Explain why outlier features break uniform quantization in large language models"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team needs to deploy a 70B model quickly and can tolerate a small quality drop, but they do not have budget for a multi-day distributed fine-tuning run. Which path best matches the chapter's recommended workflow?",
+            "choices": [
+              "Start with QAT immediately because PTQ is only useful for small models",
+              "Use PTQ first with methods like AWQ or GPTQ, then escalate to QAT or QLoRA only if the resulting quality is unacceptable",
+              "Avoid quantization entirely and rely on CUDA Graphs to recover the lost throughput",
+              "Use FP32 weights first, then prune after deployment if latency is too high"
+            ],
+            "answer": "The correct answer is B. The chapter recommends PTQ as the default deployment path because it is fast and operationally cheap, while QAT-like approaches are the fallback when aggressive low-bit PTQ misses quality targets. Jumping straight to full retraining ignores the engineering-cost trade-off emphasized in the section.",
+            "learning_objective": "Evaluate deployment trade-offs between PTQ and QAT under resource and quality constraints"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why weight-only INT4 quantization is usually more helpful for batch-1 decode, while weight-activation FP8 or INT8 quantization becomes more valuable at large batch sizes.",
+            "answer": "At batch-1 decode, the bottleneck is reading weights from HBM, so shrinking weight storage directly reduces memory traffic even if the GEMM still runs in FP16 after dequantization. At large batch sizes, the workload moves closer to compute-bound, so lowering both weight and activation precision can speed the arithmetic itself. The practical consequence is that serving stacks often use different precision strategies for latency-oriented and throughput-oriented operating points.",
+            "learning_objective": "Compare quantization strategies across memory-bound and compute-bound inference regimes"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Paged attention and KV cache quantization solve the same problem in the same way, so using both together is mostly redundant.",
+            "answer": "False. Paged attention reduces fragmentation and wasted allocation, while KV cache quantization reduces the bytes required for the cache itself. The chapter explicitly treats their benefits as multiplicative, not redundant.",
+            "learning_objective": "Distinguish memory-waste reduction from precision-based memory-use reduction"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Suppose a serving system is limited by maximum batch size because KV cache memory crowds out request slots. Which change most directly increases the effective batch size?",
+            "choices": [
+              "Increase the router capacity factor in an MoE layer",
+              "Use larger prompts so prefill does more parallel work",
+              "Apply CUDA Graphs so the CPU launches fewer kernels per token",
+              "Quantize weights and compress the KV cache so more requests fit alongside the model on GPU memory"
+            ],
+            "answer": "The correct answer is D. The batch-size constraint here is memory capacity, not launch overhead or routing policy. Reducing both weight footprint and KV cache bytes frees GPU memory for more concurrent requests, which then raises arithmetic intensity and throughput.",
+            "learning_objective": "Analyze how precision engineering changes serving economics through memory budget reallocation"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-compilation",
+      "section_title": "Graph Compilation",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "compilation pipeline stages",
+            "torch.compile architecture and graph breaks",
+            "XLA versus torch.compile trade-offs",
+            "TensorRT and Triton roles"
+          ],
+          "question_strategy": "Test pipeline ordering, practical compiler selection, graph-break reasoning, and the boundary between fully automatic compilation and custom-kernel authoring.",
+          "difficulty_progression": "Start with the core purpose of compilation, move to tooling distinctions, then end with trade-offs around dynamic shapes and deployment contexts.",
+          "integration": "Reuses prior framework knowledge while extending it to system-level compilation, autotuning, memory planning, and backend-specific optimization choices.",
+          "ranking_explanation": "This section introduces a major optimization layer with multiple frameworks, concrete pipeline stages, and practical deployment trade-offs, warranting a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "ORDER",
+            "question": "Order the following graph compilation stages for a transformer block: (1) operator fusion, (2) graph capture, (3) kernel selection and code generation, (4) memory planning.",
+            "answer": "The correct order is: (2) graph capture, (1) operator fusion, (4) memory planning, (3) kernel selection and code generation. The compiler must first obtain a graph before rewriting it. Fusion changes tensor lifetimes and eliminates intermediates, so memory planning should reason over the optimized graph. Only then can the backend choose or generate kernels for the final transformed operations.",
+            "learning_objective": "Apply the logical sequence of graph compilation pipeline stages"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which scenario most strongly favors XLA over torch.compile?",
+            "choices": [
+              "A steady-state TPU training job with mostly static shapes, where whole-program optimization and automatic distributed partitioning matter",
+              "An exploratory PyTorch workflow with frequent graph breaks and changing Python control flow on NVIDIA GPUs",
+              "A low-volume inference service where compilation time must stay in the seconds range and models change daily",
+              "A custom attention kernel that needs manual algorithm design beyond compiler rewrite rules"
+            ],
+            "answer": "The correct answer is A. XLA's strength is whole-program static compilation and global optimization, especially on TPUs and large distributed jobs. Dynamic exploratory workflows fit torch.compile better, while custom algorithm design points to human kernel engineering rather than a different compiler choice.",
+            "learning_objective": "Evaluate which compiler framework matches a workload's hardware and execution characteristics"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What is the main performance danger of excessive graph breaks in torch.compile?",
+            "choices": [
+              "They force every kernel to run in FP32 rather than lower precision",
+              "They disable tensor parallelism across GPUs, so communication cost rises sharply",
+              "They split the model into many small compiled regions, reducing fusion opportunities and increasing compilation overhead",
+              "They prevent CUDA streams from overlapping communication with computation"
+            ],
+            "answer": "The correct answer is C. Graph breaks fragment the trace into smaller subgraphs, so the compiler cannot optimize across those boundaries and may spend time compiling pieces too small to deliver meaningful gains. This is a compilation-structure problem, not a precision-mode or stream-scheduling issue.",
+            "learning_objective": "Analyze how graph breaks reduce compiler effectiveness in dynamic PyTorch programs"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why TensorRT often outperforms general-purpose compilers for stable production inference, and why many teams still start with torch.compile.",
+            "answer": "TensorRT can calibrate ranges, autotune kernels aggressively, specialize to exact deployment shapes, and optimize purely for inference without backward-pass constraints, so it often achieves higher throughput on fixed production workloads. Teams still start with torch.compile because it needs minimal code change, compiles faster, tolerates more model dynamism, and delivers immediate speedups during development. The trade-off is flexibility versus maximal specialization.",
+            "learning_objective": "Compare deployment trade-offs between general-purpose and inference-specialized compilers"
+          },
+          {
+            "question_type": "FILL",
+            "question": "Triton uses the ____ as its core programming abstraction, letting the programmer think in blocks of data that fit the memory hierarchy instead of manually scheduling individual threads.",
+            "answer": "tile. The tile-centered abstraction mirrors how high-performance kernels exploit SRAM reuse, making fusion and tiling decisions easier to express than in low-level CUDA thread management.",
+            "learning_objective": "Identify the core abstraction that distinguishes Triton's programming model"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-speculative",
+      "section_title": "Speculative Decoding",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "speculative decoding as a latency optimization",
+            "compute-for-latency trade-off",
+            "interaction with memory-bound decode and serving constraints"
+          ],
+          "question_strategy": "Use a minimal synthesis quiz because the section is intentionally brief here and points to a later chapter for full mechanics. Focus on the chapter-level idea and when it is profitable.",
+          "difficulty_progression": "Start with identifying the mechanism, then move to when the trade is attractive, and finish with an integrative scenario about serving latency.",
+          "integration": "Links back to the memory-wall discussion earlier in the chapter and forward to the dedicated inference-at-scale treatment, without relying on later unread details.",
+          "ranking_explanation": "This section is short and mostly connective, but speculative decoding is a named learning objective and a major chapter idea, so it merits a minimal quiz rather than being skipped."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What is the core systems idea behind speculative decoding?",
+            "choices": [
+              "Use a small draft model to propose several tokens, then verify them in parallel with the large target model",
+              "Replace KV cache reads with recomputation so memory traffic disappears entirely",
+              "Train a dense model to behave like an MoE so only one expert is active per token",
+              "Fuse the softmax and sampling kernels so the CPU never waits on the GPU"
+            ],
+            "answer": "The correct answer is A. Speculative decoding trades extra compute from a cheap draft model for fewer expensive target-model weight reads during decode. The other choices describe recomputation, sparse routing, or fusion, which are different optimization families.",
+            "learning_objective": "Identify the mechanism by which speculative decoding reduces decoding latency"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Speculative decoding is most valuable because it reduces model quality requirements and allows the target model to be removed from the serving path.",
+            "answer": "False. The target model remains in the serving path as the verifier, preserving output quality. The gain comes from reducing latency by amortizing expensive target-model work across multiple candidate tokens.",
+            "learning_objective": "Evaluate a misconception about how speculative decoding preserves target-model correctness"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why speculative decoding is especially attractive for memory-bound decode under strict latency SLAs.",
+            "answer": "Batch-1 decode is often limited by repeatedly loading large target-model weights from HBM for each token. Speculative decoding uses a much cheaper draft model to guess several tokens, then verifies them in a single target-model pass, effectively getting more accepted tokens per expensive weight read. That makes it a latency-oriented optimization that exploits spare compute to relieve a bandwidth bottleneck.",
+            "learning_objective": "Explain when speculative decoding is profitable in terms of the chapter's memory-wall framework"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-moe",
+      "section_title": "Mixture of Experts",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "sparse activation and routing",
+            "decoupling model capacity from per-token cost",
+            "system implications of expert selection"
+          ],
+          "question_strategy": "Use a minimal quiz focused on the core architectural idea and its systems consequence, since this section is brief and defers detailed serving mechanics to another chapter.",
+          "difficulty_progression": "Start with identifying the architecture, then move to analyzing why it changes the performance equation, and finish with its practical systems cost.",
+          "integration": "Builds on earlier conditional-computation and distributed-systems vocabulary while setting up the inference-scale discussion of expert parallelism.",
+          "ranking_explanation": "The section is concise, but MoE is a major learning objective and chapter-level optimization concept, so it merits a minimal quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why can a Mixture of Experts model have much larger total parameter count than a dense model without paying the same per-token inference cost?",
+            "choices": [
+              "Because the router activates only a small subset of expert feed-forward networks for each token",
+              "Because MoE eliminates the attention mechanism, leaving only lightweight routing",
+              "Because all experts share one common weight matrix in HBM",
+              "Because expert models are always quantized to 1 bit during serving"
+            ],
+            "answer": "The correct answer is A. MoE decouples total capacity from active computation by sparsely activating experts per token. It does not remove attention, collapse all experts into one shared matrix, or require extreme quantization to deliver the capacity-versus-cost benefit.",
+            "learning_objective": "Explain how sparse expert activation decouples model capacity from inference cost"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain one major systems benefit and one major systems cost introduced by MoE layers.",
+            "answer": "The main benefit is that MoE can deliver the representational capacity of a much larger model while activating only a fraction of parameters per token, reducing compute and bandwidth on the critical path. The cost is routing and distributed coordination: experts must be placed, tokens must be sent to them, and imbalance or communication overhead can erase the theoretical efficiency gains.",
+            "learning_objective": "Analyze the trade-off between sparse activation efficiency and routing/communication overhead in MoE systems"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In MoE systems, increasing expert count is effectively a free way to scale capacity because only one expert is active per token.",
+            "answer": "False. More experts raise total memory needs, routing complexity, and communication/load-balancing challenges. Sparse activation reduces active compute, but system costs still grow with expert count.",
+            "learning_objective": "Evaluate a common misconception about expert count as a free scaling knob"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-overlap",
+      "section_title": "Communication-Computation Overlap",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "when overlap hides communication",
+            "batch size and overlap opportunity",
+            "CUDA streams and asynchronous execution",
+            "resource contention during overlap"
+          ],
+          "question_strategy": "Test the condition for useful overlap, the role of batch size, and the CUDA-stream mechanism, ending with the practical caveat that overlap is not free.",
+          "difficulty_progression": "Begin with the overlap condition, then analyze a batch-size scenario, then reason about asynchronous streams and interference.",
+          "integration": "Connects distributed training concepts from earlier chapters with this chapter's optimization framing of the overhead term.",
+          "ranking_explanation": "This section adds important distributed-performance reasoning and concrete system mechanisms, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Under what condition can communication-computation overlap remove communication from the critical path?",
+            "choices": [
+              "When communication time is less than or equal to the compute time available to hide it behind",
+              "When communication uses FP16 tensors instead of FP32 tensors",
+              "When all collectives are launched after the backward pass completes",
+              "When the network bandwidth exceeds peak GPU FLOPS"
+            ],
+            "answer": "The correct answer is A. Overlap only eliminates exposed communication when the communication finishes before the compute window it is hiding behind ends. Lower precision can help communication volume, but it is not the governing condition by itself, and serializing collectives after backward defeats overlap entirely.",
+            "learning_objective": "Analyze the timing condition required for communication-computation overlap to be effective"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does increasing batch size often improve overlap effectiveness in tensor-parallel workloads?",
+            "choices": [
+              "It reduces the number of collectives per layer to zero",
+              "It makes communication launch overhead disappear completely",
+              "It shortens GEMM kernels so communication can start earlier",
+              "It increases compute time per layer, creating a larger window in which communication can be hidden"
+            ],
+            "answer": "The correct answer is D. Larger batch sizes make per-layer GEMMs heavier, so there is more compute time available to cover communication. The chapter explicitly contrasts tiny batch-1 collectives, where software overhead dominates, with larger-batch cases where communication fits comfortably under compute.",
+            "learning_objective": "Explain how batch size changes the overlap budget in distributed execution"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain how CUDA streams enable overlap, and why overlap can still slightly reduce compute throughput even when it improves end-to-end step time.",
+            "answer": "Separate compute and communication streams let the GPU schedule GEMMs and asynchronous NCCL collectives concurrently instead of serializing them on one timeline. The catch is that communication still consumes hardware resources, including some SM capacity and data-movement machinery, so dense compute kernels may lose a few percent of throughput during overlap. That small interference is usually worth it because it hides far more communication time than it costs.",
+            "learning_objective": "Explain the mechanism and resource trade-off of stream-based asynchronous overlap"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If communication is overlapped with compute, it no longer consumes any GPU resources and therefore cannot interfere with kernel execution.",
+            "answer": "False. The chapter notes that overlap uses separate streams but still contends for physical resources such as SM capacity and communication engines. Overlap reduces exposed latency, not resource usage to zero.",
+            "learning_objective": "Evaluate a misconception about overlap as free concurrency"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-profiling",
+      "section_title": "System Profiling",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "profiling hierarchy",
+            "MFU, HFU, TTFT, ITL, MBU",
+            "roofline diagnosis with profiler data",
+            "PyTorch profiler and Nsight Systems workflow",
+            "common bottleneck patterns and profiling feedback loop"
+          ],
+          "question_strategy": "Use a broad full quiz that spans hierarchy, metrics, trace interpretation, and diagnosis. Include one roofline-based diagnostic, one metric-selection question, and one workflow/feedback-loop question.",
+          "difficulty_progression": "Start with the role of profiling, move to metric choice and timeline interpretation, then end with diagnostic synthesis and iterative optimization logic.",
+          "integration": "This section ties the entire chapter together by turning roofline, fusion, precision, and overlap into a measurement-driven workflow.",
+          "ranking_explanation": "Profiling is central to the chapter's thesis that optimization must follow diagnosis. The section introduces multiple tools, metrics, and diagnostic patterns, so it merits a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A batch-1 LLM decode workload on H100 shows 2 percent MFU but 85 percent memory-bandwidth utilization. What is the best interpretation?",
+            "choices": [
+              "The serving stack is badly broken because both compute and memory utilization should be high simultaneously",
+              "The workload is memory-bound and may already be close to the hardware limit for decode, despite low compute utilization",
+              "The kernel is compute-bound, so the next step is to optimize Tensor Core scheduling",
+              "The profiler is likely wrong because MFU and bandwidth utilization cannot disagree by that much"
+            ],
+            "answer": "The correct answer is B. Inference decode often saturates bandwidth long before it uses much of the available FLOPS, so low MFU with high MBU is consistent with a healthy memory-bound implementation. Treating low MFU alone as failure confuses training-style metrics with inference bottlenecks.",
+            "learning_objective": "Interpret profiling metrics correctly for memory-bound inference workloads"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which profiling level is the right starting point if the only symptom you have is that end-to-end latency is 3\u00d7 above the service SLO?",
+            "choices": [
+              "Kernel-level profiling only, because the largest kernel is almost always the bottleneck",
+              "Application-level profiling first, then drill down through distributed and trace-level views to local causes",
+              "Immediately rewrite the attention kernel before collecting any traces",
+              "Skip profiling and compute arithmetic intensity from the model architecture alone"
+            ],
+            "answer": "The correct answer is B. The section recommends a drill-down workflow from global symptoms to local causes. Starting at application level tells you whether the problem is queueing, communication, launch gaps, or a specific kernel, whereas jumping straight to one kernel risks optimizing the wrong layer of the stack.",
+            "learning_objective": "Design a profiling workflow that moves from global symptoms to local causes"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A LayerNorm kernel achieves about 2.8 TB/s on an H100 and has arithmetic intensity around 5.4 FLOP/byte. Explain what the roofline diagnosis is and what optimization class it suggests.",
+            "answer": "Because 5.4 FLOP/byte is far below the H100 ridge point, the kernel is firmly memory-bound, and the high achieved bandwidth shows it is already close to the hardware bandwidth ceiling. That means better FLOP scheduling alone will not help much. The right interventions reduce data movement instead, such as fusion to eliminate an HBM round-trip or lower precision to cut bytes per element.",
+            "learning_objective": "Analyze profiler and roofline data to classify a kernel and choose an appropriate optimization class"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In an Nsight Systems timeline, what pattern most strongly suggests kernel-launch overhead is a meaningful bottleneck?",
+            "choices": [
+              "A few very long GEMM bars with no idle gaps between them",
+              "Many short kernels separated by repeated idle gaps and noticeable CPU-side launch activity",
+              "NCCL bars fully overlapped under long backward kernels",
+              "A memory timeline whose peak usage is flat and stable across iterations"
+            ],
+            "answer": "The correct answer is B. Frequent short kernels with visible gaps indicate the GPU is repeatedly going idle between launches, exactly the pattern that fusion, CUDA Graphs, or compilation can address. Long continuous GEMMs or well-overlapped NCCL activity point to different bottlenecks.",
+            "learning_objective": "Identify launch-bound execution patterns from a timeline trace"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Once an optimization improves a microbenchmark, it is safe to assume end-to-end throughput will improve by a similar factor.",
+            "answer": "False. The chapter emphasizes that optimization is a waterbed problem: speeding up a non-dominant kernel may barely change end-to-end performance, and fixing one bottleneck often exposes another. Verification requires reprofiling at the application level.",
+            "learning_objective": "Evaluate why end-to-end verification is necessary after localized performance improvements"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-measurement-scale",
+      "section_title": "Measurement at Scale",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "fleet-scale MFU",
+            "scaling tax and regressions",
+            "gray failure detection",
+            "difference between local-node and fleet-wide efficiency"
+          ],
+          "question_strategy": "Use a minimal quiz because the section is focused and shorter than profiling, but still introduces important fleet-level synthesis beyond single-node optimization.",
+          "difficulty_progression": "Start with the meaning of fleet MFU, then move to diagnosing scaling regressions, and end with the operational reason stragglers matter.",
+          "integration": "Extends earlier benchmarking, observability, and MFU concepts to fleet-scale optimization and regression detection.",
+          "ranking_explanation": "This is a synthesis section with important operational concepts rather than a deep new mechanism, so a minimal quiz is appropriate."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why is MFU a better fleet-scale efficiency metric than raw hardware utilization?",
+            "choices": [
+              "Because MFU counts only useful model FLOPs, excluding waste from recomputation, padding, and synchronization",
+              "Because hardware utilization cannot be measured on GPU clusters larger than one node",
+              "Because MFU includes network latency directly in its denominator while utilization does not",
+              "Because hardware utilization is only defined for inference and MFU is only defined for training"
+            ],
+            "answer": "The correct answer is A. The section argues that hardware can look busy while doing low-value work or waiting inefficiently, whereas MFU normalizes for FLOPs that actually advance training or inference. The other choices misstate the relationship between these metrics.",
+            "learning_objective": "Compare MFU with raw utilization as fleet-scale efficiency metrics"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain what the chapter means by the scaling tax, and give one reason it can increase when moving from a single node to a large cluster.",
+            "answer": "The scaling tax is the drop from strong local-node efficiency to lower fleet-wide efficiency once inter-node communication, synchronization, and variability are included. For example, a model that achieves high MFU on 8 GPUs may lose efficiency at 128 GPUs because InfiniBand latency and synchronization barriers stretch step time. A sudden increase in that tax is a warning sign of scaling regression or infrastructure trouble.",
+            "learning_objective": "Explain the concept of scaling tax and diagnose one of its fleet-level causes"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In a synchronous distributed workload, one node running 10 percent slower than the rest can reduce effective fleet MFU even if every other node is healthy.",
+            "answer": "True. The slow node becomes a straggler, forcing the rest of the fleet to wait at synchronization points. That idle waiting lowers effective cluster efficiency even though the majority of nodes are operating normally.",
+            "learning_objective": "Analyze how gray failures and stragglers propagate into fleet-wide efficiency loss"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-playbook",
+      "section_title": "The Optimization Playbook: A 70B LLM Case Study",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "diagnostic optimization sequence",
+            "combining techniques and bottleneck shifts",
+            "70B serving case study",
+            "interaction among quantization, fusion, batching, and speculation"
+          ],
+          "question_strategy": "Use a full synthesis quiz emphasizing sequencing and interaction rather than isolated definitions. Include one ordering question and multiple scenario questions about shifting bottlenecks through optimization rounds.",
+          "difficulty_progression": "Start with the playbook sequence, then apply it to bottleneck classes, then finish with case-study interaction effects and deployment policy decisions.",
+          "integration": "This section explicitly integrates the chapter's memory, fusion, precision, compilation, and algorithmic techniques into a systems optimization workflow.",
+          "ranking_explanation": "The playbook is the chapter's capstone application section and deserves a full quiz that checks whether the reader can coordinate techniques rather than recall them independently."
+        },
+        "questions": [
+          {
+            "question_type": "ORDER",
+            "question": "Order the first four steps of the optimization playbook for a new ML workload: (1) select the primary bottleneck category, (2) baseline measurement, (3) roofline classification, (4) apply the highest-impact optimization and verify.",
+            "answer": "The correct order is: (2) baseline measurement, (3) roofline classification, (1) select the primary bottleneck category, (4) apply the highest-impact optimization and verify. Measurement comes first so the team has real end-to-end evidence. Roofline analysis then identifies the regime, which determines the bottleneck category. Only after diagnosis should the engineer intervene and reprofile to confirm that the bottleneck actually moved.",
+            "learning_objective": "Apply the chapter's optimization workflow in the correct diagnostic order"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A serving stack is memory-bound at batch size 1. Which optimization sequence best matches the chapter's recommended ordering for large gains with modest engineering effort?",
+            "choices": [
+              "Implement speculative decoding first, then profile only if latency remains high",
+              "Start with torch.compile, then apply weight quantization, then FlashAttention, then KV cache compression",
+              "Tune GEMM kernels by hand before collecting any trace data",
+              "Increase MoE expert count before reducing weight precision"
+            ],
+            "answer": "The correct answer is B. The playbook explicitly recommends beginning with low-effort passive optimizations, then applying precision and library-level memory optimizations before algorithmic additions like speculation. Starting with hand-written kernels or expert-count changes ignores the measured bottlenecks and sequencing logic.",
+            "learning_objective": "Select an optimization sequence consistent with the chapter's recommended playbook"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why an optimization that succeeds in Round 1 can change which optimization is best in Round 2, using the 70B case study as an example.",
+            "answer": "Optimizations shift the dominant term in the performance equation. In the case study, INT4 weights and INT8 KV cache first reduced memory pressure and enabled larger batch sizes, which improved throughput but exposed attention, element-wise kernels, and launch overhead as the next major costs. That is why FlashAttention and torch.compile became the next best moves: after the first bottleneck moved, the optimization priority changed with it.",
+            "learning_objective": "Analyze how bottleneck shifts alter the optimal next intervention in an iterative workflow"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why did the case study apply speculative decoding adaptively rather than unconditionally at all loads?",
+            "choices": [
+              "Because speculative decoding only works when TTFT is above 500 ms",
+              "Because at high batch sizes the verification pass is no longer nearly free, so speculation can add compute overhead without proportional latency benefit",
+              "Because FlashAttention cannot coexist with speculative decoding in the same serving stack",
+              "Because CUDA Graphs require speculation to be disabled whenever quantization is enabled"
+            ],
+            "answer": "The correct answer is B. The chapter stresses that speculation is most attractive at low batch sizes where decode is strongly memory-bound. As batch size grows and the GPU approaches compute saturation, verification becomes materially expensive and the trade-off worsens.",
+            "learning_objective": "Evaluate when speculative decoding should be applied based on operating point and bottleneck regime"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which outcome best reflects the chapter's warning that speedups are not additive when techniques are combined?",
+            "choices": [
+              "Applying INT4 weights guarantees the same incremental benefit from KV cache compression regardless of the new bottleneck",
+              "Once torch.compile is enabled, all algorithmic optimizations become unnecessary",
+              "A bandwidth optimization can move the system toward compute-bound behavior, reducing the marginal value of later bandwidth optimizations",
+              "FlashAttention and quantization interfere because one changes memory traffic and the other changes arithmetic precision"
+            ],
+            "answer": "The correct answer is C. The chapter emphasizes interaction effects: after one optimization reduces the memory bottleneck, the next limiting factor may become compute or overhead, so later memory-focused optimizations yield smaller gains. Treating speedups as simply additive ignores these bottleneck shifts.",
+            "learning_objective": "Analyze interaction effects among multiple optimizations in a production serving stack"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-fallacies",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "common performance-engineering misconceptions",
+            "batch dependence of speculative decoding",
+            "quality-performance trade-offs",
+            "limits of compilers and precision reductions"
+          ],
+          "question_strategy": "Use a minimal synthesis quiz that checks whether readers can spot misleading mental models and avoid costly misoptimization.",
+          "difficulty_progression": "Begin with the most common FLOPS misconception, then test a deployment pitfall, and finish with quality-aware performance reasoning.",
+          "integration": "This section consolidates the chapter's earlier lessons into anti-pattern recognition across roofline, profiling, quantization, and compilers.",
+          "ranking_explanation": "This is a synthesis and correction section rather than a source of many new mechanisms, so a minimal quiz is appropriate."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A team upgrades from A100s to a GPU with much higher peak FLOPS but similar memory bandwidth, and batch-1 decode improves only modestly. Which explanation best fits the chapter's framework?",
+            "choices": [
+              "The workload was memory-bound, so similar bandwidth means token generation rate changes little despite the larger compute peak",
+              "The new GPU likely disabled tensor parallelism, so all gains were canceled by communication",
+              "Speculative decoding must have been active on the old hardware and inactive on the new hardware",
+              "The larger FLOPS number only matters for training workloads, never for inference of any kind"
+            ],
+            "answer": "The correct answer is A. The chapter's central warning is that batch-1 decode is dominated by memory bandwidth, not raw compute peak. Saying FLOPS never matters for inference overstates the point; large-batch inference can become compute-bound, but this specific operating point does not.",
+            "learning_objective": "Evaluate the common misconception that more FLOPS automatically means faster inference"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a graph compiler is enabled, manual kernel engineering and algorithmic innovation become unnecessary for top-tier performance.",
+            "answer": "False. The chapter explicitly argues that compilers automate known transformations, but breakthroughs like FlashAttention and speculative decoding required human algorithmic insight beyond compiler heuristics.",
+            "learning_objective": "Differentiate compiler automation from human-led algorithmic performance innovation"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why measuring throughput alone can lead a team to ship a worse serving system, even if the tokens/second number improves.",
+            "answer": "Throughput can rise while answer quality, tail latency, or both get worse. For example, aggressive quantization might double tokens per second but degrade reasoning on hard cases, or a scheduler optimized for average throughput might create bad P99 latency spikes. The chapter's efficiency frontier requires judging performance jointly with quality and user-facing latency, not throughput in isolation.",
+            "learning_objective": "Justify why performance must be evaluated jointly with quality and tail-latency metrics"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-performance-engineering-summary",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "chapter-wide synthesis of roofline, fusion, precision, compilation, and profiling",
+            "iterative optimization loop",
+            "matching software structure to hardware physics"
+          ],
+          "question_strategy": "Use a minimal synthesis quiz that checks whether the reader can restate the chapter's governing principle and relate major techniques to the terms they attack.",
+          "difficulty_progression": "Start with the chapter's central constraint, then test integration across technique families, and finish with the iterative profiling principle.",
+          "integration": "This section consolidates all chapter objectives and ties back to the fleet stack and iron law concepts introduced earlier in the book.",
+          "ranking_explanation": "The summary is integrative rather than novel, so a minimal quiz is appropriate, but it still deserves coverage because it crystallizes the chapter's core mental model."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best captures the chapter's unifying principle of performance engineering?",
+            "choices": [
+              "Performance comes mainly from making hardware faster through larger FLOPS numbers",
+              "Performance engineering is mostly about reducing the number of model parameters, regardless of bottleneck",
+              "The goal is to match software structure to hardware physics by identifying the active bottleneck and reducing unnecessary data movement, overhead, or compute",
+              "Once a model is quantized, the rest of the optimization stack contributes little additional value"
+            ],
+            "answer": "The correct answer is C. The summary repeatedly frames performance engineering as fitting computation to the memory hierarchy, bandwidth limits, and execution overheads revealed by measurement. The other choices reduce the chapter to one mechanism or ignore the diagnose-first discipline.",
+            "learning_objective": "Synthesize the chapter's central principle linking profiling, bottlenecks, and hardware-aware optimization"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which pairing correctly matches an optimization family to the part of the performance equation it most directly attacks?",
+            "choices": [
+              "Graph compilation \u2192 primarily reduces overhead; operator fusion and precision engineering \u2192 primarily reduce memory-access cost",
+              "Operator fusion \u2192 primarily reduces communication across nodes; speculative decoding \u2192 primarily reduces launch overhead",
+              "Precision engineering \u2192 primarily eliminates Python graph breaks; MoE \u2192 primarily eliminates KV cache growth",
+              "Profiling \u2192 directly reduces compute; roofline analysis \u2192 directly reduces memory traffic"
+            ],
+            "answer": "The correct answer is A. The summary organizes techniques by which term they reduce: compilers attack overhead, while fusion and precision reduce bytes moved through the memory hierarchy. The other pairings confuse diagnosis tools with optimizations or assign mechanisms to the wrong bottleneck.",
+            "learning_objective": "Classify optimization families by the dominant term of the performance equation they target"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: The profile-optimize-reprofile loop is mainly useful at the beginning of a project; once the first bottleneck is fixed, later reprofiling adds little value.",
+            "answer": "False. The chapter closes by emphasizing that every optimization shifts the bottleneck, so profiling is not just the first step but every step. Reprofiling is what tells the engineer what to do next.",
+            "learning_objective": "Evaluate the importance of iterative reprofiling in performance engineering"
+          }
+        ]
+      }
+    }
+  ]
+}
