@@ -17,7 +17,7 @@ import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
-  getQuestions, getQuestionsByTopic,
+  getQuestions, getQuestionsByTopic, getTrackCount,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
 } from "@/lib/corpus";
@@ -133,7 +133,7 @@ function PracticePage() {
   const handleChainNavigate = useCallback((qId: string) => {
     const q = getQuestionById(qId);
     if (!q) return;
-    skipFilterCount.current = 3;
+    skipFilterCount.current = 1;
     setCurrent(q);
     setShowAnswer(false);
     setUserAnswer("");
@@ -155,7 +155,11 @@ function PracticePage() {
     if (dailyParam === '1' && !isDailyCompleted()) {
       const dailyQs = getDailyQuestions();
       if (dailyQs.length > 0) {
-        skipFilterCount.current = 3;
+        // React batches the state updates below into a single re-render,
+        // which fires the filter-change effect ONCE — so skip exactly one
+        // invocation, not three. Using 3 used to swallow the user's first
+        // two real track/level clicks silently.
+        skipFilterCount.current = 1;
         setPool(dailyQs);
         setCurrent(dailyQs[0]);
         return; // Skip other param handling
@@ -172,7 +176,11 @@ function PracticePage() {
     if (qParam) {
       const directQ = getQuestionById(qParam);
       if (directQ) {
-        skipFilterCount.current = 3; // skip filter triggers from track/level/area state changes
+        // React batches track/level/area setState calls into ONE re-render,
+        // so the filter-change effect fires exactly once from the mount
+        // batch. Suppress one invocation, not three — the old value of 3
+        // silently swallowed the user's first two track-filter clicks.
+        skipFilterCount.current = 1;
         setCurrent(directQ);
         setSelectedTrack(directQ.track);
         setSelectedLevel(directQ.level);
@@ -201,7 +209,9 @@ function PracticePage() {
         return true;
       });
       if (topicPool.length > 0) {
-        skipFilterCount.current = 3;
+        // See comment on the direct-link branch above: batched state
+        // updates fire the filter effect once, so skip exactly one.
+        skipFilterCount.current = 1;
         setPool(topicPool);
         setSelectedTrack(topicPool[0].track);
         if (levelParam) setSelectedLevel(levelParam);
@@ -504,7 +514,7 @@ function PracticePage() {
             onClick={() => {
               const dailyQs = getDailyQuestions();
               if (dailyQs.length > 0) {
-                skipFilterCount.current = 3;
+                skipFilterCount.current = 1;
                 setPool(dailyQs);
                 setCurrent(dailyQs[0]);
                 setShowAnswer(false);
@@ -588,14 +598,22 @@ function PracticePage() {
                 key={t}
                 onClick={() => setSelectedTrack(t)}
                 className={clsx(
-                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all",
+                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all flex items-center gap-1.5",
                   "lg:text-left",
                   selectedTrack === t
                     ? "bg-accentBlue/10 text-accentBlue"
                     : "text-textSecondary hover:bg-surfaceHover"
                 )}
               >
-                {t === "tinyml" ? "TinyML" : t}
+                <span className="flex-1">{t === "tinyml" ? "TinyML" : t}</span>
+                <span
+                  className={clsx(
+                    "font-mono text-[10px]",
+                    selectedTrack === t ? "opacity-70" : "text-textTertiary"
+                  )}
+                >
+                  {getTrackCount(t).toLocaleString()}
+                </span>
               </button>
             ))}
           </div>

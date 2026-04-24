@@ -85,6 +85,18 @@ export function getTracks(): string[] {
   return Array.from(tracks).sort();
 }
 
+// Memoize per-track counts so re-renders don't re-scan 9k+ questions.
+const _trackCounts: Record<string, number> = (() => {
+  const counts: Record<string, number> = {};
+  for (const q of questions) counts[q.track] = (counts[q.track] ?? 0) + 1;
+  return counts;
+})();
+
+/** Total question count for a single track, or the full corpus when omitted. */
+export function getTrackCount(track?: string): number {
+  return track ? (_trackCounts[track] ?? 0) : questions.length;
+}
+
 export function getLevels(): string[] {
   const order = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6+'];
   const levels = new Set(questions.map((q) => q.level));
