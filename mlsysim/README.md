@@ -157,10 +157,10 @@ If you use mlsysim in your research or teaching, please cite:
 ```bibtex
 @software{mlsysim2026,
   author       = {Janapa Reddi, Vijay},
-  title        = {{MLSysim}: A Composable Analytical Framework for Machine Learning Systems},
+  title        = {{MLSys$\cdot$im}: First-Principles Infrastructure Modeling for Machine Learning Systems},
   year         = {2026},
   url          = {https://mlsysbook.ai/mlsysim},
-  version      = {0.1.0},
+  version      = {0.1.1},
   institution  = {Harvard University}
 }
 ```

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.1.1 (2026-04-24)
+
+**Metadata-only patch release.** No code or API changes; safe drop-in
+replacement for 0.1.1.
+
+- Corrected paper title in citations: now reads "MLSys·im:
+  First-Principles Infrastructure Modeling for Machine Learning
+  Systems" (was "A Composable Analytical Framework for Machine Learning
+  Systems"). Updated in `CITATION.cff`, the BibTeX snippet in
+  `README.md`, and the reference in `mlsysim/core/walls.py`.
+
 ## v0.1.0 (2026-04-01)
 
 **Initial release** of MLSysim — the first-principles analytical modeling engine for ML systems.
