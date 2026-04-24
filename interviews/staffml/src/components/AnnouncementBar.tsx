@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ANNOUNCEMENT } from "@/lib/announcement";
+import { IS_LIVE_DEPLOY } from "@/lib/env";
 
 /**
  * StaffML announcement bar — DOM-identical to Quarto's #quarto-announcement
@@ -41,7 +42,13 @@ function hashContent(content: string): string {
 const SS_KEY_PREFIX = "quarto-announcement-dismissed-";
 
 export default function AnnouncementBar() {
-  const { icon, dismissable, type, lines } = ANNOUNCEMENT;
+  const { icon, dismissable: configDismissable, type, lines } = ANNOUNCEMENT;
+
+  // Dismiss is gated on the live-deploy flag: on the dev-preview deploy
+  // (harvard-edge.github.io/cs249r_book_dev) the bar is intentionally
+  // persistent so every pageview sees the ecosystem pitch; the live site
+  // respects the author's `dismissable: true` config and offers the ×.
+  const dismissable = configDismissable && IS_LIVE_DEPLOY;
 
   // Quarto joins multi-line content with <br> inside a single <p>.
   const innerHTML = useMemo(
