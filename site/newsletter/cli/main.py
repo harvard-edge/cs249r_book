@@ -27,6 +27,7 @@ from .commands.new import NewCommand
 from .commands.open import OpenCommand
 from .commands.pull import PullCommand
 from .commands.push import PushCommand
+from .commands.set_author import SetAuthorCommand
 from .commands.status import StatusCommand
 from .core.config import Config
 from .core.console import get_console
@@ -41,6 +42,7 @@ COMMANDS: Dict[str, Type[BaseCommand]] = {
     "check":   CheckCommand,
     "push":    PushCommand,
     "pull":    PullCommand,
+    "set-author": SetAuthorCommand,
     "archive": ArchiveCommand,
     "diff":    DiffCommand,
     "open":    OpenCommand,

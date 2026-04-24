@@ -115,13 +115,40 @@ def _categorize(subject: str, body: str, default: str) -> list[str]:
     return ["essay"] if len(plain) > 1500 else [default]
 
 
-def _detect_author(subject: str, body: str, fallback: str) -> str:
-    """Pull a guest author out of a 'Written by X' pattern if present.
+def _detect_author(
+    subject: str,
+    body: str,
+    fallback: str,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Resolve byline for a Buttondown email.
 
-    Community/team posts default to 'MLSysBook Team' when no guest author
-    is named, so a team-authored community newsletter is not mis-attributed
-    to the primary author.
+    Precedence (first match wins):
+
+    1. ``metadata["author"]`` on the Buttondown email — authoritative
+       structured field. Set via the Buttondown API (or ``news
+       set-author``), survives body edits, and is the source of truth.
+    2. Explicit marker ``<!-- author: Name -->`` in the body — a
+       transitional fallback for emails composed before metadata
+       adoption; still useful when authoring without API access.
+    3. ``Written by <Name>`` pattern in the prose — handles historical
+       guest-author newsletters that name their writer in-line.
+    4. Subject keywords ("team newsletter" / "community update" /
+       "community spotlight") default to "MLSysBook Team".
+    5. The caller-provided fallback (primary author).
     """
+    # 1. Structured metadata field — authoritative.
+    if metadata and isinstance(metadata, dict):
+        author = metadata.get("author")
+        if isinstance(author, str) and author.strip():
+            return author.strip()
+
+    # 2. Explicit marker comment — check raw body before HTML is stripped.
+    marker = re.search(r"<!--\s*author\s*:\s*(.+?)\s*-->", body, re.IGNORECASE)
+    if marker:
+        return marker.group(1).strip()
+
+    # 3. "Written by X" scan over stripped text.
     text = _strip_html(body) if _is_html(body) else body
     match = re.search(
         r"[Ww]ritten\s+by\s+(?:Professor\s+)?"
@@ -132,11 +159,30 @@ def _detect_author(subject: str, body: str, fallback: str) -> str:
     if match:
         return match.group(1).strip()
 
+    # 4. Subject-keyword heuristic.
     s = subject.lower()
     if any(kw in s for kw in ("team newsletter", "community update", "community spotlight")):
         return "MLSysBook Team"
 
+    # 5. Primary-author fallback.
     return fallback
+
+
+def _read_existing_author(path: Path) -> str | None:
+    """Read the `author:` field from an existing .md file's frontmatter.
+
+    Returns the author value if present, else None. Used by the pull
+    guardrail: when we are about to overwrite a file, we preserve any
+    manually-corrected author rather than silently re-deriving it from
+    body text.
+    """
+    try:
+        # Only scan the first ~30 lines — frontmatter is always at top.
+        head = "".join(path.open("r", encoding="utf-8").readlines()[:30])
+    except OSError:
+        return None
+    m = re.search(r'^author:\s*"([^"]+)"', head, re.MULTILINE)
+    return m.group(1) if m else None
 
 
 def _parse_date(publish_date: str) -> tuple[str, str]:
@@ -158,7 +204,12 @@ def _email_to_markdown(email: dict[str, Any], default_category: str) -> tuple[st
     publish_date = email.get("publish_date", "")
 
     categories = _categorize(subject, body, default_category)
-    author = _detect_author(subject, body, fallback="Vijay Janapa Reddi")
+    author = _detect_author(
+        subject,
+        body,
+        fallback="Vijay Janapa Reddi",
+        metadata=email.get("metadata") or {},
+    )
     date_str, year = _parse_date(publish_date)
     slug = _slugify(subject)
     filename = f"{date_str}_{slug}.md"
@@ -361,16 +412,33 @@ class PullCommand(BaseCommand):
 
             target = self.config.posts_dir / year / filename
 
+            # Guardrail: when overwriting an existing post, preserve any
+            # manually-corrected author in the .md file. A re-pull should
+            # never silently revert a byline we've hand-edited. The body
+            # of the email re-runs through `_detect_author`; if the result
+            # matches, no-op. If it differs, the existing value wins.
+            def _preserve_existing_author(path: Path, new_content: str) -> str:
+                existing = _read_existing_author(path)
+                if not existing:
+                    return new_content
+                return re.sub(
+                    r'^author:\s*"[^"]*"',
+                    f'author: "{existing}"',
+                    new_content,
+                    count=1,
+                    flags=re.MULTILINE,
+                )
+
             if target.exists():
                 if args.force:
-                    plan.append(("overwrite", email, target, content))
+                    plan.append(("overwrite", email, target, _preserve_existing_author(target, content)))
                     consecutive_unchanged = 0
                     continue
 
                 # Incremental: overwrite only if remote modified after local.
                 remote_mod_ts = _modification_ts(email.get("modification_date", ""))
                 if remote_mod_ts and remote_mod_ts > target.stat().st_mtime:
-                    plan.append(("overwrite", email, target, content))
+                    plan.append(("overwrite", email, target, _preserve_existing_author(target, content)))
                     consecutive_unchanged = 0
                     continue
 

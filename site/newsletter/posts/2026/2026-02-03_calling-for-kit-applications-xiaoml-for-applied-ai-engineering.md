@@ -1,7 +1,7 @@
 ---
 title: "Calling for Kit Applications - XIAOML for Applied AI Engineering"
 date: "2026-02-03"
-author: "Vijay Janapa Reddi"
+author: "Kari Janapareddi"
 description: "Dear Educator, We’re reaching out to invite university educators teaching (or planning to teach) TinyML and edge AI to apply to receive TinyML hardware kits for use in their courses. These kits are..."
 categories: ["hands-on"]
 image: "https://assets.buttondown.email/images/895020d4-8862-4711-9677-c95289d59122.png"

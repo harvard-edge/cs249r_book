@@ -1,7 +1,7 @@
 ---
 title: "Team Newsletter: From Tool Training to Process Thinking, A Spiral Model for AI in Higher Education"
 date: "2026-04-14"
-author: "MLSysBook Team"
+author: "Jesús Alfonso López"
 description: "This month’s team newsletter highlights work led by researchers Jesús Alfonso López, Carlos Peláez, Andrés Solano, and Paola Andrea Castillo Beltrán at Universidad Autónoma de Occidente (Cali,..."
 categories: ["community"]
 image: "https://assets.buttondown.email/images/939c0963-a1fd-46df-9ffa-6b61874f4eeb.png?w=960&fit=max"
