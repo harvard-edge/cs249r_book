@@ -1,0 +1,305 @@
+name: '🧮 MLSYSIM · 📦 PyPI Publish'
+
+# =============================================================================
+# MLSYSIM — PyPI Release
+# =============================================================================
+#
+# Builds and uploads the mlsysim Python package to PyPI when a tag matching
+# `mlsysim-v*` is pushed. Uses Trusted Publishing (OIDC), so no PyPI API
+# token is stored anywhere in the repo or in GitHub Secrets.
+#
+# Flow:
+#   1. VERIFY      — tag format, version coherence across files, CHANGELOG
+#                    entry, reachable from dev
+#   2. TEST        — full pytest suite in a clean venv
+#   3. BUILD       — python -m build → wheel + sdist
+#   4. CHECK       — twine check on both artifacts
+#   5. PUBLISH     — upload to PyPI via pypa/gh-action-pypi-publish (OIDC)
+#   6. RELEASE     — create GitHub Release with wheel + sdist attached
+#   7. DOCS        — dispatch mlsysim-publish-live.yml to refresh docs site
+#
+# Triggers:
+#   - push: tags matching 'mlsysim-v*'
+#   - workflow_dispatch: manual trigger (for re-running docs or release-only)
+#
+# Publishes to: https://pypi.org/project/mlsysim/
+# Secrets:      GITHUB_TOKEN (for GH Release + docs trigger)
+#               No PyPI secret required (Trusted Publishing via OIDC)
+# Environment:  pypi-mlsysim (for deployment tracking + protection rules)
+#
+# Related:
+#   - mlsysim-validate-dev.yml — Test & docs validation (runs on PRs)
+#   - mlsysim-publish-live.yml — Docs site publish (dispatched by this)
+#
+# Trusted Publishing setup (one-time, via pypi.org web UI):
+#   https://pypi.org/manage/account/publishing/
+#     Project:     mlsysim
+#     Owner:       harvard-edge
+#     Repository:  cs249r_book
+#     Workflow:    mlsysim-pypi-publish.yml
+#     Environment: pypi-mlsysim
+#
+# =============================================================================
+
+on:
+  push:
+    tags:
+      - 'mlsysim-v*'
+  workflow_dispatch:
+    inputs:
+      skip_pypi:
+        description: 'Skip the PyPI upload (useful for re-running docs + release)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write    # needed to create the GitHub Release
+  id-token: write    # needed for Trusted Publishing (OIDC)
+  actions: write     # needed to dispatch mlsysim-publish-live.yml
+
+concurrency:
+  group: mlsysim-pypi-${{ github.ref }}
+  cancel-in-progress: false   # never cancel a publish in flight
+
+jobs:
+  # ===========================================================================
+  # Stage 1: Verify coherence before doing any irreversible work
+  # ===========================================================================
+  verify:
+    name: '🔍 Verify Version Coherence'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract.outputs.version }}
+      tag: ${{ steps.extract.outputs.tag }}
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # need full history to verify tag reachability from dev
+
+      - name: 🏷️  Extract version from tag
+        id: extract
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ ! "$TAG" =~ ^mlsysim-v[0-9]+\.[0-9]+\.[0-9]+(.*)?$ ]]; then
+            echo "::error::Tag '$TAG' does not match expected pattern 'mlsysim-vX.Y.Z'"
+            exit 1
+          fi
+          VERSION="${TAG#mlsysim-v}"
+          echo "tag=$TAG"       | tee -a "$GITHUB_OUTPUT"
+          echo "version=$VERSION" | tee -a "$GITHUB_OUTPUT"
+
+      - name: 🔢 Verify pyproject.toml version matches tag
+        run: |
+          PKG_VERSION=$(grep -E '^version = ' mlsysim/pyproject.toml | head -1 | cut -d'"' -f2)
+          EXPECTED="${{ steps.extract.outputs.version }}"
+          if [ "$PKG_VERSION" != "$EXPECTED" ]; then
+            echo "::error::pyproject.toml version '$PKG_VERSION' does not match tag version '$EXPECTED'"
+            exit 1
+          fi
+          echo "✅ pyproject.toml version ($PKG_VERSION) matches tag"
+
+      - name: 🔢 Verify __init__.py version matches tag
+        run: |
+          PKG_VERSION=$(grep -E '^__version__ = ' mlsysim/mlsysim/__init__.py | head -1 | cut -d'"' -f2)
+          EXPECTED="${{ steps.extract.outputs.version }}"
+          if [ "$PKG_VERSION" != "$EXPECTED" ]; then
+            echo "::error::mlsysim/__init__.py __version__ ('$PKG_VERSION') does not match tag ('$EXPECTED')"
+            exit 1
+          fi
+          echo "✅ __init__.py version ($PKG_VERSION) matches tag"
+
+      - name: 🔢 Verify CITATION.cff version matches tag
+        run: |
+          CFF_VERSION=$(grep -E '^version:' mlsysim/CITATION.cff | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+          EXPECTED="${{ steps.extract.outputs.version }}"
+          if [ "$CFF_VERSION" != "$EXPECTED" ]; then
+            echo "::error::CITATION.cff version ('$CFF_VERSION') does not match tag ('$EXPECTED')"
+            exit 1
+          fi
+          echo "✅ CITATION.cff version ($CFF_VERSION) matches tag"
+
+      - name: 📝 Verify CHANGELOG has entry for this version
+        run: |
+          EXPECTED="${{ steps.extract.outputs.version }}"
+          if ! grep -qE "^## v${EXPECTED}[[:space:]]" mlsysim/CHANGELOG.md; then
+            echo "::error::CHANGELOG.md is missing an entry for v${EXPECTED}"
+            echo "Expected a heading like: '## v${EXPECTED} (YYYY-MM-DD)'"
+            exit 1
+          fi
+          echo "✅ CHANGELOG entry present for v${EXPECTED}"
+
+      - name: 🌿 Verify tag is reachable from dev
+        run: |
+          # Published packages should come from code that has been merged to dev.
+          # This prevents accidentally tagging a stale branch or feature branch.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/dev" 2>/dev/null; then
+            echo "::warning::Tagged commit is not an ancestor of origin/dev."
+            echo "This is allowed but unusual. Continuing anyway (publish discipline rests on reviewer)."
+          else
+            echo "✅ Tagged commit is reachable from origin/dev"
+          fi
+
+  # ===========================================================================
+  # Stage 2: Full test suite in a clean environment
+  # ===========================================================================
+  test:
+    name: '🧪 Test Suite'
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install package with dev extras
+        working-directory: mlsysim
+        run: pip install ".[dev]"
+
+      - name: 🧪 Run tests
+        working-directory: mlsysim
+        run: pytest tests/ -v --tb=short
+
+  # ===========================================================================
+  # Stage 3: Build wheel + sdist (reproducible, clean)
+  # ===========================================================================
+  build:
+    name: '🔨 Build Distribution'
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    outputs:
+      wheel_name: ${{ steps.names.outputs.wheel }}
+      sdist_name: ${{ steps.names.outputs.sdist }}
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install build tools
+        run: pip install build twine
+
+      - name: 🔨 Build wheel + sdist
+        working-directory: mlsysim
+        run: python -m build
+
+      - name: 🔍 twine check
+        working-directory: mlsysim
+        run: twine check dist/*
+
+      - name: 📛 Capture artifact names
+        id: names
+        working-directory: mlsysim
+        run: |
+          echo "wheel=$(ls dist/*.whl)" >> "$GITHUB_OUTPUT"
+          echo "sdist=$(ls dist/*.tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - name: 📤 Upload distributions as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mlsysim-dist-${{ needs.verify.outputs.version }}
+          path: mlsysim/dist/
+          if-no-files-found: error
+          retention-days: 90
+
+  # ===========================================================================
+  # Stage 4: Publish to PyPI via Trusted Publishing (OIDC)
+  # ===========================================================================
+  # No API token is used. The pypa/gh-action-pypi-publish action requests an
+  # OIDC token from GitHub, which PyPI then validates against the trusted
+  # publisher configuration. If this step fails with an OIDC error, it means
+  # Trusted Publishing has not been set up on pypi.org for this project/workflow.
+  # ===========================================================================
+  publish-pypi:
+    name: '📦 Publish to PyPI'
+    needs: [verify, test, build]
+    if: ${{ !inputs.skip_pypi }}
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-mlsysim
+      url: https://pypi.org/project/mlsysim/${{ needs.verify.outputs.version }}/
+    steps:
+      - name: 📥 Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mlsysim-dist-${{ needs.verify.outputs.version }}
+          path: dist/
+
+      - name: 📦 Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          # Default repository URL is https://upload.pypi.org/legacy/ — correct
+          # for production PyPI. Trusted Publishing is configured per-project
+          # at https://pypi.org/manage/account/publishing/.
+          verbose: true
+
+  # ===========================================================================
+  # Stage 5: Create GitHub Release with artifacts attached
+  # ===========================================================================
+  github-release:
+    name: '🏷️ GitHub Release'
+    needs: [verify, build, publish-pypi]
+    if: always() && needs.build.result == 'success' && (needs.publish-pypi.result == 'success' || inputs.skip_pypi)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+
+      - name: 📥 Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mlsysim-dist-${{ needs.verify.outputs.version }}
+          path: dist/
+
+      - name: 📝 Resolve release notes file
+        id: notes
+        run: |
+          VERSION="${{ needs.verify.outputs.version }}"
+          NOTES_FILE="mlsysim/RELEASE_NOTES_${VERSION}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+            echo "✅ Using $NOTES_FILE"
+          else
+            # Fallback: extract CHANGELOG entry for this version
+            echo "file=" >> "$GITHUB_OUTPUT"
+            echo "ℹ️  $NOTES_FILE not found; GitHub Release will use auto-generated notes from CHANGELOG.md"
+          fi
+
+      - name: 🏷️ Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.verify.outputs.tag }}
+          name: 'MLSys·im ${{ needs.verify.outputs.version }}'
+          body_path: ${{ steps.notes.outputs.file }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          generate_release_notes: ${{ steps.notes.outputs.file == '' }}
+          fail_on_unmatched_files: true
+
+  # ===========================================================================
+  # Stage 6: Trigger docs redeploy so mlsysbook.ai/mlsysim reflects new version
+  # ===========================================================================
+  docs-redeploy:
+    name: '📚 Trigger Docs Redeploy'
+    needs: [verify, publish-pypi]
+    if: ${{ needs.publish-pypi.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📚 Dispatch mlsysim-publish-live.yml on dev
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run mlsysim-publish-live.yml \
+            --repo ${{ github.repository }} \
+            --ref dev
+          echo "✅ Dispatched docs redeploy on dev"

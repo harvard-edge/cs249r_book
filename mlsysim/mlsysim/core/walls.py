@@ -17,7 +17,7 @@ hardware resources to global fleet-scale operations:
 
 Reference
 ---------
-Janapa Reddi et al. (2025), "MLSYSIM: A Composable Analytical Framework
+Janapa Reddi (2026), "MLSys·im: First-Principles Infrastructure Modeling
 for Machine Learning Systems."  Table 1 and Section 4.
 """
 
