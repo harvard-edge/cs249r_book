@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Target, CheckCircle2, XCircle, Terminal, SkipForward,
-  Calculator, SlidersHorizontal, X
+  Calculator, SlidersHorizontal, X, Sparkles, Lightbulb, Clock
 } from "lucide-react";
 import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
@@ -37,6 +37,7 @@ import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
+import QuestionVisual from "@/components/QuestionVisual";
 import { track } from "@/lib/analytics";
 
 /**
@@ -169,6 +170,22 @@ function PracticePage() {
   const [dailyDone, setDailyDone] = useState(false);
   const [sourceTopic, setSourceTopic] = useState<{ id: string; name: string } | null>(null);
   const [showStarGate, setShowStarGate] = useState(false);
+  // Submit-gradient safeguard (per Chip Huyen's UX review).
+  // Rationale: with the restructured layout, the Reveal button sits
+  // directly below the answer textarea — removing the eye-travel
+  // friction that previously enforced deliberation. Without this
+  // guard, users type two sentences and reveal. We detect
+  // low-effort reveals (<15s elapsed AND <50 chars typed) and
+  // surface a one-time "Think longer?" confirm so the UX doesn't
+  // silently erode learning depth. Once confirmed (or once the user
+  // has demonstrated normal deliberation on any question), the guard
+  // stays dismissed for the session.
+  const [thinkConfirmOpen, setThinkConfirmOpen] = useState(false);
+  const deliberationCalibrated = useRef(false);
+  // Post-reveal model-answer anchor so we can scroll-into-view when
+  // showAnswer flips. Prevents the model answer from rendering below
+  // the fold on long scenarios.
+  const modelAnswerRef = useRef<HTMLDivElement>(null);
 
   // Chain tracking — update when current question changes
   const chainInfo = current ? getChainForQuestion(current.id) : null;
@@ -368,7 +385,33 @@ function PracticePage() {
     setRubricItems([]);
   }, [pool, current, showAnswer]);
 
-  const handleReveal = () => {
+  // Submit-gradient guard: intercept reveals that look like
+  // "didn't really try." The restructured layout puts the Reveal
+  // button directly below the textarea, so the eye-travel friction
+  // that previously enforced deliberation is gone. Without a
+  // deliberate pause, median time-before-reveal drops and
+  // self-assessed scores inflate without actual learning. We surface
+  // a one-time confirm, and once the user has demonstrated normal
+  // deliberation on any question (≥20s OR ≥80 chars typed), the
+  // guard calibrates itself off for the session. `force=true` skips
+  // the check — used by the confirm dialog's "Reveal anyway" button.
+  const handleReveal = (force: boolean = false) => {
+    if (!force && !deliberationCalibrated.current) {
+      const elapsedMs = Date.now() - questionShownAt.current;
+      const charsTyped = userAnswer.trim().length;
+      if (elapsedMs < 15000 && charsTyped < 50) {
+        setThinkConfirmOpen(true);
+        track({ type: 'think_guard_triggered' });
+        return;
+      }
+      // Any reveal that passes the threshold marks this user as
+      // deliberating normally — don't pester them again this session.
+      if (elapsedMs >= 20000 || charsTyped >= 80) {
+        deliberationCalibrated.current = true;
+      }
+    }
+    setThinkConfirmOpen(false);
+
     // Star gate check
     if (shouldShowGate()) {
       setShowStarGate(true);
@@ -400,6 +443,15 @@ function PracticePage() {
     }
 
     setShowAnswer(true);
+    // After the reveal state commits, smoothly scroll the model
+    // answer into view. This is the primary pedagogical comparison
+    // moment — the user's answer should still be visible above, the
+    // model answer enters from below. Without this scroll, on long
+    // scenarios the model answer renders below the fold and the
+    // user has to hunt for it.
+    setTimeout(() => {
+      modelAnswerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
 
     // Track answer reveal with response time and napkin grade
     if (current) {
@@ -829,132 +881,374 @@ function PracticePage() {
         <span className="text-sm">Filters</span>
       </button>
 
-      {/* Main content */}
+      {/*
+        Main content — restructured 2026-04-24 based on UX feedback from
+        Emma (beginner), David (power user), and Chip Huyen (practitioner).
+        Key shifts:
+          - LEFT column = problem + answer + reveal + post-reveal (one
+            vertical reading/typing flow). No more 500px eye-travel from
+            scenario to textarea.
+          - RIGHT column = tools panel (Ask Interviewer, Hardware ref,
+            Napkin calc) — each a collapsible card so non-AI users don't
+            see wasted pixels shouting "use the AI."
+          - Your-task callout is STICKY at the top of the left scroll
+            container: scroll the scenario away, the question stays
+            visible (David's fix for long-scenario context loss).
+          - Submit-gradient safeguard: reveals triggered with <15s
+            elapsed AND <50 chars typed pop a "Think longer?" confirm.
+            Once the user demonstrates normal deliberation, the guard
+            self-calibrates off for the session (Chip's warning about
+            the new layout making premature reveals too frictionless).
+          - Post-reveal model answer scrolls into view via modelAnswerRef
+            so it doesn't render below the fold.
+          - "Stuck? Ask the Interviewer →" nudge beneath the textarea
+            so beginners discover the AI without it dominating the page
+            (Emma's scaffolding request + Chip's "don't advertise
+            unused features" rule).
+      */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {current ? (
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-            {/* Question */}
+            {/* ── LEFT: problem + answer + reveal + post-reveal ── */}
             <div className="flex-1 flex flex-col min-h-0">
               <div className="flex-1 overflow-y-auto px-8 lg:px-12 py-10">
-              <div className="max-w-3xl mx-auto">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={current.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: 20 }}
-                  >
-                    <div className="flex items-center gap-3 mb-4">
-                      <LevelBadge level={current.level} />
-                      <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">
-                        {current.competency_area}
-                      </span>
-                      <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">
-                        {current.zone}
-                      </span>
-                      <span className="text-[10px] font-mono text-textTertiary uppercase">
-                        {current.track}
-                      </span>
-                      <span className="flex-1" />
-                      {/* Copy link */}
-                      <button
-                        onClick={() => {
-                          const url = `${window.location.origin}/practice?q=${current.id}`;
-                          navigator.clipboard.writeText(url);
-                          showToast({ type: 'badge', title: 'Link copied', description: 'Share this question with others' });
-                        }}
-                        // p-2 -m-2 extends the tap target to 30x30px on mobile
-                        // while keeping the visual icon at 14x14 (Apple HIG
-                        // "extend hit target without changing appearance").
-                        className="text-textMuted hover:text-textSecondary transition-colors p-2 -m-2"
-                        aria-label="Copy question link"
-                        title="Copy question link"
-                      >
-                        <LinkIcon className="w-3.5 h-3.5" />
-                      </button>
-                      {/* Report issue */}
-                      <a
-                        href={buildReportUrl(current)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
-                        title="Report an issue with this question"
-                      >
-                        <Flag className="w-3.5 h-3.5" /> Report
-                      </a>
-                    </div>
-                    {chainInfo && !showAnswer && (
-                      <div className="mb-3">
-                        <ChainBadge
-                          chainId={chainInfo.chainId}
-                          position={chainInfo.position + 1}  /* 1-indexed for display */
-                          total={chainInfo.total}
-                          onClick={() => setChainPreviewOpen((v) => !v)}
-                        />
+                <div className="max-w-3xl mx-auto">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={current.id}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                    >
+                      {/* Badges + copy-link + report */}
+                      <div className="flex items-center gap-3 mb-4">
+                        <LevelBadge level={current.level} />
+                        <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-border bg-surface">
+                          {current.competency_area}
+                        </span>
+                        <span className="text-[10px] font-mono text-textTertiary uppercase px-2 py-0.5 rounded border border-accentBlue/20 bg-accentBlue/5">
+                          {current.zone}
+                        </span>
+                        <span className="text-[10px] font-mono text-textTertiary uppercase">
+                          {current.track}
+                        </span>
+                        <span className="flex-1" />
+                        <button
+                          onClick={() => {
+                            const url = `${window.location.origin}/practice?q=${current.id}`;
+                            navigator.clipboard.writeText(url);
+                            showToast({ type: 'badge', title: 'Link copied', description: 'Share this question with others' });
+                          }}
+                          className="text-textMuted hover:text-textSecondary transition-colors p-2 -m-2"
+                          aria-label="Copy question link"
+                          title="Copy question link"
+                        >
+                          <LinkIcon className="w-3.5 h-3.5" />
+                        </button>
+                        <a
+                          href={buildReportUrl(current)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-textSecondary hover:text-accentRed transition-colors"
+                          title="Report an issue with this question"
+                        >
+                          <Flag className="w-3.5 h-3.5" /> Report
+                        </a>
                       </div>
-                    )}
-                    <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
-                      {current.title}
-                    </h2>
-                    <div className="prose max-w-none">
-                      {current.scenario ? (
-                        <p className="text-textSecondary leading-relaxed text-base">
-                          {cleanScenario(current.scenario)}
-                        </p>
-                      ) : (
-                        <ScenarioSkeleton />
+
+                      {/* Chain badge (pre-reveal only) */}
+                      {chainInfo && !showAnswer && (
+                        <div className="mb-3">
+                          <ChainBadge
+                            chainId={chainInfo.chainId}
+                            position={chainInfo.position + 1}
+                            total={chainInfo.total}
+                            onClick={() => setChainPreviewOpen((v) => !v)}
+                          />
+                        </div>
                       )}
-                    </div>
 
-                    {/*
-                      Your-task callout. Three states, in priority order:
-                      1. `current.question` present → render it as the
-                         primary ask (post-backfill state).
-                      2. Scenario already ends with `?` → render nothing
-                         extra; the interrogative is already in the prose.
-                      3. Neither → render a zone-aware inferred fallback
-                         so the reader at least knows the shape of the
-                         expected answer. Marked "inferred" so it's
-                         clearly distinct from an authored question.
-                      Placed AFTER the scenario because the scenario sets
-                      context that the question refers to ("given the
-                      above…"). A prompt above an unread scenario would
-                      be meaningless.
-                    */}
-                    {current.question ? (
-                      <div className="mt-5 p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <Target className="w-3.5 h-3.5 text-accentBlue" />
-                          <span className="text-[10px] font-mono text-accentBlue uppercase tracking-widest">Your task</span>
-                        </div>
-                        <p className="text-textPrimary leading-relaxed text-base font-medium">
-                          {current.question}
-                        </p>
-                      </div>
-                    ) : current.scenario && !current.scenario.trim().endsWith("?") ? (
-                      <div className="mt-5 p-4 rounded-lg border border-dashed border-border bg-surface/40">
-                        <div className="flex items-center gap-2 mb-1.5">
-                          <Target className="w-3.5 h-3.5 text-textTertiary" />
-                          <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest">
-                            Your task <span className="text-textMuted normal-case">(inferred)</span>
-                          </span>
-                        </div>
-                        <p className="text-textSecondary leading-relaxed text-sm">
-                          {inferTaskPrompt(current.zone, current.bloom_level)}
-                        </p>
-                      </div>
-                    ) : null}
-                    {chainInfo && !showAnswer && chainPreviewOpen && (
-                      <div className="mt-6" data-testid="chain-preview-prereveal">
-                        <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
-                      </div>
-                    )}
+                      {/* Title */}
+                      <h2 className="text-2xl lg:text-3xl font-bold text-textPrimary mb-6 tracking-tight">
+                        {current.title}
+                      </h2>
 
-                  </motion.div>
-                </AnimatePresence>
+                      {/*
+                        STICKY Your-task callout. Pins to the top of the
+                        scroll container so the question stays visible
+                        while the user scrolls to read more scenario or
+                        compare their answer with the model. Negative
+                        horizontal margins + re-added padding make the
+                        sticky bar span the full left-column width so the
+                        background covers scrolling text cleanly.
+                      */}
+                      <div className="sticky top-0 z-20 -mx-8 lg:-mx-12 px-8 lg:px-12 py-3 bg-background border-b border-border">
+                        {current.question ? (
+                          <div className="p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <Target className="w-3.5 h-3.5 text-accentBlue" />
+                              <span className="text-[10px] font-mono text-accentBlue uppercase tracking-widest">Your task</span>
+                            </div>
+                            <p className="text-textPrimary leading-relaxed text-base font-medium">
+                              {current.question}
+                            </p>
+                          </div>
+                        ) : current.scenario && !current.scenario.trim().endsWith("?") ? (
+                          <div className="p-4 rounded-lg border border-dashed border-border bg-surface/40">
+                            <div className="flex items-center gap-2 mb-1.5">
+                              <Target className="w-3.5 h-3.5 text-textTertiary" />
+                              <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest">
+                                Your task <span className="text-textMuted normal-case">(inferred)</span>
+                              </span>
+                            </div>
+                            <p className="text-textSecondary leading-relaxed text-sm">
+                              {inferTaskPrompt(current.zone, current.bloom_level)}
+                            </p>
+                          </div>
+                        ) : (
+                          /* Scenario ends with ?; no callout needed but reserve minimal spacing */
+                          <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
+                            <Target className="w-3.5 h-3.5" />
+                            Your task — see scenario below
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Scenario prose */}
+                      <div className="prose max-w-none mt-6">
+                        {current.scenario ? (
+                          <p className="text-textSecondary leading-relaxed text-base">
+                            {cleanScenario(current.scenario)}
+                          </p>
+                        ) : (
+                          <ScenarioSkeleton />
+                        )}
+                      </div>
+
+                      {/* Visual diagram (optional) */}
+                      {current.visual && (
+                        <QuestionVisual track={current.track} visual={current.visual} />
+                      )}
+
+                      {/* Pre-reveal chain sibling preview (toggle from ChainBadge) */}
+                      {chainInfo && !showAnswer && chainPreviewOpen && (
+                        <div className="mt-6" data-testid="chain-preview-prereveal">
+                          <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
+                        </div>
+                      )}
+
+                      {/* ── ANSWER + REVEAL (pre-reveal) ── */}
+                      {!showAnswer ? (
+                        <div className="mt-8">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest flex items-center gap-1.5">
+                              <Calculator className="w-3 h-3" />
+                              {current.details.napkin_math ? "Your napkin math" : "Your answer"}
+                            </span>
+                          </div>
+                          <textarea
+                            value={userAnswer}
+                            onChange={(e) => setUserAnswer(e.target.value)}
+                            placeholder={
+                              current.details.napkin_math
+                                ? "Type your napkin math here...\n\nExample:\nBandwidth: 3.35 TB/s\nModel size: 140 GB\nTime = 140 / 3350 ≈ 42 ms\n\n=> 42 ms   (mark your final answer with =>)"
+                                : "Type your answer or reasoning here..."
+                            }
+                            className="w-full min-h-[220px] bg-surface border border-border rounded-md p-5 font-mono text-[13px] text-textPrimary resize-y focus:outline-none focus:border-accentBlue/50 placeholder:text-textTertiary/40 leading-relaxed"
+                            spellCheck="false"
+                          />
+                          <button
+                            onClick={() => handleReveal()}
+                            className="mt-4 w-full bg-textPrimary text-background font-bold py-3 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2"
+                          >
+                            Reveal Answer <span className="text-[10px] opacity-50 ml-1">⌘↵</span>
+                          </button>
+
+                          {/*
+                            Beginner scaffolding nudge (Emma's UX review).
+                            Subtle link below the textarea that points
+                            discoverable users toward the Ask Interviewer
+                            feature in the right column. Arrow implies
+                            spatial direction. Kept small so it doesn't
+                            compete with the Reveal button for attention.
+                          */}
+                          <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-textTertiary">
+                            <Lightbulb className="w-3 h-3" />
+                            <span>Stuck? Use the <span className="text-accentBlue font-medium">Ask Interviewer</span> panel on the right →</span>
+                          </div>
+                        </div>
+                      ) : (
+                        /* ── POST-REVEAL — model answer lands below the user's input ── */
+                        <motion.div
+                          ref={modelAnswerRef}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="mt-8 space-y-5 scroll-mt-24"
+                        >
+                          {userAnswer.trim() && (
+                            <details className="group" open>
+                              <summary className="text-[10px] font-mono text-textTertiary uppercase cursor-pointer select-none flex items-center gap-1.5">
+                                <span className="group-open:rotate-90 transition-transform text-[8px]">&#9654;</span>
+                                Your answer
+                              </summary>
+                              <div className="mt-2 p-3 bg-surface border border-border rounded-md font-mono text-[12px] text-textSecondary whitespace-pre-wrap leading-relaxed max-h-56 overflow-y-auto">
+                                {userAnswer}
+                              </div>
+                            </details>
+                          )}
+
+                          {napkinResult && (
+                            <div className={clsx(
+                              "p-4 rounded-lg border",
+                              napkinResult.grade === 'exact' || napkinResult.grade === 'close'
+                                ? "bg-accentGreen/10 border-accentGreen/30"
+                                : napkinResult.grade === 'ballpark'
+                                ? "bg-accentAmber/10 border-accentAmber/30"
+                                : "bg-accentRed/10 border-accentRed/30"
+                            )}>
+                              <div className="flex items-center gap-2 mb-2">
+                                {(napkinResult.grade === 'exact' || napkinResult.grade === 'close') ? (
+                                  <CheckCircle2 className="w-4 h-4 text-accentGreen" />
+                                ) : napkinResult.grade === 'ballpark' ? (
+                                  <CheckCircle2 className="w-4 h-4 text-accentAmber" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-accentRed" />
+                                )}
+                                <span className={clsx(
+                                  "text-sm font-bold",
+                                  (napkinResult.grade === 'exact' || napkinResult.grade === 'close') ? "text-accentGreen"
+                                    : napkinResult.grade === 'ballpark' ? "text-accentAmber"
+                                    : "text-accentRed"
+                                )}>
+                                  {napkinResult.label}
+                                </span>
+                              </div>
+                              <p className="text-xs text-textSecondary font-mono">
+                                Your answer: {napkinResult.userNum.toLocaleString()} |
+                                Model answer: {napkinResult.modelNum.toLocaleString()} |
+                                Off by: {(napkinResult.ratio * 100).toFixed(0)}%
+                              </p>
+                              {napkinResult.maxSelfScore < 3 && (
+                                <p className="text-[10px] text-textTertiary mt-2">
+                                  Self-assessment capped at "{napkinResult.maxSelfScore === 2 ? 'Partial' : 'Wrong'}" based on napkin math accuracy
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {current.details.common_mistake && (
+                            <div className="border-l-4 border-accentRed pl-4">
+                              <span className="text-[10px] font-mono text-accentRed uppercase mb-1 flex items-center gap-1">
+                                <XCircle className="w-3 h-3" /> Common Mistake
+                              </span>
+                              <p className="text-sm text-textSecondary leading-relaxed">{current.details.common_mistake}</p>
+                            </div>
+                          )}
+
+                          <div className="border-l-4 border-accentGreen pl-4">
+                            <span className="text-[10px] font-mono text-accentGreen uppercase mb-1 flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" /> Model Answer
+                            </span>
+                            <p className="text-sm text-textPrimary leading-relaxed">{current.details.realistic_solution}</p>
+                          </div>
+
+                          {current.details.napkin_math && (
+                            <div className="bg-surface border border-border p-4 rounded-lg">
+                              <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
+                              <NapkinMathDisplay text={current.details.napkin_math} />
+                            </div>
+                          )}
+
+                          {rubricItems.length > 0 && (
+                            <div className="border-t border-border pt-5">
+                              <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
+                                Did your answer cover? <span className="text-textTertiary/50 ml-1">{rubricItems.filter(i => i.checked).length}/{rubricItems.length}</span>
+                              </span>
+                              <div className="space-y-2">
+                                {rubricItems.map((item, idx) => (
+                                  <label
+                                    key={idx}
+                                    className={clsx(
+                                      "flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-all text-xs",
+                                      item.checked
+                                        ? "border-accentGreen/30 bg-accentGreen/5"
+                                        : "border-border hover:border-borderHighlight"
+                                    )}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={item.checked}
+                                      onChange={() => {
+                                        const updated = [...rubricItems];
+                                        updated[idx] = { ...updated[idx], checked: !updated[idx].checked };
+                                        setRubricItems(updated);
+                                      }}
+                                      className="mt-0.5 accent-accentGreen"
+                                    />
+                                    <span className={clsx(
+                                      "leading-relaxed",
+                                      item.checked ? "text-textPrimary" : "text-textSecondary"
+                                    )}>
+                                      {item.text}
+                                    </span>
+                                  </label>
+                                ))}
+                              </div>
+                              {rubricScore !== null && (
+                                <div className="mt-2 text-[10px] font-mono text-textTertiary">
+                                  Rubric score: {rubricScore}/3 → {['Skip', 'Wrong', 'Partial', 'Nailed It'][rubricScore]}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="border-t border-border pt-5">
+                            <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
+                              {rubricItems.length > 0 ? 'Confirm or override' : 'Rate yourself'}
+                              <span className="text-textTertiary/50 ml-2">Press 1-4</span>
+                            </span>
+                            <div className="grid grid-cols-4 gap-2">
+                              {[
+                                { score: 0, label: "Skip", color: "border-border text-textTertiary hover:border-borderHighlight" },
+                                { score: 1, label: "Wrong", color: "border-accentRed/30 text-accentRed hover:bg-accentRed/10" },
+                                { score: 2, label: "Partial", color: "border-accentAmber/30 text-accentAmber hover:bg-accentAmber/10" },
+                                { score: 3, label: "Nailed It", color: "border-accentGreen/30 text-accentGreen hover:bg-accentGreen/10" },
+                              ].map(({ score, label, color }) => {
+                                const disabled = score > effectiveMaxScore;
+                                const isRubricSuggested = rubricScore !== null && score === rubricScore;
+                                return (
+                                  <button
+                                    key={score}
+                                    onClick={() => handleScore(Math.min(score, effectiveMaxScore))}
+                                    disabled={disabled}
+                                    aria-label={`Rate yourself: ${label} (${score} of 3)`}
+                                    className={clsx(
+                                      "px-3 py-2.5 rounded-lg border text-xs font-medium transition-all",
+                                      disabled
+                                        ? "opacity-30 cursor-not-allowed border-border text-textTertiary"
+                                        : isRubricSuggested
+                                        ? `${color} ring-1 ring-accentBlue/50`
+                                        : color
+                                    )}
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <QuestionFeedback question={current} />
+                            {chainInfo && (
+                              <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
+                            )}
+                          </div>
+                        </motion.div>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
               </div>
-              </div>
-              {/* Sticky bottom bar */}
+
+              {/* Sticky bottom bar: pool count + Next Question */}
               <div className="shrink-0 border-t border-border bg-background px-8 lg:px-12 py-3 flex items-center justify-between">
                 <span className="text-[11px] font-mono text-textTertiary">
                   {pool.length} in pool
@@ -969,17 +1263,14 @@ function PracticePage() {
               </div>
             </div>
 
-            {/* Answer panel */}
-            <div className="w-full lg:w-[460px] border-t lg:border-t-0 lg:border-l border-border bg-surface flex flex-col">
-              <div className="h-10 border-b border-border flex items-center px-4 bg-background/50 justify-between">
+            {/* ── RIGHT: tools panel ── */}
+            <div className="w-full lg:w-[400px] border-t lg:border-t-0 lg:border-l border-border bg-surface flex flex-col overflow-y-auto">
+              <div className="h-10 border-b border-border flex items-center px-4 bg-background/50 justify-between shrink-0">
                 <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest flex items-center gap-2">
-                  <Calculator className="w-3 h-3" /> {current.details.napkin_math ? "napkin_math.py" : "answer.md"}
+                  <Sparkles className="w-3 h-3" /> Tools
                 </span>
                 <button
                   onClick={() => pickRandom()}
-                  // Extend tap target to ~32x52px on mobile while keeping
-                  // visual text inline-sized. Negative margin cancels the
-                  // padding so layout doesn't shift.
                   className="text-[10px] font-mono text-textTertiary hover:text-textPrimary transition-colors flex items-center gap-1 py-2 -my-2 px-2 -mx-2"
                   aria-label="Skip to a random question"
                 >
@@ -987,212 +1278,31 @@ function PracticePage() {
                 </button>
               </div>
 
-              <HardwareRef />
-              <NapkinCalc />
-              {/* Pre-Reveal: Socratic clarifier (interview persona).
-                  Post-Reveal: Tutor with canonical answer injected.
-                  The `key` forces a remount when mode flips so the
-                  transcript resets — a pre-reveal "don't tell me the
-                  answer" exchange would otherwise pollute the tutor's
-                  context when we start a fresh post-reveal dialogue. */}
+              {/*
+                Right-column order follows Chip Huyen's feedback:
+                  - Ask Interviewer first (the novel feature; beginners
+                    discover it via the nudge under the textarea). Keep
+                    it collapsible — non-AI users see a thin header, not
+                    a giant empty chat panel shouting "you're doing this
+                    wrong." The `key` prop force-remounts on persona
+                    swap so pre-reveal and post-reveal transcripts stay
+                    separate.
+                  - Hardware reference defaults OPEN. Practitioners
+                    doing bandwidth/FLOPS calcs consult it constantly;
+                    forcing a click every 15 seconds is the #1 friction
+                    point Chip flagged.
+                  - Napkin calculator defaults CLOSED. It is an invoked
+                    tool, not a consulted reference — only expand when
+                    actively computing something.
+              */}
               <AskInterviewer
                 key={`${current.id}-${showAnswer ? "study" : "interview"}`}
                 questionContext={current.scenario}
                 mode={showAnswer ? "study" : "interview"}
                 canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}
               />
-              <div className="flex-1 p-5 flex flex-col overflow-y-auto">
-                {!showAnswer ? (
-                  <>
-                    <textarea
-                      value={userAnswer}
-                      onChange={(e) => setUserAnswer(e.target.value)}
-                      placeholder={
-                        current.details.napkin_math
-                          ? "Type your napkin math here...\n\nExample:\nBandwidth: 3.35 TB/s\nModel size: 140 GB\nTime = 140 / 3350 ≈ 42 ms\n\n=> 42 ms   (mark your final answer with =>)"
-                          : "Type your answer or reasoning here..."
-                      }
-                      className="flex-1 min-h-[200px] w-full bg-background border border-border rounded-md p-5 font-mono text-[13px] text-textPrimary resize-none focus:outline-none focus:border-accentBlue/50 placeholder:text-textTertiary/40 leading-relaxed"
-                      spellCheck="false"
-                      autoFocus
-                    />
-                    <button
-                      onClick={handleReveal}
-                      className="mt-4 w-full bg-textPrimary text-background font-bold py-3 rounded-lg hover:opacity-90 transition-all flex items-center justify-center gap-2"
-                    >
-                      Reveal Answer <span className="text-[10px] opacity-50 ml-1">⌘↵</span>
-                    </button>
-                  </>
-                ) : (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-5"
-                  >
-                    {/* User's answer (preserved for comparison) */}
-                    {userAnswer.trim() && (
-                      <details className="group">
-                        <summary className="text-[10px] font-mono text-textTertiary uppercase cursor-pointer select-none flex items-center gap-1.5">
-                          <span className="group-open:rotate-90 transition-transform text-[8px]">&#9654;</span>
-                          Your answer
-                        </summary>
-                        <div className="mt-2 p-3 bg-background border border-border rounded-md font-mono text-[12px] text-textSecondary whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto">
-                          {userAnswer}
-                        </div>
-                      </details>
-                    )}
-
-                    {/* Napkin math result — gradient feedback */}
-                    {napkinResult && (
-                      <div className={clsx(
-                        "p-4 rounded-lg border",
-                        napkinResult.grade === 'exact' || napkinResult.grade === 'close'
-                          ? "bg-accentGreen/10 border-accentGreen/30"
-                          : napkinResult.grade === 'ballpark'
-                          ? "bg-accentAmber/10 border-accentAmber/30"
-                          : "bg-accentRed/10 border-accentRed/30"
-                      )}>
-                        <div className="flex items-center gap-2 mb-2">
-                          {(napkinResult.grade === 'exact' || napkinResult.grade === 'close') ? (
-                            <CheckCircle2 className="w-4 h-4 text-accentGreen" />
-                          ) : napkinResult.grade === 'ballpark' ? (
-                            <CheckCircle2 className="w-4 h-4 text-accentAmber" />
-                          ) : (
-                            <XCircle className="w-4 h-4 text-accentRed" />
-                          )}
-                          <span className={clsx(
-                            "text-sm font-bold",
-                            (napkinResult.grade === 'exact' || napkinResult.grade === 'close') ? "text-accentGreen"
-                              : napkinResult.grade === 'ballpark' ? "text-accentAmber"
-                              : "text-accentRed"
-                          )}>
-                            {napkinResult.label}
-                          </span>
-                        </div>
-                        <p className="text-xs text-textSecondary font-mono">
-                          Your answer: {napkinResult.userNum.toLocaleString()} |
-                          Model answer: {napkinResult.modelNum.toLocaleString()} |
-                          Off by: {(napkinResult.ratio * 100).toFixed(0)}%
-                        </p>
-                        {napkinResult.maxSelfScore < 3 && (
-                          <p className="text-[10px] text-textTertiary mt-2">
-                            Self-assessment capped at "{napkinResult.maxSelfScore === 2 ? 'Partial' : 'Wrong'}" based on napkin math accuracy
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {current.details.common_mistake && (
-                      <div className="border-l-4 border-accentRed pl-4">
-                        <span className="text-[10px] font-mono text-accentRed uppercase mb-1 block flex items-center gap-1">
-                          <XCircle className="w-3 h-3" /> Common Mistake
-                        </span>
-                        <p className="text-sm text-textSecondary leading-relaxed">{current.details.common_mistake}</p>
-                      </div>
-                    )}
-                    <div className="border-l-4 border-accentGreen pl-4">
-                      <span className="text-[10px] font-mono text-accentGreen uppercase mb-1 block flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3" /> Model Answer
-                      </span>
-                      <p className="text-sm text-textPrimary leading-relaxed">{current.details.realistic_solution}</p>
-                    </div>
-                    {current.details.napkin_math && (
-                      <div className="bg-background border border-border p-4 rounded-lg">
-                        <span className="text-[10px] font-mono text-accentBlue uppercase mb-3 block">Napkin Math</span>
-                        <NapkinMathDisplay text={current.details.napkin_math} />
-                      </div>
-                    )}
-
-                    {/* Rubric checkboxes */}
-                    {rubricItems.length > 0 && (
-                      <div className="border-t border-border pt-5">
-                        <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
-                          Did your answer cover? <span className="text-textTertiary/50 ml-1">{rubricItems.filter(i => i.checked).length}/{rubricItems.length}</span>
-                        </span>
-                        <div className="space-y-2">
-                          {rubricItems.map((item, idx) => (
-                            <label
-                              key={idx}
-                              className={clsx(
-                                "flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-all text-xs",
-                                item.checked
-                                  ? "border-accentGreen/30 bg-accentGreen/5"
-                                  : "border-border hover:border-borderHighlight"
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={item.checked}
-                                onChange={() => {
-                                  const updated = [...rubricItems];
-                                  updated[idx] = { ...updated[idx], checked: !updated[idx].checked };
-                                  setRubricItems(updated);
-                                }}
-                                className="mt-0.5 accent-accentGreen"
-                              />
-                              <span className={clsx(
-                                "leading-relaxed",
-                                item.checked ? "text-textPrimary" : "text-textSecondary"
-                              )}>
-                                {item.text}
-                              </span>
-                            </label>
-                          ))}
-                        </div>
-                        {rubricScore !== null && (
-                          <div className="mt-2 text-[10px] font-mono text-textTertiary">
-                            Rubric score: {rubricScore}/3 → {['Skip', 'Wrong', 'Partial', 'Nailed It'][rubricScore]}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Self-assessment */}
-                    <div className="border-t border-border pt-5">
-                      <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">
-                        {rubricItems.length > 0 ? 'Confirm or override' : 'Rate yourself'}
-                        <span className="text-textTertiary/50 ml-2">Press 1-4</span>
-                      </span>
-                      <div className="grid grid-cols-4 gap-2">
-                        {[
-                          { score: 0, label: "Skip", color: "border-border text-textTertiary hover:border-borderHighlight" },
-                          { score: 1, label: "Wrong", color: "border-accentRed/30 text-accentRed hover:bg-accentRed/10" },
-                          { score: 2, label: "Partial", color: "border-accentAmber/30 text-accentAmber hover:bg-accentAmber/10" },
-                          { score: 3, label: "Nailed It", color: "border-accentGreen/30 text-accentGreen hover:bg-accentGreen/10" },
-                        ].map(({ score, label, color }) => {
-                          const disabled = score > effectiveMaxScore;
-                          const isRubricSuggested = rubricScore !== null && score === rubricScore;
-                          return (
-                            <button
-                              key={score}
-                              onClick={() => handleScore(Math.min(score, effectiveMaxScore))}
-                              disabled={disabled}
-                              aria-label={`Rate yourself: ${label} (${score} of 3)`}
-                              className={clsx(
-                                "px-3 py-2.5 rounded-lg border text-xs font-medium transition-all",
-                                disabled
-                                  ? "opacity-30 cursor-not-allowed border-border text-textTertiary"
-                                  : isRubricSuggested
-                                  ? `${color} ring-1 ring-accentBlue/50`
-                                  : color
-                              )}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {/* Feedback: thumbs, difficulty, report, suggest */}
-                      <QuestionFeedback question={current} />
-
-                      {/* Chain navigation — go deeper */}
-                      {chainInfo && (
-                        <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-              </div>
+              <HardwareRef defaultOpen={true} />
+              <NapkinCalc defaultOpen={false} />
             </div>
           </div>
         ) : (
@@ -1201,6 +1311,54 @@ function PracticePage() {
           </div>
         )}
       </div>
+
+      {/*
+        Submit-gradient confirm dialog (per Chip Huyen's UX review).
+        Fires when a user clicks Reveal with <15s elapsed AND <50
+        chars typed — indicating they likely didn't really try. One
+        dismissal (either choice) calibrates the guard off for the
+        rest of the session so power users are not pestered. Uses a
+        full-viewport overlay so the dialog is unmissable.
+      */}
+      {thinkConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6"
+          onClick={() => setThinkConfirmOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="think-confirm-title"
+        >
+          <div
+            className="bg-surface border border-border rounded-xl p-6 max-w-md w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Clock className="w-4 h-4 text-accentAmber" />
+              <h3 id="think-confirm-title" className="text-sm font-bold text-textPrimary uppercase tracking-widest">Think longer?</h3>
+            </div>
+            <p className="text-sm text-textSecondary leading-relaxed mb-5">
+              You&apos;ve been on this question for less than 15 seconds and haven&apos;t typed much. The practice works better when you commit to an answer first — even a wrong one sharpens what you learn from the reveal.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setThinkConfirmOpen(false)}
+                className="flex-1 py-2.5 rounded-lg border border-accentBlue/30 bg-accentBlue/5 text-accentBlue font-medium text-sm hover:bg-accentBlue/10 transition-colors"
+              >
+                Keep thinking
+              </button>
+              <button
+                onClick={() => {
+                  deliberationCalibrated.current = true;
+                  handleReveal(true);
+                }}
+                className="flex-1 py-2.5 rounded-lg border border-border text-textSecondary font-medium text-sm hover:bg-surfaceHover transition-colors"
+              >
+                Reveal anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Star gate overlay */}
       {showStarGate && (
