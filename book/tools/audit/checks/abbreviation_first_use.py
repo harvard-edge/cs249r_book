@@ -74,64 +74,55 @@ RULE_TEXT = "Abbreviations must be expanded on first use per chapter"
 #     which break standard word-boundary detection
 #   - CI/CD: DevOps term with slash punctuation; commonly understood
 #   - vs.: not an abbreviation in the expansion sense
+#   - Baseline CS/ML abbreviations listed in §10.5's exempt list (Round 2,
+#     2026-04-24). These are universally understood by the book's graduate
+#     CS/ML audience and expanding them on every chapter's first use was
+#     judged pedantic. The exempt list includes: CPU/GPU/TPU/ASIC/FPGA/DSA
+#     hardware baseline; CNN/RNN/LSTM/MLP/LLM/ViT/GAN/VAE/MoE model
+#     baseline; JIT/AOT/IR/ONNX compiler baseline; ReLU/Adam/SGD/AD/BPTT/
+#     GEMM/BLAS numerical baseline; SIMD/RISC/MIPS architecture baseline;
+#     NVMe/HBM/DRAM/SRAM memory baseline; JSON protocol baseline; SLA/ROC/
+#     AUC/TCO operations baseline; GDPR/HIPAA legislation (proper nouns);
+#     MAC/IOPS/NaN numerical baseline. See §10.5 for the full list and
+#     rationale. These terms should be introduced once in the book (in
+#     their canonical chapter) and may be used bare everywhere else.
 
 _CANONICAL = [
-    ("AST",    "abstract syntax tree"),
-    ("AOT",    "ahead-of-time"),
-    ("AUC",    "area under the curve"),  # §10.5 uses "area under the [ROC] curve"
-    ("BPTT",   "backpropagation through time"),
-    ("BLAS",   "Basic Linear Algebra Subprograms"),
-    ("CNN",    "convolutional neural network"),
+    # Specialized abbreviations — must be expanded on first use per chapter
     ("CTM",    "continuous therapeutic monitoring"),
     ("DAG",    "directed acyclic graph"),
     ("DCE",    "dead-code elimination"),
+    ("DLRM",   "Deep Learning Recommendation Model"),
     ("ELT",    "extract, load, transform"),
     ("ETL",    "extract, transform, load"),
     ("FFT",    "fast Fourier transform"),
-    ("GDPR",   "General Data Protection Regulation"),
     ("GELU",   "Gaussian Error Linear Unit"),
-    ("GEMM",   "general matrix multiply"),
-    ("HIPAA",  "Health Insurance Portability and Accountability Act"),
+    ("HELM",   "Holistic Evaluation of Language Models"),
+    ("HIS",    "hospital information systems"),
     ("HOG",    "histogram of oriented gradients"),
     ("ICR",    "information-compute ratio"),
     ("ILSVRC", "ImageNet Large Scale Visual Recognition Challenge"),
-    ("IOPS",   "input/output operations per second"),
-    ("IR",     "intermediate representation"),
-    ("JIT",    "just-in-time"),
-    ("JSON",   "JavaScript Object Notation"),
     ("KWS",    "keyword spotting"),
-    ("LLM",    "large language model"),
-    ("MAC",    "multiply-accumulate"),
-    ("MIPS",   "microprocessor without interlocked pipelined stages"),
-    ("MLP",    "multilayer perceptron"),
-    ("MoE",    "mixture-of-experts"),
-    ("NAS",    "neural architecture search"),
-    ("NaN",    "not a number"),
-    ("NVMe",   "Non-Volatile Memory Express"),
-    ("ONNX",   "Open Neural Network Exchange"),
+    ("MMLU",   "Massive Multitask Language Understanding"),
+    ("MSWC",   "Multilingual Spoken Words Corpus"),
     ("OTA",    "over-the-air"),
     ("PTX",    "Parallel Thread Execution"),
     ("RBAC",   "role-based access control"),
-    ("ReLU",   "rectified linear unit"),
-    ("RISC",   "reduced instruction set computer"),
-    ("RNN",    "recurrent neural network"),
-    ("ROC",    "receiver operating characteristic"),
+    ("RFM",    "recency, frequency, and monetary"),
     # SIFT is deliberately excluded: the §10.5 expansion is
     # "scale-invariant feature transform" (computer vision), but the
     # book also uses SIFT as "software-implemented fault tolerance" in
     # fault_tolerance.qmd — a different acronym that spells the same.
     # Homonym handling would require per-context disambiguation; skip
-    # the term in Item D to avoid FPs.
-    ("SIMD",   "single instruction, multiple data"),
-    ("SLA",    "service level agreement"),
-    ("SoC",    "system on chip"),
+    # the term to avoid FPs.
     ("SSA",    "static single-assignment"),
-    ("TCO",    "total cost of ownership"),
     ("TFDV",   "TensorFlow Data Validation"),
-    ("TPU",    "Tensor Processing Unit"),
     ("UAT",    "universal approximation theorem"),
-    ("ViT",    "vision transformer"),
-    ("Adam",   "Adaptive Moment Estimation"),
+    ("V2X",    "vehicle-to-everything"),
+    ("XLA",    "Accelerated Linear Algebra"),
+    # "CAP theorem" — multi-word acronym handled separately (not in this list
+    # because the abbreviation includes a lowercase word "theorem" that
+    # would require custom word-boundary matching).
 ]
 
 # File-level exclusions. Files listed here are skipped entirely because
@@ -324,6 +315,12 @@ def check(
     # table of definitions, so every "first use" is really a definition
     # head, not a body-prose use).
     if file_path.name in _EXCLUDED_FILES:
+        return issues, counter
+
+    # Path-level exclusions: parts/ files are short volume dividers that
+    # list concepts by abbreviation, not running prose that introduces
+    # them. They inherit expansions from the chapters they divide.
+    if "/parts/" in str(file_path):
         return issues, counter
 
     intro_line: dict[str, int] = {}
