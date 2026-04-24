@@ -1,0 +1,724 @@
+{
+  "metadata": {
+    "source_file": "book/quarto/contents/vol2/network_fabrics/network_fabrics.qmd",
+    "schema_version": 2,
+    "generated_by": "quiz-refresh/generate_quizzes.py",
+    "generated_on": "2026-04-24",
+    "model": "gpt-5.4",
+    "total_sections": 11,
+    "sections_with_quizzes": 11,
+    "sections_without_quizzes": 0
+  },
+  "sections": [
+    {
+      "section_id": "#sec-network-fabrics-introduction",
+      "section_title": "The Synchronization Backbone",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "network as the synchronization backbone for distributed training",
+            "the NVLink-to-InfiniBand bandwidth cliff",
+            "how collective patterns map to fabric constraints",
+            "connection to the Fleet Stack and distributed efficiency"
+          ],
+          "question_strategy": "Use a foundational definition/classification question first, then move to quantitative interpretation of the intra-node/inter-node bandwidth cliff, then application to collective communication patterns, and end with a synthesis question linking the fabric to distributed training strategy.",
+          "difficulty_progression": "Starts with recognizing why networking becomes central at scale, moves to applying the 18x bandwidth cliff to parallelism choices and collective bottlenecks, and ends by integrating the section with prior distributed-training concepts.",
+          "integration": "Connects to prior chapters on the Fleet Stack, distributed training, communication tax, tensor/pipeline/data parallelism, and the iron law of ML systems.",
+          "ranking_explanation": "This section introduces the chapter's core thesis and the motivating quantitative argument for why network fabrics dominate large-scale training efficiency, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does the chapter describe the network fabric as the \"synchronization backbone\" of a 1,000-GPU training cluster?",
+            "choices": [
+              "Because every synchronization point depends on the slowest communication path, so one weak link can stall all GPUs at the barrier.",
+              "Because network hardware determines the numerical precision used in gradient updates.",
+              "Because the network replaces the need for collective communication algorithms such as AllReduce.",
+              "Because GPUs can only execute matrix multiplications when directly attached to the same switch."
+            ],
+            "answer": "The correct answer is A. In synchronous training, all workers must finish communication before the next step begins, so the slowest link dictates cluster progress. An answer based on numerical precision confuses communication infrastructure with arithmetic format selection, which is handled by accelerators and software.",
+            "learning_objective": "Explain why synchronized distributed training makes network performance a first-order determinant of system throughput"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why the NVLink-to-InfiniBand bandwidth cliff changes which parallelism strategies are practical within a node versus across nodes.",
+            "answer": "Within a node, NVLink provides roughly 900 GB/s, while inter-node NDR InfiniBand provides about 50 GB/s, so crossing the node boundary introduces an approximately 18x bandwidth drop. That makes tensor parallelism, which requires frequent high-bandwidth activation exchange, attractive inside a node, while pipeline and data parallelism carry more of the cross-node work. The practical consequence is that model partitioning must respect the communication hierarchy, not just the compute capacity.",
+            "learning_objective": "Analyze how interconnect bandwidth hierarchy constrains the placement of tensor, pipeline, and data parallelism"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If a training cluster doubles the number of GPUs, the communication problem usually becomes less important because more total compute is available.",
+            "answer": "False. At scale, added GPUs increase the amount of synchronization work and the number of devices waiting at each barrier, so communication can dominate more strongly rather than less.",
+            "learning_objective": "Evaluate how scaling GPU count changes the relative importance of communication overhead"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which collective communication pattern is described as the most demanding because each GPU must send unique data to every other GPU?",
+            "choices": [
+              "AllGather",
+              "AllToAll",
+              "AllReduce",
+              "Broadcast"
+            ],
+            "answer": "The correct answer is B. AllToAll requires every participant to exchange distinct payloads with every other participant, creating the densest communication pattern. AllReduce is central to synchronous training, but it aggregates and redistributes values rather than requiring unique pairwise exchanges everywhere.",
+            "learning_objective": "Identify which collective pattern creates the heaviest communication demand in large ML clusters"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The chapter frames the interconnect as a distributed system's memory bus by calling it the ______ Bus that moves parameter updates between workers.",
+            "answer": "Gradient. The term emphasizes that the network plays the same system role across nodes that a memory bus plays within a machine: moving updates fast enough to keep compute from idling.",
+            "learning_objective": "Identify the chapter's systems analogy for the role of the interconnect in distributed training"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-workload-inversion",
+      "section_title": "*How* ML Networking Inverts Datacenter Assumptions",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "how ML traffic differs from web/datacenter traffic",
+            "BSP synchronization and tail latency",
+            "elephant flows and loss intolerance",
+            "the five-level model as organizing framework"
+          ],
+          "question_strategy": "Cover the inversion table, then test causal reasoning about BSP and tail latency, then ask about losslessness and elephant-flow routing, and close with an ordering item on the five-level model.",
+          "difficulty_progression": "Begins with identifying the central inversion, proceeds to scenario-based reasoning about stragglers and packet loss, and ends with structural recall of the five-level framework that organizes the rest of the chapter.",
+          "integration": "Builds on prior knowledge of distributed training and all-reduce while establishing the chapter-specific five-level model used in later sections.",
+          "ranking_explanation": "This section introduces the chapter's conceptual framing and explains why conventional datacenter assumptions fail for ML, making it foundational enough for a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which performance metric becomes the binding constraint in synchronous ML training, unlike in traditional web-oriented datacenter traffic?",
+            "choices": [
+              "Average per-flow fairness",
+              "Tail latency of the slowest communication path",
+              "Storage capacity per rack",
+              "CPU interrupt rate on a single server"
+            ],
+            "answer": "The correct answer is B. BSP-style training waits for the slowest participant at each barrier, so tail latency directly sets iteration time. An answer based on average per-flow fairness reflects a web-services mental model with many independent users, not a globally synchronized training job.",
+            "learning_objective": "Compare the dominant network performance metric for ML training against traditional datacenter workloads"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A single congested switch port delays one GPU's packets by 100 ms during a 1,024-GPU synchronous training step. Explain why this is a cluster-wide problem rather than a local networking issue.",
+            "answer": "Under BSP, all 1,024 GPUs must complete the communication phase before any can begin the next step, so one delayed worker stalls the entire cluster. The concrete result is that 100 ms of delay on one path effectively wastes 100 ms of compute opportunity for every other GPU. The system consequence is that tail events must be engineered away, not treated as harmless outliers.",
+            "learning_objective": "Analyze how BSP barriers amplify a single network straggler into cluster-wide idle time"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why are static ECMP-style mechanisms poorly matched to ML collective traffic?",
+            "choices": [
+              "They require optical links instead of copper links.",
+              "They can hash a small number of long-lived elephant flows onto the same path, creating persistent hot spots while other links are underused.",
+              "They only work for inference and not for training.",
+              "They eliminate packet ordering, which is impossible for RDMA hardware to tolerate."
+            ],
+            "answer": "The correct answer is B. ML jobs generate a few massive long-lived flows, so unlucky static hashing can keep collisions in place for an entire training run. The claim that ECMP only works for inference is too broad; the problem is mismatch to elephant-flow structure, not a hard training-versus-inference boundary.",
+            "learning_objective": "Explain why routing mechanisms designed for many small stochastic flows break down for ML elephant flows"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Because RDMA is high performance, it is naturally tolerant of occasional packet loss in the same way TCP is.",
+            "answer": "False. RDMA-based fabrics assume lossless delivery; a dropped packet can trigger costly Go-Back-N behavior and create a severe straggler for the whole synchronous job.",
+            "learning_objective": "Evaluate why losslessness is a stronger requirement for RDMA-based ML fabrics than for TCP/IP networks"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following five-level model components from lowest to highest abstraction: (1) Cluster design, (2) Fabric behavior, (3) Wire and link, (4) Switch and topology, (5) Transport.",
+            "answer": "The correct order is: (3) Wire and link, (5) Transport, (4) Switch and topology, (2) Fabric behavior, (1) Cluster design. Physical signaling constrains what links can do, transport builds reliable communication over those links, topology organizes paths, fabric behavior determines realized performance under load, and cluster design integrates all layers into a working system. Swapping topology below transport would hide the fact that transport primitives operate over already-constructed physical links.",
+            "learning_objective": "Identify the chapter's five-level network model and the dependency structure between its layers"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-wire-link",
+      "section_title": "Level 1: Wire and Link",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "PAM4 and FEC latency trade-offs",
+            "copper versus optics reach and cost",
+            "SerDes power and link budget constraints",
+            "physical-layer limits shaping cluster geometry"
+          ],
+          "question_strategy": "Start with PAM4's purpose, then test application of FEC latency and medium selection, then move to power/link-budget consequences for rack geometry and scaling.",
+          "difficulty_progression": "Begins with signaling fundamentals, moves to medium-selection trade-offs and quantitative latency reasoning, and ends with synthesis around power-per-bit and cluster layout.",
+          "integration": "Connects to prior hardware chapters through bandwidth, power, and physical scaling limits, and prepares the transport-level \u03b1 term discussed next.",
+          "ranking_explanation": "This section introduces concrete physical constraints and quantitative trade-offs that are essential for understanding every higher network layer, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why do modern high-speed links use PAM4 instead of simply increasing the binary symbol rate indefinitely?",
+            "choices": [
+              "Because PAM4 doubles the bits carried per symbol, increasing throughput without requiring the symbol rate itself to double.",
+              "Because PAM4 removes the need for forward error correction on noisy links.",
+              "Because PAM4 guarantees lower latency than NRZ on every message size.",
+              "Because PAM4 allows copper cables to reach much farther than optical links."
+            ],
+            "answer": "The correct answer is A. PAM4 packs two bits into each symbol period, which raises bandwidth density when symbol-rate scaling hits physical limits. The idea that PAM4 removes FEC is backwards; its reduced noise margin is exactly why high-speed PAM4 links require FEC.",
+            "learning_objective": "Explain why PAM4 is used to extend link throughput under symbol-rate limits"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A packet crosses three switch hops in a fat-tree built from PAM4 links with 100-200 ns of FEC latency per hop. Explain why this matters even if the message itself is small.",
+            "answer": "FEC adds an irreducible per-hop latency floor, so three hops contribute roughly 300-600 ns one way, or about 600-1,200 ns across a round trip, before higher-level software overhead is considered. For small messages in the latency-dominated regime, that fixed tax can dominate the total transfer time. The system consequence is that better software alone cannot eliminate the startup cost imposed by physical signaling.",
+            "learning_objective": "Analyze how FEC latency contributes to the fixed startup cost of network communication"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which physical medium is the most appropriate default choice for short within-rack links when the design goal is minimum cost and latency?",
+            "choices": [
+              "Pluggable optics for every connection, because they offer the most flexibility",
+              "AOC, because permanently attached transceivers always outperform copper for short runs",
+              "Passive DAC copper, because it is cheapest and lowest latency but only reaches a few meters",
+              "Wireless links, because they avoid link-budget limits"
+            ],
+            "answer": "The correct answer is C. DAC is the lowest-cost, lowest-latency option for short runs and is therefore preferred inside a rack. A pluggable-optics-only approach ignores the chapter's cost and power argument that architects pack systems densely to maximize cheap copper and minimize expensive optics.",
+            "learning_objective": "Select an appropriate physical medium based on reach, cost, and latency constraints"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The strict decibel allowance that determines whether a receiver can still reliably detect a transmitted signal after cable and connector losses is called the link ______.",
+            "answer": "budget. The link budget captures the allowable attenuation between transmitter and receiver, and it directly constrains cable reach as lane speeds rise.",
+            "learning_objective": "Identify the physical-layer constraint used to reason about attenuation and cable reach"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why moving from 400 Gbps links toward 800 Gbps and beyond pushes cluster architects toward denser rack layouts and more optics outside the cabinet.",
+            "answer": "As lane speeds rise, copper loss per meter increases and the link budget tightens, so practical copper reach shrinks to roughly 1-2 meters at the highest speeds. That forces very short within-cabinet electrical runs and pushes any longer connection onto costlier, higher-power optics. The practical implication is that physical cluster geometry is shaped by signaling physics as much as by compute density.",
+            "learning_objective": "Analyze how higher link speeds translate into rack-level geometry and power trade-offs"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-transport",
+      "section_title": "Level 2: Transport and the Performance Model",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "RDMA and GPUDirect RDMA",
+            "InfiniBand versus RoCE trade-offs",
+            "losslessness and Go-Back-N fragility",
+            "the \u03b1-\u03b2 model and latency/bandwidth crossover"
+          ],
+          "question_strategy": "Cover RDMA motivation, compare IB and RoCE, test reasoning about dropped packets and losslessness, then use \u03b1-\u03b2 scenarios to distinguish latency-bound from bandwidth-bound communication.",
+          "difficulty_progression": "Starts with foundational transport concepts, advances to protocol-selection trade-offs and packet-loss consequences, and ends with quantitative \u03b1-\u03b2 interpretation tied to message size.",
+          "integration": "Connects to earlier distributed-training content on communication tax and to later topology sections through the \u03b1 and \u03b2 terms that topology and congestion control influence.",
+          "ranking_explanation": "This is one of the chapter's central technical sections, introducing RDMA transports and the \u03b1-\u03b2 performance model explicitly named in the learning objectives, so it requires a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What is the primary systems benefit of RDMA for large-scale ML communication compared with kernel TCP/IP?",
+            "choices": [
+              "It allows the NIC to offload transport and access remote memory directly, reducing CPU overhead and message latency.",
+              "It guarantees that packet loss is harmless because retransmissions are always selective.",
+              "It increases GPU FLOPS by moving arithmetic into the network interface.",
+              "It removes the need for a lossless network fabric."
+            ],
+            "answer": "The correct answer is A. RDMA bypasses the kernel data path and offloads transport work to NIC hardware, which cuts both CPU involvement and end-to-end latency. The claim that RDMA removes the need for losslessness is the opposite of the section's argument: RDMA fabrics become more fragile, not less, when packets are dropped.",
+            "learning_objective": "Explain how RDMA changes the CPU and memory-copy overheads of distributed ML communication"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why GPUDirect RDMA matters for a cluster exchanging hundreds of gigabytes of gradients per step.",
+            "answer": "Without GPUDirect RDMA, gradient data must bounce through host RAM before reaching the NIC, adding extra copies, latency, and pressure on CPU memory bandwidth. GPUDirect lets the NIC access GPU memory directly, which removes redundant transfers and makes overlap between communication and computation much more practical. The system consequence is that the host CPU can orchestrate the training pipeline instead of acting as a bulk data mover.",
+            "learning_objective": "Analyze the effect of GPUDirect RDMA on end-to-end data movement in distributed training"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best captures the operational trade-off between InfiniBand and RoCE in ML clusters?",
+            "choices": [
+              "RoCE is inherently lossless in hardware, while InfiniBand relies on PFC and ECN to approximate losslessness.",
+              "InfiniBand and RoCE have identical loss-control mechanisms; the only difference is connector type.",
+              "InfiniBand provides native credit-based losslessness, while RoCE runs over Ethernet and needs mechanisms such as PFC and ECN to approximate that behavior.",
+              "RoCE is only useful for storage traffic, not GPU training traffic."
+            ],
+            "answer": "The correct answer is C. InfiniBand builds lossless behavior into the fabric with credit-based flow control, whereas RoCE inherits Ethernet's best-effort roots and must construct lossless semantics operationally. A response claiming identical mechanisms misses the chapter's central distinction in reliability guarantees and operational complexity.",
+            "learning_objective": "Compare InfiniBand and RoCE in terms of losslessness guarantees and deployment complexity"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In RDMA fabrics, a single dropped packet late in a large transfer can create a much larger delay than the pure wire time of the missing frame.",
+            "answer": "True. Go-Back-N recovery can force retransmission of a large tail of the message, turning one loss event into a millisecond-scale straggler for a synchronous job.",
+            "learning_objective": "Evaluate why packet loss is catastrophic for synchronous RDMA-based training workloads"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "For NDR InfiniBand with an approximate crossover near 75 KB, which message is most clearly in the latency-dominated regime?",
+            "choices": [
+              "A 350 MB gradient shard during AllReduce",
+              "A 4 KB pipeline-scheduling control message",
+              "A 100 MB activation checkpoint transfer",
+              "A multi-gigabyte checkpoint shard written to storage"
+            ],
+            "answer": "The correct answer is B. A 4 KB control message is far below the \u03b1\u03b2 crossover, so startup cost dominates and extra bandwidth helps little. The large gradient and checkpoint transfers sit well into the bandwidth-dominated regime, where link rate matters much more than shaving tiny fixed overheads.",
+            "learning_objective": "Classify communication events as latency-dominated or bandwidth-dominated using the \u03b1-\u03b2 crossover"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following reasoning steps for applying the \u03b1-\u03b2 model to a new message type: (1) Compare the message size to \u03b1\u03b2, (2) Compute transfer time as \u03b1 + n/\u03b2, (3) Determine whether reducing latency or increasing bandwidth is the more promising optimization, (4) Identify the values of \u03b1, \u03b2, and message size n for the fabric.",
+            "answer": "The correct order is: (4) Identify the values of \u03b1, \u03b2, and message size n for the fabric, (2) Compute transfer time as \u03b1 + n/\u03b2, (1) Compare the message size to \u03b1\u03b2, (3) Determine whether reducing latency or increasing bandwidth is the more promising optimization. You must first know the fabric and workload parameters before evaluating cost, then classify the regime, then choose the optimization lever. Swapping the last two steps would make the recommendation unsupported by the model.",
+            "learning_objective": "Apply the \u03b1-\u03b2 framework to choose between latency-focused and bandwidth-focused optimizations"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-topology",
+      "section_title": "Level 3: Switch and Topology",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "bisection bandwidth and non-blocking fabrics",
+            "ToR failure domains and radix",
+            "fat-tree scaling and oversubscription",
+            "rail-optimized, dragonfly, and torus trade-offs"
+          ],
+          "question_strategy": "Begin with a definition-based topology metric, then test oversubscription consequences, workload-topology matching, and alternative-topology trade-offs across subsections.",
+          "difficulty_progression": "Starts with bisection bandwidth, moves through structural consequences of oversubscription and ToR design, and ends with workload-aware topology selection among fat-tree, rail-optimized, dragonfly, and torus.",
+          "integration": "Builds on \u03b1-\u03b2 by showing how topology changes hop count and available bandwidth, and connects to training parallelism patterns from prior chapters.",
+          "ranking_explanation": "Topology is explicitly called out in the learning objectives and the section contains several core architectural trade-offs, so it merits a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which topology metric best captures the worst-case throughput ceiling for global AllReduce-style communication across a cluster?",
+            "choices": [
+              "Aggregate edge bandwidth",
+              "Average cable length per rack",
+              "Bisection bandwidth",
+              "Number of GPU fans per node"
+            ],
+            "answer": "The correct answer is C. Bisection bandwidth measures the minimum aggregate capacity across a cut that splits the cluster in half, which directly matters for global collectives. Aggregate edge bandwidth can look large even when the network narrows badly in the middle, so it can hide the real synchronization bottleneck.",
+            "learning_objective": "Identify the topology metric that governs global collective throughput"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a 4:1 oversubscribed spine in a training cluster is described as a false economy.",
+            "answer": "Oversubscription reduces the available bisection bandwidth by the same factor, so a 4:1 design can make global synchronization about 4x slower when all nodes inject traffic together. In synchronous training, that slowdown directly turns into idle accelerator time across the whole cluster. The practical consequence is that money saved on switches can waste far more money in underutilized GPUs.",
+            "learning_objective": "Analyze how oversubscription at the spine layer affects cluster-wide synchronization cost"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does a rail-optimized network help tensor parallelism more than data parallelism?",
+            "choices": [
+              "Because tensor-parallel traffic between corresponding GPUs can stay on dedicated rails and often avoid extra switch hops.",
+              "Because data parallelism never uses collective communication.",
+              "Because rail optimization increases the FLOPS of each GPU within a node.",
+              "Because it eliminates the need for any spine connectivity across the cluster."
+            ],
+            "answer": "The correct answer is A. Rail-optimized wiring aligns the physical fabric with the communication pattern of corresponding GPU ranks, reducing hop count and cross-traffic for latency-sensitive activation exchanges. The idea that spine connectivity disappears is wrong because global data-parallel synchronization still must cross rails and use broader fabric capacity.",
+            "learning_objective": "Explain why rail-optimized fabrics are especially valuable for tensor-parallel communication"
+          },
+          {
+            "question_type": "FILL",
+            "question": "In a high-density rack, the top-of-rack switch defines a minimum ______ domain, because losing that switch disconnects all accelerators beneath it at once.",
+            "answer": "failure. The ToR is both an aggregation point and a shared risk boundary, so its outage partitions all attached GPUs from the job.",
+            "learning_objective": "Identify the systems role of the top-of-rack switch in cluster reliability"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which topology is most attractive when you need full bisection bandwidth for diverse all-to-all-style ML workloads, even though it is expensive in switches and cabling?",
+            "choices": [
+              "Torus",
+              "Dragonfly",
+              "Rail-only network with no cross-rail spine",
+              "Fat-tree (Clos)"
+            ],
+            "answer": "The correct answer is D. Fat-tree topologies are the standard choice when you need universal high-bandwidth communication and many equal-cost paths. Dragonfly reduces cabling, but it trades away worst-case global bandwidth and therefore creates a placement-sensitive performance cliff for jobs that spill across groups.",
+            "learning_objective": "Select an appropriate topology for globally bandwidth-hungry ML workloads"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A cluster will run both 3D-parallel LLM training and MoE workloads with heavy AllToAll communication. Justify why a hybrid design may be preferable to a pure rail-optimized fabric.",
+            "answer": "Rail optimization is excellent for the predictable, rank-aligned traffic of tensor parallelism, but MoE AllToAll creates broader, less structured communication that needs full fabric flexibility and strong bisection bandwidth. A hybrid design preserves low-hop paths for tensor-parallel traffic while still providing a fat-tree-style spine for global exchanges. The consequence is better support for both structured and unpredictable communication patterns without overfitting the network to one workload.",
+            "learning_objective": "Evaluate topology trade-offs for clusters serving both structured tensor-parallel and unstructured AllToAll workloads"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-behavior",
+      "section_title": "Level 4: Fabric Behavior (Congestion, Routing)",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "BSP and tail-latency sensitivity",
+            "PFC and congestion spreading",
+            "DCQCN versus HPCC",
+            "adaptive routing and incast mitigation"
+          ],
+          "question_strategy": "Open with BSP/tail-latency consequences, then test PFC failure reasoning, compare congestion-control approaches, and finish with incast/adaptive-routing synthesis.",
+          "difficulty_progression": "Moves from foundational BSP implications to operational failure modes and then to higher-level mechanism comparison and mitigation strategy.",
+          "integration": "Relates topology capacity from the prior section to realized performance under contention, and connects to monitoring and operational diagnosis later in the chapter.",
+          "ranking_explanation": "This section introduces congestion-control mechanisms explicitly listed in the learning objectives and explains why realized throughput deviates from topology ideal, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why is tail latency more important than average throughput in BSP-style distributed training?",
+            "choices": [
+              "Because the global barrier makes the slowest worker or packet determine when the next step can begin.",
+              "Because average throughput is only relevant for inference serving, not training.",
+              "Because switches report only P99 metrics and not averages.",
+              "Because GPU memory capacity is determined by network latency."
+            ],
+            "answer": "The correct answer is A. BSP forces all workers to wait at the synchronization barrier, so the worst delay sets step time. Saying average throughput matters only for inference is too absolute; the key point is that synchronized training is uniquely dominated by stragglers.",
+            "learning_objective": "Explain why BSP execution converts network tail latency into training iteration time"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why Priority Flow Control solves one problem for RoCE fabrics while creating another.",
+            "answer": "PFC helps RoCE approximate lossless delivery by pausing traffic before switch buffers overflow and packets are dropped. But those PAUSE frames can propagate upstream and spread congestion, freezing unrelated flows and sometimes the whole fabric. The practical consequence is that PFC changes packet loss into a backpressure-management problem rather than eliminating operational risk.",
+            "learning_objective": "Analyze the trade-off introduced by PFC in lossless Ethernet fabrics"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What is the main advantage of HPCC over DCQCN in incast-heavy ML workloads?",
+            "choices": [
+              "HPCC avoids using any switch telemetry, which simplifies deployment.",
+              "HPCC uses precise in-network telemetry to set rates more accurately, reducing queue buildup and tail-latency variance.",
+              "HPCC works only on InfiniBand, while DCQCN works only on Ethernet.",
+              "HPCC increases bisection bandwidth without changing switch hardware."
+            ],
+            "answer": "The correct answer is B. HPCC gives senders detailed queue and utilization information, so they can react precisely instead of oscillating around a binary congestion signal. The claim that it increases bisection bandwidth confuses congestion control with physical topology; HPCC improves how existing capacity is used.",
+            "learning_objective": "Compare telemetry-driven and ECN-driven congestion control mechanisms for ML fabrics"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Incast is mainly a symptom of insufficient internal spine bandwidth and cannot happen if the fabric interior is otherwise uncongested.",
+            "answer": "False. Incast is a many-to-one endpoint bottleneck, so it can occur even when the rest of the network is uncongested because the destination port absorbs traffic from too many simultaneous senders.",
+            "learning_objective": "Distinguish endpoint incast from general internal-fabric congestion"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is adaptive routing especially important for ML elephant flows and MoE-style AllToAll traffic?",
+            "choices": [
+              "It lets switches choose paths based on real-time queue conditions instead of locking long-lived flows onto unlucky hashed links.",
+              "It guarantees zero packet reordering on standard Ethernet without any additional mechanism.",
+              "It removes the need for congestion control because packets simply avoid all queues.",
+              "It converts every topology into a non-blocking fat-tree."
+            ],
+            "answer": "The correct answer is A. Adaptive routing reduces persistent hot spots by steering packets or flowlets away from congested paths in real time. The idea that it removes congestion control altogether is incorrect; routing helps distribute load, but it cannot erase endpoint incast or create missing capacity.",
+            "learning_objective": "Explain how adaptive routing mitigates persistent path collisions for large ML communication flows"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A fabric experiences repeated incast during the backward pass. Describe two mitigations from the section and explain why they help.",
+            "answer": "One mitigation is layer-staggering, which starts AllReduce for early layers while later layers are still computing, reducing the number of simultaneous senders converging at once. Another is switching from ring-based to tree-based AllReduce, which lowers concurrent flow counts at aggregation points. The consequence is lower queue pressure and a reduced chance of PFC cascades or packet-loss-induced stragglers.",
+            "learning_objective": "Design mitigation strategies for repeated incast events during synchronous training"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-cluster",
+      "section_title": "Level 5: Cluster Design and Case Studies",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "gradient bus concept at cluster level",
+            "communication-computation overlap and last-mile problem",
+            "DGX SuperPOD versus Meta Grand Teton",
+            "next-generation interconnects including UEC, CPO, and CXL"
+          ],
+          "question_strategy": "Start with overlap and hierarchy, then compare the two production case studies, and finish with forward-looking architecture questions about next-generation interconnects and power scaling.",
+          "difficulty_progression": "Begins with practical overlap reasoning, moves to comparative case-study evaluation, and ends with synthesis about future interconnect trends and architectural consequences.",
+          "integration": "Pulls together all five levels of the chapter and connects to prior material on parallelism, scheduling, and systems trade-offs.",
+          "ranking_explanation": "This section integrates the full chapter into cluster-level design decisions and production case studies, so it deserves a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why is communication-computation overlap such a central design goal for the cluster-level \"gradient bus\"?",
+            "choices": [
+              "Because overlap can hide much of the inter-node communication cost behind the backward pass, reducing exposed synchronization time on the critical path.",
+              "Because overlap eliminates the need for collective communication libraries entirely.",
+              "Because overlap raises NVLink bandwidth to match InfiniBand bandwidth.",
+              "Because overlap guarantees that all layers have identical communication costs."
+            ],
+            "answer": "The correct answer is A. By launching communication as gradients become available, the system can mask part of the inter-node bandwidth cliff behind ongoing compute. The notion that collective libraries become unnecessary is wrong; overlap depends on those communication mechanisms rather than replacing them.",
+            "learning_objective": "Explain why overlap between backward computation and communication improves distributed training efficiency"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain the \"last-mile problem\" in overlapped gradient communication and why it still limits end-to-end iteration time.",
+            "answer": "Gradients from the earliest layer are produced last in the backward pass, so they have little or no later computation available to hide their transfer. Even if most communication overlaps successfully, those final exposed transfers remain on the critical path. The practical consequence is that overlap improves but does not erase network sensitivity, especially for the tail of each iteration.",
+            "learning_objective": "Analyze why communication-computation overlap cannot fully hide all synchronization cost"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which comparison best matches the chapter's characterization of NVIDIA DGX SuperPOD and Meta Grand Teton?",
+            "choices": [
+              "SuperPOD uses Ethernet with PFC as its main lossless mechanism, while Grand Teton relies on native InfiniBand credits.",
+              "SuperPOD is a rail-optimized InfiniBand design emphasizing native losslessness, while Grand Teton uses large-scale RoCE over Ethernet and pays more operational complexity to gain ecosystem flexibility.",
+              "Both systems use identical transport and congestion-control mechanisms but differ only in cable vendors.",
+              "Grand Teton avoids congestion control because Ethernet switches already enforce perfect fairness."
+            ],
+            "answer": "The correct answer is B. SuperPOD is presented as the InfiniBand-centric reference architecture, whereas Grand Teton uses RoCE over Ethernet with careful watchdogs, DCQCN tuning, and flowlet switching. The idea that the systems differ only by vendor misses the chapter's core comparison of operational philosophy and transport semantics.",
+            "learning_objective": "Compare two production cluster architectures in terms of transport choice and operational trade-offs"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What problem is the Ultra Ethernet Consortium primarily trying to solve for AI-scale fabrics?",
+            "choices": [
+              "Reducing GPU HBM capacity requirements by moving parameters into switches",
+              "Making Ethernet useful only for storage while leaving AI traffic to InfiniBand",
+              "Replacing all collective communication with point-to-point RPCs",
+              "Adding HPC-style features such as packet spraying and stronger ordering/loss control so Ethernet better matches AI and HPC workloads"
+            ],
+            "answer": "The correct answer is D. UEC aims to redesign Ethernet so it natively supports the traffic patterns and reliability needs of AI fabrics, instead of relying on fragile approximations like traditional RoCE plus PFC. A response about reducing HBM capacity confuses memory architecture with network protocol evolution.",
+            "learning_objective": "Explain the architectural motivation behind Ultra Ethernet for AI and HPC clusters"
+          },
+          {
+            "question_type": "FILL",
+            "question": "Moving the optical engine into the switch package to cut faceplate power and electrical trace loss is the idea behind Co-Packaged ______.",
+            "answer": "Optics. Co-Packaged Optics reduces power per port and helps scale high-radix switches by moving optical conversion close to the ASIC.",
+            "learning_objective": "Identify the emerging interconnect packaging approach used to reduce network power tax"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team expects to scale from tens of thousands to more than 100,000 accelerators. Justify why future interconnect choices are driven not only by bandwidth but also by power and topology flattening.",
+            "answer": "At that scale, pluggable optics, SerDes power, and extra switch tiers consume substantial energy and add latency through more hops and more FEC stages. Faster 800G/1.6T links and CPO can reduce the number of tiers, transceivers, and per-bit power needed to move data. The system consequence is that interconnect evolution becomes a prerequisite for sustainable cluster growth, not just a performance upgrade.",
+            "learning_objective": "Evaluate how power-per-bit and hop-count reduction shape next-generation fabric design"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-virtualization",
+      "section_title": "Network Virtualization",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "multi-tenancy requirements in GPU clusters",
+            "SR-IOV and hardware NIC virtualization",
+            "bandwidth partitioning constraints",
+            "QoS, virtual lanes, and noisy-neighbor isolation"
+          ],
+          "question_strategy": "Use a concise but meaningful quiz that emphasizes practical multi-tenant design: what SR-IOV provides, what it does not provide, and how QoS/VLs protect training from noisy neighbors.",
+          "difficulty_progression": "Begins with hardware virtualization basics, then moves to the limitations of VF slicing, and ends with packet-level traffic isolation reasoning.",
+          "integration": "Connects earlier transport concepts to cluster sharing, and sets up the monitoring section by showing how virtualization can complicate diagnosis.",
+          "ranking_explanation": "Although shorter than the main five-level sections, this section introduces practical multi-tenant design decisions and directly addresses a learning objective on SR-IOV and traffic isolation, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "What is the main role of SR-IOV in a multi-tenant GPU cluster?",
+            "choices": [
+              "It lets one physical NIC present multiple virtual functions so VMs or containers can access RDMA-capable hardware queues with near-bare-metal performance.",
+              "It converts Ethernet into InfiniBand by adding credit-based flow control in software.",
+              "It guarantees that every tenant can burst above the physical NIC's line rate when needed.",
+              "It removes the need for cluster schedulers to reason about network resources."
+            ],
+            "answer": "The correct answer is A. SR-IOV exposes hardware-backed virtual NIC functions so tenants can use direct DMA paths with very low virtualization overhead. The claim that tenants can burst beyond physical line rate ignores the section's point that SR-IOV partitions a fixed hardware capacity rather than creating extra bandwidth.",
+            "learning_objective": "Explain how SR-IOV enables high-performance NIC virtualization for ML workloads"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A 400 Gbps NIC is split across eight SR-IOV virtual functions. Explain the trade-off this creates for a training job sharing the host.",
+            "answer": "Each virtual function gets isolation and predictable access, but the job is now capped at roughly one-eighth of the NIC's capacity rather than being able to consume the full port opportunistically. That protects tenants from stealing each other's bandwidth while also imposing a hard throughput ceiling. The practical implication is that performance planning must treat the VF slice as a physical constraint, not a soft scheduling target.",
+            "learning_objective": "Analyze the bandwidth-partitioning consequence of SR-IOV in shared ML infrastructure"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why do virtual lanes or traffic classes matter when a training job shares the fabric with checkpoint or storage traffic?",
+            "choices": [
+              "They ensure every packet is forced onto the same switch path for easier debugging.",
+              "They let the network isolate traffic classes so congestion in a storage lane does not block high-priority gradient traffic.",
+              "They increase the raw line rate of each physical link.",
+              "They eliminate the need for any congestion control on Ethernet fabrics."
+            ],
+            "answer": "The correct answer is B. Separate lanes or classes keep one traffic type's queue buildup from directly head-of-line blocking another, which is crucial when checkpoint bursts coexist with latency-sensitive collectives. The idea that they raise physical line rate confuses scheduling and isolation with link-speed improvement.",
+            "learning_objective": "Explain how QoS mechanisms protect latency-sensitive training traffic in a shared fabric"
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If SR-IOV is configured, noisy-neighbor problems disappear automatically and no additional QoS or traffic isolation policy is needed.",
+            "answer": "False. SR-IOV virtualizes NIC access, but shared links and switches still need QoS mechanisms such as virtual lanes, traffic classes, or scheduling policies to prevent interference.",
+            "learning_objective": "Evaluate the limits of hardware NIC virtualization as a complete multi-tenant isolation solution"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-monitoring",
+      "section_title": "Monitoring and Debugging",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "silent network degradation in training clusters",
+            "link-level telemetry and RDMA counters",
+            "bandwidth/latency validation with RDMA tools",
+            "systematic debugging workflow"
+          ],
+          "question_strategy": "Start with why network issues hide as wasted compute, then test which counters and tools match RDMA workloads, and end with a workflow-oriented diagnostic question.",
+          "difficulty_progression": "Begins with foundational observability reasoning, moves to counter and tool selection, and ends with systematic diagnosis of a slowdown.",
+          "integration": "Builds on all previous sections by showing how physical faults, transport problems, and congestion manifest operationally in production clusters.",
+          "ranking_explanation": "This section directly supports a learning objective on diagnosing network bottlenecks using counters, telemetry, and bandwidth tools, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why are network problems in ML clusters often described as \"silent waste\" rather than obvious outages?",
+            "choices": [
+              "Because most degradations show up as modest iteration slowdowns and lower utilization rather than hard failures, so expensive GPU time is lost without alarms.",
+              "Because RDMA hardware hides all counters from monitoring systems.",
+              "Because training jobs automatically reroute around every bad cable with no performance effect.",
+              "Because network issues only affect storage and never collective communication."
+            ],
+            "answer": "The correct answer is A. A degraded link can leave the network technically up while quietly reducing bandwidth enough to waste large amounts of accelerator time over long runs. The claim that jobs automatically reroute around every bad cable ignores the synchronous straggler effects emphasized throughout the chapter.",
+            "learning_objective": "Explain why observability is essential for detecting network-induced training inefficiency"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which tool is the best fit for validating the actual data path used by RDMA-based ML training on an InfiniBand fabric?",
+            "choices": [
+              "iperf, because kernel TCP mirrors RDMA behavior closely enough",
+              "ping, because latency alone is sufficient to validate collective bandwidth",
+              "ib_write_bw from the perftest suite, because it measures RDMA bandwidth rather than kernel TCP throughput",
+              "traceroute, because path discovery directly reports NCCL performance"
+            ],
+            "answer": "The correct answer is C. RDMA workloads bypass the kernel stack, so validation should use RDMA-specific tools such as ib_write_bw instead of TCP benchmarks. A TCP-oriented answer confuses a different software path with the one used by NCCL and GPUDirect communication.",
+            "learning_objective": "Select an appropriate validation tool for measuring RDMA network performance"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A node pair suddenly measures 24 GB/s instead of the expected 48-49 GB/s on NDR InfiniBand. Explain what physical-layer issue this suggests and how you would investigate it.",
+            "answer": "A 50 percent drop suggests silent link degradation, such as fallback from NDR to HDR speed or loss of lanes due to a bad connector, cable, or transceiver. I would inspect link-level counters such as symbol errors, link-down events, and bandwidth negotiation state on the relevant ports and switches. The practical consequence is that a seemingly healthy link can still throttle a whole synchronous collective path.",
+            "learning_objective": "Diagnose a likely physical-layer cause of major RDMA bandwidth loss using telemetry"
+          },
+          {
+            "question_type": "ORDER",
+            "question": "Order the following debugging workflow steps from highest-level symptom to lowest-level root-cause check: (1) Check PFC or ECN counters, (2) Inspect NCCL logs, (3) Validate physical-layer counters such as symbol errors, (4) Check GPU utilization, (5) Run point-to-point RDMA bandwidth tests.",
+            "answer": "The correct order is: (4) Check GPU utilization, (2) Inspect NCCL logs, (5) Run point-to-point RDMA bandwidth tests, (1) Check PFC or ECN counters, (3) Validate physical-layer counters such as symbol errors. The workflow narrows from application symptoms to transport behavior and finally to hardware causes. Jumping straight to cable errors before confirming the communication path would skip cheaper and more informative diagnostic steps.",
+            "learning_objective": "Apply a systematic debugging sequence to isolate the source of network-induced training slowdown"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why is an all-pairs bandwidth matrix useful before launching a large distributed training job?",
+            "answer": "It reveals cold spots where specific node pairs, spine switches, or cable bundles underperform even though the fabric appears generally healthy. That matters because one weak path can throttle a synchronous collective ring or tree for the whole job. The practical implication is that preflight validation can prevent wasting expensive cluster time on a hidden physical or routing defect.",
+            "learning_objective": "Explain how pairwise bandwidth validation helps prevent cluster-wide synchronization bottlenecks"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-fallacies",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "misconceptions about bandwidth upgrades",
+            "lossless Ethernet versus InfiniBand reliability",
+            "oversubscription and topology-aware placement",
+            "incorrect benchmarking and missing monitoring"
+          ],
+          "question_strategy": "Use misconception-challenging items that force the reader to apply earlier chapter arguments rather than merely restating them.",
+          "difficulty_progression": "Begins with a bandwidth misconception, then tests operational pitfalls around RoCE, benchmarking, and scheduling, and ends with synthesis across prior sections.",
+          "integration": "Synthesizes the chapter by revisiting \u03b1-\u03b2, congestion, topology, and monitoring through common decision errors.",
+          "ranking_explanation": "This section integrates and stress-tests the chapter's main arguments through realistic misconceptions, so it warrants a full quiz rather than a skip."
+        },
+        "questions": [
+          {
+            "question_type": "TF",
+            "question": "True or False: Doubling link bandwidth from HDR to NDR will nearly halve communication time for any ML networking workload.",
+            "answer": "False. The \u03b1-\u03b2 model shows that small, latency-dominated messages improve only modestly when bandwidth doubles because startup cost still dominates.",
+            "learning_objective": "Evaluate when bandwidth upgrades do and do not translate into meaningful end-to-end speedups"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which pitfall most directly explains why a RoCE cluster can be harder to operate safely than an InfiniBand cluster, even when large-transfer throughput looks similar?",
+            "choices": [
+              "RoCE has no user-space API for RDMA verbs.",
+              "RoCE depends on Ethernet mechanisms such as PFC and ECN to approximate losslessness, creating risks like congestion spreading and PFC storms.",
+              "RoCE cannot use optical links at all.",
+              "RoCE always has lower raw link bandwidth than InfiniBand."
+            ],
+            "answer": "The correct answer is B. RoCE can deliver high throughput, but its lossless behavior is operationally constructed rather than native, which creates failure modes such as PFC storms. A response about user-space APIs is incorrect because the chapter explicitly notes a common verbs programming model across RDMA transports.",
+            "learning_objective": "Compare the operational reliability risks of RoCE and InfiniBand"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is using iperf to validate an ML training fabric a misleading test?",
+            "choices": [
+              "Because iperf measures kernel TCP behavior rather than the RDMA data path used by training collectives",
+              "Because iperf can only run on Ethernet and never on InfiniBand-connected hosts",
+              "Because iperf is too accurate and therefore hides network faults",
+              "Because iperf always reports full line rate regardless of the actual network"
+            ],
+            "answer": "The correct answer is A. iperf exercises a kernel-managed TCP/IP path with copies and context switches, while ML training typically uses RDMA to bypass that stack. Saying iperf cannot run on such hosts misses the real issue, which is measurement of the wrong transport path rather than inability to execute the tool.",
+            "learning_objective": "Identify why benchmark choice must match the workload's actual transport path"
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why adaptive routing does not eliminate the need for topology-aware placement in an oversubscribed network.",
+            "answer": "Adaptive routing can spread traffic across the paths that exist, but it cannot create missing bandwidth across an oversubscribed cut. If a scheduler places a large job across groups linked by a narrow spine, the job still bottlenecks there even if routing is perfectly balanced. The practical consequence is that scheduling and routing are complementary: one ensures capacity exists, the other uses it well.",
+            "learning_objective": "Analyze the complementary roles of placement and routing in avoiding network bottlenecks"
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-network-fabrics-summary",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "integration of the five-level model",
+            "\u03b1-\u03b2 framework as quantitative vocabulary",
+            "losslessness, topology, and observability as end-to-end themes"
+          ],
+          "question_strategy": "Keep this as a Tier 2 synthesis quiz focused on integration across the chapter rather than introducing new technical details.",
+          "difficulty_progression": "Starts with chapter-level integration, then asks the reader to connect design decisions back to the five-level model and monitoring practice.",
+          "integration": "Explicitly ties together wire physics, transport, topology, fabric behavior, cluster design, and operational observability across the full chapter.",
+          "ranking_explanation": "This is a synthesis section that consolidates the argument already developed, so a minimal quiz is appropriate rather than a full one."
+        },
+        "questions": [
+          {
+            "question_type": "SHORT",
+            "question": "Explain why the chapter argues that understanding a slow training run requires reasoning across multiple layers of the five-level model rather than blaming \"the network\" in general.",
+            "answer": "A slowdown might come from physical issues like a degraded cable, transport fragility such as packet loss and retransmission, topology limits like oversubscription, or fabric-behavior problems such as incast and congestion spreading. The same symptom at the application level can therefore have very different root causes. The practical consequence is that effective systems engineering requires cross-layer diagnosis, not a single-layer explanation.",
+            "learning_objective": "Synthesize the five-level model into a cross-layer diagnostic approach for distributed-training slowdowns"
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best captures the chapter's overall design lesson for large-scale ML fabrics?",
+            "choices": [
+              "Once link speeds are high enough, topology and congestion control matter only marginally.",
+              "Vendor benchmark numbers are sufficient for fabric selection if the nominal bandwidth is highest.",
+              "End-to-end training efficiency depends on the interaction of physical links, transport, topology, congestion behavior, and observability\u2014not on bandwidth alone.",
+              "Monitoring mainly matters after failures, not during normal training operations."
+            ],
+            "answer": "The correct answer is C. The chapter's main theme is that fabric performance emerges from interacting layers, so no single metric such as line rate is enough. A bandwidth-only view ignores the repeated emphasis on hop count, losslessness, congestion control, and telemetry-driven diagnosis.",
+            "learning_objective": "Evaluate the chapter's end-to-end view of fabric design as a multi-layer systems problem"
+          },
+          {
+            "question_type": "FILL",
+            "question": "The quantitative framework that separates latency-dominated from bandwidth-dominated communication regimes is the ______-\u03b2 model.",
+            "answer": "\u03b1. The \u03b1-\u03b2 model gives a compact way to reason about startup cost versus transfer-rate cost when selecting fabrics, topologies, and collective strategies.",
+            "learning_objective": "Identify the chapter's main quantitative framework for communication-cost reasoning"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -112,7 +112,14 @@ def qmd_path_for(vol: str, chapter: str) -> Path:
 
 
 def canonical_json_new_path(vol: str, chapter: str) -> Path:
-    return CONTENTS_DIR / vol / chapter / f"{chapter}_quizzes.json.new"
+    """Return the canonical ``.new`` staging path. The stem matches the
+    chapter's ``.qmd`` filename (not the directory name), so outlier
+    chapters like ``vol1/optimizations/`` (whose ``.qmd`` is
+    ``model_compression.qmd``) get the correct ``model_compression_quizzes.json``
+    output that the Lua filter expects per the chapter's ``quiz:`` YAML key."""
+    qmd = qmd_path_for(vol, chapter)
+    stem = qmd.stem  # e.g. "model_compression" for vol1/optimizations
+    return CONTENTS_DIR / vol / chapter / f"{stem}_quizzes.json.new"
 
 
 def memo_path(chapter: str) -> Path:
