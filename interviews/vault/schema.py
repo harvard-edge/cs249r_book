@@ -133,6 +133,8 @@ class Question(BaseModel):
     # Content
     title: str
     scenario: str
+    # Explicit one-sentence ask derived from the scenario + canonical answer.
+    question: Optional[str] = None
     details: QuestionDetails
 
     # Workflow
