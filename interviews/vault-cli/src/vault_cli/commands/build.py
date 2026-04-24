@@ -11,7 +11,7 @@ from rich.table import Table
 
 from vault_cli.compiler import build as compile_build
 from vault_cli.exit_codes import ExitCode
-from vault_cli.legacy_export import emit_legacy_corpus
+from vault_cli.legacy_export import copy_visual_assets, emit_legacy_corpus
 from vault_cli.loader import load_all
 
 console = Console()
@@ -71,6 +71,19 @@ def register(app: typer.Typer) -> None:
             console.print(
                 f"[dim]legacy corpus.json: {legacy_result['count']} questions → "
                 f"{legacy_result['output']}[/dim]"
+            )
+            # Mirror visual assets alongside the JSON. The frontend
+            # references /question-visuals/<track>/<file>.svg directly
+            # from Next.js's public/ tree — no hydration or worker
+            # round-trip, just static assets cached at the edge.
+            visuals_out = Path("interviews/staffml/public")
+            visuals_result = copy_visual_assets(vault_dir, visuals_out)
+            result["visual_assets"] = visuals_result
+            console.print(
+                f"[dim]visual assets: {visuals_result.get('total_assets', 0)} total, "
+                f"{visuals_result.get('copied', 0)} copied, "
+                f"{visuals_result.get('deleted', 0)} pruned → "
+                f"{visuals_out}/question-visuals/[/dim]"
             )
 
         if as_json:

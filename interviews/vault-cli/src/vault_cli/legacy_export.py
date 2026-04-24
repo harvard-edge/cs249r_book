@@ -42,6 +42,21 @@ def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
     # renders it synchronously, so lazy-hydration would be a regression.
     if q.question:
         legacy["question"] = q.question
+    # Visual metadata. The SVG file itself lives under
+    # interviews/vault/visuals/<track>/ and is copied to
+    # interviews/staffml/public/question-visuals/ by `copy_visual_assets`
+    # below; this JSON only carries the metadata the frontend needs
+    # (kind + filename + alt + optional caption) to build the asset
+    # URL at /question-visuals/<track>/<path>.
+    if q.visual is not None:
+        visual_out: dict[str, Any] = {
+            "kind": q.visual.kind,
+            "path": q.visual.path,
+            "alt": q.visual.alt,
+        }
+        if q.visual.caption:
+            visual_out["caption"] = q.visual.caption
+        legacy["visual"] = visual_out
 
     # Chain — legacy shape: chain_ids (list) + chain_positions (dict).
     # v1.0 schema already carries multi-chain membership natively.
@@ -159,4 +174,50 @@ def _to_summary(item: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
-__all__ = ["emit_legacy_corpus"]
+def copy_visual_assets(vault_dir: Path, staffml_public_dir: Path) -> dict[str, Any]:
+    """Copy `interviews/vault/visuals/<track>/*.svg` → `<staffml>/public/question-visuals/<track>/`.
+
+    The Next.js frontend serves static assets from ``public/`` at
+    ``/question-visuals/<track>/<file>.svg``. This function mirrors
+    the track-sharded directory layout so the same relative filename
+    used in the YAML's ``visual.path`` field resolves without
+    transformation.
+
+    Overwrites destination files on every run — the vault is the
+    source of truth. Removes destination files whose source no longer
+    exists so renames/deletions propagate. Returns counts for the
+    build summary.
+    """
+    import shutil
+
+    source = vault_dir / "visuals"
+    dest = staffml_public_dir / "question-visuals"
+    copied = 0
+    deleted = 0
+
+    if not source.exists():
+        return {"copied": 0, "deleted": 0, "note": "no visuals directory"}
+
+    # Mirror from source into dest.
+    dest.mkdir(parents=True, exist_ok=True)
+    source_files: set[Path] = set()
+    for svg in source.rglob("*.svg"):
+        rel = svg.relative_to(source)
+        source_files.add(rel)
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists() or target.read_bytes() != svg.read_bytes():
+            shutil.copy2(svg, target)
+            copied += 1
+
+    # Prune destination files that no longer have a source.
+    for existing in dest.rglob("*.svg"):
+        rel = existing.relative_to(dest)
+        if rel not in source_files:
+            existing.unlink()
+            deleted += 1
+
+    return {"copied": copied, "deleted": deleted, "total_assets": len(source_files)}
+
+
+__all__ = ["emit_legacy_corpus", "copy_visual_assets"]

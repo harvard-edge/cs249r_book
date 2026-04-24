@@ -27,6 +27,18 @@ export interface Question {
    * back to a zone-based inferred-task label.
    */
   question?: string;
+  /**
+   * Optional diagram attached to the question. The SVG file lives at
+   * `/question-visuals/<track>/<visual.path>` — copied from the vault
+   * by the build step. Rendered between the scenario and the Your
+   * task callout so the reading order is context → diagram → ask.
+   */
+  visual?: {
+    kind: "svg" | "mermaid";
+    path: string;              // bare filename, resolves under /question-visuals/<track>/
+    alt: string;                // a11y-required description
+    caption?: string;
+  };
   topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones
   competency_area: string;  // one of 13 canonical areas
