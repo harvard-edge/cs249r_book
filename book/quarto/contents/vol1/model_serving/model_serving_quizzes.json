@@ -1,9 +1,849 @@
 {
   "metadata": {
-    "source_file": "/Users/VJ/GitHub/MLSysBook/quarto/contents/vol1/model_serving/model_serving.qmd",
-    "total_sections": 0,
-    "sections_with_quizzes": 0,
+    "source_file": "book/quarto/contents/vol1/model_serving/model_serving.qmd",
+    "schema_version": 2,
+    "generated_by": "quiz-refresh/generate_quizzes.py",
+    "generated_on": "2026-04-24",
+    "model": "gpt-5.4",
+    "total_sections": 12,
+    "sections_with_quizzes": 12,
     "sections_without_quizzes": 0
   },
-  "sections": []
+  "sections": [
+    {
+      "section_id": "#sec-model-serving-serving-paradigm-9634",
+      "section_title": "Serving Paradigm",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "serving inversion from throughput to latency",
+            "static vs dynamic inference and hybrid serving",
+            "deployment-spectrum consequences across cloud, mobile, and TinyML",
+            "load balancers and deterministic latency isolation"
+          ],
+          "question_strategy": "Begin with the core conceptual inversion, then test application of static vs dynamic serving, deployment-context constraints, and finally system-level implications of load balancing and resource isolation.",
+          "difficulty_progression": "Starts with foundational identification of the serving objective, moves to architecture-choice scenarios, then to infrastructure and tail-latency reasoning.",
+          "integration": "Connects the Iron Law, deployment paradigms from earlier chapters, and benchmarking/compression concepts to production serving constraints.",
+          "ranking_explanation": "This section introduces the chapter's governing thesis and several foundational architectural decisions, so it warrants a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which change most directly captures the chapter's 'serving inversion' relative to training?",
+            "choices": [
+              "The system shifts from maximizing average throughput at high utilization to minimizing per-request tail latency with capacity headroom.",
+              "The system shifts from using fixed model weights to updating weights continuously during inference.",
+              "The system shifts from using specialized accelerators to using only CPUs for predictable latency.",
+              "The system shifts from needing monitoring to relying mainly on offline validation."
+            ],
+            "answer": "The correct answer is A. Serving optimizes latency, especially p99 behavior, so systems intentionally keep headroom instead of saturating hardware. An answer centered on updating weights confuses serving with training, and one that claims CPUs are always required ignores cloud GPU serving.",
+            "learning_objective": "Explain how serving inverts training's optimization objective from throughput maximization to latency minimization."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A photo organization app classifies a user's existing library overnight, while a content moderation API must classify newly uploaded images immediately. Explain why the first workload favors static inference and the second favors dynamic inference.",
+            "answer": "The photo app serves predictable inputs, so it can pre-compute results and eliminate user-visible inference latency. In contrast, content moderation must handle novel uploads in real time, so predictions must be computed on demand. The practical consequence is that the moderation system needs low-latency serving infrastructure, while the photo app can trade freshness for lower serving cost.",
+            "learning_objective": "Compare static and dynamic inference choices for different serving workloads."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A team wants to deploy the same vision model in three environments: a cloud API, a smartphone app, and a TinyML sensor node. Which statement best matches the chapter's serving spectrum?",
+            "choices": [
+              "All three should use the same batching and memory strategy so model behavior stays consistent.",
+              "Cloud serving emphasizes dynamic batching and concurrency, mobile emphasizes batch-1 responsiveness and energy, and TinyML requires fully pre-allocated memory with no dynamic batching.",
+              "Mobile and TinyML mainly differ in network protocol choice, while cloud and mobile share the same memory constraints.",
+              "TinyML is the best target for large models because firmware deployment avoids container cold starts."
+            ],
+            "answer": "The correct answer is B. The chapter emphasizes that deployment context changes the serving design itself: cloud favors dynamic batching, mobile favors responsive batch-1 execution, and TinyML uses static memory allocation. The claim that all three should share one strategy ignores the power, memory, and batching constraints that define each paradigm.",
+            "learning_objective": "Classify serving strategies across cloud, mobile, and TinyML deployment contexts."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Once a load balancer routes requests evenly across replicas, deterministic tail latency is guaranteed as long as average utilization stays below 70 percent.",
+            "answer": "False. Even with balanced routing, noisy neighbors, thread migration, paging, and interrupts inside a node can still create latency jitter. The chapter argues that CPU pinning, memory locking, and interrupt shielding are needed to make latency more deterministic.",
+            "learning_objective": "Identify why replica-level load balancing alone does not eliminate tail-latency variability."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which operational choice would most likely reduce p99 latency jitter on a single inference node serving a safety-critical workload?",
+            "choices": [
+              "Increase average utilization toward 95 percent so the GPU stays fully busy.",
+              "Move health checks from the load balancer into the model code only.",
+              "Use CPU affinity, lock critical memory regions, and steer interrupts away from inference cores.",
+              "Replace gRPC with JSON so payloads are easier to inspect manually."
+            ],
+            "answer": "The correct answer is C. Resource isolation reduces cache eviction, paging stalls, and interrupt-driven preemption, all of which create jitter. Pushing utilization to 95 percent worsens queueing risk, and switching to JSON increases overhead rather than improving deterministic behavior.",
+            "learning_objective": "Select node-level isolation techniques that improve deterministic serving latency."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-serving-system-architecture-4879",
+      "section_title": "Serving System Architecture",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "inference server pipeline stages",
+            "scheduler and batching window trade-offs",
+            "tensor layout transformation",
+            "REST/gRPC and serialization overhead"
+          ],
+          "question_strategy": "Cover request flow through the inference server, then probe scheduler behavior and communication/serialization decisions that consume latency budget.",
+          "difficulty_progression": "Starts with server anatomy, progresses to scheduling trade-offs and protocol choices, and ends with an integration question about where latency can be lost outside the model.",
+          "integration": "Builds on prior chapters on frameworks, hardware acceleration, and benchmarking by showing how serving software maps requests onto optimized runtimes.",
+          "ranking_explanation": "This section introduces the core software architecture of serving systems and therefore merits a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "ORDER",
+            "question": "Order the following inference-server stages for a typical online request: (1) Dynamic batcher, (2) Accelerator execution, (3) Network ingress, (4) Request queue.",
+            "answer": "The correct order is: (3) Network ingress, (4) Request queue, (1) Dynamic batcher, (2) Accelerator execution. Requests must first enter through the network stack before they can be buffered, then the scheduler forms a batch, and only then can the runtime dispatch work to the accelerator. Swapping batching and queuing would remove the staging area the scheduler relies on.",
+            "learning_objective": "Order the major stages of inference-server request handling."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is the scheduler described as the point 'where throughput meets latency' in an inference server?",
+            "choices": [
+              "Because it decides whether to run requests immediately or wait briefly to form a larger batch that better utilizes the accelerator.",
+              "Because it chooses whether the model should train or serve on each request.",
+              "Because it converts NCHW tensors into NHWC tensors for all frameworks.",
+              "Because it replaces the need for load balancing across replicas."
+            ],
+            "answer": "The correct answer is A. The scheduler controls the batching window, trading immediate service for higher accelerator efficiency. Tensor-layout conversion is a separate transformation concern, and load balancing across replicas is not eliminated by per-node scheduling.",
+            "learning_objective": "Explain how the serving scheduler mediates the latency-throughput trade-off."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a format mismatch such as sending NHWC image tensors to a runtime expecting NCHW can be a silent serving failure rather than an obvious crash.",
+            "answer": "The tensor is still a valid block of numbers, so the runtime may execute without raising an exception even though it interprets spatial data as channels. For example, a model trained on NCHW can receive scrambled image structure and return garbage predictions. The system consequence is silent accuracy loss that monitoring focused only on uptime or latency may miss.",
+            "learning_objective": "Analyze how request transformation errors can silently corrupt serving outputs."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A high-throughput internal microservice serves embedding vectors and spends substantial CPU time parsing payloads. Which interface choice best aligns with the chapter's guidance?",
+            "choices": [
+              "REST over HTTP/1.1 with JSON because human readability is the primary performance requirement for internal calls.",
+              "gRPC over HTTP/2 with Protobuf because persistent connections and binary serialization reduce handshake and parsing overhead.",
+              "REST over HTTP/1.1 with larger JSON payloads because bigger payloads amortize parsing cost automatically.",
+              "Flat text over raw TCP because schemas are unnecessary when both services are internal."
+            ],
+            "answer": "The correct answer is B. The chapter recommends gRPC plus Protobuf for latency-critical internal communication because HTTP/2 multiplexing and binary serialization reduce both connection and parsing cost. An answer focused on JSON favors accessibility, but that is the public-API trade-off, not the high-performance internal one.",
+            "learning_objective": "Select an interface protocol based on serving serialization and transport overheads."
+          },
+          {
+            "question_type": "FILL",
+            "question": "When a serving system uses a binary format whose buffer can be accessed directly as in-memory data structures, it approaches ____ deserialization.",
+            "answer": "zero-copy. The term denotes avoiding extra parsing and memory allocation so the network buffer can be used directly, reducing serialization overhead in latency-sensitive serving paths.",
+            "learning_objective": "Identify the serialization concept that minimizes data-copy overhead in serving systems."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-request-lifecycle-d9c6",
+      "section_title": "Request Lifecycle",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "latency budget decomposition",
+            "phase-by-phase bottleneck analysis",
+            "resolution and adaptive input sizing",
+            "request pipelining and duty cycle",
+            "postprocessing role"
+          ],
+          "question_strategy": "Use the concrete ResNet-50 and DLRM examples to test latency-budget reasoning, then extend to pipeline overlap and resolution trade-offs.",
+          "difficulty_progression": "Begins with identifying latency-budget structure, then applies Amdahl-style reasoning, then moves to cross-phase synthesis and pipelining.",
+          "integration": "Connects serving latency decomposition to Amdahl's Law, hardware bottlenecks, and system-efficiency ideas introduced in earlier chapters.",
+          "ranking_explanation": "This section delivers one of the chapter's core learning objectives: decomposing latency into measurable phases to find real bottlenecks."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "In the chapter's ResNet-50 latency breakdown, which phase consumes the largest share of total request time before model optimization shifts the bottleneck even further?",
+            "choices": [
+              "Postprocessing, because top-k extraction dominates the response path.",
+              "GPU inference, because neural network math always dominates end-to-end serving latency.",
+              "Preprocessing, especially JPEG decode and resize.",
+              "Network ingress, because HTTP handling exceeds model execution for image classification."
+            ],
+            "answer": "The correct answer is C. The breakdown shows preprocessing already consumes a large fraction of total latency, and after TensorRT optimization it dominates even more. The claim that neural network math always dominates is exactly the misconception the section tries to correct.",
+            "learning_objective": "Identify the dominant phase in a measured serving latency budget."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A team speeds up ResNet-50 inference from 5 ms to 0.5 ms but leaves JPEG decode, resize, normalization, and data transfer unchanged. Explain why the end-to-end speedup is much smaller than 10x.",
+            "answer": "Most of the latency sits outside the model, so accelerating only inference leaves preprocessing and transfer as the dominant costs. In the chapter's Amdahl-style example, non-model time consumes over half the budget, so the total improvement is limited even when model execution becomes much faster. The practical implication is that profiling the whole request path matters more than optimizing the most ML-specific component first.",
+            "learning_objective": "Analyze end-to-end serving speedup limits using latency-budget reasoning."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why can doubling image resolution produce less than the full 4x slowdown predicted by pure compute scaling, especially at moderate sizes?",
+            "choices": [
+              "Because latency is independent of input size once the model is compiled.",
+              "Because fixed overheads are amortized and the system may transition between compute-bound and memory-bound regimes rather than scaling purely with FLOPs.",
+              "Because postprocessing complexity always drops as image size increases.",
+              "Because higher-resolution inputs automatically improve batch formation efficiency."
+            ],
+            "answer": "The correct answer is B. The section explains that quadratic compute scaling is the theoretical starting point, but fixed overhead and changing hardware bottlenecks alter realized slowdowns. Claims about latency being independent of input size or postprocessing always shrinking ignore the measured resolution-dependent behavior.",
+            "learning_objective": "Evaluate how resolution changes interact with compute-bound and memory-bound serving behavior."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: Request pipelining reduces throughput because only one request can use the GPU at a time.",
+            "answer": "False. Pipelining overlaps CPU preprocessing and I/O for one request with GPU inference for another, increasing the accelerator's duty cycle. The section explicitly presents pipelining as a way to raise throughput without changing the model.",
+            "learning_objective": "Explain how overlapping pipeline stages improves serving utilization."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which scenario best matches the chapter's argument for adaptive resolution?",
+            "choices": [
+              "Always use the highest supported resolution because batching hides the added cost.",
+              "Always use the lowest resolution because preprocessing dominates anyway.",
+              "Pick one fixed resolution during training and never change it at serving time.",
+              "Use a lightweight first-stage classifier to choose task-appropriate resolution, trading a small preprocessing cost for higher overall throughput."
+            ],
+            "answer": "The correct answer is D. Adaptive resolution intentionally spends a small amount of work upfront to avoid unnecessary high-resolution inference on every request. The 'always highest resolution' idea ignores the throughput penalty, while 'always lowest resolution' throws away accuracy when some inputs need more detail.",
+            "learning_objective": "Select an adaptive serving strategy for balancing resolution, accuracy, and throughput."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-queuing-theory-tail-latency-29a6",
+      "section_title": "Queuing Theory",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "Little's Law and concurrency",
+            "batching tax",
+            "utilization-latency relationship",
+            "tail latency and headroom",
+            "tail-tolerant techniques"
+          ],
+          "question_strategy": "Use the chapter's concrete numbers to test queueing calculations and interpretations, then conclude with overload-mitigation and tail-tolerance choices.",
+          "difficulty_progression": "Starts with Little's Law, moves through batching and utilization analysis, and ends with tail-latency mitigation strategies.",
+          "integration": "Directly supports the chapter learning objective on applying queuing theory and ties back to benchmarking SLOs and production deployment.",
+          "ranking_explanation": "Queuing theory is central to the chapter's quantitative framework and warrants a full, conceptually varied quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "A serving node must sustain 1,000 QPS with a 50 ms average time in system. According to Little's Law, what concurrency must the node support?",
+            "choices": [
+              "20 concurrent requests",
+              "50 concurrent requests",
+              "1,000 concurrent requests",
+              "5 concurrent requests"
+            ],
+            "answer": "The correct answer is B. Little's Law gives L = \u03bbW = 1000 \u00d7 0.05 = 50 concurrent requests. Smaller numbers ignore the multiplication by latency in seconds, while 1,000 would incorrectly treat QPS as concurrency directly.",
+            "learning_objective": "Apply Little's Law to compute serving concurrency requirements."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "At 500 QPS, why does moving from batch size 1 to batch size 32 create a large latency penalty even if throughput improves?",
+            "choices": [
+              "Because larger batches reduce GPU utilization and force the model onto the CPU.",
+              "Because the first request must wait for the rest of the batch to arrive, and inference time also increases with batch size.",
+              "Because queuing theory applies only to static inference and not to online batching.",
+              "Because larger batches eliminate dynamic scheduling and therefore always violate SLOs."
+            ],
+            "answer": "The correct answer is B. The batching tax has two components: formation delay and inflated inference time for the larger batch. The idea that bigger batches reduce utilization reverses the chapter's argument; they usually improve utilization but can still hurt latency badly.",
+            "learning_objective": "Explain the sources of latency in batched serving."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why production serving systems target roughly 40-60 percent utilization instead of trying to run near 100 percent busy all the time.",
+            "answer": "As utilization approaches one, queueing delay grows nonlinearly, so a modest traffic increase can cause mean and tail latency to explode. For example, the chapter's M/M/1-style analysis shows p99 latency becomes much larger than service time well before full saturation. The practical consequence is that headroom is not waste; it is what preserves latency SLOs during bursts and failures.",
+            "learning_objective": "Justify the use of utilization headroom in serving capacity planning."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best explains why p99 latency, not mean latency, determines production risk?",
+            "choices": [
+              "Because p99 is usually equal to mean latency once the model is warmed up.",
+              "Because percentile latency exposes rare slow requests that dominate user experience and can amplify when requests fan out across components.",
+              "Because p99 measures only preprocessing and ignores queueing.",
+              "Because mean latency is useful only for offline inference systems."
+            ],
+            "answer": "The correct answer is B. Tail latency captures the unlucky requests that users actually experience, especially in multi-component systems where one slow sub-request can dominate end-to-end time. The idea that p99 converges to the mean misses the entire argument of the section.",
+            "learning_objective": "Analyze why percentile latency is the governing metric for production serving."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A service is overloaded and queue depth is growing beyond the level likely to meet its SLO. Which response best matches the chapter's recommended control strategy?",
+            "choices": [
+              "Accept all requests and let the queue absorb the burst so throughput remains maximal.",
+              "Increase the batching window indefinitely so the GPU becomes perfectly efficient.",
+              "Use admission control or load shedding to reject excess requests quickly rather than allowing widespread timeouts.",
+              "Disable health checks so slow replicas still receive traffic and total capacity appears higher."
+            ],
+            "answer": "The correct answer is C. Admission control protects latency for accepted requests by preventing hopeless work from piling into the queue. Accepting everything often collapses useful throughput, and stretching batching windows under overload simply converts pressure into more waiting.",
+            "learning_objective": "Select an overload-control technique that protects latency SLOs under queue growth."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-model-lifecycle-management-ff2e",
+      "section_title": "Model Lifecycle Management",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "training-serving skew",
+            "cold start phases",
+            "model loading strategies",
+            "caching infrastructure",
+            "multi-model serving and memory management"
+          ],
+          "question_strategy": "Test prevention of silent accuracy failures first, then probe cold-start anatomy and the memory/caching decisions behind multi-model production serving.",
+          "difficulty_progression": "Starts with skew identification, then moves to cold-start mitigation, then to multi-model memory and swap trade-offs.",
+          "integration": "Links ML workflow and MLOps concerns from prior chapters to serving-specific deployment, loading, and memory behavior.",
+          "ranking_explanation": "This section introduces major production failure modes and mitigation strategies that are essential for deployment correctness and reliability."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which issue is the clearest example of training-serving skew rather than external data drift?",
+            "choices": [
+              "User behavior changes seasonally and the model's target distribution shifts over time.",
+              "The serving pipeline uses BGR images and different normalization constants from the RGB preprocessing used during training.",
+              "Traffic volume spikes on a holiday and queue depth increases sharply.",
+              "A new GPU type changes model loading time during autoscaling."
+            ],
+            "answer": "The correct answer is B. Training-serving skew is an internal mismatch between training and serving logic, such as different color ordering or normalization. Seasonal user behavior change is external distribution shift, not an implementation inconsistency.",
+            "learning_objective": "Distinguish training-serving skew from other production-serving problems."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why is cold start more than 'just loading weights,' and why does that matter during autoscaling?",
+            "answer": "Cold start also includes CUDA context creation, graph compilation, memory allocation, and warmup work that frameworks defer until first use. During autoscaling, those extra steps mean new replicas may be unavailable or dramatically slower exactly when traffic is rising. The operational consequence is that reactive scaling can miss its window unless engines are precompiled and warmup is handled before live traffic.",
+            "learning_objective": "Explain the main components of serving cold start and their production impact."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which loading strategy best reduces repeated 30-second compilation costs for a model served through TensorRT?",
+            "choices": [
+              "Store only the original training checkpoint and rely on just-in-time compilation on every deployment.",
+              "Pre-compile the optimized engine and deploy that artifact so subsequent replicas skip the heavy compilation step.",
+              "Use JSON instead of binary model formats so weights load more transparently.",
+              "Increase batch size during warmup so graph compilation disappears from startup latency."
+            ],
+            "answer": "The correct answer is B. The section's cold-start example shows that pre-compiling the optimized engine removes the largest startup component on future deployments. Changing serialization to JSON is irrelevant here, and large warmup batches do not eliminate compile cost.",
+            "learning_objective": "Select a deployment strategy that reduces cold-start latency from compilation."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "A system serves many models whose combined size exceeds GPU memory, so it swaps models from host memory over PCIe when needed. Why can this severely hurt latency?",
+            "choices": [
+              "Because host DRAM is slower than VRAM and moving a multi-GB model over PCIe can take hundreds of milliseconds before inference even starts.",
+              "Because PCIe transfer time matters only during training, not serving.",
+              "Because model swapping improves tail latency by increasing cache diversity.",
+              "Because the GPU can execute directly from pageable host memory at full bandwidth."
+            ],
+            "answer": "The correct answer is A. The chapter quantifies swap time for a large model as hundreds of milliseconds, which already exceeds many serving SLOs. The claim about executing from pageable host memory at full bandwidth ignores the need for pinned memory and the bandwidth gap to VRAM.",
+            "learning_objective": "Analyze the latency impact of multi-model swapping between host and device memory."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: CUDA MPS improves isolation between models more strongly than MIG because all clients share a single context.",
+            "answer": "False. CUDA MPS reduces redundant context overhead and can improve concurrency, but shared context weakens isolation. MIG provides hardware-level partitioning, which is stronger for per-model isolation and SLO guarantees.",
+            "learning_objective": "Compare CUDA MPS and MIG for multi-model serving isolation."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-throughput-optimization-18d1",
+      "section_title": "Throughput Optimization",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "why batching helps",
+            "dynamic vs static batching",
+            "window-size and SLO trade-offs",
+            "continuous batching and PagedAttention",
+            "traffic-pattern-dependent batching strategies"
+          ],
+          "question_strategy": "Use concrete batch-size numbers to test the economics of batching, then extend to dynamic windows, continuous batching for LLMs, and traffic-pattern selection.",
+          "difficulty_progression": "Starts with standard batching intuition, moves to dynamic-window reasoning, and ends with LLM-specific continuous batching and deployment-pattern synthesis.",
+          "integration": "Builds on queuing theory, LLM serving, and MLPerf traffic scenarios while connecting batching to cost and hardware utilization.",
+          "ranking_explanation": "This section is one of the chapter's main technical centers and directly supports a stated learning objective on selecting batching strategies from traffic and latency constraints."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why does increasing batch size from 1 to moderate values often improve serving throughput so dramatically on GPUs?",
+            "choices": [
+              "Because larger batches remove the need for preprocessing and postprocessing.",
+              "Because batching amortizes fixed costs such as kernel launches and weight reads across more requests, raising hardware utilization.",
+              "Because larger batches make queueing theory irrelevant once the GPU is saturated.",
+              "Because the model's parameter count shrinks as batch size grows."
+            ],
+            "answer": "The correct answer is B. The section emphasizes that kernel launch overhead and repeated weight movement are expensive at batch-1 and become much cheaper per item in a batch. The other choices either eliminate costs that still exist or confuse batching with changing the model itself.",
+            "learning_objective": "Explain the hardware-level reason batching improves serving throughput."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is dynamic batching generally preferable to static batching for online services with variable traffic?",
+            "choices": [
+              "Because dynamic batching uses a time window, bounding wait time even when traffic is low or bursty.",
+              "Because static batching cannot be used with GPUs.",
+              "Because dynamic batching guarantees identical batch size on every step.",
+              "Because static batching always gives worse throughput than batch size 1."
+            ],
+            "answer": "The correct answer is A. A timeout-based window prevents requests from waiting indefinitely for a full batch, which is the core failure mode of static batching under variable arrivals. Dynamic batching does not guarantee identical batch sizes; in fact, the section emphasizes that batch size remains stochastic.",
+            "learning_objective": "Compare static and dynamic batching strategies for online serving traffic."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A service has a 50 ms latency SLO. Explain why allocating roughly 20-30 percent of that budget to batching wait time is a reasonable starting configuration principle.",
+            "answer": "Batching can improve throughput, but every millisecond spent waiting consumes latency budget before any computation occurs. Reserving only a fraction of the SLO for batching leaves room for inference, serialization, and other overheads while still capturing some efficiency gains. The practical effect is avoiding aggressive windows that deliver little extra throughput but push p99 latency past the SLO.",
+            "learning_objective": "Justify a batching-window rule of thumb from an end-to-end latency budget."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why does continuous batching matter much more for LLM serving than for fixed-output models such as image classification?",
+            "choices": [
+              "Because language models are trained online and image classifiers are not.",
+              "Because LLM requests generate variable-length sequences, so completed sequences would otherwise leave batch slots idle until the longest request finishes.",
+              "Because continuous batching eliminates the need for a KV cache.",
+              "Because image classification cannot benefit from any batching strategy at all."
+            ],
+            "answer": "The correct answer is B. Variable output length is the core problem: static batches waste capacity when some sequences finish early. Continuous batching refills those slots each decode step; it does not remove the need for KV-cache management, which remains central.",
+            "learning_objective": "Analyze why variable-length autoregressive generation requires continuous batching."
+          },
+          {
+            "question_type": "FILL",
+            "question": "vLLM reduces KV-cache fragmentation by dividing cache storage into fixed-size pages, an approach called ____.",
+            "answer": "PagedAttention. It applies an operating-system-style paging idea to KV-cache memory so completed sequences free reusable pages instead of leaving large contiguous-allocation gaps.",
+            "learning_objective": "Identify the LLM-serving memory technique that addresses KV-cache fragmentation."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which batching strategy best matches a mobile SingleStream deployment such as on-device image classification in a smartphone app?",
+            "choices": [
+              "Large dynamic batches with 20-50 ms windows to maximize GPU utilization",
+              "Synchronized multi-sensor batching with fixed camera-frame groups",
+              "No batching or batch-1 serving, prioritizing responsiveness, energy, and thermal stability",
+              "Offline maximum-batch processing because one user generates a predictable request stream"
+            ],
+            "answer": "The correct answer is C. Single-user mobile serving values immediate response and energy efficiency rather than cloud-style throughput maximization. Large time-window batching adds latency, and synchronized multi-sensor fusion describes a MultiStream scenario rather than a typical mobile app.",
+            "learning_objective": "Select a batching strategy based on deployment traffic pattern and serving constraints."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-llm-serving-b8bf",
+      "section_title": "LLM Serving",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "TTFT and TPOT",
+            "decoding strategies and streaming UX",
+            "memory-bandwidth bound decode phase",
+            "KV cache, prefix caching, and offloading"
+          ],
+          "question_strategy": "Test the two-phase latency model first, then probe decoding and memory constraints, and finish with the engineering implications of prefix caching and bandwidth limits.",
+          "difficulty_progression": "Starts with metric identification, then applies hardware-bottleneck reasoning, then moves to architectural optimization choices.",
+          "integration": "Connects transformer architecture knowledge from prior chapters to serving metrics, memory constraints, and runtime economics.",
+          "ranking_explanation": "This section introduces specialized but essential serving concepts for LLMs that differ qualitatively from fixed-output inference."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which pairing correctly matches the chapter's two main LLM serving metrics with the user experience they capture?",
+            "choices": [
+              "TTFT measures sustained generation fluidity, while TPOT measures startup responsiveness.",
+              "TTFT measures startup responsiveness, while TPOT measures the fluidity of the token stream once generation begins.",
+              "TTFT and TPOT both measure the same quantity but at different percentiles.",
+              "TTFT measures model accuracy, while TPOT measures serving cost."
+            ],
+            "answer": "The correct answer is B. Time to First Token tells the user how quickly the model starts responding, while Time Per Output Token determines how smooth the response feels after that. Treating them as the same metric misses the chapter's two-phase model.",
+            "learning_objective": "Differentiate TTFT and TPOT in LLM serving."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is the decode phase of LLM serving described as memory-bandwidth bound?",
+            "choices": [
+              "Because each new token requires repeatedly reading model weights and KV state, so moving bytes dominates available compute.",
+              "Because decoding always runs on CPUs rather than GPUs.",
+              "Because beam search removes most memory traffic and leaves only arithmetic work.",
+              "Because prefill and decode have identical hardware bottlenecks."
+            ],
+            "answer": "The correct answer is A. The chapter's token-generation-time argument is that per-token work has low arithmetic intensity, so faster compute alone does little if memory movement dominates. The idea that decode always runs on CPUs or shares the same bottleneck as prefill contradicts the section's core distinction.",
+            "learning_objective": "Explain the primary hardware bottleneck in LLM token generation."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why returning tokens incrementally can make a 2-second LLM response feel much better to a user than returning the entire response only at the end.",
+            "answer": "Streaming changes the perceived interaction from 'the system is frozen' to 'the system has started responding,' even if total generation time is unchanged. TTFT determines when output begins, and TPOT shapes the rhythm afterward. The practical implication is that serving infrastructure must support chunked or incremental responses, not just fast total completion time.",
+            "learning_objective": "Explain how streaming output changes perceived LLM serving quality."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which change most directly reduces redundant prefill work across many requests that share the same long system prompt or shared retrieval context?",
+            "choices": [
+              "Increase temperature so the model explores more outputs.",
+              "Use prefix caching so the KV states for the shared prefix are reused instead of recomputed.",
+              "Disable the KV cache so all requests are memory independent.",
+              "Switch from sampling to greedy decoding so prefill disappears."
+            ],
+            "answer": "The correct answer is B. Prefix caching reuses the hidden-state context for shared prompt prefixes, reducing both compute and memory traffic for repeated context. Raising temperature or changing decoding policy affects output diversity, not the prefill redundancy problem.",
+            "learning_objective": "Select a serving optimization that exploits repeated prompt prefixes."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: If decode latency is memory-bandwidth bound, adding more compute cores without increasing memory bandwidth can still substantially lower TPOT.",
+            "answer": "False. The chapter's point is that decode speed is limited mainly by how fast weights and KV data can be moved, so extra compute alone yields little or no latency improvement when memory movement is the bottleneck.",
+            "learning_objective": "Evaluate why memory bandwidth, not raw compute, governs LLM decode latency."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-inference-runtime-selection-5eef",
+      "section_title": "Inference Runtime Selection",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "framework-native vs optimized runtimes",
+            "ONNX Runtime and specialized engines",
+            "layer fusion and auto-tuning",
+            "precision selection and calibration"
+          ],
+          "question_strategy": "Start with runtime selection trade-offs, then test understanding of specialized optimizations and precision-serving economics.",
+          "difficulty_progression": "Begins with basic runtime comparison, then moves to hardware-specific optimization, and ends with accuracy/throughput trade-off reasoning.",
+          "integration": "Connects frameworks, quantization, and accelerator concepts from earlier chapters to production serving deployment choices.",
+          "ranking_explanation": "This section introduces core deployment decisions about runtime and precision that materially affect serving latency and cost."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why might a team choose ONNX Runtime instead of TensorRT for a production service?",
+            "choices": [
+              "Because ONNX Runtime is usually the absolute fastest option on NVIDIA GPUs.",
+              "Because ONNX Runtime preserves training functionality needed during live serving.",
+              "Because ONNX Runtime offers cross-platform deployment flexibility across CPUs, GPUs, and other accelerators from one exported model.",
+              "Because ONNX Runtime removes the need for graph optimization entirely."
+            ],
+            "answer": "The correct answer is C. The chapter positions ONNX Runtime as a hardware-agnostic optimization layer, trading some peak target-specific performance for portability. TensorRT is typically faster on NVIDIA GPUs specifically, so the 'absolute fastest everywhere' claim is not the right reason.",
+            "learning_objective": "Compare cross-platform and hardware-specialized inference runtimes."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What is the main systems benefit of layer fusion in an optimized serving runtime?",
+            "choices": [
+              "It allows the model to retrain itself online during inference.",
+              "It merges sequential operations so intermediate tensors stay in fast memory, reducing kernel launches and memory traffic.",
+              "It converts all dynamic batching into static batching.",
+              "It guarantees zero numerical differences from the training framework."
+            ],
+            "answer": "The correct answer is B. Fusing operations removes extra trips to global memory and reduces launch overhead, which is especially valuable for memory-bound inference chains. It does not imply online training or perfect numerical identity with the original framework.",
+            "learning_objective": "Explain how graph-level fusion improves inference efficiency."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "A deployment team can use FP16 with no measurable accuracy loss, or INT8 with modest additional calibration work and a small possible accuracy drop. Explain how that choice should be framed as a serving economics decision rather than only a numerical-format decision.",
+            "answer": "Lower precision raises throughput and lowers memory footprint, which directly reduces the number of accelerators needed for a given traffic target. FP16 may be the easiest 'free lunch,' while INT8 can push cost down further if its calibration burden and small accuracy risk are acceptable. The practical decision is therefore about latency, fleet size, and business tolerance for accuracy loss, not format aesthetics.",
+            "learning_objective": "Evaluate precision selection as a latency-cost-accuracy trade-off in serving."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why must calibration data for post-training INT8 quantization resemble real serving traffic rather than just convenient training examples?",
+            "choices": [
+              "Because calibration determines activation ranges and mismatched traffic can produce poor scale factors that degrade production accuracy.",
+              "Because Tensor Cores refuse to execute INT8 kernels without live production samples.",
+              "Because representative calibration data eliminates the need for monitoring.",
+              "Because calibration only affects cold-start latency, not predictions."
+            ],
+            "answer": "The correct answer is A. The chapter warns that scale factors derived from unrepresentative data can mis-handle production activations and silently reduce accuracy. Calibration is about numeric range coverage, not about enabling hardware execution or removing monitoring needs.",
+            "learning_objective": "Analyze why representative calibration data matters for quantized serving."
+          },
+          {
+            "question_type": "FILL",
+            "question": "When a serving system re-runs low-confidence INT8 outputs at higher precision to preserve quality, it is using ____ precision selection.",
+            "answer": "dynamic. The idea is to choose numerical precision at runtime based on system conditions or output confidence, balancing throughput and accuracy adaptively.",
+            "learning_objective": "Identify the runtime strategy that adapts serving precision per request."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-nodelevel-optimization-3d9d",
+      "section_title": "Node-Level Optimization",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "graph compilation and static serving graphs",
+            "CPU inference optimization",
+            "NUMA and thread pinning",
+            "serialization/loading formats",
+            "profiling and optimization hierarchy"
+          ],
+          "question_strategy": "Cover compilation first, then CPU-specific optimization, then loading and profiling techniques that reveal or remove bottlenecks.",
+          "difficulty_progression": "Starts with conceptual graph optimization, moves to CPU/NUMA reasoning, and ends with measurement-driven optimization.",
+          "integration": "Builds on frameworks, hardware acceleration, and benchmarking chapters by connecting compiler and systems techniques to serving-node performance.",
+          "ranking_explanation": "This section presents concrete optimization techniques with strong systems reasoning value, so it merits a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why can serving graphs be optimized more aggressively than training graphs?",
+            "choices": [
+              "Because serving graphs are static and no longer need to support weight updates, allowing compilation-time transformations such as fusion and constant folding.",
+              "Because serving graphs always run on one hardware target with no runtime variability.",
+              "Because training graphs cannot contain constants.",
+              "Because graph compilation matters only for CPU inference, not accelerators."
+            ],
+            "answer": "The correct answer is A. Serving uses fixed weights and stable execution structure, so the compiler can safely pre-plan memory and fuse operations. The idea that serving always has no runtime variability is too strong, and training graphs absolutely can contain constants.",
+            "learning_objective": "Explain why inference graphs enable more aggressive compiler optimization than training graphs."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "When can a CPU beat a GPU on serving latency?",
+            "choices": [
+              "Never; GPUs always dominate latency because they have more parallel hardware.",
+              "When the model is small and batch size is 1, so GPU launch and transfer overhead exceed the actual compute time.",
+              "Only when the CPU is retraining the model instead of serving it.",
+              "Only if the GPU lacks Tensor Cores."
+            ],
+            "answer": "The correct answer is B. The chapter highlights that small-batch, small-model workloads can be dominated by GPU overhead rather than arithmetic, making optimized CPU serving faster. A blanket 'GPU always wins' view ignores the dispatch and transfer overheads central to serving.",
+            "learning_objective": "Identify the workload regime where CPU inference can outperform GPU serving."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why thread pinning without NUMA-aware memory placement can still leave a CPU serving system slow.",
+            "answer": "Pinning keeps threads on specific cores, but if their model weights or activations live in memory attached to another socket, every access still crosses a slower inter-socket path. That means locality is only half solved unless threads and data are co-located. The practical result is that a node can look well-pinned in configuration yet still show avoidable latency inflation.",
+            "learning_objective": "Analyze the interaction between thread affinity and NUMA locality in CPU serving."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why do memory-mapped formats such as safetensors reduce cold-start time compared with Python pickle-based loading?",
+            "choices": [
+              "Because they compress weights more aggressively than all other formats.",
+              "Because they allow direct mapping of raw tensor bytes with minimal parsing, so loading becomes limited more by disk bandwidth than Python object reconstruction.",
+              "Because they automatically quantize weights during load.",
+              "Because they eliminate the need to move weights to accelerator memory."
+            ],
+            "answer": "The correct answer is B. The chapter's point is that zero-copy-friendly formats avoid expensive object-by-object deserialization overhead. Compression or automatic quantization is not the key mechanism described, and accelerator transfer can still be necessary after loading.",
+            "learning_objective": "Explain how serialization format affects model load latency."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "If a profiler trace shows many gaps on the GPU timeline while the CPU is busy decoding images and preparing tensors, what is the most likely immediate conclusion?",
+            "choices": [
+              "The model is compute-bound and needs more Tensor Cores.",
+              "The GPU is being starved by an upstream CPU or I/O bottleneck rather than limited by the model kernels themselves.",
+              "The runtime has fused too many operators.",
+              "The serving node must be suffering from quantization error."
+            ],
+            "answer": "The correct answer is B. Idle gaps during active CPU-side work indicate the accelerator is waiting to be fed, which points to preprocessing, transfer, or I/O limits. Quantization error is an accuracy issue, not an explanation for timeline idle regions.",
+            "learning_objective": "Interpret timeline-profiling evidence to locate serving bottlenecks."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-economics-capacity-planning-3e7e",
+      "section_title": "Economics and Planning",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "cost per inference",
+            "GPU vs CPU economics",
+            "capacity planning with latency guarantees",
+            "LLM case-study economics"
+          ],
+          "question_strategy": "Use the chapter's cost and capacity examples to test economic reasoning under latency constraints, then extend to LLM memory-capacity economics.",
+          "difficulty_progression": "Begins with unit-cost reasoning, moves to deployment trade-offs, and ends with integrated LLM memory-bandwidth and cost analysis.",
+          "integration": "Synthesizes queueing theory, batching, precision, and hardware selection into infrastructure planning decisions.",
+          "ranking_explanation": "This section integrates the chapter's technical ideas into deployment economics and capacity planning, making it a strong candidate for a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Why can a more expensive GPU instance still have a lower cost per inference than a cheaper CPU instance?",
+            "choices": [
+              "Because cloud providers charge less for idle GPU time than for idle CPU time.",
+              "Because higher hourly price matters less than much higher sustained throughput when cost is normalized per inference.",
+              "Because serving costs ignore latency and measure only memory footprint.",
+              "Because GPUs eliminate all orchestration overhead."
+            ],
+            "answer": "The correct answer is B. Cost per inference depends on both price and throughput; a pricier accelerator can still be cheaper per request if it serves many more requests per hour. The chapter's AWS-style example makes exactly this point with CPU, T4, and V100 comparisons.",
+            "learning_objective": "Evaluate serving hardware choices using cost per inference rather than hourly price alone."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Why is a throughput number meaningless for capacity planning unless it is paired with a percentile latency guarantee?",
+            "answer": "A system can report high raw QPS while still violating p95 or p99 SLOs on a nontrivial fraction of requests. In serving, only throughput delivered within the latency objective is actually useful to the product. The practical implication is that provisioning must be based on valid throughput under load, not unconstrained benchmark throughput.",
+            "learning_objective": "Justify why capacity planning must combine throughput and latency SLOs."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why might a hybrid scaling strategy keep baseline traffic on GPUs but send overflow traffic to CPUs during spikes?",
+            "choices": [
+              "Because CPUs are always cheaper and faster than GPUs for all models.",
+              "Because GPU instances scale up instantly while CPUs have long startup delays.",
+              "Because CPUs can absorb bursts reactively when GPU startup latency is too slow, even if CPU cost per inference is higher during the spike.",
+              "Because hybrid systems eliminate the need for load balancing."
+            ],
+            "answer": "The correct answer is C. The chapter notes that GPU spin-up can be slow enough that reactive scaling misses the burst, so CPU overflow can preserve responsiveness. This does not mean CPUs are globally cheaper or that load balancing becomes unnecessary.",
+            "learning_objective": "Analyze when a hybrid CPU+GPU serving strategy is economically useful."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "In the Llama-3-8B case study, which resource primarily determines throughput and cost once the model weights are already quantized and loaded?",
+            "choices": [
+              "KV-cache memory capacity, because it determines how many request tokens can be kept in flight concurrently.",
+              "Only FLOP count, because autoregressive decoding is compute-bound.",
+              "Network bandwidth, because prompt tokens dominate end-to-end economics.",
+              "Container image size, because deployment artifact size fixes token rate."
+            ],
+            "answer": "The correct answer is A. The case study argues that memory capacity sets the size of the concurrent working set through the KV cache, while bandwidth governs per-token latency. Treating decode as purely compute-bound misses the section's main systems conclusion.",
+            "learning_objective": "Identify the primary throughput constraint in LLM serving economics."
+          },
+          {
+            "question_type": "TF",
+            "question": "True or False: In LLM serving, memory bandwidth primarily determines latency, while memory capacity primarily constrains throughput and cost.",
+            "answer": "True. The case study separates the two roles clearly: bandwidth limits token-generation speed, while capacity limits how much KV cache and concurrency fit on the device, which shapes throughput and unit economics.",
+            "learning_objective": "Differentiate the roles of memory bandwidth and memory capacity in LLM serving."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-fallacies-pitfalls-336b",
+      "section_title": "Fallacies and Pitfalls",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "model-latency vs user-latency misconceptions",
+            "high-utilization pitfalls",
+            "training-serving skew and calibration mistakes",
+            "tail-latency and batching misconceptions",
+            "cold-start misunderstandings"
+          ],
+          "question_strategy": "Use misconception-shaped prompts, mostly MCQ and TF, to test whether the reader can reject common but plausible serving mistakes.",
+          "difficulty_progression": "Starts with familiar misconceptions, then moves to interacting queueing and lifecycle effects that require integrating earlier sections.",
+          "integration": "This section synthesizes the whole chapter by contrasting correct systems reasoning with common misapplications of benchmarking, batching, and deployment ideas.",
+          "ranking_explanation": "Although presented as pitfalls, the section sharpens the chapter's most important takeaways and therefore deserves a full quiz."
+        },
+        "questions": [
+          {
+            "question_type": "TF",
+            "question": "True or False: If a team makes model inference 2.5x faster, user-perceived latency will also improve by exactly 2.5x.",
+            "answer": "False. Serving latency also includes queueing, preprocessing, serialization, and other infrastructure costs, and those components can dominate or interact nonlinearly. Under load, speeding up the model can help more or less than proportionally depending on how utilization and queueing change.",
+            "learning_objective": "Evaluate why model-speed improvements do not map directly to user-perceived latency improvements."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Why is pushing serving infrastructure to 90 percent utilization usually a mistake even if it appears more cost-efficient on paper?",
+            "choices": [
+              "Because GPUs become less numerically accurate above 70 percent utilization.",
+              "Because queueing delay grows sharply near saturation, so modest cost savings can trigger large p99 latency increases and SLO violations.",
+              "Because model loading stops working once average utilization exceeds 80 percent.",
+              "Because high utilization prevents batching from happening."
+            ],
+            "answer": "The correct answer is B. The chapter's queueing analysis shows that latency rises superlinearly as utilization approaches capacity, so apparent efficiency gains can destroy tail behavior. Accuracy and loading are not the core reason here; queueing physics is.",
+            "learning_objective": "Analyze why maximizing utilization can undermine serving SLOs."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which monitoring approach would be most dangerous to rely on by itself for a production serving system?",
+            "choices": [
+              "Monitoring p95 and p99 latency distributions under load",
+              "Comparing serving inputs against the preprocessing assumptions used in training",
+              "Tracking average latency alone and assuming it represents user experience",
+              "Validating quantized accuracy on representative production-like data"
+            ],
+            "answer": "The correct answer is C. Mean latency can look healthy while p99 is disastrous, so average-only monitoring hides the very outliers that users experience. The other choices are exactly the kinds of checks the chapter recommends to catch real serving failures.",
+            "learning_objective": "Identify an inadequate serving-monitoring practice that misses tail-risk behavior."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why calibrating an INT8 model on convenient training data rather than representative serving traffic can silently damage production accuracy.",
+            "answer": "Calibration fixes activation ranges and scale factors based on the data it sees, so mismatched calibration data can underrepresent the values encountered in production. The model may still run fast and meet latency targets while producing worse predictions on real inputs. The practical consequence is a silent accuracy regression that infrastructure dashboards alone will not catch.",
+            "learning_objective": "Explain the production risk of miscalibrated post-training quantization."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best captures the chapter's warning about cold starts?",
+            "choices": [
+              "Cold start matters only for the first request ever sent to a new service.",
+              "Cold start is mainly a logging artifact and rarely affects user-visible latency.",
+              "Cold start compounds during scaling events and deployments, so it can hurt service quality exactly when demand is surging or capacity is changing.",
+              "Cold start disappears automatically once dynamic batching is enabled."
+            ],
+            "answer": "The correct answer is C. New replicas during bursts or rollouts may spend significant time loading, compiling, and warming up before they can actually absorb traffic. Dynamic batching does not remove that initialization cost, and treating cold start as a one-time curiosity misses its production impact.",
+            "learning_objective": "Analyze why cold start is a recurring production-serving risk rather than a one-time startup issue."
+          }
+        ]
+      }
+    },
+    {
+      "section_id": "#sec-model-serving-summary-9635",
+      "section_title": "Summary",
+      "quiz_data": {
+        "quiz_needed": true,
+        "rationale": {
+          "focus_areas": [
+            "chapter-wide synthesis",
+            "serving inversion",
+            "queueing headroom",
+            "preprocessing dominance",
+            "LLM-specific memory constraints"
+          ],
+          "question_strategy": "Provide a minimal synthesis quiz that checks whether the reader integrated the chapter's major arguments rather than recalling local details.",
+          "difficulty_progression": "Begins with the chapter's central inversion, then asks for cross-cutting implications across latency, batching, and LLM serving.",
+          "integration": "Integrates the whole chapter and connects serving back to deployment paradigms, benchmarking, compression, and MLOps.",
+          "ranking_explanation": "As a synthesis section, it warrants a minimal quiz focused on integration rather than new technical content."
+        },
+        "questions": [
+          {
+            "question_type": "MCQ",
+            "question": "Which statement best summarizes why serving requires a different systems design than training?",
+            "choices": [
+              "Serving and training use the same optimization objective, but different software frameworks.",
+              "Serving prioritizes per-request latency, tail behavior, and operational reliability under stochastic traffic, whereas training prioritizes throughput and utilization over long runs.",
+              "Serving differs from training mainly because model weights are smaller after deployment.",
+              "Serving is mostly a postprocessing problem because the model has already been optimized."
+            ],
+            "answer": "The correct answer is B. The chapter's central claim is that serving inverts training's priorities, making latency, headroom, and production reliability dominant. The other choices reduce that inversion to minor implementation details or isolate only one stage of the pipeline.",
+            "learning_objective": "Summarize the chapter's central distinction between training and serving."
+          },
+          {
+            "question_type": "SHORT",
+            "question": "Explain why a serving team that optimizes only the model, ignores queueing headroom, and never checks preprocessing consistency is likely to fail in production even if offline benchmarks look strong.",
+            "answer": "Offline benchmarks can hide the fact that preprocessing and queueing dominate user-visible latency and that training-serving skew can silently degrade accuracy. A service may look fast in isolated tests yet collapse under bursty traffic or return wrong predictions because its input pipeline differs from training. The system consequence is a deployment that misses both latency and quality goals despite impressive model-level metrics.",
+            "learning_objective": "Integrate latency, queueing, and correctness considerations into a production-serving evaluation."
+          },
+          {
+            "question_type": "MCQ",
+            "question": "What is the most important additional constraint that makes LLM serving different from traditional fixed-output model serving?",
+            "choices": [
+              "LLMs eliminate the need for batching because outputs are text rather than tensors.",
+              "LLMs replace latency concerns with accuracy concerns only.",
+              "LLMs introduce autoregressive, variable-length, KV-cache-heavy generation, so memory bandwidth and cache management become central serving bottlenecks.",
+              "LLMs are easier to serve because each request has exactly one output size."
+            ],
+            "answer": "The correct answer is C. The chapter emphasizes sequential token generation, variable output length, and growing KV state as the defining new serving constraints. The alternatives either deny batching/memory issues or incorrectly assume fixed-size outputs.",
+            "learning_objective": "Summarize the key systems constraint that distinguishes LLM serving from fixed-output inference."
+          }
+        ]
+      }
+    }
+  ]
 }

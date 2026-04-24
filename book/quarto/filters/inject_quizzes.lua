@@ -2,14 +2,12 @@
 ---@diagnostic disable-next-line: undefined-global
 PANDOC_DOCUMENT = PANDOC_DOCUMENT
 
--- Self-guard: this filter is HTML-only. If it is ever loaded under a non-HTML
--- format (pdf/latex/epub/beamer/docx/etc.), return an empty filter table so it
--- becomes a no-op. Belt-and-suspenders with the per-format filters.yml lists.
-if quarto and quarto.doc and quarto.doc.is_format then
-  if not quarto.doc.is_format("html") then
-    return {}
-  end
-end
+-- This filter is HTML-only. Cross-format protection lives at the config
+-- layer (shared/html/filters.yml lists it; pdf/ and epub/ filters.yml do
+-- not). A module-level self-guard using ``quarto.doc.is_format`` was
+-- tried and DROPPED because is_format returns false at filter-load time
+-- before format detection has completed, causing the filter to no-op
+-- even for HTML builds.
 
 local json  = require("pandoc.json")
 local utils = pandoc.utils
@@ -137,8 +135,20 @@ local function process_quiz_questions(questions, section_id)
     table.insert(ql, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{See Answer~$\\rightarrow$}}", aid))
     table.insert(al, string.format("\\noindent\\hspace*{1.25em}\\hyperref[%s]{\\textbf{$\\leftarrow$~Back to Question}}", qid))
   else
-    table.insert(ql, '<a href="#' .. aid .. '" class="question-label">See Answers →</a>')
-    table.insert(al, '<a href="#' .. qid .. '" class="answer-label">← Back to Questions</a>')
+    -- Quarto's runtime JS (link-external-newwindow=true) rewrites every
+    -- <a> it encounters with target="_blank" at page load — including
+    -- our fragment-only anchor jumps. Setting target="_self" in HTML
+    -- does not stick. We bypass by using an onclick handler that does
+    -- an in-page scroll and calls preventDefault(), neutralising the
+    -- new-tab behaviour Quarto injects.
+    local onclick_q = string.format(
+      'event.preventDefault();document.getElementById(\'%s\').scrollIntoView({behavior:\'smooth\',block:\'start\'});history.pushState(null,\'\',\'#%s\');',
+      aid, aid)
+    local onclick_a = string.format(
+      'event.preventDefault();document.getElementById(\'%s\').scrollIntoView({behavior:\'smooth\',block:\'start\'});history.pushState(null,\'\',\'#%s\');',
+      qid, qid)
+    table.insert(ql, string.format('[See Answers →](#%s){.question-label onclick="%s"}', aid, onclick_q))
+    table.insert(al, string.format('[← Back to Questions](#%s){.answer-label onclick="%s"}', qid, onclick_a))
   end
 
   return create_quiz_div(qid, "callout-quiz-question", table.concat(ql, "\n\n")),
