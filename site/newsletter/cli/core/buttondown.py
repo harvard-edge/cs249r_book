@@ -156,3 +156,33 @@ def get_email(api_key: str, email_id: str) -> dict[str, Any]:
             f"Get failed ({response.status_code}): {response.text}"
         )
     return response.json()
+
+
+def update_email(
+    api_key: str,
+    email_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """PATCH an existing email (partial update).
+
+    Useful for attaching structured data (e.g. ``metadata.author``) to
+    already-sent emails without editing their body. The payload is sent
+    as-is; common usage::
+
+        update_email(key, eid, {"metadata": {"author": "Marco Zennaro"}})
+
+    Note on ``metadata``: Buttondown replaces the whole dict on PATCH,
+    so callers that want to merge should fetch-modify-write.
+    """
+    logger.debug("Patching Buttondown email %s: keys=%s", email_id, list(payload.keys()))
+    response = requests.patch(
+        f"{API_BASE}/emails/{email_id}",
+        headers={**_auth_headers(api_key), "Content-Type": "application/json"},
+        json=payload,
+        timeout=DEFAULT_TIMEOUT_SECS,
+    )
+    if response.status_code >= 400:
+        raise ButtondownError(
+            f"Update failed ({response.status_code}): {response.text}"
+        )
+    return response.json()

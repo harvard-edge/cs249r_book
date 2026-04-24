@@ -115,26 +115,40 @@ def _categorize(subject: str, body: str, default: str) -> list[str]:
     return ["essay"] if len(plain) > 1500 else [default]
 
 
-def _detect_author(subject: str, body: str, fallback: str) -> str:
+def _detect_author(
+    subject: str,
+    body: str,
+    fallback: str,
+    metadata: dict[str, Any] | None = None,
+) -> str:
     """Resolve byline for a Buttondown email.
 
     Precedence (first match wins):
 
-    1. Explicit marker: ``<!-- author: Name -->`` anywhere in the body.
-       This is the durable convention — set it once when composing and
-       the byline is unambiguous, no fuzzy prose scanning.
-    2. ``Written by <Name>`` pattern in the prose (handles guest-author
-       newsletters that already name their writer in-line).
-    3. Subject keywords ("team newsletter" / "community update" /
+    1. ``metadata["author"]`` on the Buttondown email — authoritative
+       structured field. Set via the Buttondown API (or ``news
+       set-author``), survives body edits, and is the source of truth.
+    2. Explicit marker ``<!-- author: Name -->`` in the body — a
+       transitional fallback for emails composed before metadata
+       adoption; still useful when authoring without API access.
+    3. ``Written by <Name>`` pattern in the prose — handles historical
+       guest-author newsletters that name their writer in-line.
+    4. Subject keywords ("team newsletter" / "community update" /
        "community spotlight") default to "MLSysBook Team".
-    4. The caller-provided fallback (primary author).
+    5. The caller-provided fallback (primary author).
     """
-    # 1. Explicit marker comment — check raw body before HTML is stripped.
+    # 1. Structured metadata field — authoritative.
+    if metadata and isinstance(metadata, dict):
+        author = metadata.get("author")
+        if isinstance(author, str) and author.strip():
+            return author.strip()
+
+    # 2. Explicit marker comment — check raw body before HTML is stripped.
     marker = re.search(r"<!--\s*author\s*:\s*(.+?)\s*-->", body, re.IGNORECASE)
     if marker:
         return marker.group(1).strip()
 
-    # 2. "Written by X" scan over stripped text.
+    # 3. "Written by X" scan over stripped text.
     text = _strip_html(body) if _is_html(body) else body
     match = re.search(
         r"[Ww]ritten\s+by\s+(?:Professor\s+)?"
@@ -145,12 +159,12 @@ def _detect_author(subject: str, body: str, fallback: str) -> str:
     if match:
         return match.group(1).strip()
 
-    # 3. Subject-keyword heuristic.
+    # 4. Subject-keyword heuristic.
     s = subject.lower()
     if any(kw in s for kw in ("team newsletter", "community update", "community spotlight")):
         return "MLSysBook Team"
 
-    # 4. Primary-author fallback.
+    # 5. Primary-author fallback.
     return fallback
 
 
@@ -190,7 +204,12 @@ def _email_to_markdown(email: dict[str, Any], default_category: str) -> tuple[st
     publish_date = email.get("publish_date", "")
 
     categories = _categorize(subject, body, default_category)
-    author = _detect_author(subject, body, fallback="Vijay Janapa Reddi")
+    author = _detect_author(
+        subject,
+        body,
+        fallback="Vijay Janapa Reddi",
+        metadata=email.get("metadata") or {},
+    )
     date_str, year = _parse_date(publish_date)
     slug = _slugify(subject)
     filename = f"{date_str}_{slug}.md"
