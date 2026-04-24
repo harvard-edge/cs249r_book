@@ -502,11 +502,12 @@ When $t_{\\text{IO}} \\gg t_{\\text{compute}}$, the GPU starves regardless of it
         items.append(mo.md("""
         ## Data Gravity: Move the Compute, Not the Data
 
-        Moving 50 TB costs $4,000 in egress fees alone -- 20x the compute cost.
+        Moving data across regions is slow and expensive. Use the formulas below
+        to estimate the cost before making your prediction:
 
         ```
-        Transfer time  = Dataset / Bandwidth = 50 TB / 10 Gbps = ~11 hours
-        Egress cost    = 50,000 GB * $0.08/GB = $4,000
+        Transfer time  = Dataset / Bandwidth
+        Egress cost    = Data size (GB) * rate per GB
         ```
         """))
 
@@ -663,15 +664,10 @@ data is cheaper than moving data to compute.
         ## Data Cascades: The 2% Error That Ate 15% Accuracy
 
         Errors at early pipeline stages amplify through downstream stages.
+        Use the formula to estimate the output error before making your prediction:
 
         ```
         error_stage_n = error_0 * amplification_factor^n
-        ```
-
-        A 2% error at ingestion with amplification factor 1.4 over 5 stages:
-
-        ```
-        error = 0.02 * 1.4^5 = 0.02 * 5.38 = 10.8%
         ```
 
         Plus the 4-week detection delay: silent degradation on every request.
