@@ -28,12 +28,18 @@ From there, the workflow does everything:
 1. **Verify** — tag format, version coherence across `pyproject.toml` /
    `__init__.py` / `CITATION.cff`, CHANGELOG entry present, tag reachable
    from dev.
-2. **Test** — full pytest suite in a clean Python 3.11 container.
+2. **Test** — full pytest suite in parallel across every supported Python
+   version (3.10, 3.11, 3.12, 3.13). Catches cross-version issues
+   *before* the wheel ships.
 3. **Build** — `python -m build` → wheel + sdist; `twine check` on both.
-4. **Publish to PyPI** — via `pypa/gh-action-pypi-publish` + OIDC.
-5. **GitHub Release** — creates the release, attaches wheel + sdist, uses
+4. **Publish to PyPI** — via `pypa/gh-action-pypi-publish` + OIDC, with
+   PEP 740 attestations (cryptographic provenance).
+5. **Verify from PyPI** — post-publish smoke test: `pip install` from the
+   public PyPI (with CDN propagation retry), import check, CLI smoke.
+   Closes the gap between "upload accepted" and "user install works."
+6. **GitHub Release** — creates the release, attaches wheel + sdist, uses
    `RELEASE_NOTES_<version>.md` as the body if present.
-6. **Docs redeploy** — dispatches `mlsysim-publish-live.yml` on `dev` so the
+7. **Docs redeploy** — dispatches `mlsysim-publish-live.yml` on `dev` so the
    docs site reflects the new version.
 
 Monitor the run: <https://github.com/harvard-edge/cs249r_book/actions/workflows/mlsysim-pypi-publish.yml>
