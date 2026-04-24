@@ -37,6 +37,11 @@ def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
     }
     if q.phase:
         legacy["phase"] = q.phase
+    # Explicit prompt (optional during backfill). Preserved in the
+    # summary bundle too — it's ≤200 chars and the practice page
+    # renders it synchronously, so lazy-hydration would be a regression.
+    if q.question:
+        legacy["question"] = q.question
 
     # Chain — legacy shape: chain_ids (list) + chain_positions (dict).
     # v1.0 schema already carries multi-chain membership natively.

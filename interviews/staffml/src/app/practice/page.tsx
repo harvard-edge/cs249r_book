@@ -17,7 +17,7 @@ import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
-  getQuestions, getQuestionsByTopic,
+  getQuestions, getQuestionsByTopic, getTrackCount,
   Question, checkNapkinMath, extractFinalNumber, cleanScenario,
   NapkinResult
 } from "@/lib/corpus";
@@ -38,6 +38,52 @@ import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import { track } from "@/lib/analytics";
+
+/**
+ * Zone- and Bloom-aware fallback prompt for questions that have no
+ * explicit `question` field yet AND no `?` in their scenario. Used by
+ * the practice page to render a minimally-useful "Your task (inferred)"
+ * callout during the 2026-04 backfill transition so readers aren't
+ * left guessing the shape of the expected answer. Keep this short —
+ * the goal is to orient, not to substitute for a properly authored
+ * question.
+ */
+function inferTaskPrompt(zone: string | undefined, bloom: string | undefined): string {
+  const z = (zone || "").toLowerCase();
+  const b = (bloom || "").toLowerCase();
+  // Zone-first mapping. Exact match against the 11 ikigai zones plus
+  // their common morphological neighbours so we don't miss a variant.
+  switch (z) {
+    case "diagnosis":
+      return "Identify the root cause suggested by the scenario and justify it with a specific mechanism.";
+    case "specification":
+      return "State the requirements or constraints the scenario imposes, then specify the design these dictate.";
+    case "design":
+      return "Propose a design that satisfies the scenario's constraints and explain the key trade-offs.";
+    case "implement":
+    case "realization":
+      return "Sketch the implementation or the concrete steps needed to realize the scenario's goal.";
+    case "evaluation":
+      return "Evaluate the scenario's proposed approach — what works, what breaks, and at what cost?";
+    case "optimization":
+      return "Identify the dominant bottleneck and propose an optimization that addresses it.";
+    case "fluency":
+      return "Explain the core mechanism at play and why it behaves as the scenario describes.";
+    case "analyze":
+      return "Analyze the trade-offs the scenario presents and recommend an approach with justification.";
+    case "recall":
+      return "Identify the concept the scenario illustrates and name the principle it demonstrates.";
+    case "mastery":
+      return "Integrate the scenario's constraints, propose an approach, and justify it against the dominant trade-off.";
+  }
+  // Bloom fallback when zone is unclear.
+  if (b === "remember" || b === "understand") return "Identify the concept the scenario illustrates and explain the underlying principle.";
+  if (b === "apply") return "Apply the relevant principle to the scenario and compute or decide the outcome.";
+  if (b === "analyze") return "Analyze the trade-offs the scenario presents and recommend an approach with justification.";
+  if (b === "evaluate") return "Evaluate the scenario's setup — what succeeds, what fails, and why?";
+  if (b === "create") return "Propose a design or plan that addresses the scenario and defend your choice.";
+  return "Based on the scenario above, reason about the trade-offs and decide what approach you would take.";
+}
 
 export default function PracticePageWrapper() {
   return (
@@ -96,6 +142,12 @@ function PracticePage() {
   const [selectedArea, setSelectedArea] = useState<string | null>(null);
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [napkinOnly, setNapkinOnly] = useState(false);
+  // "Chains only" restricts the pool to questions that are part of a
+  // deepening chain (L1→L6+ on one topic). 890 chains cover ~30% of
+  // the corpus. This toggle is the minimum-viable discoverability
+  // surface — it exposes chain-membership as a filter without
+  // prejudging the gated chain-browse page (see ChainBadge docstring).
+  const [chainsOnly, setChainsOnly] = useState(false);
 
   const [pool, setPool] = useState<Question[]>([]);
   // `currentSummary` holds the lightweight record from the bundled summary
@@ -133,7 +185,7 @@ function PracticePage() {
   const handleChainNavigate = useCallback((qId: string) => {
     const q = getQuestionById(qId);
     if (!q) return;
-    skipFilterCount.current = 3;
+    skipFilterCount.current = 1;
     setCurrent(q);
     setShowAnswer(false);
     setUserAnswer("");
@@ -155,7 +207,11 @@ function PracticePage() {
     if (dailyParam === '1' && !isDailyCompleted()) {
       const dailyQs = getDailyQuestions();
       if (dailyQs.length > 0) {
-        skipFilterCount.current = 3;
+        // React batches the state updates below into a single re-render,
+        // which fires the filter-change effect ONCE — so skip exactly one
+        // invocation, not three. Using 3 used to swallow the user's first
+        // two real track/level clicks silently.
+        skipFilterCount.current = 1;
         setPool(dailyQs);
         setCurrent(dailyQs[0]);
         return; // Skip other param handling
@@ -172,7 +228,11 @@ function PracticePage() {
     if (qParam) {
       const directQ = getQuestionById(qParam);
       if (directQ) {
-        skipFilterCount.current = 3; // skip filter triggers from track/level/area state changes
+        // React batches track/level/area setState calls into ONE re-render,
+        // so the filter-change effect fires exactly once from the mount
+        // batch. Suppress one invocation, not three — the old value of 3
+        // silently swallowed the user's first two track-filter clicks.
+        skipFilterCount.current = 1;
         setCurrent(directQ);
         setSelectedTrack(directQ.track);
         setSelectedLevel(directQ.level);
@@ -201,7 +261,9 @@ function PracticePage() {
         return true;
       });
       if (topicPool.length > 0) {
-        skipFilterCount.current = 3;
+        // See comment on the direct-link branch above: batched state
+        // updates fire the filter effect once, so skip exactly one.
+        skipFilterCount.current = 1;
         setPool(topicPool);
         setSelectedTrack(topicPool[0].track);
         if (levelParam) setSelectedLevel(levelParam);
@@ -248,12 +310,13 @@ function PracticePage() {
       skipFilterCount.current--;
       return;
     }
-    const filters: { track?: string; level?: string; competency_area?: string; zone?: string } = {
+    const filters: { track?: string; level?: string; competency_area?: string; zone?: string; chainsOnly?: boolean } = {
       track: selectedTrack,
       level: selectedLevel,
     };
     if (selectedArea) filters.competency_area = selectedArea;
     if (selectedZone) filters.zone = selectedZone;
+    if (chainsOnly) filters.chainsOnly = true;
     let q = getQuestionsByFilter(filters);
     if (napkinOnly) q = q.filter(question => !!question.details.napkin_math);
     setPool(q);
@@ -265,7 +328,7 @@ function PracticePage() {
     setShowAnswer(false);
     setUserAnswer("");
     setNapkinResult(null);
-  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly]);
+  }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly]);
 
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
@@ -504,7 +567,7 @@ function PracticePage() {
             onClick={() => {
               const dailyQs = getDailyQuestions();
               if (dailyQs.length > 0) {
-                skipFilterCount.current = 3;
+                skipFilterCount.current = 1;
                 setPool(dailyQs);
                 setCurrent(dailyQs[0]);
                 setShowAnswer(false);
@@ -588,14 +651,22 @@ function PracticePage() {
                 key={t}
                 onClick={() => setSelectedTrack(t)}
                 className={clsx(
-                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all",
+                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all flex items-center gap-1.5",
                   "lg:text-left",
                   selectedTrack === t
                     ? "bg-accentBlue/10 text-accentBlue"
                     : "text-textSecondary hover:bg-surfaceHover"
                 )}
               >
-                {t === "tinyml" ? "TinyML" : t}
+                <span className="flex-1">{t === "tinyml" ? "TinyML" : t}</span>
+                <span
+                  className={clsx(
+                    "font-mono text-[10px]",
+                    selectedTrack === t ? "opacity-70" : "text-textTertiary"
+                  )}
+                >
+                  {getTrackCount(t).toLocaleString()}
+                </span>
               </button>
             ))}
           </div>
@@ -717,8 +788,24 @@ function PracticePage() {
           <span className="text-[11px] text-textSecondary font-medium">Napkin math only</span>
         </label>
 
+        {/* Chains-only toggle — discoverability affordance for the 890
+            curated chain sequences (L1→L6+ on one topic). Separate from
+            the gated `/chains` browse page — this is the minimum
+            filter-side intervention. */}
+        <label className="flex items-center gap-2 cursor-pointer" title="Restrict pool to questions that belong to a deepening L1→L6+ chain">
+          <input
+            type="checkbox"
+            checked={chainsOnly}
+            onChange={() => setChainsOnly(!chainsOnly)}
+            className="accent-accentBlue"
+          />
+          <LinkIcon className="w-3 h-3 text-textTertiary" aria-hidden="true" />
+          <span className="text-[11px] text-textSecondary font-medium">Chained questions only</span>
+        </label>
+
         <div className="text-[10px] font-mono text-textTertiary mt-auto">
           {pool.length} questions in pool
+          {chainsOnly && <span className="ml-1 text-accentBlue">· chains</span>}
         </div>
       </aside>
 
@@ -818,6 +905,45 @@ function PracticePage() {
                         <ScenarioSkeleton />
                       )}
                     </div>
+
+                    {/*
+                      Your-task callout. Three states, in priority order:
+                      1. `current.question` present → render it as the
+                         primary ask (post-backfill state).
+                      2. Scenario already ends with `?` → render nothing
+                         extra; the interrogative is already in the prose.
+                      3. Neither → render a zone-aware inferred fallback
+                         so the reader at least knows the shape of the
+                         expected answer. Marked "inferred" so it's
+                         clearly distinct from an authored question.
+                      Placed AFTER the scenario because the scenario sets
+                      context that the question refers to ("given the
+                      above…"). A prompt above an unread scenario would
+                      be meaningless.
+                    */}
+                    {current.question ? (
+                      <div className="mt-5 p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Target className="w-3.5 h-3.5 text-accentBlue" />
+                          <span className="text-[10px] font-mono text-accentBlue uppercase tracking-widest">Your task</span>
+                        </div>
+                        <p className="text-textPrimary leading-relaxed text-base font-medium">
+                          {current.question}
+                        </p>
+                      </div>
+                    ) : current.scenario && !current.scenario.trim().endsWith("?") ? (
+                      <div className="mt-5 p-4 rounded-lg border border-dashed border-border bg-surface/40">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Target className="w-3.5 h-3.5 text-textTertiary" />
+                          <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest">
+                            Your task <span className="text-textMuted normal-case">(inferred)</span>
+                          </span>
+                        </div>
+                        <p className="text-textSecondary leading-relaxed text-sm">
+                          {inferTaskPrompt(current.zone, current.bloom_level)}
+                        </p>
+                      </div>
+                    ) : null}
                     {chainInfo && !showAnswer && chainPreviewOpen && (
                       <div className="mt-6" data-testid="chain-preview-prereveal">
                         <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />

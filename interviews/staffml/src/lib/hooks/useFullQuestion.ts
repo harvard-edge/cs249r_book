@@ -36,7 +36,15 @@ export function useFullQuestion(summary: Question | undefined | null): Question 
     setHydrated(summary);
     let cancelled = false;
     getQuestionFullDetail(summary.id).then(full => {
-      if (!cancelled && full) setHydrated(full);
+      if (cancelled || !full) return;
+      // Merge rather than replace: the worker returns the heavy fields
+      // (scenario, details) but does not necessarily carry every
+      // summary-bundle field. Summary fields like `question` (the
+      // explicit-ask prompt) live in the bundle and would otherwise be
+      // dropped by a straight replace. Spread summary first so worker
+      // values win where they overlap (they carry the real content),
+      // but summary-only fields survive.
+      setHydrated({ ...summary, ...full });
     });
     return () => {
       cancelled = true;

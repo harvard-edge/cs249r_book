@@ -19,6 +19,14 @@ export interface Question {
   track: string;
   level: string;
   title: string;
+  /**
+   * Explicit one-sentence interrogative derived from (scenario,
+   * realistic_solution). Ships in the summary bundle so the practice
+   * page can render it synchronously as a "Your task" callout. Optional
+   * while the backfill is in progress — if absent, the render falls
+   * back to a zone-based inferred-task label.
+   */
+  question?: string;
   topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones
   competency_area: string;  // one of 13 canonical areas
@@ -85,6 +93,18 @@ export function getTracks(): string[] {
   return Array.from(tracks).sort();
 }
 
+// Memoize per-track counts so re-renders don't re-scan 9k+ questions.
+const _trackCounts: Record<string, number> = (() => {
+  const counts: Record<string, number> = {};
+  for (const q of questions) counts[q.track] = (counts[q.track] ?? 0) + 1;
+  return counts;
+})();
+
+/** Total question count for a single track, or the full corpus when omitted. */
+export function getTrackCount(track?: string): number {
+  return track ? (_trackCounts[track] ?? 0) : questions.length;
+}
+
 export function getLevels(): string[] {
   const order = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6+'];
   const levels = new Set(questions.map((q) => q.level));
@@ -119,6 +139,8 @@ export function getQuestionsByFilter(filters: {
   competency_area?: string;
   topic?: string;
   zone?: string;
+  /** When true, restrict results to questions that are part of a chain. */
+  chainsOnly?: boolean;
 }): Question[] {
   return questions.filter((q) => {
     if (filters.track && q.track !== filters.track) return false;
@@ -126,6 +148,7 @@ export function getQuestionsByFilter(filters: {
     if (filters.competency_area && q.competency_area !== filters.competency_area) return false;
     if (filters.topic && q.topic !== filters.topic) return false;
     if (filters.zone && q.zone !== filters.zone) return false;
+    if (filters.chainsOnly && (!q.chain_ids || q.chain_ids.length === 0)) return false;
     return true;
   });
 }

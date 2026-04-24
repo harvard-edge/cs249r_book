@@ -9,7 +9,7 @@ import {
   getAreas, getVaultStats, getAreaStyle, getAreaForTopic, searchTopics,
   type Topic,
 } from "@/lib/taxonomy";
-import { getTracks, searchQuestions, type Question } from "@/lib/corpus";
+import { getTracks, searchQuestions, getTrackCount, type Question } from "@/lib/corpus";
 import { track as trackAnalytics } from "@/lib/analytics";
 import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
@@ -375,7 +375,12 @@ function HomePage() {
             {/* Track pills */}
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[10px] font-mono text-textMuted uppercase tracking-wide mr-1">Track</span>
-              <FilterPill label="All" isActive={!selectedTrack} onClick={() => setSelectedTrack(null)} />
+              <FilterPill
+                label="All"
+                count={getTrackCount()}
+                isActive={!selectedTrack}
+                onClick={() => setSelectedTrack(null)}
+              />
               {[
                 { id: "cloud", label: "Cloud", icon: <Cloud className="w-3 h-3" /> },
                 { id: "edge", label: "Edge", icon: <Cpu className="w-3 h-3" /> },
@@ -385,6 +390,7 @@ function HomePage() {
                 <FilterPill
                   key={t.id}
                   label={t.label}
+                  count={getTrackCount(t.id)}
                   isActive={selectedTrack === t.id}
                   icon={t.icon}
                   onClick={() => setSelectedTrack(selectedTrack === t.id ? null : t.id)}
