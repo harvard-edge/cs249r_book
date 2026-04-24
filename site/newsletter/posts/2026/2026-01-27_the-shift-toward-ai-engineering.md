@@ -2,7 +2,7 @@
 title: "The Shift Toward AI Engineering"
 date: "2026-01-27"
 author: "Vijay Janapa Reddi"
-description: "<!-- buttondown-editor-mode: plaintext -->My dad told me if I didn't study computer science in college, he'd throw me out of the house. So I did. In hindsight, he was right. CS gave me the foundation..."
+description: "My dad told me if I didn't study computer science in college, he'd throw me out of the house. In hindsight, he was right — CS gave me the foundation for everything I've done over the past 25 years. Here's why that foundation matters more than ever in the age of AI engineering."
 categories: ["essay"]
 image: "https://assets.buttondown.email/images/7c78f49d-9110-4132-88e9-a049e4176c49.png?w=960&fit=max"
 ---

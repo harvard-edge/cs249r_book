@@ -2,7 +2,7 @@
 title: "The Builder's Gap"
 date: "2026-04-21"
 author: "Vijay Janapa Reddi"
-description: "<!-- buttondown-editor-mode: fancy --><!--   STATUS: DRAFT v5   Thesis: 'failures propagate upward, understanding flows downward'   Figure: figures/essay-03-stack-overlay.png (converged after 2..."
+description: "Between one line of Python and actual silicon, there are roughly a dozen layers that most engineers have never seen. Failures propagate upward through the stack; understanding flows downward. That asymmetry is the most expensive gap in the AI industry."
 categories: ["essay"]
 image: "https://assets.buttondown.email/images/b8c295a9-9ecf-41f3-98e9-17321b8084d6.png"
 ---
