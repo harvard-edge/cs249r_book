@@ -7,7 +7,8 @@
     "model": "gpt-5.4",
     "total_sections": 12,
     "sections_with_quizzes": 12,
-    "sections_without_quizzes": 0
+    "sections_without_quizzes": 0,
+    "improved_by": "quiz-refresh/improve-mode"
   },
   "sections": [
     {
@@ -34,11 +35,11 @@
             "choices": [
               "Increase peak FLOPS by moving to a higher clock rate while keeping memory bandwidth unchanged",
               "Reduce bytes moved per weight read using INT4 or FP8-style precision reduction",
-              "Replace the GPU with one that has the same bandwidth but lower compute throughput",
-              "Focus first on making the GEMM use more Tensor Core instructions without changing memory traffic"
+              "Move to a GPU with slightly lower FLOPS but substantially higher memory bandwidth",
+              "Rewrite the GEMM to use Tensor Cores more efficiently without reducing memory traffic"
             ],
-            "answer": "The correct answer is B. At roughly 1 FLOP/byte, decode is far below the H100 ridge point, so it is memory-bound. Reducing bytes per weight read directly attacks the memory-access term, whereas more Tensor Core throughput or clock speed does little when the processor is waiting on HBM.",
-            "learning_objective": "Analyze a roofline-based bottleneck and select the optimization that targets the dominant term"
+            "answer": "The correct answer is B. At roughly 1 FLOP/byte, decode is far below the H100 ridge point, so it is memory-bound. Reducing bytes per weight read directly attacks the memory-access term. Better Tensor Core scheduling or higher clocks help little when HBM delivery, not arithmetic throughput, is the limiter.",
+            "learning_objective": "Analyze a roofline-classified decode workload and choose an optimization that targets the dominant performance term"
           },
           {
             "question_type": "SHORT",
@@ -48,9 +49,9 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: If a workload is compute-bound, memory bandwidth no longer matters anywhere in the system.",
-            "answer": "False. Compute-bound means the compute term dominates at that operating point, not that memory is irrelevant in all circumstances. Changes in batch size, hardware generation, or implementation can shift the same workload back into the memory-bound regime.",
-            "learning_objective": "Evaluate a common misconception about compute-bound versus memory-bound workloads"
+            "question": "True or False: If a workload is compute-bound on one GPU generation, memory bandwidth can be ignored when upgrading to a newer accelerator.",
+            "answer": "False. The chapter shows that ridge points rise across GPU generations because compute improves faster than bandwidth. A workload that was compute-bound on an older GPU can become memory-bound on a newer one, so bandwidth still matters when hardware changes.",
+            "learning_objective": "Evaluate how hardware-generation changes can shift a workload between compute-bound and memory-bound regimes"
           },
           {
             "question_type": "MCQ",
@@ -99,15 +100,15 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "Why does fusing a sequence like GEMM \u2192 GELU \u2192 LayerNorm often speed up inference even when the total mathematical function is unchanged?",
+            "question": "A profile of one transformer layer shows dozens of short kernels and repeated writes of intermediate activations to HBM. Why does fusing a sequence like GEMM \u2192 GELU \u2192 LayerNorm often speed up inference even though the mathematical function is unchanged?",
             "choices": [
               "It reduces redundant HBM reads and writes of intermediate tensors and can also cut kernel launch overhead",
-              "It changes the algorithm from memory-bound to communication-bound, which is easier for GPUs to handle",
-              "It lowers the number of model parameters, so fewer weights need to be stored",
-              "It guarantees higher numerical precision by keeping every operation in FP32"
+              "It turns the layer from memory-bound into communication-bound, which GPUs handle more efficiently",
+              "It removes model parameters from the layer, so fewer weights must be loaded in future tokens",
+              "It forces every operation to run in FP32, eliminating numerical error from separate kernels"
             ],
-            "answer": "The correct answer is A. Fusion keeps intermediates in registers or shared memory instead of materializing them in HBM, and it replaces many small launches with fewer kernels. Claims about reducing parameter count or forcing FP32 miss the point: fusion changes data movement and overhead, not model size.",
-            "learning_objective": "Explain how operator fusion improves performance through reduced memory traffic and launch overhead"
+            "answer": "The correct answer is A. Fusion keeps intermediates in registers or shared memory instead of materializing them in HBM, and it replaces many small launches with fewer kernels. Claims about changing the workload into a communication problem or shrinking the parameter count confuse kernel structure with model architecture.",
+            "learning_objective": "Explain how operator fusion improves inference by reducing both intermediate memory traffic and dispatch overhead"
           },
           {
             "question_type": "ORDER",
@@ -130,14 +131,14 @@
           {
             "question_type": "SHORT",
             "question": "Explain why FlashAttention's speedup tends to grow with sequence length, especially compared with naive attention.",
-            "answer": "Naive attention materializes quadratic-size score and probability matrices in HBM, so its memory traffic grows with O(N^2). FlashAttention tiles the computation and keeps running statistics in SRAM, so it avoids those quadratic intermediates. At long sequence lengths such as 8K or 32K, that gap dominates execution time, freeing memory for larger batches and producing much larger wall-clock gains than at short contexts.",
-            "learning_objective": "Analyze how sequence length changes the relative advantage of tiled attention over naive attention"
+            "answer": "Naive attention materializes quadratic-size score and probability matrices in HBM, so its memory traffic grows with O(N^2). FlashAttention tiles the computation and keeps running statistics in SRAM, so it avoids those quadratic intermediates. At long sequence lengths such as 8K or 32K, that gap dominates execution time, frees memory for larger batches, and produces much larger wall-clock gains than at short contexts.",
+            "learning_objective": "Analyze how sequence length changes the relative benefit of tiled attention by comparing quadratic and linear memory traffic growth"
           },
           {
             "question_type": "FILL",
-            "question": "FlashAttention makes exact tiled attention possible by maintaining running normalization statistics with an ____ softmax algorithm instead of materializing the full score matrix.",
-            "answer": "online. The term denotes incremental softmax computation that updates maxima and sums tile by tile, allowing exact attention with O(N) memory rather than storing O(N^2) intermediates in HBM.",
-            "learning_objective": "Identify the algorithmic mechanism that enables tiled exact attention"
+            "question": "Because softmax normally depends on a global maximum over all scores, FlashAttention can tile the computation exactly only by using an ____ softmax algorithm that updates maxima and normalization terms as each block is processed.",
+            "answer": "online. The term denotes incremental softmax computation that carries forward running maxima and sums tile by tile, making exact attention possible without materializing the full O(N^2) score matrix in HBM.",
+            "learning_objective": "Infer the softmax variant that enables exact tiled attention from the constraints of incremental block processing"
           }
         ]
       }
@@ -192,9 +193,9 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Paged attention and KV cache quantization solve the same problem in the same way, so using both together is mostly redundant.",
-            "answer": "False. Paged attention reduces fragmentation and wasted allocation, while KV cache quantization reduces the bytes required for the cache itself. The chapter explicitly treats their benefits as multiplicative, not redundant.",
-            "learning_objective": "Distinguish memory-waste reduction from precision-based memory-use reduction"
+            "question": "True or False: Once paged attention eliminates KV cache fragmentation, quantizing the KV cache adds little additional value for batch-size scaling.",
+            "answer": "False. Paged attention reduces wasted allocation from fragmentation, but the cache entries still consume bytes for every stored key and value. KV cache quantization cuts those bytes directly, so the two techniques address different constraints and compound to increase effective batch size.",
+            "learning_objective": "Distinguish fragmentation reduction from byte-per-entry reduction when analyzing KV cache scaling strategies"
           },
           {
             "question_type": "MCQ",
@@ -249,15 +250,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "What is the main performance danger of excessive graph breaks in torch.compile?",
+            "question": "A team enables torch.compile on a model with data-dependent Python branches and shape changes between iterations. What is the main performance danger if many graph breaks appear?",
             "choices": [
-              "They force every kernel to run in FP32 rather than lower precision",
-              "They disable tensor parallelism across GPUs, so communication cost rises sharply",
-              "They split the model into many small compiled regions, reducing fusion opportunities and increasing compilation overhead",
-              "They prevent CUDA streams from overlapping communication with computation"
+              "Every fused kernel will fall back to FP32 arithmetic",
+              "Tensor parallel collectives will be disabled, increasing communication volume",
+              "The model will be split into many small compiled regions, limiting fusion and adding compilation overhead that may not amortize",
+              "CUDA streams will be forced into synchronous execution, eliminating overlap"
             ],
             "answer": "The correct answer is C. Graph breaks fragment the trace into smaller subgraphs, so the compiler cannot optimize across those boundaries and may spend time compiling pieces too small to deliver meaningful gains. This is a compilation-structure problem, not a precision-mode or stream-scheduling issue.",
-            "learning_objective": "Analyze how graph breaks reduce compiler effectiveness in dynamic PyTorch programs"
+            "learning_objective": "Analyze how graph breaks can reduce the runtime payoff of compilation in dynamic PyTorch programs"
           },
           {
             "question_type": "SHORT",
@@ -267,9 +268,9 @@
           },
           {
             "question_type": "FILL",
-            "question": "Triton uses the ____ as its core programming abstraction, letting the programmer think in blocks of data that fit the memory hierarchy instead of manually scheduling individual threads.",
-            "answer": "tile. The tile-centered abstraction mirrors how high-performance kernels exploit SRAM reuse, making fusion and tiling decisions easier to express than in low-level CUDA thread management.",
-            "learning_objective": "Identify the core abstraction that distinguishes Triton's programming model"
+            "question": "Triton uses the ____ as its core programming abstraction, letting the programmer reason about blocks that fit SRAM and map well to the memory hierarchy instead of manually orchestrating individual threads.",
+            "answer": "tile. The tile-centered abstraction mirrors how high-performance kernels exploit on-chip reuse, making fusion and tiling strategies easier to express than low-level thread-by-thread CUDA scheduling.",
+            "learning_objective": "Identify Triton's core abstraction and relate it to memory-hierarchy-aware kernel design"
           }
         ]
       }
@@ -305,9 +306,9 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Speculative decoding is most valuable because it reduces model quality requirements and allows the target model to be removed from the serving path.",
-            "answer": "False. The target model remains in the serving path as the verifier, preserving output quality. The gain comes from reducing latency by amortizing expensive target-model work across multiple candidate tokens.",
-            "learning_objective": "Evaluate a misconception about how speculative decoding preserves target-model correctness"
+            "question": "True or False: If the draft model proposes tokens that the target model later rejects, speculative decoding cannot still improve latency.",
+            "answer": "False. The chapter's key trade-off is that some extra verification work can still be worthwhile if multiple tokens are accepted often enough to amortize expensive target-model weight reads. Rejections reduce the gain, but they do not automatically eliminate it.",
+            "learning_objective": "Evaluate how acceptance rate affects the profitability of speculative decoding rather than assuming only perfect agreement yields speedup"
           },
           {
             "question_type": "SHORT",
@@ -466,7 +467,7 @@
             "question_type": "SHORT",
             "question": "A LayerNorm kernel achieves about 2.8 TB/s on an H100 and has arithmetic intensity around 5.4 FLOP/byte. Explain what the roofline diagnosis is and what optimization class it suggests.",
             "answer": "Because 5.4 FLOP/byte is far below the H100 ridge point, the kernel is firmly memory-bound, and the high achieved bandwidth shows it is already close to the hardware bandwidth ceiling. That means better FLOP scheduling alone will not help much. The right interventions reduce data movement instead, such as fusion to eliminate an HBM round-trip or lower precision to cut bytes per element.",
-            "learning_objective": "Analyze profiler and roofline data to classify a kernel and choose an appropriate optimization class"
+            "learning_objective": "Analyze profiler and roofline data to classify a kernel and choose an optimization class aligned with the diagnosed bottleneck"
           },
           {
             "question_type": "MCQ",

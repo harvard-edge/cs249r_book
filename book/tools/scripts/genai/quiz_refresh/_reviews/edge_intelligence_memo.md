@@ -14,5 +14,5 @@ _None._
 ## Validator output
 
 ```
-OK: edge_intelligence_quizzes.json.new passes schema + anchor validation
+OK: edge_intelligence_quizzes.json.improved passes schema + anchor validation
 ```
