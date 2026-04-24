@@ -162,6 +162,7 @@ class ValidateCommand:
             ("div-syntax", "_run_figure_div_syntax"),
             ("flow", "_run_float_flow"),
             ("files", "_run_images"),
+            ("alt-text-style", "_run_alt_text_style"),   # alt-text follows body-prose rules (§10.12)
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -182,6 +183,10 @@ class ValidateCommand:
             ("above-below", "_run_mitpress_above_below"),    # no "above"/"below" spatial refs
             ("ascii", "_run_ascii"),                         # non-ASCII chars
             ("acknowledgements", "_run_mitpress_acknowledgements"),  # American spelling
+            ("compound-prefix", "_run_compound_prefix"),     # pre-/non- close-up (§10.8)
+            ("concept-caps", "_run_concept_term_capitalization"),  # iron law, memory wall lowercase (§10.3)
+            ("abbreviation-first-use", "_run_abbreviation_first_use"),  # expand on first use per chapter (§10.5)
+            ("latin-abbrevs", "_run_latin_running_text"),    # viz./e.g./etc. in running text (§10.6)
         ],
         "punctuation": [
             ("emdash", "_run_mitpress_spaced_emdash"),        # word—word, no spaces
@@ -4861,6 +4866,150 @@ class ValidateCommand:
                 files_checked=0, issues=[], elapsed_ms=0,
             )
         return self._delegate_script(script, ["--check"] + bib_files, "bib-hygiene")
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Native audit-check adapters (book/tools/audit/checks/*).
+    #
+    # Each of these imports the matching check module from the audit
+    # package and invokes its `check(path, text, scope, counter)` entry
+    # point directly, per file. No subprocess. The audit package's
+    # sophisticated protected-context detection (code fences, math,
+    # attribute strings, index tags, citations, proper-noun phrases,
+    # D·A·M/C³ axes, etc.) lives in `audit.protected_contexts` and is
+    # reused verbatim — these wrappers add only the per-file iteration
+    # and Issue → ValidationIssue conversion.
+    #
+    # Scanner categories exposed as binder scopes (see GROUPS dict):
+    #   prose.compound-prefix           → audit.checks.compound_prefix
+    #   prose.concept-caps              → audit.checks.concept_term_capitalization
+    #   prose.abbreviation-first-use    → audit.checks.abbreviation_first_use
+    #   prose.latin-abbrevs             → audit.checks.latin_running_text
+    #   figures.alt-text-style          → audit.checks.alt_text_style
+    #
+    # These complement the existing native runners that reimplement a
+    # subset of the same rules in-tree (e.g. _run_heading_case,
+    # _run_mitpress_acknowledgements). Over time those should migrate to
+    # use the audit package as the single source of truth.
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _run_audit_check(
+        self,
+        root: Path,
+        module_path: str,
+        name: str,
+        description: str,
+    ) -> ValidationRunResult:
+        """Import an audit.checks.* module and run its `check()` per QMD file.
+
+        The audit package lives at `book/tools/audit/`. It uses relative
+        imports against its own `audit.*` top-level package, so the parent
+        directory (`book/tools`) must be on sys.path for the import to
+        resolve. This method does the path-prepend once per call.
+        """
+        import importlib
+        import sys as _sys
+        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
+        audit_root_str = str(audit_root)
+        if audit_root_str not in _sys.path:
+            _sys.path.insert(0, audit_root_str)
+        mod = importlib.import_module(module_path)
+
+        t0 = time.time()
+        qmd_files = sorted(root.rglob("*.qmd"))
+        issues: List[ValidationIssue] = []
+        counter = 0
+        for qmd in qmd_files:
+            try:
+                text = qmd.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            audit_issues, counter = mod.check(qmd, text, "both", counter)
+            for issue in audit_issues:
+                try:
+                    rel = str(qmd.relative_to(root))
+                except ValueError:
+                    rel = str(qmd)
+                message = issue.reason or issue.rule_text or issue.category
+                # needs_subagent flag → warning (human must review).
+                # Auto-fixable and protected issues → error (scripted fix).
+                severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=issue.line,
+                    code=issue.category,
+                    message=message,
+                    severity=severity,
+                    context=(issue.before or "")[:160],
+                ))
+        return ValidationRunResult(
+            name=name,
+            description=description,
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_compound_prefix(self, root: Path) -> ValidationRunResult:
+        """Close up pre-/non- compound prefixes per §10.8 (strict 6-term list).
+
+        Flags: pre-training, pre-trained, pre-deployment, pre-learning,
+        pre-processing, non-zero. Does NOT flag multi-/semi-/anti-
+        compounds (domain-specific hyphens kept per §10.8).
+        """
+        return self._run_audit_check(
+            root, "audit.checks.compound_prefix",
+            "compound-prefix", "pre-/non- close-up (§10.8)",
+        )
+
+    def _run_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
+        """Lowercase concept terms in body prose per §10.3.
+
+        Flags Title Case appearances of iron law, memory wall, compute
+        wall, data wall, bitter lesson, scaling laws, verification gap,
+        degradation equation, etc. Respects the exception contexts
+        (bold first-definition, §10.3 exception 2; §10.9 H1/H2 headline
+        case; callout titles; `\\index{}` keys).
+        """
+        return self._run_audit_check(
+            root, "audit.checks.concept_term_capitalization",
+            "concept-caps", "concept-term lowercase in prose (§10.3)",
+        )
+
+    def _run_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
+        """Expand abbreviations on first use per chapter per §10.5.
+
+        Enforces the specialized-abbreviation list (DLRM, XLA, MMLU,
+        HELM, HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
+        abbreviations (CNN, GPU, JIT, NVMe, SLA, ...) are exempt per
+        §10.5's expanded Special Cases.
+        """
+        return self._run_audit_check(
+            root, "audit.checks.abbreviation_first_use",
+            "abbreviation-first-use", "expand abbreviations on first use per chapter (§10.5)",
+        )
+
+    def _run_latin_running_text(self, root: Path) -> ValidationRunResult:
+        """Prefer English over Latin abbreviations in running prose (§10.6).
+
+        Flags e.g., i.e., etc., viz. in body prose. Permitted inside
+        parentheses, footnotes, and notes (space-constrained contexts).
+        """
+        return self._run_audit_check(
+            root, "audit.checks.latin_running_text",
+            "latin-abbrevs", "English over Latin in running text (§10.6)",
+        )
+
+    def _run_alt_text_style(self, root: Path) -> ValidationRunResult:
+        """Alt-text inside `fig-alt=\"...\"` follows body-prose rules (§10.12).
+
+        Flags: capitalized concept terms, `%` symbol, bare `vs`, LaTeX
+        commands, and other body-prose rule violations that leak into
+        alt-text attribute strings.
+        """
+        return self._run_audit_check(
+            root, "audit.checks.alt_text_style",
+            "alt-text-style", "alt-text style compliance (§10.12)",
+        )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
         """Validate image file formats using Pillow."""
