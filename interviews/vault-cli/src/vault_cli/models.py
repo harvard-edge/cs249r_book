@@ -124,6 +124,33 @@ class HumanReview(BaseModel):
         return v
 
 
+class Visual(BaseModel):
+    """Optional static visual attached to a question."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = "svg"
+    path: str
+    alt: str
+    caption: str | None = None
+
+    @field_validator("kind")
+    @classmethod
+    def _supported_kind(cls, v: str) -> str:
+        if v not in {"svg", "mermaid"}:
+            raise ValueError("visual.kind must be 'svg' or 'mermaid'")
+        return v
+
+    @field_validator("path")
+    @classmethod
+    def _safe_path(cls, v: str) -> str:
+        if ".." in v or v.startswith("/") or "\\" in v:
+            raise ValueError(f"visual.path must be a safe relative filename; got {v!r}")
+        if not v.endswith(".svg"):
+            raise ValueError(f"visual.path must end in .svg; got {v!r}")
+        return v
+
+
 class Details(BaseModel):
     # Allow unknown keys: a few imported YAMLs carry legacy fields
     # (e.g. details.question) that we preserve but do not validate strictly.
@@ -166,6 +193,7 @@ class Question(BaseModel):
     title: str = Field(max_length=120)
     scenario: str
     question: str | None = None
+    visual: Visual | None = None
     details: Details
 
     # Workflow

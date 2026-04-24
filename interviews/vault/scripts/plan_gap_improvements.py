@@ -696,6 +696,7 @@ def validation_gates() -> list[dict[str, Any]]:
         {"gate": "napkin-math", "command": "python3 interviews/vault/scripts/verify_math.py", "blocks": True},
         {"gate": "dedup", "rule": "scenario/question near-duplicates checked before publish", "blocks": True},
         {"gate": "chain-integrity", "rule": "chain IDs exist and levels progress monotonically", "blocks": True},
+        {"gate": "visual-assets", "rule": "visual asset exists, alt text is non-empty, and visual questions reference the diagram", "blocks": True},
         {"gate": "provenance", "rule": "report provenance and human_reviewed.status counts before release", "blocks": False},
     ]
 

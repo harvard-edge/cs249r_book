@@ -55,7 +55,6 @@ export interface Question {
   // real content from the worker. MCQ options/correct_index ARE bundled
   // (scoring uses them synchronously).
   scenario: string;
-  question?: string;
   details: {
     common_mistake: string;
     realistic_solution: string;

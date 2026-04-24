@@ -25,6 +25,13 @@ type EnrichedVaultQuestion = VaultQuestion & {
   competency_area: string;
   bloom_level?: string;
   phase?: string;
+  question?: string;
+  visual?: {
+    kind: "svg" | "mermaid";
+    path: string;
+    alt: string;
+    caption?: string;
+  };
   chains?: Array<{ id: string; position: number }>;
   validated?: boolean;
   math_verified?: boolean;
@@ -48,6 +55,12 @@ export interface Question {
   phase?: string;
   scenario: string;
   question?: string;
+  visual?: {
+    kind: "svg" | "mermaid";
+    path: string;
+    alt: string;
+    caption?: string;
+  };
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
   details: {
@@ -84,6 +97,7 @@ function adapt(v: EnrichedVaultQuestion): Question {
     phase: v.phase,
     scenario: v.scenario,
     question: v.question,
+    visual: v.visual,
     chain_ids: chainIds.length ? chainIds : undefined,
     chain_positions: chainIds.length ? chainPositions : undefined,
     details: {

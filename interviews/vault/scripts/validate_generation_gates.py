@@ -24,6 +24,7 @@ ROOT_DIR = VAULT_DIR.parents[1]
 QUESTIONS_DIR = VAULT_DIR / "questions"
 TAXONOMY_DATA = VAULT_DIR / "schema" / "taxonomy_data.yaml"
 CHAINS_PATH = VAULT_DIR / "chains.json"
+VISUALS_DIR = VAULT_DIR / "visuals"
 
 if str(VAULT_DIR) not in sys.path:
     sys.path.insert(0, str(VAULT_DIR))
@@ -85,6 +86,7 @@ def validate(paths: list[Path]) -> dict[str, Any]:
     applicability_errors: list[str] = []
     affinity_warnings: list[str] = []
     chain_errors: list[str] = []
+    visual_errors: list[str] = []
     exact_duplicate_questions: list[str] = []
     topic_errors: list[str] = []
     records: list[dict[str, Any]] = []
@@ -140,6 +142,27 @@ def validate(paths: list[Path]) -> dict[str, Any]:
             if isinstance(chain, dict) and chain.get("id") not in chain_ids:
                 chain_errors.append(f"{qid}: unknown chain {chain.get('id')}")
 
+        visual = data.get("visual")
+        if visual is not None:
+            if not isinstance(visual, dict):
+                visual_errors.append(f"{qid}: visual must be a mapping")
+            else:
+                kind = visual.get("kind", "svg")
+                rel_path = visual.get("path", "")
+                alt = (visual.get("alt") or "").strip()
+                if kind != "svg":
+                    visual_errors.append(f"{qid}: unsupported visual kind {kind!r}")
+                if not alt:
+                    visual_errors.append(f"{qid}: visual.alt is required")
+                if not rel_path or ".." in rel_path or str(rel_path).startswith("/"):
+                    visual_errors.append(f"{qid}: unsafe or missing visual.path {rel_path!r}")
+                else:
+                    asset = VISUALS_DIR / track / rel_path
+                    if not asset.exists():
+                        visual_errors.append(f"{qid}: visual asset missing at {asset.relative_to(VAULT_DIR)}")
+                if question and "diagram" not in normalize(question) and "figure" not in normalize(question):
+                    visual_errors.append(f"{qid}: visual question should reference the diagram/figure in question text")
+
         if question:
             question_texts[normalize(question)].append(qid)
         records.append(data)
@@ -174,6 +197,7 @@ def validate(paths: list[Path]) -> dict[str, Any]:
             affinity_warnings,
         ),
         gate_result("chain-integrity", "PASS" if not chain_errors else "FAIL", chain_errors),
+        gate_result("visual-assets", "PASS" if not visual_errors else "FAIL", visual_errors),
         gate_result(
             "exact-question-dedup",
             "WARN" if exact_duplicate_questions else "PASS",
