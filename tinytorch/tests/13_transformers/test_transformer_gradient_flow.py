@@ -67,10 +67,6 @@ def test_layernorm_gradient_flow():
     # Create LayerNorm
     ln = LayerNorm(embed_dim)
 
-    # Enable gradient tracking on parameters
-    for param in ln.parameters():
-        param.requires_grad = True
-
     # Forward pass
     x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)))
     output = ln.forward(x)
