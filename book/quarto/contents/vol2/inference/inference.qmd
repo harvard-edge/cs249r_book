@@ -2021,7 +2021,7 @@ Autoregressive generation without caching requires $O(t^2)$ computation per toke
 
 The cache size grows with context as calculated by @eq-kv-cache-size:
 
-$$\text{KV cache size} = 2 \times L \times H \times S \times B \times P$$ {#eq-kv-cache-size}
+$$\text{KV cache size} = 2 \times L \times H \times S \times B \times s_{\text{elem}}$$ {#eq-kv-cache-size}
 
 ### The KV cache wall: Memory-bound capacity {#sec-inference-scale-kv-cache-wall}
 
@@ -2119,7 +2119,7 @@ where:
 - $H$ = hidden dimension
 - $S$ = sequence length
 - $B$ = batch size
-- $P$ = precision (bytes per element)
+- $s_{\text{elem}}$ = storage size per element in bytes
 - Factor of 2 accounts for both keys and values
 
 The following *KV-cache capacity estimator* applies this formula to determine the maximum serving batch size for a large model on production hardware.
@@ -2129,13 +2129,13 @@ The following *KV-cache capacity estimator* applies this formula to determine th
 **The Problem**: A deployment serves Llama-3-70B (FP16 weights $\approx 140$ GB) on an 8xH100 node (640 GB total HBM). The goal is to determine the maximum batch size for a context length of 128K tokens.
 
 **Formula**\index{Formula}:
-$$ M_{KV} = 2 \times n_{layers} \times n_{heads} \times d_{head} \times P_{prec} $$
+$$ M_{KV} = 2 \times n_{layers} \times n_{heads} \times d_{head} \times s_{\text{elem}} $$
 $$ \text{Total Memory} = M_{weights} + (\text{Batch} \times \text{Context} \times M_{KV}) $$
 
 **Parameters**\index{Parameter}:
 
 *   $n_{layers} = 80$, $n_{heads} = 64$, $d_{head} = 128$.
-*   $P_{prec} = 2$ bytes (FP16).
+*   $s_{\text{elem}} = 2$ bytes (FP16).
 *   Context $= 131,072$ tokens.
 
 **Step 1: Calculate memory per token.**
@@ -2982,9 +2982,9 @@ The result exceeds the `{python} HardwareSetupSharding.h100_mem_gb`GB capacity o
 
 The second driver is latency. Even when a model fits in memory, sharding can reduce latency by parallelizing computation. @eq-parallel-time formalizes the potential speedup as a function of parallelization efficiency:
 
-$$T_{parallel} = \frac{T_{sequential}}{P} + T_{communication}$$ {#eq-parallel-time}
+$$T_{\text{parallel}} = \frac{T_{\text{sequential}}}{N} + T_{\text{communication}}$$ {#eq-parallel-time}
 
-where $P$ is the parallelism degree and $T_{communication}$ is the synchronization overhead. Sharding provides latency benefit only when the communication overhead is smaller than the time saved through parallelization.
+where $N$ is the number of devices in the sharding group and $T_{\text{communication}}$ is the synchronization overhead. Sharding provides latency benefit only when the communication overhead is smaller than the time saved through parallelization.
 
 | **Sharding Trigger**    |   **Model Examples** | **Minimum Sharding** | **Strategy**       |
 |:------------------------|---------------------:|---------------------:|:-------------------|
@@ -2999,9 +2999,9 @@ where $P$ is the parallelism degree and $T_{communication}$ is the synchronizati
 
 Tensor parallelism [@shoeybi2019megatron] distributes individual layers across multiple devices, enabling parallel computation within each layer. The column-row partitioning scheme introduced for training in @sec-distributed-training-systems applies here: splitting the first linear layer by columns and the second by rows requires only one AllReduce per transformer block. For transformer models, the primary target is the attention mechanism and feed-forward layers, which contain the majority of computation.
 
-The multi-head attention computation naturally partitions across attention heads. For a model with $H$ attention heads distributed across $P$ devices, each device computes $H/P$ heads:
+The multi-head attention computation naturally partitions across attention heads. For a model with $H$ attention heads distributed across tensor-parallel degree $t$, each device computes $H/t$ heads:
 
-$$\text{Attention}_i = \text{softmax}\left(\frac{Q_i K_i^T}{\sqrt{d_k}}\right) V_i \text{ for heads } i \in \{1, ..., H/P\}$$
+$$\text{Attention}_i = \text{softmax}\left(\frac{Q_i K_i^T}{\sqrt{d_k}}\right) V_i \text{ for heads } i \in \{1, ..., H/t\}$$
 
 After computing local attention, an AllReduce operation (covered in @sec-collective-communication) combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
 
@@ -3075,9 +3075,9 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
 The inference time with tensor parallelism follows @eq-tensor-parallel-time:
 
-$$T_{inference} = \frac{T_{\text{compute}}}{P} + 2 \times T_{\text{allreduce}}\left(\frac{A}{P}\right)$$ {#eq-tensor-parallel-time}
+$$T_{\text{inference}} = \frac{T_{\text{compute}}}{t} + 2 \times T_{\text{allreduce}}\left(\frac{A}{t}\right)$$ {#eq-tensor-parallel-time}
 
-where $T_{\text{compute}}$ is the sequential compute time, $P$ is the parallelism degree, and $A$ is the activation size being reduced. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
+where $T_{\text{compute}}$ is the sequential compute time, $t$ is the tensor-parallel degree, and $A$ is the activation size being reduced. The factor of 2 accounts for the two all-reduce operations per transformer layer (attention and feed-forward).
 
 ::: {.callout-example title="Tensor Parallelism for Llama-70B"}
 
@@ -3194,7 +3194,7 @@ Device 2:               [Req1] [Req2] [Req3] [Req4] ...
 Device 3:                      [Req1] [Req2] [Req3] [Req4] ...
 ```
 
-Once the pipeline is full, throughput equals $P$ times single-stage throughput, where $P$ is the number of pipeline stages. The steady-state latency remains approximately the single-device latency (sum of all stage times), but throughput scales with parallelism.
+Once the pipeline is full, throughput equals $p$ times single-stage throughput, where $p$ is the number of pipeline stages. The steady-state latency remains approximately the single-device latency (sum of all stage times), but throughput scales with parallelism.
 
 When to use pipeline parallelism for inference
 
@@ -3206,8 +3206,8 @@ When to use pipeline parallelism for inference
 
 | **Aspect**                 | **Tensor Parallelism**           | **Pipeline Parallelism**           |
 |:---------------------------|:---------------------------------|:-----------------------------------|
-| **Single-request latency** | Reduced by ~$P$x                 | No improvement                     |
-| **Throughput**             | $P$x                             | $P$x (when pipelined)              |
+| **Single-request latency** | Reduced by ~$t$x                 | No improvement                     |
+| **Throughput**             | $t$x                             | $p$x (when pipelined)              |
 | **Communication pattern**  | AllReduce (bandwidth-intensive)  | Point-to-point (latency-sensitive) |
 | **Memory efficiency**      | Activations replicated           | Activations passed along           |
 | **Complexity**             | Higher (requires custom kernels) | Lower (layer-level partitioning)   |
@@ -3349,7 +3349,7 @@ In an MoE layer, a gating network selects $k$ experts (out of $E$ total) for eac
 
 $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{input})$$
 
-Expert parallelism distributes experts across devices, with each device hosting $E/P$ experts. @fig-moe-routing traces the routing, dispatch, and gather operations:
+Expert parallelism distributes experts across devices, with each device hosting $E/N$ experts, where $N$ is the number of expert-parallel devices. @fig-moe-routing traces the routing, dispatch, and gather operations:
 
 ::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-k experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead." fig-alt="Diagram of MoE token routing. Gating selects top-2 experts. Dashed arrows show All-to-All dispatch to Expert A and B devices. Third device idle. Results gather via All-to-All to weighted sum output."}
 
@@ -3449,13 +3449,13 @@ Recommendation systems typically contain embedding tables that dwarf model weigh
 
 Row-wise sharding partitions embedding tables by row (entity ID):
 
-$$\text{Shard}_i = \{e_j : \text{hash}(j) \mod P = i\}$$
+$$\text{Shard}_i = \{e_j : \text{hash}(j) \bmod n_{\text{shard}} = i\}$$
 
-Each shard contains approximately $N/P$ embeddings, where $N$ is the total number of entities and $P$ is the shard count.
+Each shard contains approximately $n_{\text{entity}}/n_{\text{shard}}$ embeddings, where $n_{\text{entity}}$ is the total number of entities and $n_{\text{shard}}$ is the shard count.
 
 Column-wise sharding partitions each embedding vector across devices:
 
-$$e_j = [e_j^{(0)}, e_j^{(1)}, ..., e_j^{(P-1)}]$$
+$$e_j = [e_j^{(0)}, e_j^{(1)}, ..., e_j^{(n_{\text{shard}}-1)}]$$
 
 Each device stores a slice of every embedding.
 
@@ -3607,9 +3607,9 @@ The practical speedup from sharding depends critically on communication efficien
 
 @eq-allreduce-time quantifies AllReduce communication time for tensor parallelism, where data is combined from all devices with the result available on all devices.
 
-$$T_{\text{allreduce}} = 2 \times \frac{(P-1)}{P} \times \frac{M}{B}$$ {#eq-allreduce-time}
+$$T_{\text{allreduce}} = 2 \times \frac{(N-1)}{N} \times \frac{M}{B}$$ {#eq-allreduce-time}
 
-where $P$ is the number of devices, $M$ is the message size, and $B$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases.
+where $N$ is the number of devices, $M$ is the message size, and $B$ is the interconnect bandwidth. The factor of 2 accounts for the reduce-scatter and all-gather phases.
 
 @eq-p2p-time expresses the simpler point-to-point communication for pipeline parallelism, where data flows from one device to the next.
 
@@ -3619,7 +3619,7 @@ where $L$ is the network latency and $M/B$ is the transfer time.
 
 @eq-alltoall-time captures the more complex AllToAll communication for expert parallelism, where each device exchanges distinct data with every other device.
 
-$$T_{\text{alltoall}} = (P-1) \times \left(L + \frac{M/P}{B}\right)$$ {#eq-alltoall-time}
+$$T_{\text{alltoall}} = (N-1) \times \left(L + \frac{M/N}{B}\right)$$ {#eq-alltoall-time}
 
 Both equations make clear that the achievable bandwidth $B$ and latency $L$ of the underlying interconnect determine real-world sharding performance. The following *interconnect technology comparison* quantifies these differences across production hardware.
 
@@ -4015,7 +4015,7 @@ The key constraint visible in @fig-tensor-parallel-routing is that every request
 
 Under pipeline parallelism, each request traverses stages sequentially, with each stage forwarding activations to the next. @fig-pipeline-parallel-routing illustrates how pipelining multiple requests achieves throughput scaling even though single-request latency equals the sum of all stage times.
 
-::: {#fig-pipeline-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Request Flow**. (a) A single request flows sequentially through four stages—no latency benefit from parallelism. (b) Multiple requests fill the pipeline: once steady state is reached, throughput scales with the number of stages P, while per-request latency remains approximately constant." fig-alt="Two-part diagram. Top: single request through four stage boxes labeled by layer ranges with GPU labels below. Bottom: Gantt-style grid showing four GPU rows with requests offset by one stage, illustrating pipeline fill and steady-state throughput."}
+::: {#fig-pipeline-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Request Flow**. (a) A single request flows sequentially through four stages—no latency benefit from parallelism. (b) Multiple requests fill the pipeline: once steady state is reached, throughput scales with the number of pipeline stages, while per-request latency remains approximately constant." fig-alt="Two-part diagram. Top: single request through four stage boxes labeled by layer ranges with GPU labels below. Bottom: Gantt-style grid showing four GPU rows with requests offset by one stage, illustrating pipeline fill and steady-state throughput."}
 
 ![](images/svg/pipeline-parallel-routing.svg)
 
