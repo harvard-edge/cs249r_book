@@ -122,8 +122,11 @@ def canonical_json_new_path(vol: str, chapter: str) -> Path:
     return CONTENTS_DIR / vol / chapter / f"{stem}_quizzes.json.new"
 
 
-def memo_path(chapter: str) -> Path:
-    return REVIEWS_DIR / f"{chapter}_memo.md"
+def memo_path(vol: str, chapter: str) -> Path:
+    # Prefix with ``vol`` so that ``vol1/conclusion`` and ``vol2/conclusion``
+    # (and same-named ``introduction`` chapters) do not overwrite each
+    # other's memo on disk. Pre-fix filename was ``{chapter}_memo.md``.
+    return REVIEWS_DIR / f"{vol}_{chapter}_memo.md"
 
 
 # ---------------------------------------------------------------------------
@@ -749,7 +752,7 @@ def write_memo(
         "```",
         "",
     ]
-    mp = memo_path(chapter)
+    mp = memo_path(vol, chapter)
     mp.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return mp
 
@@ -798,7 +801,11 @@ def generate_for_chapter(
         elif mode == "audit":
             audit_dir = HERE / "_audit"
             audit_dir.mkdir(parents=True, exist_ok=True)
-            out = audit_dir / f"{chapter}_audit.json"
+            # Prefix with ``vol`` so ``vol1/introduction`` and
+            # ``vol2/introduction`` (and the two ``conclusion`` chapters)
+            # do not overwrite each other's audit on disk. Pre-fix
+            # filename was ``{chapter}_audit.json``.
+            out = audit_dir / f"{vol}_{chapter}_audit.json"
         else:
             out = canonical_json_new_path(vol, chapter)
         out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
