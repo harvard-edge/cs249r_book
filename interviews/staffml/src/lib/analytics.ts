@@ -21,6 +21,7 @@ export type AnalyticsEvent =
   | { type: 'question_reported'; questionId: string; category?: string }
   | { type: 'question_thumbs'; questionId: string; topic: string; level: string; value: 'up' | 'down' }
   | { type: 'question_difficulty_feedback'; questionId: string; topic: string; level: string; perceived: 'too_easy' | 'about_right' | 'too_hard' }
+  | { type: 'question_verification_feedback'; questionId: string; topic: string; level: string; value: 'verified' | 'disputed' }
   | { type: 'question_contributed'; topic: string; track: string }
   | { type: 'answer_response_time'; questionId: string; topic: string; level: string; seconds: number; napkinGrade?: string; hadUserAnswer: boolean }
   | { type: 'answer_revealed'; topic: string; zone: string; hadUserAnswer: boolean }
@@ -223,6 +224,11 @@ export interface AnalyticsSummary {
   thumbsUp: number;
   thumbsDown: number;
   difficultyDistribution: Record<'too_easy' | 'about_right' | 'too_hard', number>;
+  verification: {
+    verified: number;
+    disputed: number;
+    net: number;
+  };
   // Phase-5 chain CTR. shown counts dedup per (chainId, sessionId) so
   // navigating across siblings within a single session doesn't inflate
   // the denominator. clicked is a raw click count (intent signal).
@@ -254,6 +260,7 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
   // Dedup feedback: only count latest per (questionId, sessionId)
   const latestThumbs = new Map<string, 'up' | 'down'>();
   const latestDifficulty = new Map<string, 'too_easy' | 'about_right' | 'too_hard'>();
+  const latestVerification = new Map<string, 'verified' | 'disputed'>();
   // Dedup chain badge impressions per (chainId, sessionId). A user
   // bouncing across siblings in one session shouldn't inflate the
   // denominator of CTR. Clicks stay raw — repeated clicks DO matter
@@ -311,6 +318,9 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
       case 'question_difficulty_feedback':
         latestDifficulty.set(`${event.questionId}:${sessionId}`, event.perceived);
         break;
+      case 'question_verification_feedback':
+        latestVerification.set(`${event.questionId}:${sessionId}`, event.value);
+        break;
       case 'chain_badge_shown':
         chainShownKeys.add(`${event.chainId}:${sessionId}`);
         break;
@@ -330,6 +340,12 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
   });
   Array.from(latestDifficulty.values()).forEach(perceived => {
     difficultyDistribution[perceived]++;
+  });
+  let verified = 0;
+  let disputed = 0;
+  Array.from(latestVerification.values()).forEach(value => {
+    if (value === 'verified') verified++;
+    else disputed++;
   });
 
   // Compute averages
@@ -355,6 +371,11 @@ export function computeSummary(events?: StoredEvent[]): AnalyticsSummary {
     thumbsUp,
     thumbsDown,
     difficultyDistribution,
+    verification: {
+      verified,
+      disputed,
+      net: verified - disputed,
+    },
     chainBadgesShown,
     chainBadgesClicked,
     chainBadgeCTR,

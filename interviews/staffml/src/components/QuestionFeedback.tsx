@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ThumbsUp, ThumbsDown, Flag, Lightbulb } from "lucide-react";
+import { CheckCircle2, XCircle, ThumbsUp, ThumbsDown, Flag, Lightbulb } from "lucide-react";
 import clsx from "clsx";
 import { track, getAnalyticsEvents } from "@/lib/analytics";
 import { buildReportUrl, buildSuggestUrl } from "@/lib/issue-url";
@@ -21,6 +21,7 @@ interface QuestionFeedbackProps {
 export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
   const [thumbs, setThumbs] = useState<'up' | 'down' | null>(null);
   const [difficulty, setDifficulty] = useState<'too_easy' | 'about_right' | 'too_hard' | null>(null);
+  const [verification, setVerification] = useState<'verified' | 'disputed' | null>(null);
 
   // Hydrate previous feedback from analytics events on mount
   useEffect(() => {
@@ -37,6 +38,13 @@ export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
       const e = events[i].event;
       if (e.type === 'question_difficulty_feedback' && e.questionId === question.id) {
         setDifficulty(e.perceived);
+        break;
+      }
+    }
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i].event;
+      if (e.type === 'question_verification_feedback' && e.questionId === question.id) {
+        setVerification(e.value);
         break;
       }
     }
@@ -63,6 +71,18 @@ export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
       topic: question.topic,
       level: question.level,
       perceived,
+    });
+  };
+
+  const handleVerification = (value: 'verified' | 'disputed') => {
+    if (verification === value) return; // guard: no duplicate events
+    setVerification(value);
+    track({
+      type: 'question_verification_feedback',
+      questionId: question.id,
+      topic: question.topic,
+      level: question.level,
+      value,
     });
   };
 
@@ -129,6 +149,42 @@ export default function QuestionFeedback({ question }: QuestionFeedbackProps) {
               {emoji} {label}
             </button>
           ))}
+        </div>
+
+        {/* Vertical divider */}
+        <div className="w-px h-5 bg-border" />
+
+        {/* Community verification */}
+        <div className="flex items-center gap-1.5" role="group" aria-label="Community verification">
+          <span className="text-[10px] font-mono text-textTertiary uppercase mr-1">Verified?</span>
+          <button
+            onClick={() => handleVerification('verified')}
+            className={clsx(
+              "inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-medium transition-all",
+              verification === 'verified'
+                ? "border-accentGreen/40 bg-accentGreen/10 text-accentGreen"
+                : "border-transparent text-textMuted hover:text-accentGreen hover:bg-accentGreen/5"
+            )}
+            aria-label="I verified this question"
+            aria-pressed={verification === 'verified'}
+            title="The prompt, answer, and math look correct to me"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" /> Verified
+          </button>
+          <button
+            onClick={() => handleVerification('disputed')}
+            className={clsx(
+              "inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-medium transition-all",
+              verification === 'disputed'
+                ? "border-accentRed/40 bg-accentRed/10 text-accentRed"
+                : "border-transparent text-textMuted hover:text-accentRed hover:bg-accentRed/5"
+            )}
+            aria-label="I found an issue with this question"
+            aria-pressed={verification === 'disputed'}
+            title="Something in the prompt, answer, classification, or math may be wrong"
+          >
+            <XCircle className="w-3.5 h-3.5" /> Dispute
+          </button>
         </div>
       </div>
 
