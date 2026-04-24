@@ -96,5 +96,5 @@ mlsysim schema      Export the JSON Schema for the mlsys.yaml configuration file
 
 - Source: [github.com/harvard-edge/cs249r_book/tree/dev/mlsysim](https://github.com/harvard-edge/cs249r_book/tree/dev/mlsysim)
 - Issues: [github.com/harvard-edge/cs249r_book/issues](https://github.com/harvard-edge/cs249r_book/issues)
-- License: CC BY-NC-SA 4.0
+- License: Apache-2.0 (code) · CC-BY-NC-SA-4.0 (documentation)
 - Citation: see [`CITATION.cff`](CITATION.cff)
