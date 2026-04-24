@@ -84,6 +84,15 @@ Same for existing chain IDs (`cloud-chain-432`, …). Renaming would break
 format as of this policy. Old and new coexist freely in `id-registry.yaml`
 and `chains.yaml`.
 
+**Draft pilot exception.** Gap-analysis pilot drafts may temporarily use
+`<track>-pilot-<target>` IDs while they are `status: draft` and trace back
+to a generation target (for example, `cloud-pilot-0181`). These IDs are
+review handles, not permanent public identifiers. Before any pilot item is
+promoted to `published`, it should either be assigned a durable
+`<track>-<yyyymm>-<4hex>` ID or be explicitly accepted as a stable legacy
+ID with an entry in the review notes. This keeps pilot review easy without
+turning mutable planning metadata into public URL structure.
+
 **Status today (2026-04-21):**
 - Question IDs: 9 657 legacy (cell/fill/sus/r2/crit/new/top/plain prefixes)
 - Chain IDs: 970 legacy (`<track>-chain-<NNN>`)
