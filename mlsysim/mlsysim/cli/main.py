@@ -10,9 +10,11 @@ from mlsysim.cli.commands.audit import audit_main
 app = typer.Typer(
     name="mlsysim", 
     help="""
-    **The ML Systems Infrastructure Modeling Engine.**
-    
-    A first-principles analytical framework for predicting performance, cost, and carbon footprint of ML workloads.
+    **First-principles infrastructure modeling for machine learning systems.**
+
+    Predicts performance, cost, and carbon footprint from hardware and
+    workload specifications. The analytical engine behind the
+    *Machine Learning Systems* textbook.
     """,
     no_args_is_help=True,
     add_completion=True,
