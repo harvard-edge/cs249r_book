@@ -7,7 +7,8 @@
     "model": "gpt-5.4",
     "total_sections": 10,
     "sections_with_quizzes": 10,
-    "sections_without_quizzes": 0
+    "sections_without_quizzes": 0,
+    "improved_by": "quiz-refresh/improve-mode"
   },
   "sections": [
     {
@@ -93,9 +94,9 @@
         "questions": [
           {
             "question_type": "FILL",
-            "question": "In the \u03b1-\u03b2 model, the crossover size n* = \u03b1\u03b2 is the ____ message size that separates latency-bound communication from bandwidth-bound communication.",
-            "answer": "critical. It names the threshold where startup overhead stops dominating and per-byte transfer cost becomes the main concern, which determines whether fusion or bandwidth-oriented optimization will help more.",
-            "learning_objective": "Identify the threshold concept that divides latency-bound and bandwidth-bound communication regimes"
+            "question": "On a link where n* = \u03b1\u03b2, a 4 KB MoE token message sits well below the ____ size, so startup overhead dominates and message fusion matters more than extra raw bandwidth.",
+            "answer": "critical. The critical size is the crossover threshold between latency-bound and bandwidth-bound communication, so being below it means alpha dominates and reducing message count helps most.",
+            "learning_objective": "Apply the critical-size concept to infer when a workload is latency-bound and should favor message fusion"
           },
           {
             "question_type": "MCQ",
@@ -106,7 +107,7 @@
               "Switch from RDMA to TCP to reduce NIC complexity",
               "Compress each 4 KB token by 2\u00d7 while leaving the number of messages unchanged"
             ],
-            "answer": "The correct answer is A. With a critical size around 100 KB, 4 KB messages are deep in the latency-bound regime, so reducing the number of message startups matters most. Simply shrinking already tiny messages leaves the dominant \u03b1 term largely unchanged, and replacing RDMA with TCP would increase overhead rather than reduce it.",
+            "answer": "The correct answer is A. With a critical size around 100 KB, 4 KB messages are deep in the latency-bound regime, so reducing the number of message startups matters most. Simply shrinking already tiny messages leaves the dominant alpha term largely unchanged, and replacing RDMA with TCP would increase overhead rather than reduce it.",
             "learning_objective": "Apply the alpha-beta model to choose an optimization strategy for latency-bound communication"
           },
           {
@@ -239,19 +240,19 @@
             "question_type": "ORDER",
             "question": "Order the following phases of Ring AllReduce: (1) circulate fully reduced chunks so every GPU reconstructs the complete result, (2) split the tensor into chunks and circulate them while accumulating partial sums, (3) finish with each GPU owning one fully reduced chunk.",
             "answer": "The correct order is: (2) split the tensor into chunks and circulate them while accumulating partial sums, (3) finish with each GPU owning one fully reduced chunk, (1) circulate fully reduced chunks so every GPU reconstructs the complete result. Ring AllReduce first performs scatter-reduce, whose outcome is one complete reduced chunk per GPU, and only then performs all-gather. Reversing the phases would try to replicate data before the global partial sums had been formed.",
-            "learning_objective": "Order the two-phase execution of Ring AllReduce and identify the intermediate state after scatter-reduce"
+            "learning_objective": "Sequence the two phases of Ring AllReduce and identify the intermediate state after scatter-reduce"
           },
           {
             "question_type": "MCQ",
-            "question": "For small or moderate messages on a very large cluster, why can Tree AllReduce beat Ring AllReduce even though Tree is not bandwidth-optimal?",
+            "question": "A library must reduce 1 MB buffers across 64 GPUs. Which algorithm is most likely to win, and why?",
             "choices": [
-              "Because Tree sends fewer total bytes than the information-theoretic lower bound",
-              "Because Tree uses only local links while Ring always crosses racks",
-              "Because Tree reduces the number of sequential communication steps from O(N) to O(log N), which can outweigh its bandwidth penalty when latency dominates",
-              "Because Tree eliminates the need for a broadcast phase"
+              "Ring, because its bandwidth term is always smaller and latency never matters once more than one node is involved",
+              "Tree, because its O(log N) communication depth can outweigh its extra bandwidth cost when startup latency dominates",
+              "Parameter server, because 1 MB is too small for decentralized collectives to matter",
+              "Any algorithm will perform the same because 1 MB is below DRAM page size"
             ],
-            "answer": "The correct answer is C. Tree wins in latency-sensitive regimes because its logarithmic depth dramatically cuts startup costs compared with Ring's long sequence of hops. The idea that it beats the information-theoretic lower bound is impossible; its trade-off is lower latency at the cost of worse bandwidth efficiency.",
-            "learning_objective": "Compare Ring and Tree AllReduce under latency-dominated conditions"
+            "answer": "The correct answer is B. For small or moderate messages on a large cluster, the dominant difference is often the number of sequential startups, and Tree cuts that from O(N) to O(log N). The parameter-server idea reintroduces the hotspot problem, while the page-size claim is irrelevant to collective latency and bandwidth trade-offs.",
+            "learning_objective": "Compare Ring and Tree AllReduce under latency-dominated conditions using a concrete cluster scenario"
           },
           {
             "question_type": "SHORT",
@@ -417,9 +418,9 @@
           },
           {
             "question_type": "FILL",
-            "question": "Block quantization improves over one-scale-per-tensor quantization by computing a separate scaling factor for each ____ of elements.",
-            "answer": "block. Using local blocks adapts the quantization scale to regional gradient statistics, reducing error for non-uniform tensors at the cost of sending extra scale metadata.",
-            "learning_objective": "Identify the structural unit used to reduce quantization error in block-based gradient compression"
+            "question": "When a gradient tensor has heavy-tailed regions and near-zero regions, block quantization reduces error by assigning a separate scale to each ____ of elements instead of forcing one tensor-wide scale to fit all regions.",
+            "answer": "block. A block-local scale adapts to local gradient statistics, so small regions are not quantized using a scale set by a few large outliers elsewhere in the tensor.",
+            "learning_objective": "Infer why block-level scaling improves quantization accuracy for non-uniform gradient tensors"
           }
         ]
       }
@@ -470,7 +471,7 @@
             "question_type": "SHORT",
             "question": "A production training stack uses NCCL for GPU tensor collectives and Gloo for CPU-side coordination. Explain why this split can make sense instead of standardizing on a single backend everywhere.",
             "answer": "Different process groups have different bottlenecks: GPU gradient exchange benefits from NCCL's GPUDirect, topology discovery, and fused collective kernels, while CPU-side barriers or scalar broadcasts do not need those GPU-specific features. Using both lets the system match each library to the memory location and communication pattern involved. This avoids forcing portable control-path traffic through a GPU-optimized stack or high-throughput tensor traffic through a slower generic backend.",
-            "learning_objective": "Justify multi-backend communication designs based on workload-specific strengths of different libraries"
+            "learning_objective": "Justify multi-backend communication designs by matching GPU-resident tensor traffic and CPU-side coordination to the backend best suited for each"
           }
         ]
       }
@@ -531,15 +532,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A model's per-layer AllReduce takes longer than that layer's backward computation. What residual problem remains even with a well-implemented overlap scheme?",
+            "question": "A model's per-layer AllReduce takes 25 ms, but the backward computation available to hide it is only 15 ms. What residual problem remains even with a well-implemented overlap scheme?",
             "choices": [
               "No problem remains; overlap always hides the slower operation completely",
               "The optimizer becomes unnecessary because communication already computes the update",
-              "Some exposed communication time remains per layer, because the transfer extends past the available compute window",
+              "About 10 ms of communication per layer remains exposed because the transfer outlasts the available compute window",
               "The system automatically switches from Ring to Tree for the optimizer state"
             ],
-            "answer": "The correct answer is C. Overlap can hide only the portion of communication that fits under concurrent computation; if communication outlasts the compute window, the remainder is exposed on the critical path. The claim that overlap always hides the slower operation reverses the dependency and is exactly what this section warns against.",
-            "learning_objective": "Analyze when overlap leaves residual exposed communication because transfer time exceeds available compute"
+            "answer": "The correct answer is C. Overlap can hide only the part of communication that fits under concurrent computation; when a 25 ms transfer has only a 15 ms compute window, the remaining 10 ms stays on the critical path. The claim that overlap always hides the slower operation is exactly the misconception this section rejects.",
+            "learning_objective": "Calculate the exposed communication that remains when transfer time exceeds the available overlap window"
           }
         ]
       }
@@ -621,7 +622,7 @@
             "question_type": "SHORT",
             "question": "Summarize how the chapter's three major levers\u2014algorithm choice, topology-aware execution, and overlap/compression\u2014act on different parts of the communication problem.",
             "answer": "Algorithm choice determines the latency-bandwidth trade-off of the collective itself, deciding how many steps and how many bytes each worker must move. Topology-aware execution maps that logical algorithm onto real links so scarce bandwidth is not wasted on contention or bad routing. Overlap and compression then attack the residual cost: overlap hides unavoidable transfers behind compute, while compression reduces payload when bandwidth remains the limiting term.",
-            "learning_objective": "Synthesize the chapter's main optimization levers into a unified performance model for distributed communication"
+            "learning_objective": "Synthesize how collective algorithm design, topology mapping, and residual-cost reduction techniques address different components of communication overhead"
           }
         ]
       }

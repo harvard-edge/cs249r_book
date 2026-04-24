@@ -14,5 +14,5 @@ _None._
 ## Validator output
 
 ```
-OK: optimizations_quizzes.json.new passes schema + anchor validation
+OK: model_compression_quizzes.json.improved passes schema + anchor validation
 ```

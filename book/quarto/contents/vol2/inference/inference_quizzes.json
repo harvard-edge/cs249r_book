@@ -3,6 +3,7 @@
     "source_file": "book/quarto/contents/vol2/inference/inference.qmd",
     "schema_version": 2,
     "generated_by": "quiz-refresh/generate_quizzes.py",
+    "improved_by": "quiz-refresh/improve-mode",
     "generated_on": "2026-04-24",
     "model": "gpt-5.4",
     "total_sections": 13,
@@ -33,12 +34,12 @@
             "question": "A 13B model fits on a single A100, but product demand has grown from 10,000 QPS to 20,000 QPS while the per-request latency at batch size 1 is already acceptable. Which distribution strategy best addresses the immediate bottleneck?",
             "choices": [
               "Horizontal replication, because the bottleneck is aggregate throughput rather than model fit or single-request latency",
-              "Tensor parallelism, because any production model at this traffic level must be sharded across GPUs",
-              "Pipeline parallelism, because splitting layers reduces queueing without adding replicas",
-              "Prefix caching, because shared prompts are the dominant cause of high QPS saturation"
+              "Tensor parallelism, because spreading each layer across GPUs is the standard way to increase QPS for any model",
+              "Pipeline parallelism, because splitting layers into stages lets one request finish sooner and therefore doubles service capacity",
+              "Prefix caching, because repeated prompt prefixes are the main reason a throughput-limited service runs out of capacity"
             ],
-            "answer": "The correct answer is A. The section distinguishes throughput triggers from memory and latency triggers: if the model already fits and per-request latency is acceptable, the right response is to add replicas. Tensor or pipeline parallelism solves model-fit or latency problems, while prefix caching targets repeated prompt compute rather than raw service capacity.",
-            "learning_objective": "Identify the correct distribution strategy for an inference workload based on whether the bottleneck is memory, throughput, or latency"
+            "answer": "The correct answer is A. The section separates throughput triggers from memory and latency triggers: if the model already fits and single-request latency is acceptable, the right move is to add replicas. Tensor and pipeline parallelism target model-fit or latency problems, while prefix caching helps only if repeated prefixes are the dominant source of wasted compute.",
+            "learning_objective": "Distinguish memory, throughput, and latency triggers and choose the matching distribution strategy"
           },
           {
             "question_type": "SHORT",
@@ -48,20 +49,20 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Because training and inference both run the same model weights, the same distributed architecture is usually close to optimal for both.",
-            "answer": "False. The section argues that inference inverts training priorities: latency, tail behavior, continuous session state, and invisible failover dominate, whereas training optimizes aggregate throughput and tolerates checkpoint-based recovery and latency variance.",
+            "question": "True or False: Because training and inference run the same model weights, a cluster design tuned for distributed training is usually close to optimal for production serving too.",
+            "answer": "False. The section argues that inference inverts training priorities: user-facing serving is constrained by latency, tail behavior, continuous session state, and invisible failover, while training optimizes aggregate throughput and tolerates checkpoint-based recovery and latency variance.",
             "learning_objective": "Compare how the optimization target for inference differs from distributed training"
           },
           {
             "question_type": "MCQ",
-            "question": "An LLM service meets its raw GPU compute target of 70 ms per request on a single node, but production end-to-end latency rises to 95 ms after sharding and routing. Which explanation best matches the chapter's notion of the serving tax?",
+            "question": "An LLM service measures 70 ms of raw model compute on one node, but once requests are routed across a distributed serving stack the end-to-end latency rises to 95 ms. Which explanation best matches the chapter's notion of the serving tax?",
             "choices": [
-              "The extra latency must come from poor model quality, since network effects do not materially affect inference latency",
-              "The additional latency is expected from network, serialization, coordination, and queuing overhead introduced by distribution",
-              "The increase proves the workload has become compute-bound instead of latency-bound",
-              "The main issue is that inference replicas should be checkpointed like training jobs to reduce restart overhead"
+              "The extra latency likely comes from network hops, serialization, coordination, and queuing overhead introduced by distribution",
+              "The increase shows the model has become less accurate, so users are indirectly seeing model-quality overhead",
+              "The workload must have switched from latency-bound to compute-bound, which by itself explains the additional 25 ms",
+              "The service should checkpoint replicas more often, since checkpoint cadence is the main source of production latency"
             ],
-            "answer": "The correct answer is B. The serving tax is explicitly defined as network, serialization, coordination, and queuing overhead added by distributed serving. An explanation based on model quality misses the systems path entirely, and checkpoint-style recovery belongs to training rather than user-facing inference.",
+            "answer": "The correct answer is A. The serving tax is explicitly defined as network, serialization, coordination, and queuing overhead added by distributed serving. An explanation based on model quality confuses correctness with systems path length, and checkpoint-style reasoning belongs to training recovery rather than user-facing inference latency.",
             "learning_objective": "Analyze how distribution overhead contributes to end-to-end inference latency beyond raw compute time"
           },
           {
@@ -105,9 +106,9 @@
           },
           {
             "question_type": "FILL",
-            "question": "LLM serving with conversation history is inherently ____ because later turns benefit from routing to the same replica that already holds the session's KV cache.",
-            "answer": "stateful. The section contrasts stateful LLM serving with stateless vision-style serving, emphasizing that KV-cache locality changes load balancing, autoscaling, and failure recovery behavior.",
-            "learning_objective": "Identify the architectural property that follows from retaining per-session KV-cache state"
+            "question": "In an LLM service, horizontal scaling is no longer trivial once each conversation accumulates replica-specific KV-cache state; the system has become ____ rather than stateless.",
+            "answer": "stateful. The key issue is not just naming the property, but recognizing its consequence: later turns need sticky routing and careful failure handling because recomputing lost context can add seconds of prefill work.",
+            "learning_objective": "Infer when retained per-session state changes the scaling behavior of a serving system"
           },
           {
             "question_type": "SHORT",
@@ -117,14 +118,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A serving system reserves KV-cache memory for the maximum possible output length when a request is admitted, even if most requests end much sooner. What is the main systems consequence of this design?",
+            "question": "A serving system reserves KV-cache memory for the maximum possible output length when a request is admitted, even though most requests terminate much earlier. What is the most important systems consequence?",
             "choices": [
-              "It eliminates all external fragmentation and usually improves concurrency",
-              "It wastes large amounts of memory through over-reservation, reducing concurrent request capacity",
-              "It makes the system stateless, so horizontal scaling becomes trivial",
-              "It converts a bandwidth-bound decode workload into a compute-bound one"
+              "It guarantees near-100 percent memory utilization because every request has reserved space before execution starts",
+              "It wastes memory through over-reservation, so fewer concurrent requests fit on the same GPU",
+              "It makes the service easier to scale horizontally because pre-allocated KV cache removes replica-local state",
+              "It shifts the decode phase from memory-bandwidth-bound to compute-bound by making allocation deterministic"
             ],
-            "answer": "The correct answer is B. The section explains that pre-allocation reserves memory for worst-case output length, so much of the KV cache remains unused for short generations. A claim that it eliminates fragmentation confuses predictable reservation with efficient utilization; the problem is precisely that concurrency falls because memory is wasted.",
+            "answer": "The correct answer is B. The section explains that pre-allocation reserves memory for worst-case output length, so much of the KV cache remains unused for short generations. The tempting claim that it improves utilization confuses predictability with efficiency; the real effect is lower concurrency because large portions of memory sit idle inside over-sized reservations.",
             "learning_objective": "Analyze how memory management strategy affects concurrent capacity in an inference service"
           },
           {
@@ -165,11 +166,11 @@
             "question": "Why do LLM decode workloads typically benefit from much larger effective batch sizes than vision inference workloads?",
             "choices": [
               "Because LLM decode has high fixed overhead from repeatedly loading weights, so larger batches amortize memory-bandwidth costs across more requests",
-              "Because vision workloads cannot be batched at all once they reach multiple replicas",
-              "Because LLM decode is usually compute-bound while vision inference is always memory-bound",
-              "Because larger LLM batches reduce model size, which eliminates KV-cache growth"
+              "Because vision workloads stop benefiting from batching as soon as requests are distributed across multiple replicas",
+              "Because LLM decode is usually compute-bound while vision inference is mostly memory-bandwidth-bound",
+              "Because larger LLM batches shrink the KV cache per request, removing the main memory constraint"
             ],
-            "answer": "The correct answer is A. The section emphasizes that LLM decode is dominated by fixed weight-loading cost and memory bandwidth, so large batches amortize that overhead. An explanation claiming decode is compute-bound reverses the chapter's bottleneck analysis, and batching does not reduce the model's memory footprint itself.",
+            "answer": "The correct answer is A. The section emphasizes that LLM decode is dominated by fixed weight-loading cost and memory bandwidth, so large batches amortize that overhead. The compute-bound explanation reverses the chapter's bottleneck analysis, and larger batches do not shrink per-request KV state\u2014they often push memory pressure in the opposite direction.",
             "learning_objective": "Explain why the batching efficiency curve differs across model architectures"
           },
           {
@@ -189,11 +190,11 @@
             "question": "An LLM batch contains four requests with output lengths 50, 200, 100, and 150 tokens. What is the main reason continuous batching improves average latency over traditional batching for this mix?",
             "choices": [
               "It makes the longest request finish earlier by parallelizing its token dependencies",
-              "It eliminates useful computation for short requests so the GPU can focus only on long ones",
-              "It allows finished requests to leave immediately and new ones to reuse freed slots instead of idling until the longest sequence completes",
-              "It converts decode into a stateless workload so queueing disappears"
+              "It avoids running attention for shorter requests once the batch contains a long response",
+              "It lets finished requests depart immediately and frees their slots for new work instead of leaving them idle until the longest sequence completes",
+              "It removes the need for KV-cache state, so scheduling no longer depends on sequence length"
             ],
-            "answer": "The correct answer is C. Continuous batching reduces waste by reusing slots as soon as short sequences finish, instead of keeping them idle until the longest request ends. It does not break autoregressive dependence for the longest sequence, and the workload remains stateful because KV-cache state still matters.",
+            "answer": "The correct answer is C. Continuous batching reduces waste by reusing slots as soon as short sequences finish, instead of keeping them idle until the longest request ends. It does not eliminate autoregressive dependence for the longest sequence, and it still depends heavily on KV-cache state and memory management.",
             "learning_objective": "Compare traditional and continuous batching using the waste mechanism created by variable output lengths"
           },
           {
@@ -202,10 +203,10 @@
             "choices": [
               "Streaming inference, because batch-formation delay would directly consume the real-time budget",
               "Static batching, because uniform frame size guarantees the best GPU utilization",
-              "Feature-parallel batching, because audio frames resemble sparse embedding lookups",
-              "Continuous batching, because every speech frame has variable output length like LLM decode"
+              "Feature-parallel batching, because audio frames are dominated by distributed embedding lookups",
+              "Continuous batching, because speech frames behave like variable-length LLM decode steps"
             ],
-            "answer": "The correct answer is A. The streaming subsection explains that some workloads cannot afford batch-formation delay at all because each frame must complete within the inter-frame deadline. Static batching and continuous batching optimize utilization for other workload shapes, but they add delay that conflicts with hard real-time processing.",
+            "answer": "The correct answer is A. The streaming subsection explains that some workloads cannot afford batch-formation delay at all because each frame must complete within the inter-frame deadline. Static batching or LLM-style continuous batching may improve utilization, but they insert extra waiting that conflicts with a hard real-time budget.",
             "learning_objective": "Select a batching strategy based on a workload's real-time deadline and architectural bottleneck"
           },
           {
@@ -237,14 +238,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "What changes most fundamentally when an inference service moves from fast pattern-matching responses to reasoning-heavy responses that use many internal thinking tokens?",
+            "question": "A serving team moves from handling short factual queries to serving prompts that trigger long chains of reasoning before the final answer. What changes most fundamentally in the system objective?",
             "choices": [
-              "The system stops being latency-sensitive because users tolerate any delay for reasoning tasks",
-              "The dominant optimization target shifts from tokens per second toward compute per request and steps per second",
-              "The workload becomes stateless because reasoning tokens are internal rather than user-visible",
-              "The KV cache becomes irrelevant because reasoning happens outside the model"
+              "Latency stops mattering, because users will accept arbitrarily long waits for reasoning tasks",
+              "The dominant optimization target shifts from raw tokens-per-second toward compute allocated per request and reasoning steps per second",
+              "The workload becomes stateless, because internal reasoning tokens are not shown to the user",
+              "KV-cache pressure disappears, because reasoning tokens are not part of the visible output"
             ],
-            "answer": "The correct answer is B. The section's logic wall argument is that test-time reasoning scales compute per request, so the serving system starts resembling a search engine rather than a pure throughput factory. User tolerance may increase somewhat, but latency still matters; the state and memory constraints do not disappear.",
+            "answer": "The correct answer is B. The logic wall reframes serving as dynamic compute allocation: once requests consume many reasoning steps, the scheduler is optimizing compute per request rather than just maximizing cheap token throughput. User patience may increase somewhat, but latency budgets still matter, and the hidden reasoning tokens still consume memory and state.",
             "learning_objective": "Explain how test-time compute scaling changes the serving objective for reasoning-heavy inference"
           },
           {
@@ -255,8 +256,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: If GPU utilization looks healthy, unusually high P99 latency is unlikely to come from batching or scheduling policy.",
-            "answer": "False. The section's debugging example shows that healthy average utilization can hide head-of-line blocking and poor batch composition that only harms a small fraction of requests, which is exactly what drives P99 upward.",
+            "question": "True or False: If an LLM service shows healthy average GPU utilization, then a P99 latency spike is unlikely to be caused by batching or scheduling policy.",
+            "answer": "False. The section's debugging example shows that healthy average utilization can hide head-of-line blocking and bad batch composition that only hurts a small fraction of requests, which is exactly what drives P99 latency upward.",
             "learning_objective": "Diagnose why tail-latency failures can persist even when average GPU utilization appears healthy"
           }
         ]
@@ -294,14 +295,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "What is the main systems benefit of PagedAttention over contiguous per-sequence KV-cache allocation?",
+            "question": "A team pre-allocates one contiguous KV-cache region per request using the maximum supported context length. Under realistic workloads with many short generations, what is the main reason PagedAttention increases concurrency?",
             "choices": [
-              "It speeds up the math for each individual attention operation by reducing FLOPs",
-              "It replaces the need for batching by making every request effectively batch size one",
-              "It eliminates internal and external fragmentation so more concurrent sequences fit in the same memory pool",
-              "It makes LLM serving stateless by moving sequence state out of GPU memory"
+              "It reduces the FLOPs of attention itself, so each token uses less compute",
+              "It lets the system skip batching and process every request independently",
+              "It eliminates internal and external fragmentation, so memory that was stranded in oversized or unusable gaps becomes available for active sequences",
+              "It moves all sequence state to host memory, so GPU memory no longer limits batch size"
             ],
-            "answer": "The correct answer is C. PagedAttention is presented as a capacity optimization: it maps logical sequence pages to physical blocks, which sharply reduces fragmentation and increases concurrent throughput. It does not reduce the attention algorithm's arithmetic work directly, and it certainly does not remove batching or statefulness.",
+            "answer": "The correct answer is C. PagedAttention is presented as a capacity optimization: it maps logical sequence pages to physical blocks, which sharply reduces fragmentation and increases concurrent throughput. It does not reduce the arithmetic work of attention directly, and it does not remove the need for GPU-resident active state.",
             "learning_objective": "Explain how PagedAttention improves memory utilization and concurrent capacity"
           },
           {
@@ -312,26 +313,26 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Speculative decoding always reduces serving latency because verifying several draft tokens in parallel is cheaper than generating them sequentially.",
-            "answer": "False. The section describes speculative decoding as a probabilistic bet: if draft-token acceptance is low, the extra draft-model and verification overhead can outweigh the benefit and make serving slower.",
+            "question": "True or False: Speculative decoding is guaranteed to reduce latency whenever a draft model can propose multiple future tokens.",
+            "answer": "False. The section describes speculative decoding as a probabilistic bet: if the draft model's acceptance rate is too low, the extra draft-model work and verification overhead can outweigh the benefit and make serving slower.",
             "learning_objective": "Evaluate when speculative decoding helps and when its overhead can outweigh the gains"
           },
           {
             "question_type": "ORDER",
             "question": "Order the stages of speculative decoding: (1) Accept or reject draft tokens using the target model's verification, (2) The draft model proposes K future tokens, (3) The target model verifies the draft tokens in parallel.",
-            "answer": "The correct order is: (2) The draft model proposes K future tokens, (3) The target model verifies the draft tokens in parallel, (1) Accept or reject draft tokens using the target model's verification. The target model cannot verify tokens that have not yet been proposed, and acceptance decisions depend on the target model's parallel check. Reversing verification and acceptance would remove the correctness guarantee that makes speculative decoding lossless.",
+            "answer": "The correct order is: (2) The draft model proposes K future tokens, (3) The target model verifies the draft tokens in parallel, (1) Accept or reject draft tokens using the target model's verification. The target model cannot verify tokens that have not yet been proposed, and acceptance decisions depend on that verification pass. Reversing verification and acceptance would break the lossless-correction mechanism that preserves the target model's output distribution.",
             "learning_objective": "Order the phases of speculative decoding and explain why the sequence preserves correctness"
           },
           {
             "question_type": "MCQ",
             "question": "Why does disaggregated serving split prefill and decode across different hardware pools?",
             "choices": [
-              "Because prefill and decode have identical bottlenecks, so separating them improves software modularity only",
+              "Because prefill and decode have the same bottleneck, so separating them mainly improves software modularity",
               "Because prefill is compute-bound while decode is memory-bandwidth-bound, so different hardware configurations can be optimized for each phase",
-              "Because decode does not require the KV cache once prefill has completed",
-              "Because separating them eliminates the need to transfer KV-cache state between machines"
+              "Because decode no longer needs the KV cache after prefill finishes, so state can be discarded between phases",
+              "Because separating the phases avoids any need to move KV-cache state between machines"
             ],
-            "answer": "The correct answer is B. The section contrasts compute-bound prefill with bandwidth-bound decode, which motivates separate pools optimized for each regime. A claim that they share the same bottleneck misses the entire reason for disaggregation, and KV-cache transfer remains a real concern rather than disappearing.",
+            "answer": "The correct answer is B. The section contrasts compute-bound prefill with bandwidth-bound decode, which motivates separate pools optimized for each regime. A claim that they share the same bottleneck misses the reason for disaggregation, and KV-cache transfer remains a real systems issue rather than disappearing.",
             "learning_objective": "Compare prefill and decode resource profiles and justify disaggregated serving"
           }
         ]
@@ -364,7 +365,7 @@
               "Because tensor parallelism is always faster than single-GPU inference, regardless of model size",
               "Because pipeline parallelism is the only way to reduce time-to-first-token"
             ],
-            "answer": "The correct answer is B. The section's first sharding trigger is memory capacity: if the weights alone exceed one GPU, sharding is mandatory. A claim that all production models require multi-GPU deployment confuses deployment scale with physical necessity, and speedup considerations come only after the fit problem is solved.",
+            "answer": "The correct answer is B. The section's first sharding trigger is memory capacity: if the weights alone exceed one GPU, sharding is mandatory. A claim that all production models require multi-GPU deployment confuses deployment scale with physical necessity, and speedup arguments matter only after the fit problem is solved.",
             "learning_objective": "Identify memory-capacity constraints that force model sharding at inference time"
           },
           {
@@ -372,11 +373,11 @@
             "question": "Which statement best distinguishes tensor parallelism from pipeline parallelism for inference?",
             "choices": [
               "Tensor parallelism reduces single-request latency by splitting work within layers, whereas pipeline parallelism mainly improves throughput once the pipeline is full",
-              "Pipeline parallelism reduces single-request latency more than tensor parallelism because it avoids all communication",
-              "Tensor parallelism is used only for recommendation systems, while pipeline parallelism is used only for LLMs",
-              "Pipeline parallelism eliminates the need for interconnect bandwidth because each device has a full copy of all activations"
+              "Pipeline parallelism reduces single-request latency more than tensor parallelism because it avoids the synchronization cost of all-reduce",
+              "Tensor parallelism is mainly for recommendation systems, while pipeline parallelism is mainly for LLMs",
+              "Pipeline parallelism eliminates inter-device communication because each stage executes independently after startup"
             ],
-            "answer": "The correct answer is A. Tensor parallelism can reduce per-request latency by parallelizing work within each layer, while pipeline parallelism offers its main benefit when many requests fill the pipeline. Claims that pipeline parallelism avoids communication or always lowers single-request latency ignore the section's bubble analysis.",
+            "answer": "The correct answer is A. Tensor parallelism can reduce per-request latency by parallelizing work within each layer, while pipeline parallelism offers its main benefit when many requests fill the pipeline. The appealing claim that pipeline parallelism avoids synchronization cost ignores the chapter's point that a single request still traverses all stages sequentially and gains little latency benefit.",
             "learning_objective": "Compare tensor and pipeline parallelism in terms of latency, throughput, and communication behavior"
           },
           {
@@ -406,13 +407,13 @@
               "Tensor parallelism, because every embedding vector should be processed by all GPUs at every layer",
               "Speculative decoding, because embedding lookup behaves like autoregressive generation"
             ],
-            "answer": "The correct answer is A. The section explains that recommendation systems often require row-wise, column-wise, or hybrid embedding sharding because sparse tables dominate memory footprint and lookup traffic. Pipeline and tensor parallelism target large dense model computation, while speculative decoding belongs to autoregressive generation rather than embedding lookup.",
+            "answer": "The correct answer is A. The section explains that recommendation systems often require row-wise, column-wise, or hybrid embedding sharding because sparse tables dominate memory footprint and lookup traffic. Pipeline and tensor parallelism target large dense computation, while speculative decoding belongs to autoregressive generation rather than embedding retrieval.",
             "learning_objective": "Select a sharding strategy that matches the dominant bottleneck in recommendation serving"
           },
           {
             "question_type": "TF",
             "question": "True or False: Cross-node tensor parallelism is practical only if the interconnect bandwidth is high enough that all-reduce overhead stays smaller than the compute time saved by sharding.",
-            "answer": "True. The section's latency model makes this explicit: sharding helps only when communication overhead is less than the parallelized compute time that it replaces, which is why NVLink and fast InfiniBand matter so much.",
+            "answer": "True. The section's latency model makes this explicit: sharding helps only when communication overhead is less than the parallelized compute time it replaces, which is why NVLink and fast InfiniBand matter so much for inference.",
             "learning_objective": "Evaluate when communication overhead preserves or destroys the benefit of tensor-parallel inference"
           }
         ]
@@ -445,7 +446,7 @@
               "It is used only because round-robin cannot operate with GPUs",
               "It removes the need for any queue-depth monitoring or routing state"
             ],
-            "answer": "The correct answer is A. The section emphasizes the exponential improvement in maximum queue length from making just one extra probe, which sharply improves tail latency. Probing every server would be much more expensive than two choices, and the method still depends on lightweight queue information rather than eliminating monitoring altogether.",
+            "answer": "The correct answer is A. The section emphasizes the exponential improvement in maximum queue length from making just one extra probe, which sharply improves tail latency. Probing every server would be far more expensive, and the method still relies on lightweight queue information rather than eliminating state entirely.",
             "learning_objective": "Analyze why power-of-two-choices improves load balance and tail latency relative to random routing"
           },
           {
@@ -460,16 +461,16 @@
             "choices": [
               "Round-robin, because it guarantees equal distribution across replicas",
               "Consistent hashing, because it gives routing affinity with minimal remapping when servers are added or removed",
-              "Random assignment, because cache reuse is less important than average fairness",
+              "Random assignment, because cache reuse matters less than average fairness",
               "Weighted round-robin, because capacity weighting automatically preserves session state"
             ],
-            "answer": "The correct answer is B. Consistent hashing preserves affinity so repeated requests from the same session tend to reach the same replica and reuse cached state. Equal-distribution methods like round-robin and random assignment ignore session locality, and weighting by capacity does not by itself make routing sticky.",
+            "answer": "The correct answer is B. Consistent hashing preserves affinity so repeated requests from the same session tend to reach the same replica and reuse cached state. Equal-distribution methods like round-robin and random assignment ignore session locality, and capacity weighting alone does not make routing sticky.",
             "learning_objective": "Select a routing scheme that preserves state locality for conversational inference"
           },
           {
             "question_type": "FILL",
-            "question": "The resilience mechanism that opens after repeated failures, temporarily stops sending traffic to an unhealthy replica, and later probes for recovery is called a ____.",
-            "answer": "circuit breaker. In this section it protects the serving fleet from cascading overload by failing fast on degraded replicas instead of continuing to queue doomed requests.",
+            "question": "When a replica's error rate or latency degradation crosses a threshold, the serving fleet should open a ____ so requests fail fast or reroute instead of continuing to pile onto that unhealthy node.",
+            "answer": "circuit breaker. The mechanism matters because it contains cascading failure: rejecting or rerouting quickly is safer than letting an already degraded replica build a longer queue of requests likely to time out.",
             "learning_objective": "Identify the failure-containment mechanism used to isolate unhealthy inference replicas"
           },
           {
@@ -479,9 +480,9 @@
               "Because it equalizes relative utilization by assigning more traffic to higher-capacity servers",
               "Because it forces all requests onto the fastest GPU type, eliminating heterogeneity",
               "Because it is only needed when servers are stateful rather than stateless",
-              "Because it reduces every request to the same latency regardless of model or prompt length"
+              "Because it makes request latency identical regardless of prompt length or queue state"
             ],
-            "answer": "The correct answer is A. Weighted routing accounts for capacity differences so weaker servers are not overloaded while stronger ones sit underused. Sending everything to the fastest GPUs would waste available cluster capacity, and weighting addresses heterogeneity rather than magically equalizing all request latencies.",
+            "answer": "The correct answer is A. Weighted routing accounts for capacity differences so weaker servers are not overloaded while stronger ones sit underused. Sending everything to the fastest GPUs would waste available cluster capacity, and weighting does not erase variation from prompt length or queuing.",
             "learning_objective": "Apply capacity-aware routing to heterogeneous inference hardware"
           }
         ]
@@ -525,8 +526,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Priority scheduling matters only for queued requests and does not affect requests already running on GPUs.",
-            "answer": "False. The section explains that preemption can suspend lower-priority in-flight work, save its KV-cache state, and free GPU slots for critical requests, so priority affects both queued and active execution.",
+            "question": "True or False: Priority scheduling matters only for requests still waiting in queue and has no role once a lower-priority request is already running on the GPU.",
+            "answer": "False. The section explains that preemption can suspend lower-priority in-flight work, preserve its KV-cache state, and free GPU slots for critical traffic, so priority affects both queued and active execution.",
             "learning_objective": "Analyze how priority scheduling can reshape both queued and in-flight inference work"
           },
           {
@@ -659,12 +660,12 @@
             "question_type": "MCQ",
             "question": "What is the key idea behind AWQ?",
             "choices": [
-              "It protects weights that correspond to channels with large activation magnitudes, because those channels matter disproportionately to output quality",
-              "It quantizes all layers identically with no calibration data to maximize simplicity",
-              "It moves all quantization difficulty from weights to the KV cache",
-              "It avoids hardware-specific deployment concerns by requiring FP16 activations and FP16 weights everywhere"
+              "It protects weights connected to channels with large activation magnitudes, because errors on those channels matter disproportionately to output quality",
+              "It quantizes every layer with the same scale and no calibration data so deployment is simpler",
+              "It shifts quantization difficulty out of activations and into the KV cache",
+              "It avoids hardware-specific trade-offs by keeping both weights and activations in FP16 during execution"
             ],
-            "answer": "The correct answer is A. AWQ is activation-aware: it identifies salient activation channels and scales the corresponding weights to preserve them through low-bit quantization. A data-free, one-size-fits-all description misses the method's calibration-driven channel sensitivity.",
+            "answer": "The correct answer is A. AWQ is activation-aware: it identifies salient activation channels and scales the corresponding weights so those important pathways survive low-bit quantization better. A uniform, no-calibration description misses the method's core idea that some channels matter far more than others.",
             "learning_objective": "Compare activation-aware quantization with simpler weight-only quantization approaches"
           },
           {
@@ -676,19 +677,19 @@
           {
             "question_type": "TF",
             "question": "True or False: SmoothQuant mainly helps by making both weights and activations easier to quantize through a mathematically equivalent rescaling, especially enabling W8A8 deployment.",
-            "answer": "True. The section describes SmoothQuant as migrating quantization difficulty from hard-to-quantize activations into weights via equivalent scaling, which is what makes W8A8 practical for serving.",
+            "answer": "True. The section describes SmoothQuant as migrating quantization difficulty from hard-to-quantize activations into weights via an equivalent scaling transformation, which is what makes W8A8 practical for serving.",
             "learning_objective": "Summarize the mechanism by which SmoothQuant enables lower-precision deployment"
           },
           {
             "question_type": "MCQ",
-            "question": "You are deploying on H100s and want minimal quality loss with native support for low precision, while still improving throughput. Which choice is most aligned with the section's hardware-deployment guidance?",
+            "question": "You are deploying on H100s and want minimal quality loss with native support for lower precision while still improving throughput. Which choice is most aligned with the section's hardware-deployment guidance?",
             "choices": [
               "FP8, because Hopper-class hardware natively supports it and it offers a strong quality-efficiency trade-off",
               "W4A4 everywhere, because all production frameworks and accelerators already support it equally well",
-              "Ignore hardware support and choose the lowest bit-width available in research papers",
-              "Keep FP16 weights only, because quantization never helps decode throughput"
+              "Choose the lowest bit-width reported in research papers regardless of kernel support or framework maturity",
+              "Keep FP16 weights only, because quantization cannot help memory-bandwidth-bound decode"
             ],
-            "answer": "The correct answer is A. The hardware co-design subsection highlights FP8 as especially attractive on H100/H200 because of native support and minimal quality loss. W4A4 remains much less mature operationally, and keeping FP16 everywhere ignores the chapter's argument that memory-bound decode often benefits strongly from quantization.",
+            "answer": "The correct answer is A. The hardware co-design subsection highlights FP8 as especially attractive on H100/H200 because of native support and low quality loss. W4A4 remains far less mature operationally, and keeping FP16 everywhere ignores the chapter's central point that memory-bound decode often benefits substantially from lower-precision weights.",
             "learning_objective": "Select a quantization strategy that matches the deployment hardware and serving objective"
           }
         ]
@@ -777,7 +778,7 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: Once a model fits in GPU memory, adding more GPU memory always increases batch size and throughput proportionally.",
+            "question": "True or False: Once a model fits in GPU memory, adding more GPU memory will keep increasing batch size and throughput proportionally.",
             "answer": "False. The summary notes that the bottleneck may shift to memory bandwidth or compute before capacity is exhausted, so more memory alone may not raise throughput if the workload is already bandwidth-bound or compute-bound.",
             "learning_objective": "Distinguish memory-capacity bottlenecks from bandwidth and compute bottlenecks in inference serving"
           }
@@ -817,7 +818,7 @@
               "Use pipeline parallelism first, then choose batching later because routing and memory are secondary details",
               "Use a single stateless serving architecture whenever possible because stateful systems are always a design mistake"
             ],
-            "answer": "The correct answer is B. The summary explicitly emphasizes that batching is not universal: different workload structures imply different optimal serving strategies. A universal continuous-batching answer ignores the chapter's taxonomy, and calling statefulness a mistake confuses an architectural consequence of LLMs with an avoidable design error.",
+            "answer": "The correct answer is B. The summary explicitly emphasizes that batching is not universal: different workload structures imply different optimal serving strategies. A universal continuous-batching answer ignores the chapter's taxonomy, and calling statefulness a design mistake confuses an architectural consequence of LLMs with an avoidable error.",
             "learning_objective": "Synthesize the chapter's guidance on matching serving strategy to workload characteristics"
           },
           {

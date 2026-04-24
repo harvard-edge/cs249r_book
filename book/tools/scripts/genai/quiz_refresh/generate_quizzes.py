@@ -140,6 +140,157 @@ def load_spec() -> str:
     return SPEC_PATH.read_text(encoding="utf-8")
 
 
+def build_improve_prompt(vol: str, chapter: str, qmd_path: Path) -> str:
+    """Assemble the per-chapter prompt for the IMPROVE mode.
+
+    The model receives: the chapter text (for ground truth), the prior
+    vocabulary (for building-up context — terms from chapters 1..N-1 may
+    be assumed without re-defining), and the **existing** quiz JSON. It
+    returns a surgically-improved JSON preserving section_ids, question
+    counts per section, and question types — only the content of
+    individual questions/choices/answers/learning-objectives may change.
+    """
+    position = next(
+        (i + 1 for i, (v, c) in enumerate(READING_ORDER) if v == vol and c == chapter),
+        None,
+    )
+    total_chapters = len(READING_ORDER)
+    existing_json_path = canonical_json_new_path(vol, chapter).with_suffix("")
+    if not existing_json_path.is_file():
+        raise FileNotFoundError(
+            f"improve mode requires an existing canonical quiz JSON at {existing_json_path}"
+        )
+    existing_data = json.loads(existing_json_path.read_text(encoding="utf-8"))
+    chapter_text = qmd_path.read_text(encoding="utf-8")
+    prior_vocab_data = build_prior_vocab_for(vol, chapter)
+
+    # Compact prior vocab to term + source only (definitions bloat the prompt)
+    prior_terms = [
+        {"term": t["term"], "first_seen": t["first_seen"]}
+        for t in prior_vocab_data["terms"]
+    ]
+
+    prior_terms_brief = (
+        f"{len(prior_terms)} terms from chapters 1..{position - 1} "
+        "are listed below — you MUST assume the reader knows them."
+        if position and position > 1
+        else "This is the first chapter — no prior vocabulary to build on."
+    )
+
+    return f"""You are improving the existing quizzes for chapter **{vol}/{chapter}** \
+(position {position} of {total_chapters}).
+
+This is an **improvement pass**, not regeneration. Most questions are \
+already strong. Your job is targeted surgical fixes on the weakest \
+questions based on a review rubric. Preserve structure: keep the same \
+section_ids, keep the same number of questions per section, keep the \
+same question_type on each question. Only the **content** of the \
+question, choices, answer, and learning_objective may change.
+
+## Review rubric — five weaknesses to hunt
+
+Scan every question through these five lenses. Apply fixes where any \
+apply. Leave untouched questions untouched; preserving good content \
+is as important as fixing weak content.
+
+1. **Throwaway MCQ distractors.** Any distractor that no informed \
+   reader would consider — e.g., "CPUs stopped supporting \
+   floating-point arithmetic", "checkpointing is impossible on TPUs", \
+   "lower tokens per second means less information can leak". Replace \
+   with a plausible misconception a CS/EE grad student might actually \
+   hold (confusing memory bandwidth with compute throughput, \
+   attributing a memory-bound symptom to a compute cause, assuming \
+   linear scaling under Amdahl's law, etc.).
+
+2. **FILL questions that are bare term recall.** "Detecting ___ \
+   prevents silent propagation" → answer is "NaN" is a vocabulary \
+   test. Either rewrite so the blank is a concept students must infer \
+   from context (not just name) or keep it FILL but make the sentence \
+   force real reasoning, not recognition. (FILL remains FILL — do not \
+   change the type.)
+
+3. **TF questions whose answer is grammatically obvious.** \
+   "True or False: synthetic data can fully replace real data" — no \
+   grad student would say True. Rewrite to address a misconception \
+   that's actually plausible: something the student would likely get \
+   wrong without having read the section.
+
+4. **Templated stems.** If too many MCQs start "Which statement best \
+   captures...", "What is the best interpretation...", "Which change \
+   best describes..." — vary the stems where variation improves \
+   clarity. Scenario-rooted stems ("A team profiles X and sees Y...") \
+   are consistently stronger than abstract "which best" stems.
+
+5. **Learning objectives that tautologically restate the question.** \
+   A question "What is the definition of AI Engineering?" paired with \
+   LO "Identify the definition of AI Engineering" is redundant. \
+   Rewrite the LO as a concrete testable outcome using a Bloom's verb \
+   (Apply, Calculate, Identify, Compare, Explain, Analyze, Evaluate, \
+   Design, Classify, Justify, Distinguish, Interpret, Predict, \
+   Sequence).
+
+## Critical constraints
+
+- **Prior-vocabulary contract** (this is the "building up" principle): \
+  terms below were established in earlier chapters. You MAY use them \
+  in questions and answers without re-defining them — the reader has \
+  met them. You MUST NOT write questions that test definitions of \
+  prior-chapter terms (those tests exist in earlier chapters). You MAY \
+  test their *application* in this chapter's context.
+
+- **No forward-reference:** do not introduce concepts from later \
+  chapters. Only concepts in THIS chapter or in prior_vocab are valid.
+
+- **Preserve section_id strings exactly** — the Lua filter matches by \
+  id and a change would orphan the quiz.
+
+- **Preserve question count per section** (if a section has 5 questions, \
+  return 5 questions).
+
+- **Preserve question_type** — do not change an MCQ to a SHORT, do not \
+  change a FILL to an MCQ, etc.
+
+- **Anti-shuffle-bug rules stay in force** (spec §5, §10): \
+  distractor explanations refer to content, not letters.
+
+## Prior vocabulary — {prior_terms_brief}
+
+```json
+{json.dumps(prior_terms, indent=2)}
+```
+
+## Chapter source — `{qmd_path.relative_to(REPO_ROOT)}`
+
+(Use this as the ground truth for factual correctness; quiz content \
+must be answerable from material already established up to and \
+including this chapter.)
+
+```qmd
+{chapter_text}
+```
+
+## Existing quiz JSON — the file you are improving
+
+```json
+{json.dumps(existing_data, indent=2)}
+```
+
+## Your task
+
+Return the **improved JSON** — the complete structure, identical \
+shape to the input, with surgical content fixes applied per the \
+rubric above. Your output MUST be a single JSON object, no prose \
+before or after. `metadata.total_sections`, \
+`metadata.sections_with_quizzes`, and \
+`metadata.sections_without_quizzes` must match the actual entry \
+counts. Every `section_id` must match the input exactly.
+
+In addition, update `metadata` with one extra field: \
+`improved_by: "quiz-refresh/improve-mode"`, and bump the \
+`generated_on` date to today.
+"""
+
+
 def build_user_prompt(vol: str, chapter: str, qmd_path: Path) -> str:
     """Assemble the per-chapter user prompt.
 
@@ -435,13 +586,22 @@ def generate_for_chapter(
     model: str,
     api_key: str | None,
     dry_run: bool,
+    mode: str = "generate",
 ) -> dict[str, Any]:
-    """Run the full pipeline for one chapter. Returns a summary dict."""
+    """Run the full pipeline for one chapter. Returns a summary dict.
+
+    ``mode="generate"`` does fresh generation from scratch.
+    ``mode="improve"`` reads the existing canonical JSON and asks the
+    model to apply surgical quality fixes, preserving structure.
+    """
     t0 = time.time()
-    result: dict[str, Any] = {"vol": vol, "chapter": chapter}
+    result: dict[str, Any] = {"vol": vol, "chapter": chapter, "mode": mode}
     try:
         qmd = qmd_path_for(vol, chapter)
-        user_prompt = build_user_prompt(vol, chapter, qmd)
+        if mode == "improve":
+            user_prompt = build_improve_prompt(vol, chapter, qmd)
+        else:
+            user_prompt = build_user_prompt(vol, chapter, qmd)
         result["prompt_chars"] = len(user_prompt)
         if dry_run:
             result["status"] = "dry-run"
@@ -450,7 +610,12 @@ def generate_for_chapter(
         assert api_key is not None
         data = call_model(provider, system_prompt, user_prompt, model, api_key)
         finalize_metadata(data, vol, chapter, model)
-        out = canonical_json_new_path(vol, chapter)
+        if mode == "improve":
+            # Improved JSONs land at a staging suffix so humans can diff
+            # before renaming to canonical.
+            out = canonical_json_new_path(vol, chapter).with_suffix(".improved")
+        else:
+            out = canonical_json_new_path(vol, chapter)
         out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         rc, vout = run_validator(out, qmd)
         memo = write_memo(chapter, vol, data, vout)
@@ -510,6 +675,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=4,
         help="parallelism for --all (default 4)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["generate", "improve"],
+        default="generate",
+        help=(
+            "generate=fresh generation (default). improve=read existing "
+            "canonical JSON and apply surgical quality fixes per the "
+            "improve-mode rubric. improve mode writes to "
+            "{chapter}_quizzes.json.improved for human review."
+        ),
     )
     p.add_argument(
         "--dry-run",
@@ -581,7 +757,7 @@ def main() -> int:
         for vol, chap in chapters:
             print(f"→ {vol}/{chap}", flush=True)
             r = generate_for_chapter(
-                vol, chap, system_prompt, provider, model, api_key, args.dry_run
+                vol, chap, system_prompt, provider, model, api_key, args.dry_run, args.mode
             )
             results.append(r)
             print(f"   {r.get('status')}  {r.get('elapsed_s')}s", flush=True)
@@ -597,6 +773,7 @@ def main() -> int:
                     model,
                     api_key,
                     args.dry_run,
+                    args.mode,
                 ): (vol, chap)
                 for vol, chap in chapters
             }
