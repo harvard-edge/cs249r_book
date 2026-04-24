@@ -61,6 +61,74 @@ class Resource(BaseModel):
         return v
 
 
+class Visual(BaseModel):
+    """Optional diagram/figure attached to a question.
+
+    Visuals live as separate asset files under
+    ``interviews/vault/visuals/<track>/<path>`` so the SVG text does
+    not contaminate YAML diffs and existing SVG tooling (Inkscape,
+    formatters, linters) works unchanged. The bundle-build step copies
+    these into the Next.js ``public/question-visuals/`` tree. The
+    practice page renders them between the scenario and the
+    ``question`` callout — context → diagram → ask, mirroring how an
+    interviewer would flow the question in person.
+    """
+
+    kind: str = "svg"
+    """Renderer kind. MVP supports `svg` only. Future: `mermaid`
+    (inline text), `roofline` (parameterized React component), etc.
+    The renderer dispatches on this field."""
+
+    path: str
+    """Asset filename relative to ``interviews/vault/visuals/<track>/``.
+    Must end in ``.svg`` for ``kind=svg``. No path traversal."""
+
+    alt: str
+    """Accessibility description for screen readers and fallback when
+    the SVG fails to load. Required — a visual with no alt is an
+    accessibility regression, not an optional add-on."""
+
+    caption: Optional[str] = None
+    """Author-facing caption rendered below the figure. Short — max
+    120 chars. Optional; the alt text handles the semantic payload."""
+
+    @field_validator("kind")
+    @classmethod
+    def valid_kind(cls, v: str) -> str:
+        if v not in {"svg", "mermaid"}:
+            raise ValueError(f"Visual.kind must be 'svg' or 'mermaid' (got {v!r})")
+        return v
+
+    @field_validator("path")
+    @classmethod
+    def safe_path(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Visual.path must be non-empty")
+        if "/" in v or "\\" in v or ".." in v:
+            raise ValueError(
+                f"Visual.path must be a bare filename, no traversal (got {v!r})"
+            )
+        if len(v) > 120:
+            raise ValueError(f"Visual.path too long ({len(v)} chars, max 120)")
+        return v
+
+    @field_validator("alt")
+    @classmethod
+    def alt_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Visual.alt must be non-empty (accessibility requirement)")
+        if len(v) > 400:
+            raise ValueError(f"Visual.alt too long ({len(v)} chars, max 400)")
+        return v
+
+    @field_validator("caption")
+    @classmethod
+    def caption_length(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and len(v) > 120:
+            raise ValueError(f"Visual.caption too long ({len(v)} chars, max 120)")
+        return v
+
+
 class ChainRef(BaseModel):
     """Structured chain reference with position (plural chains list item)."""
 
@@ -140,6 +208,7 @@ class Question(BaseModel):
     # uniformly (without it, 71% of questions had no explicit ask — the
     # scenario just set context and the reader had to guess).
     question: Optional[str] = None
+    visual: Optional[Visual] = None
     details: QuestionDetails
 
     # Workflow
