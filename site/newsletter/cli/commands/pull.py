@@ -167,6 +167,12 @@ def _email_to_markdown(email: dict[str, Any], default_category: str) -> tuple[st
     image_url = email.get("image") or ""
     if image_url and "image-generator.buttondown.email" in image_url:
         image_url = ""
+    # Reject inline data-URIs: Quarto's listing template resolves the `image`
+    # field against the post's directory, so a `data:image/png;base64,...`
+    # string gets rewritten to `posts/2026/data:image/png;base64,...` and the
+    # `<img>` 404s. Data-URIs also bloat the .md file by hundreds of KB.
+    if image_url.startswith("data:"):
+        image_url = ""
 
     # Strip HTML comments unconditionally before any derived field uses the
     # body. Buttondown editor metadata (the `<!-- buttondown-editor-mode:
