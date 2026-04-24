@@ -1,7 +1,7 @@
 ---
 title: "Thank You for Joining the MLSysBook.ai Community Celebration"
 date: "2025-12-17"
-author: "Vijay Janapa Reddi"
+author: "MLSysBook Team"
 description: "Hello everyone, Thanks to those of you who joined us today for the MLSysBook.ai 10K Stars Community Celebration—and a very warm welcome to those of you who subscribed today. We’re grateful you’re..."
 categories: ["community"]
 ---

@@ -1,7 +1,7 @@
 ---
 title: "Correction: Show & Tell Time Update (Please Note)"
 date: "2026-02-26"
-author: "Vijay Janapa Reddi"
+author: "MLSysBook Team"
 description: "Hello everyone, We made a mistake in the newsletter regarding the time for Thursday’s Student Show & Tell — thank you for your patience! The correct time is: 📅 Thursday, February 26 at 9:00am EST /..."
 categories: ["community"]
 ---

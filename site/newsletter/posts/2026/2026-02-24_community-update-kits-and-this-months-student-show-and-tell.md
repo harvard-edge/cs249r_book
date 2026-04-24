@@ -1,7 +1,7 @@
 ---
 title: "Community Update: Kits and This Month’s Student Show and Tell"
 date: "2026-02-24"
-author: "Vijay Janapa Reddi"
+author: "MLSysBook Team"
 description: "Hello Everyone, Welcome to this week’s MLSysBook community update, where we share progress, tools, and opportunities to help build the discipline of AI engineering together. This week, we’re..."
 categories: ["hands-on"]
 image: "https://assets.buttondown.email/images/5c932b1c-2ba2-4293-b7bf-ad000a54b1bb.png"

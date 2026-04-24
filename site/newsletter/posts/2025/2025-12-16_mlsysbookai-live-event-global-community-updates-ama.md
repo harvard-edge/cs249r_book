@@ -1,7 +1,7 @@
 ---
 title: "MLSysBook.ai Live Event: Global Community Updates + AMA"
 date: "2025-12-16"
-author: "Vijay Janapa Reddi"
+author: "MLSysBook Team"
 description: "Hello and welcome to the MLSysBook community! We’re excited to invite you to an upcoming live MLSysBook.ai community event tomorrow (Wednesday Dec 17th, 10EST) . You can find the full event details..."
 categories: ["community"]
 ---
