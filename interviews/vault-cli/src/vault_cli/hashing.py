@@ -35,7 +35,7 @@ WHITELIST_TOP: frozenset[str] = frozenset({
     "track", "level", "zone",           # v1.0: classification now in YAML
     "topic", "competency_area", "bloom_level", "phase",
     "chains",                            # v1.0: plural chain refs
-    "status", "scenario", "details", "tags", "provenance",
+    "status", "scenario", "question", "details", "tags", "provenance",
 })
 WHITELIST_GEN_META: frozenset[str] = frozenset({"model", "prompt_hash"})
 

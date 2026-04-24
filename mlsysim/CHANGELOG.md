@@ -1,5 +1,61 @@
 # Changelog
 
+<!--
+Format note
+===========
+Each release entry follows the structure below. The mlsysim-pypi-publish
+workflow extracts the `## vX.Y.Z (YYYY-MM-DD)` section and wraps it with
+install, links, and an "About MLSys·im" footer to produce the GitHub
+Release body. Omit any section that has no entries for a given release.
+
+    ## vX.Y.Z (YYYY-MM-DD) — Optional Short Theme
+
+    [Narrative opening — 1–3 sentences describing the release.]
+
+    ### ✨ Highlights
+    [Optional; 2–4 bullets for feature+ releases.]
+
+    ### 🔬 Solvers, Models & Taxonomy
+    ### 🏭 Hardware Registry
+    ### 🧠 Workload & Model Registry
+    ### 🖥️ CLI
+    ### 🐍 Python API
+    ### 📚 Documentation
+    ### 🏗️ Packaging & Dependencies
+    ### 🐛 Bug Fixes
+    ### 🔧 Internal
+
+    ### ⚠️ Breaking Changes    (only if present)
+    ### 🔒 Security            (only if present)
+    ### Deprecations           (only if present)
+
+    ### Contributors
+    - @profvjreddi
+-->
+
+## v0.1.1 (2026-04-24) — Paper Title Correction
+
+Metadata-only patch release. No code or API changes; safe drop-in
+replacement for 0.1.0. Corrects the paper title cited in three places
+to match the actual title of the companion paper.
+
+### 📚 Documentation
+
+- **Paper title corrected** across `CITATION.cff`, the BibTeX snippet in
+  `README.md`, and the reference docstring in `mlsysim/core/walls.py`.
+  Was: *"A Composable Analytical Framework for Machine Learning Systems."*
+  Now: *"MLSys·im: First-Principles Infrastructure Modeling for Machine
+  Learning Systems."*
+
+### 🏗️ Packaging & Dependencies
+
+- Version bumped to `0.1.1` across `pyproject.toml`, `mlsysim/__init__.py`,
+  and `CITATION.cff`; `date-released` updated to `2026-04-24`.
+
+### Contributors
+
+- @profvjreddi
+
 ## v0.1.0 (2026-04-01)
 
 **Initial release** of MLSysim — the first-principles analytical modeling engine for ML systems.

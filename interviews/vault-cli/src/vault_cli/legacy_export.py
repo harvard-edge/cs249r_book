@@ -35,6 +35,8 @@ def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
         "scenario": q.scenario,
         "status": q.status,
     }
+    if q.question:
+        legacy["question"] = q.question
     if q.phase:
         legacy["phase"] = q.phase
     # Explicit prompt (optional during backfill). Preserved in the

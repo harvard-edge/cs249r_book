@@ -157,10 +157,10 @@ If you use mlsysim in your research or teaching, please cite:
 ```bibtex
 @software{mlsysim2026,
   author       = {Janapa Reddi, Vijay},
-  title        = {{MLSysim}: A Composable Analytical Framework for Machine Learning Systems},
+  title        = {{MLSys$\cdot$im}: First-Principles Infrastructure Modeling for Machine Learning Systems},
   year         = {2026},
   url          = {https://mlsysbook.ai/mlsysim},
-  version      = {0.1.0},
+  version      = {0.1.1},
   institution  = {Harvard University}
 }
 ```
@@ -258,3 +258,15 @@ Thanks to these wonderful people for helping improve MLSys·im!
 ```text
 @all-contributors please add @username for code, doc, ideas, or bug
 ```
+
+---
+
+## License
+
+**Code:** [Apache License 2.0](LICENSE.md) — free for commercial and non-commercial use, with patent grant and attribution requirement.
+
+**Documentation and textbook prose:** [Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (CC-BY-NC-SA-4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/) — the tutorials and prose on [mlsysbook.ai/mlsysim](https://mlsysbook.ai/mlsysim) are part of the *Machine Learning Systems* textbook and carry its license.
+
+The two licenses are intentionally separate: the Python package is permissively licensed so engineers and researchers can use it anywhere (including commercially), while the textbook prose retains its non-commercial protection to prevent republication as a derivative textbook.
+
+Copyright &copy; 2026 Vijay Janapa Reddi and MLSys·im contributors.

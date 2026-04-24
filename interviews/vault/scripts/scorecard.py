@@ -12,6 +12,34 @@ import argparse
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+import sys
+
+import yaml
+
+
+VAULT_DIR = Path(__file__).resolve().parent.parent
+SCHEMA_DIR = VAULT_DIR / "schema"
+if str(SCHEMA_DIR) not in sys.path:
+    sys.path.insert(0, str(SCHEMA_DIR))
+
+from enums import VALID_TOPICS  # noqa: E402
+
+
+def load_yaml_overrides() -> dict[str, dict]:
+    """Load source YAML fields that legacy corpus.json may omit."""
+    out: dict[str, dict] = {}
+    questions_dir = VAULT_DIR / "questions"
+    if not questions_dir.exists():
+        return out
+    for path in questions_dir.glob("*/*.yaml"):
+        try:
+            data = yaml.safe_load(path.read_text()) or {}
+        except Exception:
+            continue
+        qid = data.get("id")
+        if qid:
+            out[qid] = data
+    return out
 
 
 def compute_scorecard(corpus_path: str, chains_path: str, taxonomy_path: str) -> dict:
@@ -22,7 +50,22 @@ def compute_scorecard(corpus_path: str, chains_path: str, taxonomy_path: str) ->
     with open(taxonomy_path) as f:
         tax = json.load(f)
 
+    yaml_by_id = load_yaml_overrides()
+    for q in data:
+        source = yaml_by_id.get(q.get("id"), {})
+        for field in (
+            "question",
+            "validation_status",
+            "validated",
+            "math_verified",
+            "human_reviewed",
+            "provenance",
+        ):
+            if field not in q and field in source:
+                q[field] = source[field]
+
     tax_ids = {c["id"] for c in tax["concepts"]}
+    schema_topic_ids = set(VALID_TOPICS)
     id_to_q = {q["id"]: q for q in data}
 
     sc = {"timestamp": datetime.now().isoformat(), "total": len(data)}
@@ -60,38 +103,47 @@ def compute_scorecard(corpus_path: str, chains_path: str, taxonomy_path: str) ->
         dev = sum(abs(blooms.get(b, 0) / n - p) for b, p in ideal.items()) / len(ideal)
         sc["bloom_deviation"][t] = round(dev * 100, 1)
 
-    # Taxonomy
-    empty_tc = sum(1 for q in data if not q.get("taxonomy_concept", "").strip())
-    missing_tc = sum(1 for q in data if q.get("taxonomy_concept", "") and q["taxonomy_concept"] not in tax_ids)
+    # Taxonomy (v1): `topic` is the canonical per-question concept field.
+    empty_topic = sum(1 for q in data if not q.get("topic", "").strip())
+    corpus_topics = {q.get("topic", "") for q in data if q.get("topic", "").strip()}
+    missing_topic = sorted(corpus_topics - schema_topic_ids)
+    zero_schema_topics = sorted(t for t in schema_topic_ids if t not in corpus_topics)
     sc["taxonomy"] = {
-        "concepts": len(tax["concepts"]),
+        "taxonomy_json_concepts": len(tax["concepts"]),
+        "schema_topics": len(schema_topic_ids),
         "edges": len(tax.get("edges", [])),
-        "empty_refs": empty_tc,
-        "missing_refs": missing_tc,
+        "empty_topic_refs": empty_topic,
+        "corpus_topics_not_in_schema": missing_topic,
+        "schema_topics_with_zero_questions": zero_schema_topics,
+        "taxonomy_json_overlap": len(corpus_topics & tax_ids),
     }
 
     # Quality
     short_sol = sum(1 for q in data if len(q.get("details", {}).get("realistic_solution", "") or "") < 100)
     short_nm = sum(1 for q in data if len(q.get("details", {}).get("napkin_math", "") or "") < 50)
-    full_6axis = sum(
+    full_v1_axes = sum(
         1
         for q in data
         if all(
             [
                 q.get("track"),
-                q.get("bloom_level"),
-                q.get("taxonomy_concept"),
-                q.get("knowledge_area"),
-                q.get("reasoning_mode"),
+                q.get("level"),
+                q.get("zone"),
+                q.get("topic"),
                 q.get("competency_area"),
+                q.get("bloom_level"),
+                q.get("phase"),
             ]
         )
     )
+    question_field = sum(1 for q in data if (q.get("question") or "").strip())
     sc["quality"] = {
         "short_solutions": short_sol,
         "short_napkin_math": short_nm,
-        "full_6axis": full_6axis,
-        "full_6axis_pct": round(100 * full_6axis / len(data), 1),
+        "full_v1_axes": full_v1_axes,
+        "full_v1_axes_pct": round(100 * full_v1_axes / len(data), 1),
+        "question_field_populated": question_field,
+        "question_field_pct": round(100 * question_field / len(data), 1),
     }
 
     # Chains
@@ -137,11 +189,17 @@ def print_scorecard(sc: dict, prev: dict = None):
     for t, d in sc["bloom_deviation"].items():
         print(f"  {t}: {d}%")
 
-    print(f"\nTaxonomy: {sc['taxonomy']['concepts']} concepts, {sc['taxonomy']['edges']} edges")
-    print(f"  Empty refs: {sc['taxonomy']['empty_refs']}, Missing: {sc['taxonomy']['missing_refs']}")
+    print(
+        f"\nTaxonomy: {sc['taxonomy']['schema_topics']} schema topics, "
+        f"{sc['taxonomy']['taxonomy_json_concepts']} taxonomy.json concepts"
+    )
+    print(f"  Empty topic refs: {sc['taxonomy']['empty_topic_refs']}")
+    print(f"  Corpus topics not in schema: {len(sc['taxonomy']['corpus_topics_not_in_schema'])}")
+    print(f"  Schema topics with zero questions: {len(sc['taxonomy']['schema_topics_with_zero_questions'])}")
 
     print(f"\nQuality:")
-    print(f"  6-axis complete: {sc['quality']['full_6axis_pct']}%")
+    print(f"  v1 axes complete: {sc['quality']['full_v1_axes_pct']}%")
+    print(f"  Question field populated: {sc['quality']['question_field_pct']}%")
     print(f"  Short solutions: {sc['quality']['short_solutions']}")
     print(f"  Short napkin: {sc['quality']['short_napkin_math']}")
 

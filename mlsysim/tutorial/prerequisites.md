@@ -14,9 +14,9 @@ Everything you need to run the hands-on exercises.
 | Disk | 50 MB | 100 MB |
 | GPU | **Not required** | Not required |
 
-mlsysim is a pure analytical framework -- it models hardware performance
-from first principles without executing any GPU kernels. All exercises
-run on a laptop CPU in seconds.
+mlsysim is a first-principles infrastructure modeling tool -- it models
+hardware performance analytically without executing any GPU kernels.
+All exercises run on a laptop CPU in seconds.
 
 ---
 

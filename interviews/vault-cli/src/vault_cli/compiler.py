@@ -35,6 +35,7 @@ CREATE TABLE questions (
   phase TEXT,
   status TEXT NOT NULL,
   scenario TEXT NOT NULL,
+  question TEXT,
   common_mistake TEXT,
   realistic_solution TEXT NOT NULL,
   napkin_math TEXT,
@@ -115,25 +116,25 @@ CREATE TABLE release_metadata (
 -- with INSERTs/UPDATEs/DELETEs via triggers. Cold-start fingerprint check
 -- includes triggers — see staffml-vault-worker/src/index.ts.
 CREATE VIRTUAL TABLE questions_fts USING fts5(
-  title, scenario, realistic_solution,
+  title, scenario, question, realistic_solution,
   content='questions', content_rowid='rowid'
 );
 
 CREATE TRIGGER questions_ai AFTER INSERT ON questions BEGIN
-  INSERT INTO questions_fts(rowid, title, scenario, realistic_solution)
-  VALUES (new.rowid, new.title, new.scenario, new.realistic_solution);
+  INSERT INTO questions_fts(rowid, title, scenario, question, realistic_solution)
+  VALUES (new.rowid, new.title, new.scenario, new.question, new.realistic_solution);
 END;
 
 CREATE TRIGGER questions_ad AFTER DELETE ON questions BEGIN
-  INSERT INTO questions_fts(questions_fts, rowid, title, scenario, realistic_solution)
-  VALUES('delete', old.rowid, old.title, old.scenario, old.realistic_solution);
+  INSERT INTO questions_fts(questions_fts, rowid, title, scenario, question, realistic_solution)
+  VALUES('delete', old.rowid, old.title, old.scenario, old.question, old.realistic_solution);
 END;
 
 CREATE TRIGGER questions_au AFTER UPDATE ON questions BEGIN
-  INSERT INTO questions_fts(questions_fts, rowid, title, scenario, realistic_solution)
-  VALUES('delete', old.rowid, old.title, old.scenario, old.realistic_solution);
-  INSERT INTO questions_fts(rowid, title, scenario, realistic_solution)
-  VALUES (new.rowid, new.title, new.scenario, new.realistic_solution);
+  INSERT INTO questions_fts(questions_fts, rowid, title, scenario, question, realistic_solution)
+  VALUES('delete', old.rowid, old.title, old.scenario, old.question, old.realistic_solution);
+  INSERT INTO questions_fts(rowid, title, scenario, question, realistic_solution)
+  VALUES (new.rowid, new.title, new.scenario, new.question, new.realistic_solution);
 END;
 """
 
@@ -158,11 +159,11 @@ def _compile_questions(
             """
             INSERT INTO questions (
               id, title, topic, track, level, zone, competency_area, bloom_level, phase,
-              status, scenario, common_mistake, realistic_solution, napkin_math,
+              status, scenario, question, common_mistake, realistic_solution, napkin_math,
               provenance, created_at, last_modified,
               human_review_status, human_review_by, human_review_date,
               file_path, content_hash, authors_json
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 q.id,
@@ -176,6 +177,7 @@ def _compile_questions(
                 q.phase,
                 q.status,
                 q.scenario,
+                q.question,
                 q.details.common_mistake,
                 q.details.realistic_solution,
                 q.details.napkin_math,

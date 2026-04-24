@@ -86,6 +86,24 @@ function inferTaskPrompt(zone: string | undefined, bloom: string | undefined): s
   return "Based on the scenario above, reason about the trade-offs and decide what approach you would take.";
 }
 
+function normalizePromptText(text: string | undefined): string {
+  return (text || "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function scenarioAlreadyContainsQuestion(
+  scenario: string | undefined,
+  question: string | undefined
+): boolean {
+  const normalizedQuestion = normalizePromptText(question);
+  if (!normalizedQuestion) return false;
+  return normalizePromptText(scenario).includes(normalizedQuestion);
+}
+
 export default function PracticePageWrapper() {
   return (
     <Suspense fallback={
@@ -983,7 +1001,7 @@ function PracticePage() {
                         background covers scrolling text cleanly.
                       */}
                       <div className="sticky top-0 z-20 -mx-8 lg:-mx-12 px-8 lg:px-12 py-3 bg-background border-b border-border">
-                        {current.question ? (
+                        {current.question && !scenarioAlreadyContainsQuestion(current.scenario, current.question) ? (
                           <div className="p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
                             <div className="flex items-center gap-2 mb-1.5">
                               <Target className="w-3.5 h-3.5 text-accentBlue" />
@@ -993,7 +1011,7 @@ function PracticePage() {
                               {current.question}
                             </p>
                           </div>
-                        ) : current.scenario && !current.scenario.trim().endsWith("?") ? (
+                        ) : !current.question && current.scenario && !current.scenario.trim().endsWith("?") ? (
                           <div className="p-4 rounded-lg border border-dashed border-border bg-surface/40">
                             <div className="flex items-center gap-2 mb-1.5">
                               <Target className="w-3.5 h-3.5 text-textTertiary" />

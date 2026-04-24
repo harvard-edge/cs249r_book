@@ -15,8 +15,8 @@ Checks:
     1. No duplicate concept names in taxonomy
     2. No duplicate concept IDs in taxonomy
     3. All concept IDs are kebab-case (no Title Case stubs)
-    4. taxonomy.question_count matches actual corpus primary_concept counts
-    5. All corpus primary_concepts exist in taxonomy
+    4. taxonomy.question_count matches actual corpus topic counts
+    5. All corpus topics exist in taxonomy
     6. All taxonomy prerequisites exist as defined concepts (no orphans)
     7. No cycles in prerequisite graph
     8. competency_area uses only canonical values
@@ -124,28 +124,27 @@ def check_03_kebab_case_ids(taxonomy, **_) -> CheckResult:
 
 
 def check_04_question_count_sync(taxonomy, corpus, **_) -> CheckResult:
-    actual = Counter(q.get("primary_concept", "") for q in corpus)
-    mismatches = []
-    for c in taxonomy["concepts"]:
-        claimed = c.get("question_count", 0)
-        real = actual.get(c["id"], 0)
-        if claimed != real:
-            mismatches.append(f'{c["id"]}: taxonomy says {claimed}, corpus has {real}')
-    if not mismatches:
+    """v1.0: compute live topic counts from corpus.topic.
+
+    taxonomy.json is a broad extracted concept graph and its question_count
+    fields are intentionally not the source of truth for the 87-topic schema.
+    """
+    actual = Counter(q.get("topic", "") for q in corpus)
+    unknown = sorted(t for t in actual if t and t not in VALID_TOPICS)
+    if not unknown:
         return CheckResult(4, "question_count_sync", "PASS",
-                           "All taxonomy question_counts match corpus")
+                           f"All corpus.topic values map to {len(VALID_TOPICS)} schema topics")
     return CheckResult(4, "question_count_sync", "FAIL",
-                       f"{len(mismatches)} question_count mismatches",
-                       mismatches, fixable=True)
+                       f"{len(unknown)} corpus topics not in schema enum", unknown)
 
 
 def check_05_corpus_concepts_in_taxonomy(taxonomy, corpus, **_) -> CheckResult:
-    tax_ids = {c["id"] for c in taxonomy["concepts"]}
-    corpus_concepts = {q.get("primary_concept", "") for q in corpus} - {"", None}
+    tax_ids = set(VALID_TOPICS)
+    corpus_concepts = {q.get("topic", "") for q in corpus} - {"", None}
     missing = corpus_concepts - tax_ids
     if not missing:
         return CheckResult(5, "corpus_concepts_in_taxonomy", "PASS",
-                           "All corpus primary_concepts exist in taxonomy")
+                           "All corpus topics exist in taxonomy")
     details = sorted(missing)
     return CheckResult(5, "corpus_concepts_in_taxonomy", "WARN",
                        f"{len(missing)} corpus concepts not in taxonomy", details)
@@ -274,7 +273,7 @@ def check_12_title_uniqueness(corpus, **_) -> CheckResult:
 
 
 def check_13_singleton_concepts(taxonomy, corpus, **_) -> CheckResult:
-    defined = {c["id"] for c in taxonomy["concepts"]}
+    defined = {c["id"] for c in taxonomy["concepts"] if c["id"] in VALID_TOPICS}
     all_prereqs = set()
     has_prereqs = set()
     for c in taxonomy["concepts"]:
@@ -287,7 +286,7 @@ def check_13_singleton_concepts(taxonomy, corpus, **_) -> CheckResult:
     # Singletons: no prereqs AND never referenced as prereq
     singletons = defined - has_prereqs - all_prereqs
     # Only warn about singletons that actually have questions (the rest may be prunable)
-    actual_counts = Counter(q.get("primary_concept", "") for q in corpus)
+    actual_counts = Counter(q.get("topic", "") for q in corpus)
     active_singletons = [s for s in singletons if actual_counts.get(s, 0) > 0]
 
     if not active_singletons:
@@ -302,8 +301,8 @@ def check_13_singleton_concepts(taxonomy, corpus, **_) -> CheckResult:
 
 
 def check_14_corpus_only_concepts(taxonomy, corpus, **_) -> CheckResult:
-    tax_ids = {c["id"] for c in taxonomy["concepts"]}
-    corpus_concepts = Counter(q.get("primary_concept", "") for q in corpus)
+    tax_ids = set(VALID_TOPICS)
+    corpus_concepts = Counter(q.get("topic", "") for q in corpus)
     corpus_only = {c: cnt for c, cnt in corpus_concepts.items()
                    if c and c not in tax_ids}
     if not corpus_only:
@@ -359,6 +358,21 @@ VALID_TOPICS = {
     "federated-learning", "differential-privacy", "fairness-evaluation",
     "responsible-ai", "tco-cost-modeling",
 }
+
+# Prefer the LinkML-derived enum module over the historical hardcoded copy
+# above. Keeping this assignment local avoids changing the rest of the script's
+# public surface while making the v1.0 invariant checks follow the schema.
+try:
+    schema_dir = VAULT / "schema"
+    if str(schema_dir) not in sys.path:
+        sys.path.insert(0, str(schema_dir))
+    from enums import VALID_TOPICS as SCHEMA_VALID_TOPICS
+    from enums import VALID_ZONES as SCHEMA_VALID_ZONES
+
+    VALID_TOPICS = set(SCHEMA_VALID_TOPICS)
+    VALID_ZONES = set(SCHEMA_VALID_ZONES)
+except Exception:
+    pass
 
 
 def check_15_zone_coverage(corpus, **_) -> CheckResult:
@@ -430,8 +444,8 @@ def check_19_validated_consistency(corpus, **_) -> CheckResult:
 # ── Auto-Fix Functions ───────────────────────────────────────
 
 def fix_04_question_count_sync(taxonomy, corpus):
-    """Rebuild question_count from corpus primary_concept."""
-    actual = Counter(q.get("primary_concept", "") for q in corpus)
+    """Rebuild overlapping taxonomy question_count from corpus topic."""
+    actual = Counter(q.get("topic", "") for q in corpus)
     fixed = 0
     for c in taxonomy["concepts"]:
         real = actual.get(c["id"], 0)
