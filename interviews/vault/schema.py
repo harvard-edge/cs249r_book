@@ -133,6 +133,13 @@ class Question(BaseModel):
     # Content
     title: str
     scenario: str
+    # Explicit interrogative — the one-sentence ask derived from scenario
+    # + details.realistic_solution. Optional during backfill; once the
+    # 2026-04-24 pass completes, the practice page relies on this field
+    # to render a "Your task" callout so readers see the question
+    # uniformly (without it, 71% of questions had no explicit ask — the
+    # scenario just set context and the reader had to guess).
+    question: Optional[str] = None
     details: QuestionDetails
 
     # Workflow

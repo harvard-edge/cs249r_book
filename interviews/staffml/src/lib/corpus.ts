@@ -19,6 +19,14 @@ export interface Question {
   track: string;
   level: string;
   title: string;
+  /**
+   * Explicit one-sentence interrogative derived from (scenario,
+   * realistic_solution). Ships in the summary bundle so the practice
+   * page can render it synchronously as a "Your task" callout. Optional
+   * while the backfill is in progress — if absent, the render falls
+   * back to a zone-based inferred-task label.
+   */
+  question?: string;
   topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones
   competency_area: string;  // one of 13 canonical areas
