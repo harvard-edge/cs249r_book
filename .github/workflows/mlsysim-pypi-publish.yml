@@ -329,8 +329,10 @@ jobs:
     if: always() && needs.build.result == 'success' && (needs.publish-pypi.result == 'success' || inputs.skip_pypi)
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout
+      - name: 📥 Checkout (full history for tag resolution)
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0       # needed for `git describe --tags` to find PREV_TAG
 
       - name: 📥 Download build artifacts
         uses: actions/download-artifact@v4
@@ -338,30 +340,107 @@ jobs:
           name: mlsysim-dist-${{ needs.verify.outputs.version }}
           path: dist/
 
-      - name: 📝 Resolve release notes file
+      - name: 📝 Compose release notes
         id: notes
         run: |
           VERSION="${{ needs.verify.outputs.version }}"
           NOTES_FILE="mlsysim/RELEASE_NOTES_${VERSION}.md"
+          OUT="$RUNNER_TEMP/release-body.md"
+
           if [ -f "$NOTES_FILE" ]; then
-            echo "file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
-            echo "✅ Using $NOTES_FILE"
+            # Hand-written release notes (for milestone releases). Use as-is —
+            # the file is assumed to already be well-formed.
+            echo "::notice::Using hand-written $NOTES_FILE"
+            cp "$NOTES_FILE" "$OUT"
           else
-            # Fallback: extract CHANGELOG entry for this version
-            echo "file=" >> "$GITHUB_OUTPUT"
-            echo "ℹ️  $NOTES_FILE not found; GitHub Release will use auto-generated notes from CHANGELOG.md"
+            # Default path: extract the `## vX.Y.Z` section from CHANGELOG.md
+            # and wrap with title, install, links, and the About footer.
+            echo "::notice::Extracting v${VERSION} section from CHANGELOG.md"
+            CHANGELOG="mlsysim/CHANGELOG.md"
+
+            # Optional theme: everything after " — " on the heading line.
+            THEME=$(awk -v ver="v${VERSION}" '
+              $0 ~ "^## " ver " " {
+                if (match($0, / — /)) print substr($0, RSTART + RLENGTH)
+                exit
+              }
+            ' "$CHANGELOG")
+
+            # Body: lines between the heading and the next `## v…` heading.
+            BODY=$(awk -v ver="v${VERSION}" '
+              $0 ~ "^## " ver " " {flag=1; next}
+              flag && /^## v[0-9]/ {exit}
+              flag {print}
+            ' "$CHANGELOG")
+
+            if [ -z "$BODY" ]; then
+              echo "::error::CHANGELOG.md has no section for v${VERSION}"
+              exit 1
+            fi
+
+            # Previous tag for the diff link (best-effort; empty on first release).
+            PREV_TAG=$(git describe --tags --abbrev=0 --match='mlsysim-v*' --exclude="mlsysim-v${VERSION}" 2>/dev/null || echo '')
+
+            {
+              if [ -n "$THEME" ]; then
+                echo "# MLSys·im ${VERSION} — ${THEME}"
+              else
+                echo "# MLSys·im ${VERSION}"
+              fi
+              echo "*First-principles infrastructure modeling for the [Machine Learning Systems](https://mlsysbook.ai) textbook.*"
+              echo ""
+              printf '%s\n' "$BODY"
+              echo ""
+              echo "---"
+              echo ""
+              echo "## Install"
+              echo ""
+              echo '    pip install --upgrade mlsysim=='"${VERSION}"
+              echo ""
+              echo "---"
+              echo ""
+              echo "## Links"
+              echo ""
+              echo "- [PyPI · mlsysim ${VERSION}](https://pypi.org/project/mlsysim/${VERSION}/)"
+              echo "- [Documentation](https://mlsysbook.ai/mlsysim/)"
+              echo "- [Full CHANGELOG](https://github.com/${{ github.repository }}/blob/dev/mlsysim/CHANGELOG.md)"
+              if [ -n "$PREV_TAG" ]; then
+                echo "- [Diff ${PREV_TAG} → mlsysim-v${VERSION}](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...mlsysim-v${VERSION})"
+              fi
+              echo ""
+              echo "---"
+              echo ""
+              echo "## About MLSys·im"
+              echo ""
+              echo "MLSys·im is the first-principles infrastructure modeling engine that"
+              echo "produces every quantitative result in the [*Machine Learning Systems*](https://mlsysbook.ai)"
+              echo "textbook — memory bandwidth calculations, roofline analyses, TCO projections,"
+              echo "sustainability estimates, and every other number a reader encounters. Each"
+              echo "figure and equation in the textbook is **computed, not hand-typed**; mlsysim"
+              echo "is the computation."
+              echo ""
+              echo "The framework codifies **22 systems walls** — the physical and logical"
+              echo "constraints that bound ML system performance — into composable solvers,"
+              echo "with SI units enforced at runtime. Designed for three audiences: **students**"
+              echo "building quantitative intuition, **instructors** running live classroom"
+              echo "demonstrations, and **researchers** doing rapid what-if analysis."
+            } > "$OUT"
           fi
+
+          echo "body_file=$OUT" >> "$GITHUB_OUTPUT"
+          echo "::group::composed release body (first 80 lines)"
+          head -80 "$OUT"
+          echo "::endgroup::"
 
       - name: 🏷️ Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.verify.outputs.tag }}
           name: 'MLSys·im ${{ needs.verify.outputs.version }}'
-          body_path: ${{ steps.notes.outputs.file }}
+          body_path: ${{ steps.notes.outputs.body_file }}
           files: |
             dist/*.whl
             dist/*.tar.gz
-          generate_release_notes: ${{ steps.notes.outputs.file == '' }}
           fail_on_unmatched_files: true
 
   # ===========================================================================
