@@ -8,18 +8,25 @@ schema lives in the spec — this script is plumbing.
 
 Usage
 -----
-    # Single chapter:
+    # Single chapter (default provider is OpenAI with gpt-4o):
     python3 generate_quizzes.py --chapter vol1/training
 
-    # All chapters in reading order, 6-way parallel:
-    python3 generate_quizzes.py --all --workers 6
+    # Anthropic (Opus) instead:
+    python3 generate_quizzes.py --chapter vol1/training --provider anthropic
+
+    # All chapters in reading order, 4-way parallel:
+    python3 generate_quizzes.py --all --workers 4
+
+    # Override model explicitly:
+    python3 generate_quizzes.py --all --provider openai --model gpt-4.1
 
     # Dry-run (no API calls, prints what would happen):
     python3 generate_quizzes.py --all --dry-run
 
 Environment
 -----------
-    ANTHROPIC_API_KEY   required unless --dry-run
+    OPENAI_API_KEY      required when --provider openai (the default)
+    ANTHROPIC_API_KEY   required when --provider anthropic
 
 Outputs
 -------
@@ -62,7 +69,25 @@ CONTENTS_DIR = REPO_ROOT / "book" / "quarto" / "contents"
 REVIEWS_DIR = HERE / "_reviews"
 VALIDATOR = HERE / "validate_quiz_json.py"
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Per-provider defaults. --provider chooses which path; --model overrides
+# the default for the chosen provider.
+PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
+    "openai": {
+        # gpt-5.4 (March 2026) — current top-line GPT for chat workloads.
+        # Use --model gpt-5.4-pro for the higher-tier variant; --model
+        # gpt-5.4-mini for a cheaper pass. Quiz regeneration is an
+        # infrequent batch job so we default to the best mainstream
+        # model rather than the cheapest.
+        "model": "gpt-5.4",
+        "env": "OPENAI_API_KEY",
+    },
+    "anthropic": {
+        # Opus 4.7 — the most capable Anthropic model for this task.
+        "model": "claude-opus-4-7",
+        "env": "ANTHROPIC_API_KEY",
+    },
+}
+DEFAULT_PROVIDER = "openai"
 MAX_TOKENS = 16000
 
 
@@ -207,16 +232,28 @@ entry counts — the validator cross-checks these.
 
 
 # ---------------------------------------------------------------------------
-# LLM call
+# LLM calls — one function per provider, dispatched by call_model()
 # ---------------------------------------------------------------------------
 
 
-def call_claude(
+def _strip_json_fence(text: str) -> str:
+    """Remove a surrounding ``` or ```json fence if the model wrapped its
+    JSON response in one. Some models ignore JSON-object format hints and
+    still emit fenced markdown."""
+    text = text.strip()
+    if text.startswith("```"):
+        # drop opening fence + optional language tag on its own line
+        text = text.split("\n", 1)[1] if "\n" in text else text
+        if text.endswith("```"):
+            text = text.rsplit("```", 1)[0]
+        text = text.strip()
+    return text
+
+
+def call_anthropic(
     system_prompt: str, user_prompt: str, model: str, api_key: str
 ) -> dict[str, Any]:
-    """Single API call. Extracts a top-level JSON object from the response.
-
-    Raises on non-JSON output. The caller is responsible for retrying."""
+    """Call the Anthropic Messages API. Returns the parsed JSON object."""
     from anthropic import Anthropic  # type: ignore
 
     client = Anthropic(api_key=api_key)
@@ -226,22 +263,65 @@ def call_claude(
         system=system_prompt,
         messages=[{"role": "user", "content": user_prompt}],
     )
-    text = "".join(
-        b.text for b in resp.content if getattr(b, "type", "") == "text"
-    ).strip()
-    # Strip markdown fences if present — Claude sometimes wraps JSON in ```json ... ```
-    if text.startswith("```"):
-        text = text.split("\n", 1)[1] if "\n" in text else text
-        if text.endswith("```"):
-            text = text.rsplit("```", 1)[0]
-        text = text.strip()
+    text = _strip_json_fence(
+        "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
+    )
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
         snippet = text[:400]
         raise RuntimeError(
-            f"model returned non-JSON output: {e}\n---\n{snippet}\n---"
+            f"anthropic returned non-JSON output: {e}\n---\n{snippet}\n---"
         ) from e
+
+
+def call_openai(
+    system_prompt: str, user_prompt: str, model: str, api_key: str
+) -> dict[str, Any]:
+    """Call the OpenAI Chat Completions API. Returns the parsed JSON object.
+
+    Uses ``response_format={'type': 'json_object'}`` to coerce JSON output.
+    The system prompt instructs the model to return JSON; this flag enforces
+    it at the API level.
+    """
+    from openai import OpenAI  # type: ignore
+
+    client = OpenAI(api_key=api_key)
+    # GPT-5 family (and newer) deprecated ``max_tokens`` in favor of
+    # ``max_completion_tokens``. Older gpt-4x models accept both. Use the
+    # new name for forward compatibility.
+    resp = client.chat.completions.create(
+        model=model,
+        max_completion_tokens=MAX_TOKENS,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    text = _strip_json_fence(resp.choices[0].message.content or "")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        snippet = text[:400]
+        raise RuntimeError(
+            f"openai returned non-JSON output: {e}\n---\n{snippet}\n---"
+        ) from e
+
+
+def call_model(
+    provider: str,
+    system_prompt: str,
+    user_prompt: str,
+    model: str,
+    api_key: str,
+) -> dict[str, Any]:
+    """Provider-agnostic dispatch. Raises on unsupported provider."""
+    if provider == "openai":
+        return call_openai(system_prompt, user_prompt, model, api_key)
+    if provider == "anthropic":
+        return call_anthropic(system_prompt, user_prompt, model, api_key)
+    raise ValueError(f"unsupported provider: {provider!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +424,7 @@ def generate_for_chapter(
     vol: str,
     chapter: str,
     system_prompt: str,
+    provider: str,
     model: str,
     api_key: str | None,
     dry_run: bool,
@@ -360,7 +441,7 @@ def generate_for_chapter(
             result["elapsed_s"] = round(time.time() - t0, 1)
             return result
         assert api_key is not None
-        data = call_claude(system_prompt, user_prompt, model, api_key)
+        data = call_model(provider, system_prompt, user_prompt, model, api_key)
         finalize_metadata(data, vol, chapter, model)
         out = canonical_json_new_path(vol, chapter)
         out.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -397,9 +478,25 @@ def parse_args() -> argparse.Namespace:
         help="process every chapter in READING_ORDER",
     )
     p.add_argument(
+        "--provider",
+        choices=sorted(PROVIDER_DEFAULTS.keys()),
+        default=DEFAULT_PROVIDER,
+        help=(
+            f"LLM provider (default {DEFAULT_PROVIDER}). Each provider has a "
+            f"default model: "
+            + ", ".join(
+                f"{k}={v['model']}" for k, v in PROVIDER_DEFAULTS.items()
+            )
+            + "."
+        ),
+    )
+    p.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
-        help=f"Claude model name (default {DEFAULT_MODEL})",
+        default=None,
+        help=(
+            "override the provider's default model. If omitted, uses "
+            "PROVIDER_DEFAULTS[--provider]['model']."
+        ),
     )
     p.add_argument(
         "--workers",
@@ -417,9 +514,16 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    provider = args.provider
+    defaults = PROVIDER_DEFAULTS[provider]
+    model = args.model or defaults["model"]
+    env_var = defaults["env"]
+    api_key = os.environ.get(env_var)
     if not args.dry_run and not api_key:
-        sys.exit("error: ANTHROPIC_API_KEY not set (or pass --dry-run)")
+        sys.exit(
+            f"error: {env_var} not set (required for --provider {provider}); "
+            "pass --dry-run to skip the API call"
+        )
 
     system_prompt = load_spec()
     if args.chapter:
@@ -432,7 +536,8 @@ def main() -> int:
 
     print(f"spec: {SPEC_PATH.relative_to(REPO_ROOT)} ({len(system_prompt)} chars)")
     print(f"chapters: {len(chapters)}")
-    print(f"model: {args.model}")
+    print(f"provider: {provider}")
+    print(f"model: {model}")
     print(f"workers: {args.workers}")
     print(f"dry-run: {args.dry_run}")
     print()
@@ -442,7 +547,7 @@ def main() -> int:
         for vol, chap in chapters:
             print(f"→ {vol}/{chap}", flush=True)
             r = generate_for_chapter(
-                vol, chap, system_prompt, args.model, api_key, args.dry_run
+                vol, chap, system_prompt, provider, model, api_key, args.dry_run
             )
             results.append(r)
             print(f"   {r.get('status')}  {r.get('elapsed_s')}s", flush=True)
@@ -454,7 +559,8 @@ def main() -> int:
                     vol,
                     chap,
                     system_prompt,
-                    args.model,
+                    provider,
+                    model,
                     api_key,
                     args.dry_run,
                 ): (vol, chap)
