@@ -2,7 +2,7 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
 import { viteSingleFile } from 'vite-plugin-singlefile';
-import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync, watch, unlinkSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 
 export default defineConfig({
   root: 'src_shadow',
@@ -72,34 +72,6 @@ export default defineConfig({
   
   // Production plugins
   plugins: [
-    {
-      name: 'file-watcher',
-      buildStart() {
-        // Watch source files for changes and trigger rebuild
-        const srcPath = resolve(__dirname, 'src_shadow');
-        console.log('🔍 Watching for changes in:', srcPath);
-        
-        try {
-          watch(srcPath, (eventType, filename) => {
-            if (filename && !filename.includes('node_modules') && !filename.includes('.git')) {
-              console.log(`📝 File changed: ${filename} (${eventType})`);
-              console.log('🔄 Triggering rebuild...');
-              // The build will be triggered automatically by Vite's dev server
-            }
-          });
-        } catch (error) {
-          console.log('⚠️  File watching not available on this platform, using polling instead');
-        }
-      },
-    },
-    {
-      name: 'auto-refresh',
-      configureServer(server) {
-        server.ws.on('vite:beforeUpdate', () => {
-          console.log('🔄 Hot reload triggered - files will be updated automatically');
-        });
-      },
-    },
     {
       name: 'multi-dist-copy-and-cleanup',
       writeBundle() {
