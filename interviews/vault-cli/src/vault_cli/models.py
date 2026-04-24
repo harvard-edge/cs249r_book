@@ -165,6 +165,7 @@ class Question(BaseModel):
     # Content
     title: str = Field(max_length=120)
     scenario: str
+    question: str | None = None
     details: Details
 
     # Workflow

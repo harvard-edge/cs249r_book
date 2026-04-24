@@ -39,6 +39,24 @@ import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import { track } from "@/lib/analytics";
 
+function normalizePromptText(text: string | undefined): string {
+  return (text || "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function scenarioAlreadyContainsQuestion(
+  scenario: string | undefined,
+  question: string | undefined
+): boolean {
+  const normalizedQuestion = normalizePromptText(question);
+  if (!normalizedQuestion) return false;
+  return normalizePromptText(scenario).includes(normalizedQuestion);
+}
+
 export default function PracticePageWrapper() {
   return (
     <Suspense fallback={
@@ -818,6 +836,17 @@ function PracticePage() {
                         <ScenarioSkeleton />
                       )}
                     </div>
+                    {current.question && !scenarioAlreadyContainsQuestion(current.scenario, current.question) && (
+                      <div className="mt-5 p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <Target className="w-3.5 h-3.5 text-accentBlue" />
+                          <span className="text-[10px] font-mono text-accentBlue uppercase tracking-widest">Your task</span>
+                        </div>
+                        <p className="text-textPrimary leading-relaxed text-base font-medium">
+                          {current.question}
+                        </p>
+                      </div>
+                    )}
                     {chainInfo && !showAnswer && chainPreviewOpen && (
                       <div className="mt-6" data-testid="chain-preview-prereveal">
                         <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />

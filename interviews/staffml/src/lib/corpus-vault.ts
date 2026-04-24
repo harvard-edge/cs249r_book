@@ -47,6 +47,7 @@ export interface Question {
   bloom_level?: string;
   phase?: string;
   scenario: string;
+  question?: string;
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
   details: {
@@ -82,6 +83,7 @@ function adapt(v: EnrichedVaultQuestion): Question {
     bloom_level: v.bloom_level,
     phase: v.phase,
     scenario: v.scenario,
+    question: v.question,
     chain_ids: chainIds.length ? chainIds : undefined,
     chain_positions: chainIds.length ? chainPositions : undefined,
     details: {
