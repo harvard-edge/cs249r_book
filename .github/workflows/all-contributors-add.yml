@@ -420,19 +420,28 @@ jobs:
       # READMEs, and the generator scripts to update them.
       #
       # actions/checkout@v6 does NOT auto-clear sparse-checkout state from a
-      # prior invocation in the same job: the .git/info/sparse-checkout file
-      # persists and the working tree stays restricted. We explicitly pass
-      # sparse-checkout: '' (empty list) to disable sparse mode and bring in
-      # the full repo. Without this, only .github/workflows/contributors/...
-      # is present here, so every project's .all-contributorsrc looks
-      # missing — the failure mode that broke @all-contributors on PR #1542.
+      # prior invocation in the same job. The .git/info/sparse-checkout file
+      # and core.sparseCheckout config persist; passing sparse-checkout: ''
+      # is interpreted as "empty include list" rather than "disable sparse",
+      # so the working tree stays restricted to .github/workflows/contributors/.
+      # Every project's .all-contributorsrc then looks missing.
+      #
+      # The reliable fix: explicitly disable sparse mode via the git porcelain
+      # before re-checking out, then full-clone normally.
+      - name: Disable lingering sparse-checkout state
+        if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
+        shell: bash
+        run: |
+          # No-op if sparse mode isn't active. Tolerant of either path.
+          git sparse-checkout disable 2>/dev/null || true
+          rm -f .git/info/sparse-checkout
+
       - name: Checkout repository (full)
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
-          sparse-checkout: ''
 
       - name: Setup Python
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
