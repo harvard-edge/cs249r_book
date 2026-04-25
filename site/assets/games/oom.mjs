@@ -30,8 +30,8 @@
 import {
   mountPixiOnCanvas, dailySeed, dayNumber, bestScore,
   pop, flash, burst, floatText, shake, tween, getFilters
-} from "/assets/games/runtime.mjs";
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+} from "./runtime.mjs";
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 const TIME_LIMIT_MS = 60000;
 const STEP_BLOCKS = 6;

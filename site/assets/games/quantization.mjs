@@ -29,8 +29,8 @@
 import {
   mountPixiOnCanvas, dailySeed, dayNumber, bestScore,
   pop, flash, burst, floatText, shake, tween, getFilters
-} from "/assets/games/runtime.mjs";
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+} from "./runtime.mjs";
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 const PRECISIONS = [
   { name: "fp32", bits: 32, color: 0xcfe2f3, stroke: 0x4a90c4 },

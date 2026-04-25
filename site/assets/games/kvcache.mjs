@@ -1,5 +1,5 @@
-import { mountPixiOnCanvas, flash, burst, floatText } from "/assets/games/runtime.mjs";
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+import { mountPixiOnCanvas, flash, burst, floatText } from "./runtime.mjs";
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
 window.MLSP.games = window.MLSP.games || {};
