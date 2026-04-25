@@ -8,44 +8,68 @@ approach that shipped with `cloud-visual-001`.
 
 ---
 
-## The shift
+## The core idea — three layers, decoupled
 
-**Old framing.** Visual questions were a *category*: a question either was
-or was not "a visual question". Authoring meant hand-laying-out an SVG
-following the book's style guide, getting the geometry right by eye, and
-checking the result rendered cleanly in the practice page.
+| Layer | Concern | Owns |
+|---|---|---|
+| **Website (practice page)** | Render the static SVG as `<img>` and surface its alt + caption | `visual.kind`, `visual.path`, `visual.alt`, `visual.caption` |
+| **Build pipeline** | Compile DOT or matplotlib source into the same SVG asset the website ships | `visual.source_format` + naming convention |
+| **Authoring** | Decide whether a diagram earns its place; pick the format whose layout engine fits | `AUTHORING.md` rules |
 
-**New framing.** Visuals are a *property* that any question can carry. The
-question is just a question; the `visual:` field is an optional
-presentation enrichment that surfaces a diagram when one earns its place.
-The practice page's "Visual questions only" filter surfaces questions that
-*happen* to have a visual — it doesn't define a separate question type.
-
-Two consequences follow:
-
-1. **Authoring scales differently.** Rather than authoring N "visual
-   questions" from scratch, we *enrich* existing or new questions with
-   a `visual:` block when the diagram earns its place per the
-   AUTHORING.md three-condition test (the ask requires reading the
-   diagram; the visual encodes information text cannot; a static image
-   suffices).
-2. **Format choice becomes a layout-effort decision.** Hand-authored SVG
-   is correct for custom layouts but expensive to produce. For
-   structured visuals (topology, curves, Gantt), we let the layout
-   engine do the work.
+The website **only** reads the static SVG asset. It does not know — and
+should not know — whether the SVG was hand-drawn, compiled from DOT, or
+rendered by a Python script. Build provenance is metadata for
+maintainers and tooling, not a runtime concern.
 
 ---
 
-## Three supported visual formats
+## YAML schema (the contract)
+
+```yaml
+visual:
+  kind: svg                              # what the website ships — always svg
+  path: <id>.svg                         # the static SVG asset (the only thing the practice page loads)
+  alt: <text, ≤250 chars>                # screen-reader description, no interpretation
+  caption: <text, optional>              # small caption shown below the diagram
+  source_format: dot | matplotlib | hand # OPTIONAL build metadata — default 'hand'
+```
+
+### Why `kind` is always `svg`
+
+`kind` was originally framed as the *authoring* format (svg / dot /
+matplotlib). That was a mistake: the website only ever renders SVG, and
+exposing the authoring format in `kind:` confused the website schema
+with the build-tool schema. The fix is to fix `kind:` at `svg` (the
+output format) and add `source_format:` (the input format) as separate,
+optional build metadata.
+
+### File layout — naming convention does the work
+
+For each visual, two files may coexist:
+
+```
+interviews/vault/visuals/<track>/<id>.svg     # the asset the website ships (always present)
+interviews/vault/visuals/<track>/<id>.dot     # iff source_format=dot     — build input
+interviews/vault/visuals/<track>/<id>.py      # iff source_format=matplotlib — build input
+```
+
+The renderer doesn't need a separate `source:` field in the YAML — it
+infers the source filename from the SVG basename and the
+`source_format` hint. If `source_format` is `hand` (or absent), no
+build step runs; the SVG is the source.
+
+---
+
+## Three supported source formats
 
 We pick the format whose layout engine fits the content. **Don't
 hand-author SVG when an auto-layout tool will do it for you.**
 
-| Format | Use for | Layout effort | Tool |
+| `source_format` | Use for | Layout effort | Tool |
 |---|---|---|---|
-| **DOT (Graphviz)** | Topology, graphs, dataflow, network fabrics | Auto | `dot -Tsvg` (graphviz ≥ 2.40) |
-| **matplotlib** | Curves, plots, Gantt charts (`barh`), heatmaps | Programmatic | `python3 -c "..."` then `savefig` |
-| **SVG (hand-authored)** | Custom layouts that don't fit either above (memory-page diagrams, mixed annotations) | Manual | text editor + book SVG style guide |
+| `dot` | Topology, graphs, dataflow, network fabrics | Auto | `dot -Tsvg` (graphviz ≥ 2.40) |
+| `matplotlib` | Curves, plots, Gantt charts (`barh`), heatmaps | Programmatic | `python3 <script>` then `savefig` |
+| `hand` | Custom layouts that don't fit either above (memory-page diagrams, mixed annotations) | Manual | text editor + book SVG style guide |
 
 We considered Mermaid for sequence/Gantt diagrams. Decision: matplotlib's
 `barh` plus annotation API covers the same ground without adding a
@@ -54,70 +78,33 @@ Node-based dependency. If a future archetype genuinely needs Mermaid
 
 ### When to pick which
 
-| Visual archetype | Format | Why |
+| Visual archetype | source_format | Why |
 |---|---|---|
-| Ring AllReduce / Tree AllReduce | DOT | Nodes + directed edges, layout-engine-perfect |
-| Pipeline parallelism / network fabric topology | DOT | Same |
-| Pipeline bubble Gantt / prefill-decode interleave | matplotlib (`barh`) | Time on x-axis, lanes on y-axis — programmatic |
-| Roofline plot / queueing hockey-stick / scaling curve | matplotlib | Continuous functions plus annotations |
-| KV-cache page layout / memory hierarchy data path | SVG hand-authored | Custom spatial composition |
-| Duty-cycle timeline | matplotlib | Programmatic time-series |
-| Checkpoint/recovery RPO/RTO | matplotlib (`barh`) | Same Gantt-like layout |
+| Ring AllReduce / Tree AllReduce | `dot` | Nodes + directed edges, layout-engine-perfect |
+| Pipeline parallelism / network fabric topology | `dot` | Same |
+| Pipeline bubble Gantt / prefill-decode interleave | `matplotlib` (`barh`) | Time on x-axis, lanes on y-axis — programmatic |
+| Roofline plot / queueing hockey-stick / scaling curve | `matplotlib` | Continuous functions plus annotations |
+| KV-cache page layout / memory hierarchy data path | `hand` | Custom spatial composition |
+| Duty-cycle timeline | `matplotlib` | Programmatic time-series |
+| Checkpoint/recovery RPO/RTO | `matplotlib` (`barh`) | Same Gantt-like layout |
 
 Default: try DOT first for graph-shaped content; try matplotlib first
-for time/quantity-shaped content; fall back to SVG only when neither
-fits.
-
----
-
-## Schema
-
-The YAML `visual:` block extends per-question:
-
-```yaml
-visual:
-  kind: dot | matplotlib | svg     # which renderer to invoke
-  source: <relative-path>          # source artifact (.dot, .py, or .svg)
-  rendered: <relative-path>        # rendered SVG output (auto-built; ship this)
-  alt: <text>                      # screen-reader description, ≤250 chars
-  caption: <text>                  # short caption shown below the diagram
-```
-
-**Source vs. rendered.** For `kind: svg`, source IS the rendered output
-(no build step). For `kind: dot` and `kind: matplotlib`, the source is
-the human-edited artifact (a `.dot` file or a `.py` script); the
-`rendered:` SVG is a build product, regenerated by tooling, never
-hand-edited.
-
-**Storage layout:**
-```
-interviews/vault/visuals/
-├── ARCHITECTURE.md       (this file)
-├── AUTHORING.md          (style guide — when a visual earns its place)
-├── <track>/              (cloud, edge, mobile, tinyml, global)
-│   ├── <id>.dot          (DOT source — checked in)
-│   ├── <id>.py           (matplotlib source — checked in)
-│   ├── <id>.svg          (SVG: either hand-authored, or a build artifact)
-│   └── ...
-```
-
-The `.svg` files are checked in even when they're build artifacts. This
-keeps the website bundle reproducible and lets `git diff` catch
-unexpected geometry shifts when a source file changes.
+for time/quantity-shaped content; fall back to `hand` only when
+neither fits.
 
 ---
 
 ## Build pipeline
 
 `interviews/vault/scripts/render_visuals.py` is the single entry point.
-Given a question YAML's `visual:` block, it dispatches to the right
-renderer:
+It scans every question YAML's `visual:` block and dispatches by
+`source_format`:
 
-| `kind` | Pipeline |
+| `source_format` | Pipeline |
 |---|---|
-| `svg` | No-op. Source IS the output. |
-| `dot` | `dot -Tsvg <source> -o <rendered>` |
-| `matplotlib` | `python3 <source>` (the script must `savefig(..., format="svg")` to the rendered path) |
+| `hand` (or absent) | No-op. The SVG IS the source. Just confirm it exists. |
+| `dot` | `dot -Tsvg <id>.dot -o <id>.svg` |
+| `matplotlib` | `python3 <id>.py` (the script reads `os.environ["VISUAL_OUT_PATH"]` and `savefig` to it) |
 
 After rendering, every output SVG passes a normalization step:
 
@@ -145,31 +132,28 @@ pipeline mirroring the existing `gemini_cli_math_review.py`:
 2. **Generates** candidate question YAMLs, including a `visual:` block
    when the topic appears in the visual-archetype catalog.
 3. **For visual-eligible items**, also generates the source artifact
-   (DOT text, or a small matplotlib script). The source goes through
-   `render_visuals.py` to produce a candidate SVG.
+   (DOT text, or a small matplotlib script) and writes it next to the
+   YAML's expected SVG asset path. `render_visuals.py` then compiles it.
 4. **Outputs as drafts** (`status: draft`, `provenance:
    gemini-3.1-pro-preview`). Never auto-publishes.
 
 ### Cross-model validation
 
-Gemini-generated drafts are reviewed by `gemini_cli_math_review.py`
-running on a *Claude-pinned* model (Claude Opus or Sonnet) to provide
-cross-model agreement. Concretely:
+Gemini-generated drafts are reviewed by `gemini_cli_math_review.py`,
+which can also be run with a Claude model to provide cross-model
+agreement. The default flow:
 
 - Generation: Gemini 3.1 Pro Preview drafts the question.
-- Math review pass 1: Gemini 3.1 Pro re-checks its own arithmetic
-  (catches obvious slips).
-- Math review pass 2: Claude Opus / Sonnet recomputes from first
-  principles against the same hardware-constants reference.
+- Math review pass: Gemini 3.1 Pro re-checks arithmetic, units, and
+  hardware specs against the same constants reference used during
+  generation. (A Claude-pinned re-run is the natural follow-up for
+  release-grade verification.)
 - Visual review: a separate visual-fidelity check confirms the rendered
   SVG matches the scenario's claimed quantities (e.g., 4 ranks in the
   ring → 4 nodes in the DOT graph).
 
-A draft promotes only if both math passes return CORRECT and the visual
+A draft promotes only if the math pass returns CORRECT and the visual
 check passes. Disagreements escalate to maintainer review.
-
-This makes "different model generates, different model verifies" the
-default rather than the exception.
 
 ---
 
@@ -199,9 +183,9 @@ are hand-authored SVG. AUTHORING.md remains the authority on *when* a
 visual earns its place; this document is the authority on *how* the
 visual is encoded and rendered.
 
-Existing `cloud-visual-001.svg` continues to work unchanged — its
-`visual.kind` becomes `svg` and its `source` becomes the same path as
-its `rendered` (i.e., it's the no-op case).
+Existing `cloud-visual-001.yaml` continues to work unchanged — its
+`kind: svg, path: cloud-visual-001.svg` schema is the new default, and
+`source_format` is omitted (treated as `hand`).
 
 ---
 

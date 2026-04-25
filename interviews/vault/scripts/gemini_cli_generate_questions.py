@@ -248,14 +248,17 @@ def build_yaml(cell: dict[str, str], parsed: dict[str, Any], qid: str,
     }
     if include_visual and "visual" in parsed:
         v = parsed["visual"]
-        suffix = "dot" if archetype_info["kind"] == "dot" else "py" if archetype_info["kind"] == "matplotlib" else "svg"
+        # Schema matches what the practice page renders (kind=svg+path) plus
+        # an optional source_format hint for the build pipeline.
+        author_format = archetype_info["kind"]  # dot | matplotlib | svg
         doc["visual"] = {
-            "kind": archetype_info["kind"],
-            "source": f"{qid}.{suffix}",
-            "rendered": f"{qid}.svg",
+            "kind": "svg",
+            "path": f"{qid}.svg",
             "alt": v.get("alt", "").strip(),
             "caption": v.get("caption", "").strip(),
         }
+        if author_format != "svg":
+            doc["visual"]["source_format"] = author_format
     doc["details"] = {
         "realistic_solution": parsed["realistic_solution"].strip(),
         "common_mistake": parsed["common_mistake"].strip(),
@@ -330,14 +333,16 @@ def generate_one(cell: dict[str, str], visual: bool, model: str,
 
     doc = build_yaml(cell, parsed, qid, visual, archetype_info)
 
-    # Visual source
+    # Visual source artifact: lives next to the rendered SVG by naming
+    # convention (<id>.dot or <id>.py). Not surfaced in the YAML schema —
+    # render_visuals.py finds it from the source_format hint.
     if visual:
         source_text = parsed.get("visual_source", "").strip()
-        if source_text:
+        if source_text and archetype_info["kind"] != "svg":
+            ext = {"dot": "dot", "matplotlib": "py"}[archetype_info["kind"]]
             track_visuals = VISUALS_DIR / cell["track"]
             track_visuals.mkdir(parents=True, exist_ok=True)
-            suffix = doc["visual"]["source"].rsplit(".", 1)[-1]
-            (track_visuals / doc["visual"]["source"]).write_text(
+            (track_visuals / f"{qid}.{ext}").write_text(
                 source_text, encoding="utf-8")
 
     yaml_path.parent.mkdir(parents=True, exist_ok=True)

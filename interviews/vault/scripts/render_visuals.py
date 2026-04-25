@@ -1,20 +1,31 @@
 #!/usr/bin/env python3
-"""Render question visuals from source artifacts to ship-ready SVG.
+"""Render question visuals to ship-ready SVG.
 
-Single entry point that dispatches by `visual.kind`:
-  - `svg`       -> no-op (source is already the rendered output)
-  - `dot`       -> graphviz `dot -Tsvg` auto-layout
-  - `matplotlib`-> execute the source script, which must `savefig` to the
-                  rendered path
+The schema the website cares about is minimal::
 
-Reads each YAML under `interviews/vault/questions/`, picks up its
-`visual:` block (if any), and renders. Idempotent: skips items whose
-rendered SVG is newer than the source.
+    visual:
+      kind: svg                # always svg — that's what the website ships
+      path: <id>.svg           # the static asset
+      alt: <text>
+      caption: <text>
+      # Build metadata (optional, ignored by website):
+      source_format: dot | matplotlib | hand   # default: hand
+
+The runtime story for the practice page is "load `<id>.svg` as an
+`<img>`". The renderer's job is to produce that SVG when it's a build
+artifact (DOT or matplotlib source). For hand-authored SVGs, the source
+IS the asset, no build needed.
+
+Source files live next to the asset by naming convention:
+
+    interviews/vault/visuals/<track>/<id>.svg     # the asset (always)
+    interviews/vault/visuals/<track>/<id>.dot     # iff source_format=dot
+    interviews/vault/visuals/<track>/<id>.py      # iff source_format=matplotlib
 
 Usage:
     python3 render_visuals.py                       # render all stale
     python3 render_visuals.py --force               # force re-render
-    python3 render_visuals.py --id cloud-visual-001 # single question
+    python3 render_visuals.py --id cloud-2846       # single question
     python3 render_visuals.py --dry-run             # plan only
 
 Architecture: see interviews/vault/visuals/ARCHITECTURE.md.
@@ -35,7 +46,9 @@ VAULT_DIR = Path(__file__).resolve().parent.parent
 QUESTIONS_DIR = VAULT_DIR / "questions"
 VISUALS_DIR = VAULT_DIR / "visuals"
 
-SUPPORTED_KINDS = {"svg", "dot", "matplotlib"}
+VALID_KINDS = {"svg"}                          # what the website renders
+VALID_SOURCE_FORMATS = {"dot", "matplotlib", "hand"}
+SOURCE_EXT = {"dot": "dot", "matplotlib": "py"}
 
 # Book SVG style: enforce these properties on every rendered SVG so DOT,
 # matplotlib, and hand-SVG outputs render identically in the practice page.
@@ -47,7 +60,11 @@ SVG_FONT_FAMILY = "Helvetica Neue, Helvetica, Arial, sans-serif"
 # ---------------------------------------------------------------------------
 
 def discover_visuals() -> list[dict[str, Any]]:
-    """Return one record per question with a non-empty `visual:` block."""
+    """Return one record per question with a `visual:` block.
+
+    Reads only the production-schema fields: kind, path, alt, caption.
+    Build metadata: source_format (optional).
+    """
     records = []
     for yaml_path in QUESTIONS_DIR.glob("**/*.yaml"):
         try:
@@ -60,34 +77,44 @@ def discover_visuals() -> list[dict[str, Any]]:
         v = data["visual"]
         if not isinstance(v, dict):
             continue
+
         kind = v.get("kind", "svg")
-        if kind not in SUPPORTED_KINDS:
-            print(f"  ! {data.get('id')}: unknown visual.kind={kind!r}", file=sys.stderr)
+        if kind not in VALID_KINDS:
+            print(f"  ! {data.get('id')}: unsupported kind={kind!r} "
+                  f"(only {VALID_KINDS} ship)", file=sys.stderr)
             continue
+
+        path = v.get("path")
+        if not path:
+            print(f"  ! {data.get('id')}: missing visual.path", file=sys.stderr)
+            continue
+
         track = data.get("track", "global")
         track_dir = VISUALS_DIR / track
-        # `path` is the legacy field (cloud-visual-001 uses it). Treat it
-        # as the rendered output for kind=svg, and as the source for
-        # kind=dot/matplotlib if `source` is unset.
-        legacy_path = v.get("path")
-        source_rel = v.get("source") or legacy_path
-        rendered_rel = v.get("rendered") or legacy_path or _default_rendered_name(data["id"])
+        asset_path = track_dir / path
+
+        # Source format defaults to "hand" (no build step needed)
+        source_format = v.get("source_format", "hand")
+        if source_format not in VALID_SOURCE_FORMATS:
+            print(f"  ! {data.get('id')}: unknown source_format={source_format!r}",
+                  file=sys.stderr)
+            continue
+
+        # Source file: same basename, extension by source_format
+        source_path = None
+        if source_format != "hand":
+            ext = SOURCE_EXT[source_format]
+            source_path = track_dir / f"{Path(path).stem}.{ext}"
 
         records.append({
             "id": data["id"],
             "track": track,
-            "kind": kind,
-            "source_path": (track_dir / source_rel) if source_rel else None,
-            "rendered_path": track_dir / rendered_rel,
+            "asset_path": asset_path,
+            "source_path": source_path,
+            "source_format": source_format,
             "yaml_path": yaml_path,
-            "alt": v.get("alt", ""),
-            "caption": v.get("caption", ""),
         })
     return records
-
-
-def _default_rendered_name(qid: str) -> str:
-    return f"{qid}.svg"
 
 
 # ---------------------------------------------------------------------------
@@ -95,39 +122,35 @@ def _default_rendered_name(qid: str) -> str:
 # ---------------------------------------------------------------------------
 
 def render_one(rec: dict[str, Any], force: bool = False, dry_run: bool = False) -> str:
-    """Render a single visual record. Returns 'rendered'|'skipped'|'error'."""
+    """Render or pass through a single visual. Returns 'rendered'|'skipped'|error."""
     qid = rec["id"]
-    kind = rec["kind"]
+    fmt = rec["source_format"]
     src = rec["source_path"]
-    out = rec["rendered_path"]
+    out = rec["asset_path"]
 
-    if kind == "svg":
-        if not (src and src.exists()):
-            return f"error:{qid}:svg source missing at {src}"
-        # No-op: source IS the output. Just confirm presence.
+    if fmt == "hand":
+        if not out.exists():
+            return f"error:{qid}:hand-authored asset missing at {out}"
         return "skipped"
 
-    if kind in ("dot", "matplotlib"):
-        if not src or not src.exists():
-            return f"error:{qid}:source missing at {src}"
-        if not force and out.exists() and out.stat().st_mtime >= src.stat().st_mtime:
-            return "skipped"
-        if dry_run:
-            print(f"  + would render {qid}: {src.name} -> {out.name}")
-            return "rendered"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        if kind == "dot":
-            _render_dot(src, out)
-        else:
-            _render_matplotlib(src, out)
-        _normalize_svg(out)
+    # Build artifact path: needs source
+    if not src or not src.exists():
+        return f"error:{qid}:{fmt} source missing at {src}"
+    if not force and out.exists() and out.stat().st_mtime >= src.stat().st_mtime:
+        return "skipped"
+    if dry_run:
+        print(f"  + would render {qid}: {src.name} -> {out.name}")
         return "rendered"
-
-    return f"error:{qid}:unknown kind {kind}"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "dot":
+        _render_dot(src, out)
+    else:
+        _render_matplotlib(src, out)
+    _normalize_svg(out)
+    return "rendered"
 
 
 def _render_dot(src: Path, out: Path) -> None:
-    """Run `dot -Tsvg src -o out`. Raises on failure."""
     result = subprocess.run(
         ["dot", "-Tsvg", str(src), "-o", str(out)],
         capture_output=True, text=True, timeout=30,
@@ -137,11 +160,7 @@ def _render_dot(src: Path, out: Path) -> None:
 
 
 def _render_matplotlib(src: Path, out: Path) -> None:
-    """Execute the source script with OUT_PATH passed as env var.
-
-    The script is expected to read os.environ['VISUAL_OUT_PATH'] and
-    `savefig(out_path, format="svg", bbox_inches="tight")` itself.
-    """
+    """Execute the source script with VISUAL_OUT_PATH env var."""
     import os
     env = dict(os.environ)
     env["VISUAL_OUT_PATH"] = str(out)
@@ -159,27 +178,17 @@ def _render_matplotlib(src: Path, out: Path) -> None:
 
 
 def _normalize_svg(path: Path) -> None:
-    """Apply book-style normalization to a rendered SVG.
-
-    - Set font-family on the root <svg>
-    - Strip <!--Generated by ...--> comments that vary by tool version
-    - Confirm no embedded raster
-    """
+    """Apply book-style normalization to a rendered SVG."""
     text = path.read_text(encoding="utf-8")
     if "data:image/" in text or "<image " in text:
         raise RuntimeError(f"{path} contains embedded raster — not allowed")
-
-    # Strip generator comment (graphviz / matplotlib both emit one)
     text = re.sub(r"<!--\s*Generated by [^>]*?-->\s*", "", text)
-
-    # Inject our font-family on the root <svg> if not already present
     if "font-family=" not in text.split(">", 1)[0]:
         text = re.sub(
             r"<svg(\s[^>]*?)>",
             lambda m: f'<svg{m.group(1)} font-family="{SVG_FONT_FAMILY}">',
             text, count=1,
         )
-
     path.write_text(text, encoding="utf-8")
 
 
@@ -190,7 +199,7 @@ def _normalize_svg(path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true",
-                        help="Re-render even if the output is fresh.")
+                        help="Re-render even if output is fresh.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--id", help="Render only this question id.")
     args = parser.parse_args()
@@ -213,9 +222,8 @@ def main() -> int:
             print(f"  ✗ {status}")
             counts["error"] += 1
         else:
-            kind_tag = rec["kind"]
             print(f"  {'✓' if status == 'rendered' else '·'} {rec['id']:30s} "
-                  f"[{kind_tag:11s}] {status}")
+                  f"[{rec['source_format']:11s}] {status}")
             counts[status] += 1
 
     print(f"\nSummary: rendered={counts['rendered']} "
