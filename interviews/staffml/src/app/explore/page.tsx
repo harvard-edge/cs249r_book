@@ -31,6 +31,8 @@ interface AtlasNode {
   question: Question;
   x: number;
   y: number;
+  lon: number;
+  lat: number;
   r: number;
   color: string;
   areaName: string;
@@ -43,7 +45,16 @@ interface AreaAnchor {
   name: string;
   x: number;
   y: number;
+  lon: number;
+  lat: number;
   color: string;
+}
+
+interface GlobeProjection {
+  x: number;
+  y: number;
+  scale: number;
+  depth: number;
 }
 
 function hashString(input: string): number {
@@ -67,6 +78,21 @@ function screenToWorld(point: Point, pan: Point, zoom: number): Point {
   return {
     x: (point.x - pan.x) / zoom,
     y: (point.y - pan.y) / zoom,
+  };
+}
+
+function projectGlobe(lon: number, lat: number, rotation: number, radius: number): GlobeProjection {
+  const rotatedLon = lon + rotation;
+  const cosLat = Math.cos(lat);
+  const x3 = cosLat * Math.cos(rotatedLon);
+  const z3 = cosLat * Math.sin(rotatedLon);
+  const y3 = Math.sin(lat);
+  const front = (z3 + 1) / 2;
+  return {
+    x: CENTER_X + x3 * radius,
+    y: CENTER_Y - y3 * radius * 0.9,
+    scale: 0.62 + front * 0.58,
+    depth: z3,
   };
 }
 
@@ -102,6 +128,7 @@ export default function ExplorePage() {
   const [canvasSize, setCanvasSize] = useState({ width: 960, height: 620 });
   const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(0.55);
+  const [rotation, setRotation] = useState(0);
   const [selectedTrack, setSelectedTrack] = useState<string>("all");
   const [selectedLevel, setSelectedLevel] = useState<string>("all");
   const [selectedArea, setSelectedArea] = useState<string>("all");
@@ -116,15 +143,18 @@ export default function ExplorePage() {
   const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
 
   const areaAnchors = useMemo<AreaAnchor[]>(() => {
-    const ring = Math.min(WORLD_WIDTH, WORLD_HEIGHT) * 0.36;
     return areas.map((area, index) => {
       const angle = (index / areas.length) * Math.PI * 2 - Math.PI / 2;
       const style = getAreaStyle(area.id);
+      const lat = (hashUnit(area.id, "area-lat") - 0.5) * 1.05;
+      const projection = projectGlobe(angle, lat, 0, 390);
       return {
         id: area.id,
         name: area.name,
-        x: CENTER_X + Math.cos(angle) * ring,
-        y: CENTER_Y + Math.sin(angle) * ring * 0.78,
+        x: projection.x,
+        y: projection.y,
+        lon: angle,
+        lat,
         color: style.primary,
       };
     });
@@ -142,6 +172,8 @@ export default function ExplorePage() {
         y: CENTER_Y,
         color: "#6b7280",
         name: question.competency_area,
+        lon: 0,
+        lat: 0,
       };
       const levelIndex = Math.max(0, levels.indexOf(question.level));
       const topicAngle = hashUnit(question.topic, "topic-angle") * Math.PI * 2;
@@ -151,6 +183,12 @@ export default function ExplorePage() {
       const jitter = 28 + hashUnit(question.id, "jitter-radius") * 38;
       const jitterAngle = hashUnit(question.id, "jitter-angle") * Math.PI * 2;
       const chainCount = question.chain_ids?.length ?? 0;
+      const lon = anchor.lon + (hashUnit(question.topic, "topic-lon") - 0.5) * 0.7 + (hashUnit(question.id, "node-lon") - 0.5) * 0.12;
+      const lat = clamp(
+        anchor.lat + (hashUnit(question.zone, "zone-lat") - 0.5) * 0.55 + (levelIndex - 2.5) * 0.045 + (hashUnit(question.id, "node-lat") - 0.5) * 0.1,
+        -1.08,
+        1.08,
+      );
 
       return {
         question,
@@ -164,6 +202,8 @@ export default function ExplorePage() {
           Math.sin(topicAngle) * topicRadius * 0.7 +
           Math.sin(zoneAngle) * levelOffset +
           Math.sin(jitterAngle) * jitter,
+        lon,
+        lat,
         r: chainCount > 0 ? 3.4 : 2.6,
         color: anchor.color,
         areaName: areaById.get(question.competency_area)?.name ?? question.competency_area,
@@ -222,6 +262,8 @@ export default function ExplorePage() {
       .slice(0, 10);
   }, [filteredNodes, hasActiveFilters]);
 
+  const globeRadius = Math.min(WORLD_WIDTH, WORLD_HEIGHT) * 0.47;
+
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -246,6 +288,20 @@ export default function ExplorePage() {
   }, []);
 
   useEffect(() => {
+    let frame = 0;
+    let lastTick = 0;
+    const tick = (time: number) => {
+      if (time - lastTick > 70) {
+        setRotation((value) => (value + 0.01) % (Math.PI * 2));
+        lastTick = time;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
@@ -263,36 +319,117 @@ export default function ExplorePage() {
     ctx.translate(pan.x, pan.y);
     ctx.scale(zoom, zoom);
 
-    for (const anchor of areaAnchors) {
-      const isActive = selectedArea === "all" || selectedArea === anchor.id;
-      ctx.beginPath();
-      ctx.arc(anchor.x, anchor.y, 198, 0, Math.PI * 2);
-      ctx.fillStyle = isActive ? `${anchor.color}07` : "rgba(100,116,139,0.025)";
-      ctx.strokeStyle = isActive ? `${anchor.color}18` : "rgba(100,116,139,0.06)";
-      ctx.lineWidth = 1.2 / zoom;
-      ctx.fill();
-      ctx.stroke();
+    const globeGradient = ctx.createRadialGradient(
+      CENTER_X - globeRadius * 0.25,
+      CENTER_Y - globeRadius * 0.22,
+      globeRadius * 0.08,
+      CENTER_X,
+      CENTER_Y,
+      globeRadius,
+    );
+    globeGradient.addColorStop(0, "rgba(59,130,246,0.09)");
+    globeGradient.addColorStop(0.62, "rgba(15,23,42,0.015)");
+    globeGradient.addColorStop(1, "rgba(15,23,42,0.055)");
 
-      ctx.fillStyle = isActive ? anchor.color : "rgba(148,163,184,0.45)";
-      ctx.font = `${Math.max(15, 13 / zoom)}px Inter, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.fillText(anchor.name, anchor.x, anchor.y - 228);
+    ctx.beginPath();
+    ctx.ellipse(CENTER_X, CENTER_Y, globeRadius, globeRadius * 0.9, 0, 0, Math.PI * 2);
+    ctx.fillStyle = globeGradient;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(100,116,139,0.18)";
+    ctx.lineWidth = 1.2 / zoom;
+    ctx.stroke();
+
+    // Longitudes/latitudes make the map read as a planet instead of a Venn diagram.
+    ctx.strokeStyle = "rgba(100,116,139,0.10)";
+    ctx.lineWidth = 0.8 / zoom;
+    for (const lat of [-0.9, -0.45, 0, 0.45, 0.9]) {
+      ctx.beginPath();
+      ctx.ellipse(
+        CENTER_X,
+        CENTER_Y - Math.sin(lat) * globeRadius * 0.9,
+        Math.cos(lat) * globeRadius,
+        Math.cos(lat) * globeRadius * 0.13,
+        0,
+        0,
+        Math.PI * 2,
+      );
+      ctx.stroke();
+    }
+    for (let i = 0; i < 8; i++) {
+      const phase = (i / 8) * Math.PI;
+      ctx.beginPath();
+      ctx.ellipse(CENTER_X, CENTER_Y, Math.abs(Math.cos(phase + rotation)) * globeRadius, globeRadius * 0.9, 0, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
-    if (selectedNode) {
-      ctx.strokeStyle = "rgba(148, 163, 184, 0.28)";
-      ctx.lineWidth = 1.2 / zoom;
-      for (const node of relatedNodes) {
+    const projectedAnchors = areaAnchors.map((anchor) => ({
+      anchor,
+      projection: projectGlobe(anchor.lon, anchor.lat, rotation, globeRadius),
+    }));
+
+    ctx.lineWidth = 0.8 / zoom;
+    for (let i = 0; i < projectedAnchors.length; i++) {
+      const a = projectedAnchors[i];
+      const b = projectedAnchors[(i + 1) % projectedAnchors.length];
+      const c = projectedAnchors[(i + 4) % projectedAnchors.length];
+      for (const target of [b, c]) {
+        const alpha = Math.max(0.05, Math.min(0.18, (a.projection.depth + target.projection.depth + 2) / 18));
         ctx.beginPath();
-        ctx.moveTo(selectedNode.x, selectedNode.y);
-        ctx.lineTo(node.x, node.y);
+        ctx.moveTo(a.projection.x, a.projection.y);
+        ctx.lineTo(target.projection.x, target.projection.y);
+        ctx.strokeStyle = `rgba(100,116,139,${alpha})`;
         ctx.stroke();
       }
     }
 
+    const drawNodeLink = (source: AtlasNode, target: AtlasNode, alpha = 0.18) => {
+      const a = projectGlobe(source.lon, source.lat, rotation, globeRadius);
+      const b = projectGlobe(target.lon, target.lat, rotation, globeRadius);
+      if (a.depth < -0.78 && b.depth < -0.78) return;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.strokeStyle = `rgba(59,130,246,${alpha * Math.max(0.2, (a.scale + b.scale) / 2)})`;
+      ctx.lineWidth = 1 / zoom;
+      ctx.stroke();
+    };
+
+    if (selectedNode) {
+      for (const node of relatedNodes) drawNodeLink(selectedNode, node, 0.24);
+    } else if (filteredNodes.length <= 160) {
+      const ordered = [...filteredNodes].sort((a, b) =>
+        a.question.topic.localeCompare(b.question.topic) || a.lon - b.lon || a.lat - b.lat,
+      );
+      for (let i = 1; i < ordered.length; i++) drawNodeLink(ordered[i - 1], ordered[i], 0.18);
+
+      const byTopic = new Map<string, AtlasNode[]>();
+      for (const node of filteredNodes) {
+        const group = byTopic.get(node.question.topic) ?? [];
+        if (group.length < 6) group.push(node);
+        byTopic.set(node.question.topic, group);
+      }
+      for (const group of Array.from(byTopic.values())) {
+        for (let i = 1; i < group.length; i++) drawNodeLink(group[i - 1], group[i], 0.24);
+      }
+    } else {
+      for (let i = 1; i < panelMatches.length; i++) drawNodeLink(panelMatches[i - 1], panelMatches[i], 0.10);
+    }
+
+    for (const { anchor, projection } of projectedAnchors) {
+      const isActive = selectedArea === "all" || selectedArea === anchor.id;
+      if (projection.depth < -0.7) continue;
+      ctx.beginPath();
+      ctx.arc(projection.x, projection.y, 4.5 * projection.scale, 0, Math.PI * 2);
+      ctx.fillStyle = isActive ? anchor.color : "rgba(148,163,184,0.45)";
+      ctx.globalAlpha = isActive ? 0.7 : 0.35;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
     for (const node of filteredNodes) {
-      const screenX = node.x * zoom + pan.x;
-      const screenY = node.y * zoom + pan.y;
+      const projection = projectGlobe(node.lon, node.lat, rotation, globeRadius);
+      const screenX = projection.x * zoom + pan.x;
+      const screenY = projection.y * zoom + pan.y;
       if (
         screenX < -20 ||
         screenY < -20 ||
@@ -304,12 +441,13 @@ export default function ExplorePage() {
       const isSelected = node.question.id === selectedId;
       const isHovered = node.question.id === hoveredId;
       const dim = selectedNode && !isSelected && !relatedNodes.some((r) => r.question.id === node.question.id);
-      const radius = isSelected ? 7.5 : isHovered ? 6.2 : node.r + node.levelIndex * 0.18;
+      const radius = (isSelected ? 7.5 : isHovered ? 6.2 : node.r + node.levelIndex * 0.18) * projection.scale;
+      const depthAlpha = projection.depth < -0.45 ? 0.22 : projection.depth < 0 ? 0.45 : 0.9;
 
       ctx.beginPath();
-      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+      ctx.arc(projection.x, projection.y, radius, 0, Math.PI * 2);
       ctx.fillStyle = dim ? `${node.color}45` : node.color;
-      ctx.globalAlpha = dim ? 0.45 : 0.9;
+      ctx.globalAlpha = dim ? Math.min(0.35, depthAlpha) : depthAlpha;
       ctx.fill();
       ctx.globalAlpha = 1;
 
@@ -325,9 +463,12 @@ export default function ExplorePage() {
     areaAnchors,
     canvasSize,
     filteredNodes,
+    globeRadius,
     hoveredId,
     pan,
+    panelMatches,
     relatedNodes,
+    rotation,
     selectedArea,
     selectedId,
     selectedNode,
@@ -353,11 +494,12 @@ export default function ExplorePage() {
     let bestDistance = Infinity;
 
     for (const node of filteredNodes) {
-      const dx = node.x - world.x;
-      const dy = node.y - world.y;
+      const projection = projectGlobe(node.lon, node.lat, rotation, globeRadius);
+      const dx = projection.x - world.x;
+      const dy = projection.y - world.y;
       const distance = dx * dx + dy * dy;
       const relaxedHitRadius = filteredNodes.length <= 80 ? 26 : HIT_RADIUS;
-      const threshold = Math.pow((relaxedHitRadius + node.r) / zoom, 2);
+      const threshold = Math.pow((relaxedHitRadius + node.r * projection.scale) / zoom, 2);
       if (distance < threshold && distance < bestDistance) {
         best = node;
         bestDistance = distance;
@@ -448,15 +590,15 @@ export default function ExplorePage() {
               <div>
                 <div className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] font-semibold text-accentBlue px-2.5 py-1 rounded-full border border-accentBlue/30 bg-accentBlue/5 mb-2">
                   <Sparkles className="w-3 h-3" />
-                  Guided atlas preview
+                  Question planet preview
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-textPrimary tracking-tight">
                   Explore the StaffML Vault
                 </h1>
                 <p className="text-sm text-textSecondary mt-1 max-w-2xl leading-relaxed">
-                  Use this as a discovery map: search for a concept, narrow by track or level, then
-                  follow nearby questions into practice. The soft circles are area neighborhoods, not
-                  strict Venn regions; the dots and question cards are the main navigation.
+                  Use this as a discovery planet: search for a concept, narrow by track or level,
+                  then follow connected question constellations into practice. Lines show local
+                  topic/chain neighborhoods, while cards keep the path easy to choose.
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center shrink-0">
@@ -475,7 +617,7 @@ export default function ExplorePage() {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search the map: kv cache, quantization, drift, tensor parallel..."
+              placeholder="Search the planet: kv cache, quantization, drift, tensor parallel..."
                 className="w-full pl-9 pr-9 py-2 rounded-lg border border-border bg-background text-sm text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight"
               />
               {query && (
@@ -537,7 +679,7 @@ export default function ExplorePage() {
                 "block w-full h-full touch-none cursor-grab bg-[radial-gradient(circle_at_center,var(--surface)_0,transparent_64%)]",
                 dragRef.current.active && "cursor-grabbing",
               )}
-              aria-label="Interactive map of StaffML Vault questions"
+              aria-label="Interactive question planet of StaffML Vault questions"
             />
             <div className="pointer-events-none absolute left-4 bottom-4 rounded-lg border border-borderSubtle bg-background/85 backdrop-blur px-3 py-2 text-[11px] text-textTertiary">
               Drag to pan - scroll to zoom - click a dot to inspect a question
@@ -638,11 +780,10 @@ function EmptyPanel({
       <div className="w-10 h-10 rounded-xl border border-accentBlue/30 bg-accentBlue/10 flex items-center justify-center mb-4">
         <Network className="w-5 h-5 text-accentBlue" />
       </div>
-      <h2 className="text-lg font-bold text-textPrimary mb-2">Question neighborhoods</h2>
+      <h2 className="text-lg font-bold text-textPrimary mb-2">Question planet</h2>
       <p className="text-sm text-textSecondary leading-relaxed mb-5">
-        Each dot is a Vault question. Nearby dots share StaffML metadata: topic, zone,
-        difficulty, track, or chain membership. Use the map to choose a question path,
-        not to read exact set overlaps.
+        Each dot is a Vault question. Lines connect local topic and chain neighborhoods.
+        Use the planet to choose a question path, not to read exact set overlaps.
       </p>
 
       {!hasActiveFilters && (
@@ -662,7 +803,7 @@ function EmptyPanel({
             <HowToStep
               step="3"
               title="Pick a path"
-              text="Click a card or dot, practice it, then use nearby questions to move easier, harder, or sideways."
+              text="Click a card or dot, practice it, then use connected questions to move easier, harder, or sideways."
             />
           </div>
         </section>
@@ -695,7 +836,7 @@ function EmptyPanel({
         <section className="mb-6 rounded-xl border border-borderSubtle bg-surface/60 p-4">
           <h3 className="text-sm font-bold text-textPrimary mb-1">No matching questions</h3>
           <p className="text-sm text-textSecondary leading-relaxed mb-3">
-            Try a broader phrase, clear a track or level filter, or return to the full atlas.
+            Try a broader phrase, clear a track or level filter, or return to the full planet.
           </p>
           <button
             type="button"
