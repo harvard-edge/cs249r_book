@@ -22,6 +22,20 @@ window.MLSP.games.checkpoint = async function(canvas, callbacks) {
   
   const barFill = new PIXI.Graphics();
   container.addChild(barFill);
+  const instruction = new PIXI.Text({
+    text: "Hold Space to train. Release to write a checkpoint before a node failure.",
+    style: { fill: 0xffffff, fontSize: 16, fontFamily: "Helvetica Neue, Arial", align: "center" }
+  });
+  instruction.anchor.set(0.5);
+  instruction.position.set(width / 2, height / 2 - 62);
+  container.addChild(instruction);
+  const checkpointText = new PIXI.Text({
+    text: "last checkpoint: 0%",
+    style: { fill: 0xaaaaaa, fontSize: 13, fontFamily: "Helvetica Neue, Arial" }
+  });
+  checkpointText.anchor.set(0.5);
+  checkpointText.position.set(width / 2, height / 2 + 46);
+  container.addChild(checkpointText);
   
   let progress = 0;
   let lastCheckpoint = 0;
@@ -32,13 +46,15 @@ window.MLSP.games.checkpoint = async function(canvas, callbacks) {
   
   const checkpoints = [];
   
-  const downHandler = (e) => { if (e.code === 'Space') spaceHeld = true; };
+  const downHandler = (e) => { if (e.code === 'Space') { e.preventDefault(); spaceHeld = true; } };
   const upHandler = (e) => { 
     if (e.code === 'Space') {
+      e.preventDefault();
       spaceHeld = false;
       // Write checkpoint
       if (progress > lastCheckpoint && progress < width - 100 && !state.gameOver) {
         lastCheckpoint = progress;
+        checkpointText.text = "last checkpoint: " + Math.floor((lastCheckpoint / (width - 100)) * 100) + "%";
         const cp = new PIXI.Graphics();
         cp.rect(50 + progress - 2, height/2 - 30, 4, 60);
         cp.fill({ color: 0x00ff00 });
@@ -74,8 +90,11 @@ window.MLSP.games.checkpoint = async function(canvas, callbacks) {
     }
     
     // Draw fill
-    barFill.width = Math.max(0.1, progress);
-    barFill.tint = spaceHeld ? 0x0088ff : 0x555555;
+    barFill.clear();
+    if (progress > 0) {
+      barFill.rect(50, height/2 - 20, progress, 40);
+      barFill.fill({ color: spaceHeld ? 0x4a90c4 : 0x555555 });
+    }
     
     state.score = Math.floor((progress / (width - 100)) * 100);
     callbacks.onScoreChange(state);

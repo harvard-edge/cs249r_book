@@ -2,7 +2,7 @@ import { mountPixiOnCanvas, burst, flash, shake } from "/assets/games/runtime.mj
 import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
 
 export async function mountPipeline(canvas, opts = {}) {
-  const { app, stage, width: W, height: H } = await mountPixiOnCanvas(canvas, { bg: 0xf8f9fa });
+  const { app, stage, width: W, height: H } = await mountPixiOnCanvas(canvas, { bg: 0xffffff });
 
   let score = 0;
   let activeBlocks = [];
@@ -11,10 +11,10 @@ export async function mountPipeline(canvas, opts = {}) {
   const MAX_MEMORY = 8;
   let nextBlockId = 0;
 
-  const stageWidth = 60;
-  const stageHeight = 100;
+  const stageWidth = 82;
+  const stageHeight = 124;
   const startX = W / 2 - 2 * stageWidth;
-  const startY = H / 2 - stageHeight / 2 + 20;
+  const startY = 132;
 
   const bgLayer = new PIXI.Container();
   const blockLayer = new PIXI.Container();
@@ -22,18 +22,43 @@ export async function mountPipeline(canvas, opts = {}) {
   const overlayLayer = new PIXI.Container();
   stage.addChild(bgLayer, blockLayer, hudLayer, overlayLayer);
 
-  const colors = { fwd: 0x4a90c4, bwd: 0xc87b2a, mem: 0xc44444, box: 0xe9ecef, text: 0x333333 };
+  const colors = { fwd: 0x4a90c4, bwd: 0xc87b2a, mem: 0xc44444, box: 0xffffff, text: 0x333333, rail: 0xd8e4ee };
 
-  // Draw Stages
+  const rail = new PIXI.Graphics();
+  rail.roundRect(startX - 26, startY + 20, stageWidth * 4 + 52, 32, 16).fill({ color: 0xebf3fa });
+  rail.roundRect(startX - 26, startY + stageHeight - 52, stageWidth * 4 + 52, 32, 16).fill({ color: 0xfdf1e2 });
+  rail.moveTo(startX - 12, startY + 36).lineTo(startX + stageWidth * 4 + 12, startY + 36).stroke({ color: colors.fwd, width: 2, alpha: 0.42 });
+  rail.moveTo(startX + stageWidth * 4 + 12, startY + stageHeight - 36).lineTo(startX - 12, startY + stageHeight - 36).stroke({ color: colors.bwd, width: 2, alpha: 0.42 });
+  bgLayer.addChild(rail);
+
+  // Draw pipeline stages as clean device cards.
   for (let i = 0; i < 4; i++) {
     const box = new PIXI.Graphics();
-    box.roundRect(startX + i * stageWidth + 4, startY, stageWidth - 8, stageHeight, 8).fill(colors.box).stroke({ width: 2, color: 0xdee2e6 });
+    box.roundRect(startX + i * stageWidth + 5, startY, stageWidth - 10, stageHeight, 10)
+      .fill(colors.box)
+      .stroke({ width: 1.5, color: 0xd7dde5 });
+    box.rect(startX + i * stageWidth + 5, startY, stageWidth - 10, 5).fill({ color: i === 0 ? 0xa31f34 : 0x4a90c4, alpha: 0.9 });
     bgLayer.addChild(box);
-    const text = new PIXI.Text({ text: `Stage ${i}`, style: { fontSize: 11, fill: 0x6c757d, fontFamily: "sans-serif", fontWeight: "bold" }});
+    const text = new PIXI.Text({ text: `GPU ${i}`, style: { fontSize: 12, fill: 0x555555, fontFamily: "Helvetica Neue, Arial", fontWeight: "bold" }});
     text.anchor.set(0.5);
-    text.position.set(startX + i * stageWidth + stageWidth / 2, startY - 14);
+    text.position.set(startX + i * stageWidth + stageWidth / 2, startY + 18);
     bgLayer.addChild(text);
   }
+
+  const legend = new PIXI.Container();
+  const legendBg = new PIXI.Graphics();
+  legendBg.roundRect(0, 0, 184, 48, 8).fill({ color: 0xffffff, alpha: 0.92 }).stroke({ color: 0xe0e0e0, width: 1 });
+  const fwdSwatch = new PIXI.Graphics();
+  fwdSwatch.roundRect(12, 12, 22, 5, 2).fill({ color: colors.fwd });
+  const bwdSwatch = new PIXI.Graphics();
+  bwdSwatch.roundRect(12, 31, 22, 5, 2).fill({ color: colors.bwd });
+  const fwdLabel = new PIXI.Text({ text: "forward activations", style: { fontSize: 10, fill: 0x555555, fontFamily: "Helvetica Neue, Arial", fontWeight: "700" }});
+  const bwdLabel = new PIXI.Text({ text: "backward gradients", style: { fontSize: 10, fill: 0x555555, fontFamily: "Helvetica Neue, Arial", fontWeight: "700" }});
+  fwdLabel.position.set(42, 8);
+  bwdLabel.position.set(42, 27);
+  legend.position.set(20, 88);
+  legend.addChild(legendBg, fwdSwatch, bwdSwatch, fwdLabel, bwdLabel);
+  bgLayer.addChild(legend);
 
   // HUD
   const title = new PIXI.Text({ text: "Pipeline Pacer", style: { fontSize: 16, fontWeight: "bold", fill: colors.text } });
@@ -54,9 +79,9 @@ export async function mountPipeline(canvas, opts = {}) {
   memFrame.roundRect(W / 2 - 100, H - 30, 200, 14, 7).stroke({ width: 2, color: 0xced4da });
   const memFill = new PIXI.Graphics();
 
-  const hintText = new PIXI.Text({ text: "Tap or Space to spawn microbatch", style: { fontSize: 12, fill: 0xadb5bd, fontStyle: "italic" } });
+  const hintText = new PIXI.Text({ text: "Tap or Space to admit the next microbatch", style: { fontSize: 12, fill: 0x777777, fontStyle: "italic" } });
   hintText.anchor.set(0.5);
-  hintText.position.set(W / 2, 30);
+  hintText.position.set(W / 2, 60);
 
   hudLayer.addChild(title, scoreText, timeText, memText, memFrame, memFill, hintText);
 
@@ -76,7 +101,7 @@ export async function mountPipeline(canvas, opts = {}) {
       progress: 0,
       sprite: new PIXI.Graphics()
     };
-    block.sprite.roundRect(-12, -12, 24, 24, 4).fill(colors.fwd);
+    block.sprite.roundRect(-13, -13, 26, 26, 6).fill(colors.fwd).stroke({ color: 0x2f6e9d, width: 1 });
     blockLayer.addChild(block.sprite);
     activeBlocks.push(block);
   }
@@ -111,7 +136,7 @@ export async function mountPipeline(canvas, opts = {}) {
           if (b.stageIndex >= 4) {
             b.isFwd = false;
             b.stageIndex = 3;
-            b.sprite.clear().roundRect(-12, -12, 24, 24, 4).fill(colors.bwd);
+            b.sprite.clear().roundRect(-13, -13, 26, 26, 6).fill(colors.bwd).stroke({ color: 0x9a6620, width: 1 });
             burst(blockLayer, b.sprite.x, b.sprite.y, colors.bwd, 4, { speed: 1.5, lifeMs: 300 });
           }
         } else {
@@ -134,7 +159,7 @@ export async function mountPipeline(canvas, opts = {}) {
       if (nextIdx > 3 || nextIdx < 0) targetX = currentX + (b.isFwd ? stageWidth : -stageWidth);
 
       let x = currentX + (targetX - currentX) * b.progress;
-      let yOffset = b.isFwd ? -18 : 18;
+      let yOffset = b.isFwd ? -26 : 26;
       b.sprite.position.set(x, startY + stageHeight / 2 + yOffset);
     }
 

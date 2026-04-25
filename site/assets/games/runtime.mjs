@@ -123,6 +123,9 @@ export async function mountPixiOnCanvas(canvas, opts = {}) {
   // Pixi v8 sets stage.eventMode globally on stage; we want canvas to receive pointer events.
   app.stage.eventMode = "static";
   app.stage.hitArea = app.screen;
+  if (opts.backdrop !== false) {
+    drawBrandBackdrop(app.stage, W, H, opts);
+  }
 
   const tickHandlers = [];
   app.ticker.add((ticker) => {
@@ -139,6 +142,38 @@ export async function mountPixiOnCanvas(canvas, opts = {}) {
     onTick: (fn) => tickHandlers.push(fn),
     destroy: () => app.destroy(true, { children: true, texture: true }),
   };
+}
+
+export function drawBrandBackdrop(stage, W, H, opts = {}) {
+  const bg = opts.bg ?? 0xffffff;
+  const r = (bg >> 16) & 255;
+  const g = (bg >> 8) & 255;
+  const b = bg & 255;
+  const isDark = (0.2126 * r + 0.7152 * g + 0.0722 * b) < 90;
+  const layer = new PIXI.Graphics();
+
+  if (isDark) {
+    layer.rect(0, 0, W, H).fill({ color: bg });
+    layer.rect(0, 0, 5, H).fill({ color: 0xa31f34, alpha: 0.85 });
+    for (let x = 48; x < W; x += 56) {
+      layer.moveTo(x, 32).lineTo(x, H - 32).stroke({ color: 0xffffff, alpha: 0.045, width: 1 });
+    }
+    for (let y = 42; y < H; y += 46) {
+      layer.moveTo(28, y).lineTo(W - 28, y).stroke({ color: 0xffffff, alpha: 0.05, width: 1 });
+    }
+  } else {
+    layer.rect(0, 0, W, H).fill({ color: bg });
+    layer.rect(0, 0, 5, H).fill({ color: 0xa31f34, alpha: 0.82 });
+    for (let x = 48; x < W; x += 56) {
+      layer.moveTo(x, 32).lineTo(x, H - 32).stroke({ color: 0xe9edf2, width: 1 });
+    }
+    for (let y = 42; y < H; y += 46) {
+      layer.moveTo(28, y).lineTo(W - 28, y).stroke({ color: 0xeef1f4, width: 1 });
+    }
+  }
+
+  stage.addChild(layer);
+  return layer;
 }
 
 /* -----------------------------------------------------------
@@ -366,6 +401,23 @@ window.MLSP.runtime = {
   pop, flash, burst, floatText, shake, tween, getFilters,
   dailySeed
 };
+
+if (!window.MLSP.__fullscreenToggleBound) {
+  window.MLSP.__fullscreenToggleBound = true;
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.(".mlsp-fullscreen-btn");
+    if (!button) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const container = button.closest(".mlsp-game-container");
+    if (!container) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      container.requestFullscreen?.();
+    }
+  }, true);
+}
 
 /* -----------------------------------------------------------
    Page lifecycle: trigger any registered onReady() callback

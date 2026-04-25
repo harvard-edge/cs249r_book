@@ -64,18 +64,20 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
   // Object pool to prevent WebGL buffer issues from rapid instantiation
   const blockPool = [];
   for (let i = 0; i < 20; i++) {
-    const b = new PIXI.Graphics();
-    b.rect(-25, -25, 50, 50);
-    b.fill({ color: 0xffffff });
-    b.tint = 0x880000;
+    const b = new PIXI.Container();
+    const bg = new PIXI.Graphics();
+    bg.roundRect(-25, -25, 50, 50, 6);
+    bg.fill({ color: 0xc44444 });
+    bg.stroke({ color: 0x7f1d1d, width: 2 });
     b.visible = false;
     
-    const t = new PIXI.Text({ text: "J", style: { fill: 0xffffff, fontSize: 24, fontWeight: "bold" } });
+    const t = new PIXI.Text({ text: "J", style: { fill: 0xffffff, fontSize: 24, fontWeight: "bold", fontFamily: "Helvetica Neue, Arial" } });
     t.anchor.set(0.5);
+    b.addChild(bg);
     b.addChild(t);
     
     container.addChild(b);
-    blockPool.push({ sprite: b, text: t, active: false });
+    blockPool.push({ sprite: b, bg: bg, text: t, active: false });
   }
 
   const blocks = [];
@@ -89,13 +91,14 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
     
     const l = letters[Math.floor(Math.random() * letters.length)];
     poolItem.text.text = l;
-    poolItem.sprite.tint = 0x880000;
-    poolItem.sprite.position.set(0, height/2);
+    poolItem.bg.clear();
+    poolItem.bg.roundRect(-25, -25, 50, 50, 6).fill({ color: 0xc44444 }).stroke({ color: 0x7f1d1d, width: 2 });
+    poolItem.sprite.position.set(30, height/2);
     poolItem.sprite.rotation = 0;
     poolItem.sprite.visible = true;
     poolItem.active = true;
     
-    const block = { poolItem: poolItem, letter: l, processed: false, x: 0, y: height/2, vx: 0, vy: 0, rotation: 0, bounced: false };
+    const block = { poolItem: poolItem, letter: l, processed: false, x: 30, y: height/2, vx: 0, vy: 0, rotation: 0, bounced: false };
     blocks.push(block);
   }
   
@@ -107,8 +110,9 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
       const target = blocks.find(b => !b.processed && !b.bounced && b.x > 150 && b.x < 450);
       if (target && target.letter === key) {
         target.processed = true;
-        target.poolItem.sprite.tint = 0x008800; // Processed green
-        runtime.burst(stage, target.x, target.y, 0x00ff00, 10);
+        target.poolItem.bg.clear();
+        target.poolItem.bg.roundRect(-25, -25, 50, 50, 6).fill({ color: 0x3d9e5a }).stroke({ color: 0x27683b, width: 2 });
+        runtime.burst(stage, target.x, target.y, 0x3d9e5a, 10);
       } else {
         runtime.shake(container, 5, 100);
       }
