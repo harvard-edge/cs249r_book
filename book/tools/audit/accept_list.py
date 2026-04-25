@@ -71,6 +71,10 @@ SCHEMA_VERSION = 1
 
 # Default accept-list path — next to scan.py in book/tools/audit/.
 DEFAULT_ACCEPT_LIST = Path(__file__).resolve().parent / "accepted_fps.json"
+# Notation-specific accept-list (kept separate to avoid mixing categories).
+DEFAULT_NOTATION_ACCEPT_LIST = (
+    Path(__file__).resolve().parent / "accepted_fps_notation.json"
+)
 
 
 @dataclass(frozen=True)

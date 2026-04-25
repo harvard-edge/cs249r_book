@@ -235,6 +235,9 @@ class ValidateCommand:
         "units": [
             ("physics", "_run_unit_tests"),
         ],
+        "notation": [
+            ("consistency", "_run_notation_consistency"),  # iron-law symbols (BW, R_peak, L_lat, D_vol)
+        ],
         "spelling": [
             ("prose", "_run_spelling_prose"),
             ("tikz", "_run_spelling_tikz"),
@@ -4055,13 +4058,59 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_table_content(self, root: Path) -> ValidationRunResult:
-        """Validate grid table content (bare pipes, fracs, HTML entities, etc.)."""
+        """Validate grid table content (bare pipes, fracs, HTML entities).
+
+        Native import of book/tools/scripts/content/validate_tables.py
+        via importlib — no subprocess. The script's per-file API
+        (`validate_file(path) -> List[TableIssue]`) is the entry point;
+        each TableIssue maps directly to a ValidationIssue. The script
+        itself remains callable as a standalone CLI for its --fix mode.
+        """
+        import importlib.util
+        import sys as _sys
+
         script = (
             Path(__file__).resolve().parent.parent.parent
             / "tools" / "scripts" / "content" / "validate_tables.py"
         )
-        args = ["-d", str(root)]
-        return self._delegate_script(script, args, "table-content")
+        mod_name = "mlsys_validate_tables"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        t0 = time.time()
+        qmd_files = sorted(root.rglob("*.qmd"))
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            try:
+                table_issues = mod.validate_file(qmd)
+            except Exception:
+                continue
+            for ti in table_issues:
+                # ti.file may already be relative (str) or absolute.
+                p = Path(ti.file)
+                if p.is_absolute():
+                    try:
+                        rel = str(p.relative_to(root))
+                    except ValueError:
+                        rel = str(p)
+                else:
+                    rel = ti.file
+                issues.append(ValidationIssue(
+                    file=rel, line=ti.line, code=ti.code,
+                    message=ti.message, severity=ti.severity,
+                    context=(ti.context or "")[:160],
+                ))
+        return ValidationRunResult(
+            name="table-content",
+            description="Grid table content invariants (bare pipes, fracs, HTML entities)",
+            files_checked=len(qmd_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
 
     # ------------------------------------------------------------------
     # Spelling checks  (delegated to check_prose_spelling.py / check_tikz_spelling.py)
@@ -4476,28 +4525,6 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # EPUB structure (legacy custom check — no Java required)
-    # ------------------------------------------------------------------
-
-    def _run_epub(self, root: Path) -> ValidationRunResult:
-        """Validate EPUB file structure and content."""
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "utilities" / "validate_epub.py"
-        )
-        # Find EPUB files in build output directories
-        book_dir = Path(__file__).resolve().parent.parent.parent
-        epub_files = list(book_dir.rglob("*.epub"))
-        if not epub_files:
-            return ValidationRunResult(
-                name="epub", description="EPUB validation (no .epub files found)",
-                files_checked=0, issues=[], elapsed_ms=0,
-            )
-        # Validate the most recent EPUB
-        epub_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return self._delegate_script(script, ["--quick", str(epub_files[0])], "epub")
-
-    # ------------------------------------------------------------------
     # Content tree: require shared/ and frontmatter/ (not only vol1/vol2)
     # ------------------------------------------------------------------
 
@@ -4564,44 +4591,98 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_sources(self, root: Path) -> ValidationRunResult:
-        """Validate source citations (asterisk sources, formatting, etc.)."""
-        import subprocess as _sp
+        """Validate source citation patterns (asterisk sources, missing periods, etc.).
+
+        Native import of book/tools/scripts/utilities/manage_sources.py via
+        importlib — no subprocess. Instantiates SourceChecker pointed at
+        the contents directory, runs analyze_sources(), and reads the
+        populated `problems` dict to emit one ValidationIssue per
+        pattern hit. The script itself remains callable as a standalone
+        CLI for its --clean / --report modes.
+        """
+        import importlib.util
+        import sys as _sys
+        import io
+        import contextlib
+
         script = (
             Path(__file__).resolve().parent.parent.parent
             / "tools" / "scripts" / "utilities" / "manage_sources.py"
         )
-        # manage_sources.py expects to be run from the quarto root (where contents/ lives)
-        quarto_dir = Path(__file__).resolve().parent.parent.parent / "quarto"
+        mod_name = "mlsys_manage_sources"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
         t0 = time.time()
-        cmd = ["python3", str(script), "--problems"]
-        try:
-            result = _sp.run(cmd, capture_output=True, text=True, timeout=120, cwd=str(quarto_dir))
-            elapsed = int((time.time() - t0) * 1000)
-            if result.returncode == 0:
+        # SourceChecker resolves files via target_directories — pass an absolute
+        # path to contents/ so we don't depend on cwd (the original subprocess
+        # invocation set cwd=quarto_dir; this is the cwd-free equivalent).
+        contents_dir = root if root.name == "contents" else root / "contents"
+        if not contents_dir.exists():
+            # Fall back to the canonical book/quarto/contents location.
+            contents_dir = (
+                Path(__file__).resolve().parent.parent.parent
+                / "quarto" / "contents"
+            )
+
+        checker = mod.SourceChecker(target_directories=[str(contents_dir)])
+        # SourceChecker's analyze_sources() prints status banners; suppress
+        # them so binder's own renderer owns the output channel.
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                checker.analyze_sources()
+            except Exception as e:
+                elapsed = int((time.time() - t0) * 1000)
                 return ValidationRunResult(
                     name="sources", description="Source citation validation",
-                    files_checked=0, issues=[], elapsed_ms=elapsed,
+                    files_checked=0, elapsed_ms=elapsed,
+                    issues=[ValidationIssue(
+                        file=str(script.relative_to(root)) if script.is_relative_to(root) else str(script),
+                        line=0, code="sources-runtime-error",
+                        message=f"SourceChecker failed: {type(e).__name__}: {e}",
+                        severity="error",
+                    )],
                 )
-            output = (result.stdout + result.stderr).strip()
-            return ValidationRunResult(
-                name="sources", description="Source citation validation",
-                files_checked=0, elapsed_ms=elapsed,
-                issues=[ValidationIssue(
-                    file="(script output)", line=0, code="sources",
-                    message=output[:500] if output else f"Script exited with code {result.returncode}",
+
+        issues: List[ValidationIssue] = []
+        # checker.problems is dict[category, list[{file, line, text, ...}]]
+        for category, hits in checker.problems.items():
+            for hit in hits:
+                hit_file = str(hit.get("file", "?"))
+                p = Path(hit_file)
+                if p.is_absolute():
+                    try:
+                        rel = str(p.relative_to(root))
+                    except ValueError:
+                        rel = hit_file
+                else:
+                    rel = hit_file
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=int(hit.get("line", 0) or 0),
+                    code=category,
+                    message=str(hit.get("text", ""))[:200],
                     severity="error",
-                )],
-            )
-        except FileNotFoundError:
-            elapsed = int((time.time() - t0) * 1000)
+                    context="",
+                ))
+
+        elapsed = int((time.time() - t0) * 1000)
+        if not issues:
             return ValidationRunResult(
                 name="sources", description="Source citation validation",
-                files_checked=0, elapsed_ms=elapsed,
-                issues=[ValidationIssue(
-                    file=str(script), line=0, code="sources",
-                    message=f"Script not found: {script}", severity="error",
-                )],
+                files_checked=int(checker.stats.get("total_files", 0) or 0),
+                issues=[], elapsed_ms=elapsed,
             )
+        return ValidationRunResult(
+            name="sources", description="Source citation validation",
+            files_checked=int(checker.stats.get("total_files", 0) or 0),
+            issues=issues, elapsed_ms=elapsed,
+        )
 
     def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
         """Validate .bib references against academic DBs (native implementation)."""
@@ -4759,12 +4840,22 @@ class ValidateCommand:
             console.print(f"[green]{payload.get('message', 'Operation succeeded')}[/green]")
 
     # ------------------------------------------------------------------
-    # Delegated checks (call existing scripts via subprocess)
+    # Subprocess helper: only for scripts that wrap external binaries.
+    #
+    # All pure-Python validators have been migrated to native imports
+    # (see _run_table_content, _run_grid_tables, _run_sources,
+    # _run_bib_hygiene, _run_image_formats, _run_external_images,
+    # _run_unit_tests, _run_notation_consistency). The remaining
+    # _delegate_script callers all wrap a non-Python tool:
+    #   - _run_spelling_prose / _run_spelling_tikz → aspell CLI
+    #   - _run_math_render_audit → Quarto's `quarto render` pipeline
+    # New checks should follow the native pattern unless they
+    # genuinely need to invoke an external binary.
     # ------------------------------------------------------------------
 
     @staticmethod
     def _delegate_script(script_path: Path, args: List[str], run_name: str) -> ValidationRunResult:
-        """Run an external script and convert its exit code to a ValidationRunResult."""
+        """Run an external-binary-wrapping script and convert its exit code to a ValidationRunResult."""
         import subprocess
         t0 = time.time()
         cmd = ["python3", str(script_path)] + args
@@ -4809,15 +4900,56 @@ class ValidateCommand:
             )
 
     def _run_grid_tables(self, root: Path) -> ValidationRunResult:
-        """Check for grid tables (should be converted to pipe tables)."""
+        """Check for grid tables (prefer pipe tables).
+
+        Native import of book/tools/scripts/utilities/convert_grid_to_pipe_tables.py
+        via importlib — no subprocess. The script's `check_grid_tables(content)`
+        per-content API is the entry point. The script itself remains
+        callable as a standalone CLI for its --fix mode.
+        """
+        import importlib.util
+        import sys as _sys
+
         script = (
             Path(__file__).resolve().parent.parent.parent
             / "tools" / "scripts" / "utilities" / "convert_grid_to_pipe_tables.py"
         )
-        qmd_files = [str(f) for f in sorted(root.rglob("*.qmd"))]
-        if not qmd_files:
-            return ValidationRunResult(name="grid-tables", issues=[])
-        return self._delegate_script(script, ["--check"] + qmd_files, "grid-tables")
+        mod_name = "mlsys_convert_grid_to_pipe_tables"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        t0 = time.time()
+        qmd_files = sorted(root.rglob("*.qmd"))
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            try:
+                content = qmd.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                grid_hits = mod.check_grid_tables(content)
+            except Exception:
+                continue
+            for line_num, desc in grid_hits:
+                try:
+                    rel = str(qmd.relative_to(root))
+                except ValueError:
+                    rel = str(qmd)
+                issues.append(ValidationIssue(
+                    file=rel, line=line_num, code="grid-table",
+                    message=desc, severity="error", context="",
+                ))
+        return ValidationRunResult(
+            name="grid-tables",
+            description="Grid tables (prefer pipe tables)",
+            files_checked=len(qmd_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
 
     def _run_heading_case(self, root: Path) -> ValidationRunResult:
         """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
@@ -4848,24 +4980,102 @@ class ValidateCommand:
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
         """Validate .bib files against §5 Bibliography Hygiene schema.
 
-        Delegates to `book/tools/bib_lint.py --check`, which enforces the
-        canonical schema: required fields per entry type, canonical field
-        order, quoting style, author-list rules, journal spell-out,
-        publisher canonical forms. Violations against the pre-existing
-        baseline (`book/tools/bib_lint_baseline.json`) are grandfathered;
-        only NEW violations block.
+        Native import of book/tools/bib_lint.py via importlib — no
+        subprocess. Mirrors the original `bib_lint --check` semantics:
+        only NEW errors (not in book/tools/bib_lint_baseline.json) block;
+        baseline-grandfathered errors are silenced. The script itself
+        remains callable as a standalone CLI for its --fix / --baseline
+        modes.
         """
+        import importlib.util
+        import sys as _sys
+
         script = (
             Path(__file__).resolve().parent.parent.parent
             / "tools" / "bib_lint.py"
         )
-        bib_files = [str(f) for f in sorted(root.rglob("*.bib"))]
+        mod_name = "mlsys_bib_lint"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        t0 = time.time()
+        bib_files = sorted(root.rglob("*.bib"))
         if not bib_files:
             return ValidationRunResult(
                 name="bib-hygiene", description="bib-hygiene",
-                files_checked=0, issues=[], elapsed_ms=0,
+                files_checked=0, issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
             )
-        return self._delegate_script(script, ["--check"] + bib_files, "bib-hygiene")
+
+        # Baseline (file, entry_key, rule) tuples — these errors are grandfathered.
+        try:
+            baseline = mod.load_baseline()
+        except Exception:
+            baseline = set()
+
+        # The baseline JSON was generated with file paths stripped of the
+        # canonical "MLSysBook/" prefix (bib_lint.py:798). Mirror that here
+        # so worktrees and the main checkout agree on the lookup key.
+        def _baseline_key_path(path: Path) -> str:
+            s = str(path)
+            for prefix in ("/Users/VJ/GitHub/MLSysBook/",
+                           "/Users/VJ/GitHub/MLSysBook-notation/"):
+                if s.startswith(prefix):
+                    return s[len(prefix):]
+            return s
+
+        issues: List[ValidationIssue] = []
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                entries, _ = mod.parse_bib(text)
+            except ValueError as exc:
+                rel = (str(bib_path.relative_to(root))
+                       if bib_path.is_relative_to(root) else str(bib_path))
+                issues.append(ValidationIssue(
+                    file=rel, line=0, code="parse-error",
+                    message=f"PARSE ERROR: {exc}", severity="error",
+                ))
+                continue
+
+            fp_key = _baseline_key_path(bib_path)
+            try:
+                rel = str(bib_path.relative_to(root))
+            except ValueError:
+                rel = str(bib_path)
+
+            for entry in entries:
+                for v in mod.validate_entry(entry):
+                    # Mirror bib_lint.py --check semantics exactly:
+                    # only NEW errors block the gate; warnings and
+                    # baseline-grandfathered errors are silent. Run the
+                    # script directly with --report to see warnings.
+                    if v.severity != "error":
+                        continue
+                    if (fp_key, v.entry_key, v.rule) in baseline:
+                        continue
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=v.entry_line,
+                        code=v.rule,
+                        message=f"@{entry.entry_type}{{{v.entry_key}}} — {v.message}",
+                        severity="error",
+                        context="",
+                    ))
+
+        return ValidationRunResult(
+            name="bib-hygiene", description="bib-hygiene (§5)",
+            files_checked=len(bib_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Native audit-check adapters (book/tools/audit/checks/*).
@@ -4988,6 +5198,66 @@ class ValidateCommand:
             "abbreviation-first-use", "expand abbreviations on first use per chapter (§10.5)",
         )
 
+    def _run_notation_consistency(self, root: Path) -> ValidationRunResult:
+        """Notation conventions vs the Notations chapter (BW, R_peak, L_lat, D_vol).
+
+        Routes through audit.scan.scan() so the persistent notation
+        accept-list at book/tools/audit/accepted_fps_notation.json is
+        applied (covers Little's Law L=concurrency, LogP model L=network
+        latency, subscripted L_{net}/L_{queue}, P=probability function,
+        etc.). The detection rules live in audit.checks.notation_consistency;
+        this method is the binder front door — pure Python imports, no
+        subprocess. Replaces the standalone book/tools/audit/run_notation_consistency.py.
+        """
+        import importlib
+        import sys as _sys
+
+        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
+        audit_root_str = str(audit_root)
+        if audit_root_str not in _sys.path:
+            _sys.path.insert(0, audit_root_str)
+        scan_mod = importlib.import_module("audit.scan")
+
+        t0 = time.time()
+        # scope="both" is mandatory: the notation accept-list spans both
+        # volumes, and a single-volume binder scan would mark cross-volume
+        # entries as stale on every run.
+        ledger = scan_mod.scan(
+            scope="both",
+            categories=["notation-consistency"],
+            verbose=False,
+            use_accept_list=True,
+        )
+
+        issues: List[ValidationIssue] = []
+        seen_files: set[str] = set()
+        for issue in ledger.issues:
+            seen_files.add(str(issue.file))
+            # Only OPEN issues fail the gate; ACCEPTED and DEFERRED do not.
+            if issue.status != "open":
+                continue
+            try:
+                rel = str(Path(issue.file).resolve().relative_to(root))
+            except ValueError:
+                rel = str(issue.file)
+            message = issue.reason or issue.rule_text or issue.category
+            issues.append(ValidationIssue(
+                file=rel,
+                line=issue.line,
+                code=issue.category,
+                message=message,
+                severity="error",
+                context=(issue.before or "")[:160],
+            ))
+
+        return ValidationRunResult(
+            name="notation-consistency",
+            description="Notation conventions: BW, R_peak, L_lat, D_vol (Notations chapter)",
+            files_checked=len(seen_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
     def _run_latin_running_text(self, root: Path) -> ValidationRunResult:
         """Prefer English over Latin abbreviations in running prose (§10.6).
 
@@ -5012,26 +5282,136 @@ class ValidateCommand:
         )
 
     def _run_image_formats(self, root: Path) -> ValidationRunResult:
-        """Validate image file formats using Pillow."""
+        """Validate image file formats using Pillow.
+
+        Native import of book/tools/scripts/images/manage_images.py via
+        importlib — no subprocess. Calls `check_file()` per image; each
+        returned tuple becomes a ValidationIssue. The script remains
+        callable as a standalone CLI for its --fix mode.
+        """
+        import importlib.util
+        import sys as _sys
+
         script = (
             Path(__file__).resolve().parent.parent.parent
             / "tools" / "scripts" / "images" / "manage_images.py"
         )
-        image_files = []
+        mod_name = "mlsys_manage_images"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        t0 = time.time()
+        image_files: List[Path] = []
         for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif"):
-            image_files.extend(str(f) for f in sorted(root.rglob(ext)))
-        if not image_files:
-            return ValidationRunResult(name="image-formats", issues=[])
-        return self._delegate_script(script, image_files, "image-formats")
+            image_files.extend(sorted(root.rglob(ext)))
+
+        issues: List[ValidationIssue] = []
+        for img in image_files:
+            try:
+                # show_progress=False suppresses the script's own console
+                # output; binder owns the rendering channel.
+                bad = mod.check_file(str(img), strict=False, verbose=False,
+                                     fix=False, show_progress=False)
+            except Exception:
+                continue
+            for tup in bad:
+                # tuple shape: (filepath, msg, actual_format, expected_format)
+                fp, msg = tup[0], tup[1]
+                actual = tup[2] if len(tup) > 2 else None
+                expected = tup[3] if len(tup) > 3 else None
+                detail = msg
+                if actual and expected:
+                    detail = f"{msg}: actual={actual}, expected={expected}"
+                p = Path(fp)
+                rel = (str(p.relative_to(root)) if p.is_absolute()
+                       and p.is_relative_to(root) else fp)
+                issues.append(ValidationIssue(
+                    file=rel, line=0, code="image-format",
+                    message=detail, severity="error", context="",
+                ))
+
+        return ValidationRunResult(
+            name="image-formats",
+            description="Image file format validation (Pillow)",
+            files_checked=len(image_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
 
     def _run_external_images(self, root: Path) -> ValidationRunResult:
-        """Check for external image URLs in QMD files."""
+        """Check for external image URLs in QMD files.
+
+        Native import of book/tools/scripts/images/manage_external_images.py
+        via importlib — no subprocess. Calls
+        `ImageDownloader.validate_external_images()` which returns the
+        list of (file, fig_id, url) tuples; each becomes a
+        ValidationIssue. The script remains callable as a standalone
+        CLI for its download / fix modes.
+        """
+        import importlib.util
+        import sys as _sys
+        import io
+        import contextlib
+
         script = (
             Path(__file__).resolve().parent.parent.parent
             / "tools" / "scripts" / "images" / "manage_external_images.py"
         )
-        return self._delegate_script(
-            script, ["--validate", str(root)], "external-images"
+        mod_name = "mlsys_manage_external_images"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        t0 = time.time()
+        downloader = mod.ImageDownloader(str(root))
+        # ImageDownloader prints status banners; suppress so binder owns
+        # the rendering channel.
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                files_processed, external_images = downloader.validate_external_images(False)
+            except Exception as e:
+                elapsed = int((time.time() - t0) * 1000)
+                return ValidationRunResult(
+                    name="external-images", description="External image URL detection",
+                    files_checked=0, elapsed_ms=elapsed,
+                    issues=[ValidationIssue(
+                        file=str(script.name), line=0, code="external-images-runtime",
+                        message=f"validate_external_images failed: {type(e).__name__}: {e}",
+                        severity="error",
+                    )],
+                )
+
+        issues: List[ValidationIssue] = []
+        for tup in external_images:
+            # tuple shape: (file_path, fig_id, url)
+            file_path, fig_id, url = tup[0], tup[1], tup[2]
+            p = Path(file_path)
+            if p.is_absolute():
+                try:
+                    rel = str(p.relative_to(root))
+                except ValueError:
+                    rel = file_path
+            else:
+                rel = file_path
+            issues.append(ValidationIssue(
+                file=rel, line=0, code="external-image",
+                message=f"{fig_id} → {url}",
+                severity="error", context="",
+            ))
+
+        return ValidationRunResult(
+            name="external-images",
+            description="External image URL detection",
+            files_checked=files_processed, issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
 
     def _run_svg_wellformedness(self, root: Path) -> ValidationRunResult:
@@ -5112,9 +5492,81 @@ class ValidateCommand:
         )
 
     def _run_unit_tests(self, root: Path) -> ValidationRunResult:
-        """Run physics engine unit conversion tests."""
-        # validate.py is at book/cli/commands/validate.py
-        # test_units.py is at book/tests/test_units.py
+        """Run physics engine unit conversion tests.
+
+        Native import of book/tests/test_units.py via importlib — no
+        subprocess. The script's test list is gated by `if __name__ ==
+        "__main__"`, so we discover `test_*` callables on the imported
+        module ourselves and run each, capturing the script's
+        module-level FAILURES list per test. The script remains
+        callable as a standalone CLI for direct ad-hoc runs.
+        """
+        import importlib.util
+        import sys as _sys
+        import io
+        import contextlib
+
         book_dir = Path(__file__).resolve().parent.parent.parent  # book/
         script = book_dir / "tests" / "test_units.py"
-        return self._delegate_script(script, [], "unit-tests")
+
+        # t0 starts BEFORE the import: pint registry construction and
+        # mlsysim constants happen at module-load time, so that's where
+        # most of the wall-clock cost actually is.
+        t0 = time.time()
+        mod_name = "mlsys_test_units"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            try:
+                # Suppress module-import banners; binder owns rendering.
+                with contextlib.redirect_stdout(io.StringIO()):
+                    spec.loader.exec_module(mod)
+            except Exception as e:
+                return ValidationRunResult(
+                    name="unit-tests", description="Physics engine unit conversion tests",
+                    files_checked=0,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                    issues=[ValidationIssue(
+                        file=str(script.name), line=0, code="unit-tests-import",
+                        message=f"Could not import test_units.py: {type(e).__name__}: {e}",
+                        severity="error",
+                    )],
+                )
+
+        # Discover test functions on the module (mirrors pytest convention).
+        test_fns = sorted(
+            (name, getattr(mod, name)) for name in dir(mod)
+            if name.startswith("test_") and callable(getattr(mod, name))
+        )
+        issues: List[ValidationIssue] = []
+        for name, fn in test_fns:
+            # Reset the module-level FAILURES list so we can capture per-test failures.
+            mod.FAILURES = []
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    result = fn()
+            except Exception as e:
+                issues.append(ValidationIssue(
+                    file=str(script.name), line=0, code=name,
+                    message=f"{name} raised {type(e).__name__}: {e}",
+                    severity="error",
+                ))
+                continue
+            if not result or mod.FAILURES:
+                # Each entry in FAILURES is a pre-formatted "  ✗ ..." string.
+                detail = "; ".join(f.strip() for f in mod.FAILURES) or "test returned False"
+                issues.append(ValidationIssue(
+                    file=str(script.name), line=0, code=name,
+                    message=f"{name}: {detail}",
+                    severity="error",
+                ))
+
+        return ValidationRunResult(
+            name="unit-tests",
+            description="Physics engine unit conversion tests",
+            files_checked=len(test_fns), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )

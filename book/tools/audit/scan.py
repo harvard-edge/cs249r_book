@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from audit.ledger import Issue, Ledger
 from audit.accept_list import (
     DEFAULT_ACCEPT_LIST,
+    DEFAULT_NOTATION_ACCEPT_LIST,
     apply_accept_list,
     format_report,
     format_stale_warnings,
@@ -54,6 +55,7 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.latin_running_text", "latin-running-text"),
     ("audit.checks.alt_text_style", "alt-text-style"),
     ("audit.checks.bibliography_hygiene", "bibliography-hygiene"),
+    ("audit.checks.notation_consistency", "notation-consistency"),
 ]
 
 
@@ -240,9 +242,14 @@ def scan(
     # issues from any category, and runs regardless of --categories filter
     # (matching is keyed on category so off-category entries are ignored).
     if use_accept_list:
-        path = accept_list_path or DEFAULT_ACCEPT_LIST
+        primary = accept_list_path or DEFAULT_ACCEPT_LIST
         try:
-            entries = load_accept_list(path)
+            entries = load_accept_list(primary)
+        except SystemExit:
+            raise
+        # Also load the notation-specific accept list (if present).
+        try:
+            entries.extend(load_accept_list(DEFAULT_NOTATION_ACCEPT_LIST))
         except SystemExit:
             raise
         # Build the scope-aware file set so stale detection does not flag
