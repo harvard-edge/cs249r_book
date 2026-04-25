@@ -364,6 +364,32 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
     return fig, ax
 
+def _metric_as_float(value, unit=None):
+    """Return a numeric metric, converting Pint quantities when needed."""
+    if hasattr(value, "m_as") and unit is not None:
+        return float(value.m_as(unit))
+    if hasattr(value, "to") and unit is not None:
+        return float(value.to(unit).magnitude)
+    if hasattr(value, "magnitude"):
+        return float(value.magnitude)
+    return float(value)
+
+def _metric_ratio(numerator, denominator):
+    """Return numerator / denominator for scalar or Pint quantity metrics."""
+    if hasattr(numerator, "to") and hasattr(denominator, "units"):
+        return float((numerator / denominator).to_base_units().magnitude)
+    return float(numerator) / float(denominator)
+
+def _memory_utilization(metrics):
+    """Read or derive memory utilization from an evaluation metrics payload."""
+    if "memory_utilization" in metrics:
+        return float(metrics["memory_utilization"])
+    if "weight_size" in metrics and "capacity" in metrics:
+        return _metric_ratio(metrics["weight_size"], metrics["capacity"])
+    if "memory_used_gb" in metrics and "memory_capacity_gb" in metrics:
+        return _metric_ratio(metrics["memory_used_gb"], metrics["memory_capacity_gb"])
+    return 0.0
+
 def plot_evaluation_scorecard(evaluation):
     """
     Visualizes the supply-vs-demand scorecard for a SystemEvaluation.
@@ -373,9 +399,12 @@ def plot_evaluation_scorecard(evaluation):
     l2_metrics = evaluation.performance.metrics
     
     # 2. CALCULATION
-    l1_ratio = float(l1_metrics.get("memory_utilization", 0.0))
-    latency_ms = float(l2_metrics.get("latency", 0.0))
-    sla_ms = float(l2_metrics.get("sla_latency_ms", 1000.0))
+    l1_ratio = _memory_utilization(l1_metrics)
+    latency_ms = _metric_as_float(l2_metrics.get("latency", 0.0), "ms")
+    sla_ms = _metric_as_float(
+        l2_metrics.get("sla_latency_ms", l2_metrics.get("sla_latency", 1000.0)),
+        "ms",
+    )
     l2_ratio = latency_ms / sla_ms if sla_ms > 0 else 0.0
     
     levels = ['Memory (RAM)', 'Latency (SLA)']

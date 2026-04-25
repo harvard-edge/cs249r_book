@@ -732,14 +732,18 @@ class BuildCommand:
         Returns:
             True if command succeeded, False otherwise
         """
-        # Set up environment with PYTHONPATH including the project root
+        # Set up environment with local sources first. The mlsysim package
+        # uses a nested layout, so the package directory must precede any
+        # globally installed editable checkout.
         env = os.environ.copy()
         root_dir = str(self.config_manager.root_dir.resolve())
+        mlsysim_dir = str((self.config_manager.root_dir / "mlsysim").resolve())
         current_pythonpath = env.get("PYTHONPATH", "")
+        local_pythonpath = f"{root_dir}:{mlsysim_dir}"
         if current_pythonpath:
-            env["PYTHONPATH"] = f"{root_dir}:{current_pythonpath}"
+            env["PYTHONPATH"] = f"{local_pythonpath}:{current_pythonpath}"
         else:
-            env["PYTHONPATH"] = root_dir
+            env["PYTHONPATH"] = local_pythonpath
 
         try:
             if self.verbose:
