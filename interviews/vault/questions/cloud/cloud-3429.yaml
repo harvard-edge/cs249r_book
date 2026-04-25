@@ -7,46 +7,29 @@ topic: pipeline-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: Optimizing LLM Pipeline Parallelism on Google TPU v5e
-scenario: You are deploying a large language model (LLM) with 500 billion parameters
-  to a cluster of Google TPU v5e devices. Each TPU v5e has 16 GB HBM, 197 TFLOPS BF16
-  performance, and 1.6 TB/s memory bandwidth. To handle the model size, you've implemented
-  pipeline parallelism, splitting the model into 8 stages across 8 distinct TPU v5e
-  devices. Initial training runs show a significant underutilization of the TPUs,
-  with observed device utilization averaging only 40%. You suspect 'pipeline bubbles'
-  are the primary culprit due to synchronous communication and idle periods. Describe
-  how you would diagnose this bottleneck and propose a solution to improve throughput,
-  quantifying the expected performance gain using the given TPU specs and assuming
-  ideal conditions.
-question: How would you diagnose TPU v5e pipeline bubbles in the 8-stage 500B model
-  and quantify the throughput gain from micro-batching?
+title: Pipeline Bubble on a Heterogeneous TPU v5e Stage Layout
+scenario: 'A 500B-parameter LLM is split into 8 pipeline stages on 8 TPU v5e devices (16 GB HBM, 197
+  TFLOPS BF16, 1.6 TB/s HBM bandwidth, ICI inter-chip ~25 GB/s per axis). Stage compute times measured
+  per micro-batch — stages 1-7 each 100 ms, stage 8 (LM head + softmax over a 256K vocab) 175 ms. The
+  pipeline currently runs with 4 micro-batches per global step. Quantify the bubble fraction and the
+  exposed throughput loss from the slowest stage, and identify the smallest schedule change that closes
+  the gap to within 10%.'
+question: For an 8-stage TPU v5e pipeline with a 175 ms stage-8 vs 100 ms stage 1-7 and m=4 micro-batches, what is the bubble fraction and what schedule change brings utilization to within 10% of ideal?
 details:
-  realistic_solution: Implement micro-batching combined with an interleaved scheduling
-    strategy (e.g., a variant of GPipe or PipeDream). This allows different micro-batches
-    from potentially different global batches to process concurrently within the pipeline,
-    keeping the TPUs busy. Diagnosis would involve profiling each stage's forward
-    and backward pass times, and analyzing communication overheads between stages,
-    potentially using tools like `tf.profiler` or custom logging to identify idle
-    periods. Optimal micro-batch size selection is crucial, balancing memory usage,
-    communication overhead, and bubble reduction.
-  common_mistake: Ignoring the cumulative impact of inter-device communication latency
-    and synchronous stage transitions, leading to significant idle time during pipeline
-    bubbles. An inexperienced engineer might focus solely on optimizing individual
-    stage computations or increasing the global batch size without adopting micro-batching
-    strategies, which doesn't address the fundamental bubble overhead.
-  napkin_math: Consider a pipeline with 'S' stages (S=8) and a global batch processed
-    into 'M' micro-batches. In a naive synchronous schedule, the pipeline fill and
-    drain phases create `(S-1)` periods of idle time equivalent to the critical path
-    time for one micro-batch through a stage, `T_stage_critical`. If `T_stage_critical`
-    is 100ms, the total bubble overhead for fill/drain is `7 * 100ms = 700ms`. If
-    the 'active' computation time for a global batch is, say, `10 * 100ms = 1000ms`,
-    the total time would be `1700ms`. With interleaved scheduling, the `700ms` bubble
-    time is largely overlapped with useful computation after the initial pipeline
-    fill, effectively reducing the per-global-batch iteration time closer to 1000ms.
-    This can lead to a throughput increase of approximately `1700ms / 1000ms = 1.7x`.
-    If initial utilization is 40% (effective 0.4 * 197 TFLOPS = 78.8 TFLOPS/device),
-    increasing utilization to 70% (0.7 * 197 TFLOPS = 137.9 TFLOPS/device) would represent
-    a ~1.75x improvement in effective compute utilization due to reduced idle time.
+  realistic_solution: 'Bubble fraction at m=4, k=8 = (k-1)/(m + k - 1) = 7/11 ≈ 63.6% — over half the
+    schedule is bubble. Step time is dominated by max(stage_i) = 175 ms (stage 8), so steady-state pipeline
+    rate = 1 / 175 ms regardless of how many other stages are 100 ms. Two changes are needed: (a) shrink
+    the stage-8 imbalance by splitting the LM head across two ICI-connected chips (stage-8 compute drops
+    to ~95 ms, matching the others) — this restores max(stage) ≈ 100 ms; (b) raise micro-batches to m=32
+    so bubble fraction drops to (8-1)/(32 + 8 - 1) = 7/39 ≈ 17.9%. Together, utilization climbs from
+    ~36% to ~82% — within 10% of the 91% ideal asymptote.'
+  common_mistake: Increasing m alone without rebalancing the stages. Bubble fraction shrinks but every
+    micro-batch still pays the 175 ms stage-8 cost — pipeline rate is bounded by the slowest stage,
+    not by the bubble.
+  napkin_math: 'Naive pipeline time for one global step at m=4: T = (m + k - 1) * max(stage) = (4 + 7)
+    * 175 = 1925 ms. Useful work = m * sum(stage) / k = 4 * (7*100 + 175) / 8 = 437.5 ms. Utilization
+    = 437.5 / 1925 ≈ 22.7%. After rebalance (max stage = 100 ms) and m=32: T = (32 + 7) * 100 = 3900
+    ms, useful work = 32 * 100 = 3200 ms, utilization = 82.0%.'
 status: published
 provenance: imported
 requires_explanation: false

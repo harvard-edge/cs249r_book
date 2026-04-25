@@ -7,29 +7,32 @@ topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: understand
 phase: training
-title: Row-Parallel vs Column-Parallel Weight Splitting
-scenario: Explain the difference between column-parallel and row-parallel linear layers
-  in Megatron-LM. For a weight matrix W of shape [H_in, H_out] split across 4 GPUs,
-  what does each GPU hold, and what collective is needed after each?
-question: For a weight matrix W of shape [H_in, H_out] split across 4 GPUs, what does
-  each GPU hold, and what collective is needed after each?
+title: TP Layout Under an Asymmetric Bandwidth Budget
+scenario: An 8B-parameter dense block runs on a 4-GPU mini-pod where 2 GPUs share a fast NVLink lane
+  (450 GB/s unidirectional) and the other 2 GPUs are connected to that pair only over PCIe Gen4 (~25
+  GB/s unidirectional). The block has hidden dim H_in = H_out = 8192 and is currently column-parallel,
+  ending in an AllGather across all 4 ranks. Decide whether to keep column-parallel + AllGather, or
+  switch to row-parallel + AllReduce, given the asymmetric fabric. Quantify the collective time under
+  each layout and identify the binding link.
+question: "On 4 GPUs with a 2x NVLink pair + 2x PCIe pair, should the [8192, 8192] linear block use column-parallel + AllGather or row-parallel + AllReduce, and why?"
 details:
-  realistic_solution: 'Column-parallel: W is split along columns (output dimension).
-    Each GPU holds W_i of shape [H_in, H_out/4]. Input x is replicated on all GPUs.
-    Each GPU computes y_i = x @ W_i, producing shape [batch, H_out/4]. An AllGather
-    concatenates these into the full [batch, H_out]. Row-parallel: W is split along
-    rows (input dimension). Each GPU holds W_i of shape [H_in/4, H_out]. Input x must
-    be split: each GPU gets x_i of shape [batch, H_in/4]. Each GPU computes y_i =
-    x_i @ W_i, producing a partial sum of shape [batch, H_out]. An AllReduce sums
-    these partials into the final result. Megatron pairs column→row to eliminate one
-    collective: the column output is already naturally partitioned to serve as row
-    input.'
-  common_mistake: Mixing up which dimension is split. Column-parallel splits along
-    H_out (each GPU gets full H_in but H_out/4). Row-parallel splits along H_in (each
-    GPU gets H_in/4 but full H_out).
-  napkin_math: 'For H_in=H_out=8192, TP=4: Column-parallel shards are [8192, 2048]
-    (8192×2048 = 16.78M params). Row-parallel shards are [2048, 8192] (16.78M params).
-    Both are 16.78M params × 2B = 33.6 MB per GPU.'
+  realistic_solution: 'Column-parallel: each rank holds [8192, 2048] of W and produces a [batch, 2048]
+    output partition. The end-of-block AllGather across 4 ranks moves 3/4 * 4 * batch * 2048 * 2 bytes
+    = 3 * batch * 4096 bytes through the slowest link. For batch=2048 that is ~24 MB across the slowest
+    PCIe edge → ~0.96 ms. Row-parallel: each rank holds [2048, 8192] of W; input must first be split
+    [batch, 2048], and the output is a partial sum requiring an AllReduce of [batch, 8192]. AllReduce
+    moves 2*(N-1)/N = 1.5x the [batch, 8192] tensor (32 MB at batch=2048) → 48 MB across the slowest
+    link → ~1.92 ms. Column-parallel + AllGather wins by ~2x because AllGather moves N-1/N of the small
+    sharded tensor while AllReduce moves 2*(N-1)/N of the *full* tensor. The PCIe leg is the binding
+    link in both cases — keep TP inside the NVLink pair when possible.'
+  common_mistake: 'Choosing layout by FLOPs symmetry alone. Both layouts have identical compute (16.78M
+    params per shard), so the answer must come from collective cost — and the collective cost is asymmetric:
+    AllReduce moves twice the bytes of AllGather across the same ring. The other common error is naming
+    NVLink (450 GB/s) as the binding link when the PCIe edge (25 GB/s) is 18x slower.'
+  napkin_math: 'H_in = H_out = 8192, TP=4, batch=2048, BF16. Column-parallel + AllGather across 4 ranks:
+    bus traffic = 3/4 * 4 * 2048 * 2048 * 2 = 24 MB through 25 GB/s PCIe → 0.96 ms. Row-parallel + AllReduce:
+    bus traffic = 2*(3/4) * 2048 * 8192 * 2 = 48 MB → 1.92 ms. Per-shard weights either layout: 8192
+    * 2048 = 16.78 M params × 2 B = 33.6 MB.'
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,35 +7,29 @@ topic: 3d-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: Understanding 3D Parallelism with NVIDIA A100s for Frontier Models
-scenario: You are leading a team training a frontier language model on a cluster equipped
-  with NVIDIA A100 GPUs, each featuring 80 GB HBM2e memory, 312 TFLOPS of FP16 performance,
-  and 2.0 TB/s of memory bandwidth. To achieve unprecedented scale and efficiently
-  utilize these powerful accelerators, your architecture leverages 3D parallelism.
-  Describe the distinct roles of data parallelism, tensor parallelism, and pipeline
-  parallelism in this setup, specifically explaining how each component contributes
-  to training a model that would otherwise be intractable on a single A100 GPU.
-question: What roles do data, tensor, and pipeline parallelism play in training a
-  frontier model across A100 GPUs?
+title: 3D Parallelism Sizing — Adam State + Activations on A100s
+scenario: A 70B-parameter transformer is trained on A100 80 GB GPUs (NVLink intra-node, IB inter-node).
+  Each parameter under mixed-precision Adam costs 16 bytes of model state (FP16 weight + FP16 grad +
+  FP32 master + FP32 m + FP32 v). Reserve 16 GB per GPU for activations + workspace. The team must choose
+  TP, PP, and DP sizes that respect the per-GPU HBM budget. Decompose how each parallelism axis (DP,
+  TP, PP) reduces (or fails to reduce) the per-GPU memory footprint.
+question: "Decompose how DP, TP, and PP each affect the per-GPU memory footprint for a 70B Adam-trained model on 80 GB A100s, and choose minimum (TP, PP) to fit."
 details:
-  realistic_solution: 'A realistic solution involves a strategic combination where:
-    (1) Tensor parallelism horizontally partitions very large tensors (e.g., large
-    weight matrices or activation tensors) across multiple A100 GPUs, effectively
-    making a single ''logical'' GPU with a combined 160 GB, 240 GB, etc., of HBM2e
-    memory. (2) Pipeline parallelism vertically partitions the model''s layers across
-    A100 GPUs, allowing different layers to compute concurrently on different devices
-    and hiding communication latency. (3) Data parallelism then replicates these tensor/pipeline-parallel
-    instances and distributes mini-batches of data, scaling the overall throughput.
-    The high 2.0 TB/s memory bandwidth of the A100s is crucial for efficient intra-node
-    communication in both tensor and pipeline parallelism.'
-  common_mistake: A common mistake is to conflate the purposes of the different parallelism
-    strategies, assuming they all address the same bottleneck. For example, relying
-    solely on data parallelism when a model's weights or activations exceed the 80
-    GB HBM2e memory capacity of a single NVIDIA A100, instead of employing tensor
-    or pipeline parallelism, will inevitably lead to out-of-memory errors.
-  napkin_math: If a single model layer's activation memory footprint is 180 GB, and
-    an NVIDIA A100 GPU has 80 GB HBM2e, what is the minimum number of A100 GPUs required
-    for just this layer using only tensor parallelism, assuming perfect partitioning?
+  realistic_solution: 'DP replicates model state across ranks — it does *not* reduce per-GPU memory at
+    all. TP shards weights, gradients, and (with ZeRO-1) part of the optimizer state along a tensor
+    dimension; the full model state divides by TP. PP shards layers across stages; the full model state
+    divides by PP. For 70B params * 16 bytes = 1120 GB of model state; per-GPU budget is 80 - 16 = 64
+    GB; minimum (TP * PP) ≥ 1120 / 64 = 17.5 → 18, rounded up to a topology-friendly TP=8 (within a node,
+    on NVLink) and PP=4 (across nodes), giving TP*PP = 32, per-GPU model state = 35 GB, leaving 29 GB
+    for activations and workspace. DP can then be added freely for throughput without affecting fit.'
+  common_mistake: 'Assuming DP alone reduces per-GPU memory. DP only divides the *batch*, not the model
+    state — 64 DP ranks each still hold the full 1120 GB of state without TP/PP/ZeRO. Conversely, naive
+    TP across nodes pays InfiniBand''s ~25 GB/s unidirectional bandwidth on every layer''s AllReduce
+    and stalls; TP belongs inside the NVLink island.'
+  napkin_math: '70B params * 16 bytes (mixed-precision Adam) = 1120 GB total state. Per-GPU model budget:
+    80 - 16 (activations) = 64 GB. Required min(TP * PP) = ceil(1120 / 64) = 18. Choose TP=8 (NVLink-bound)
+    + PP=4 (cross-node) → 32-way model split, per-GPU model = 35 GB, activation budget = 29 GB. DP=N
+    multiplies global batch by N with zero per-GPU memory cost.'
 status: published
 provenance: imported
 requires_explanation: false

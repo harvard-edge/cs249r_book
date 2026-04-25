@@ -67,7 +67,7 @@ LEVEL_MAP = {
     "evaluation": "L5", "realization": "L6+", "optimization": "L4", "mastery": "L6+",
 }
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-pro-preview"
 
 
 def gen_one(idx, job):

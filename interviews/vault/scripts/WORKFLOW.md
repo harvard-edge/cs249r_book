@@ -111,7 +111,7 @@ This script:
 | Model | Best for | Rate limit | Cost |
 |-------|----------|------------|------|
 | gemini-3.1-pro | Math review, generation | 250/day | Free tier |
-| gemini-2.5-flash | Bulk validation | 1500/day | Free tier |
+| gemini-3.1-pro-preview | Bulk validation | 1500/day | Free tier |
 | claude-opus-4.6 | Deep review, complex fixes | No daily limit | API cost |
 
 Strategy: Use Gemini for bulk, Opus for deep fixes, Flash for validation sweeps.

@@ -7,49 +7,43 @@ topic: gradient-synchronization
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: Optimizing Distributed LLM Training on AMD MI300X with Gradient Synchronization
-scenario: You are tasked with optimizing the training of a large language model (LLM)
-  distributed across a cluster of AMD MI300X accelerators. Each MI300X boasts 192
-  GB of HBM3 memory, 1,307 TFLOPS of FP16 sparse compute (at peak), and a memory bandwidth
-  of 5.3 TB/s. Despite using a highly optimized PyTorch distributed data parallel
-  (DDP) setup, you observe that scaling efficiency significantly drops beyond 16 GPUs,
-  with gradient synchronization becoming the dominant bottleneck, accounting for over
-  40% of the epoch time. The model's training throughput is currently 250 TFLOPS/GPU,
-  and the target is 800 TFLOPS/GPU. Diagnose the core issues and propose a strategy
-  to achieve the target throughput.
-question: How would you diagnose the >40% gradient synchronization bottleneck beyond
-  16 MI300X GPUs and raise throughput from 250 to 800 TFLOPS/GPU?
+title: PowerSGD vs FP8 Gradients on a 32-MI300X Inter-Node Ring
+scenario: A 100B BF16 model trains across 32 AMD MI300X GPUs (192 GB HBM3, 1307 TFLOPS
+  FP16, Infinity Fabric intra-node, 4 nodes connected by 200 Gbps RoCE v2 with effective
+  unidirectional ~22 GB/s). Per-step backward = 600 ms. The current ring AllReduce
+  of FP16 gradients exposes 1.6 s of communication per step, dominating wall clock.
+  Compare two production-realistic compression levers — PowerSGD with rank r=8, and
+  FP8 quantized gradients — by computing the post-compression AllReduce time and the
+  convergence-step overhead each typically adds.
+question: On 32 MI300Xs over 200 Gbps RoCE with a 600 ms backward and 1.6 s baseline
+  AllReduce, which gradient compression — PowerSGD r=8 or FP8 — closes the gap, and
+  what is each approach's convergence cost?
 details:
-  realistic_solution: Diagnose the communication pattern to identify if it's bandwidth
-    or latency bound. For bandwidth-bound scenarios, explore gradient compression
-    techniques (e.g., top-k sparse gradients, FP16/int8 quantization) to reduce the
-    data volume transferred. Evaluate various AllReduce algorithms (e.g., ring-allreduce
-    vs. tree-allreduce based on network topology) and assess their suitability for
-    the MI300X's interconnect. For latency-bound scenarios or to overlap communication,
-    investigate gradient accumulation, and potentially introduce a limited form of
-    asynchronous SGD with careful stale gradient handling mechanisms (e.g., bounded
-    staleness, adaptively dropping stale updates based on a scheduler) to minimize
-    impact on convergence while maximizing compute utilization. Quantify the potential
-    reduction in synchronization time and its impact on overall throughput.
-  common_mistake: Blindly increasing batch size or using standard synchronous AllReduce
-    without considering the communication-to-computation ratio or the specific characteristics
-    of the MI300X's interconnect and network topology. Another common mistake is not
-    quantifying the communication overhead before attempting solutions.
-  napkin_math: Consider a large language model with 100 billion parameters. If each
-    parameter is represented by a 32-bit float, the total gradient size is approximately
-    400 GB. Even with the MI300X's impressive 5.3 TB/s HBM3 bandwidth, the challenge
-    lies in inter-GPU communication. If the effective network bandwidth available
-    for gradient synchronization between two nodes is 200 GB/s (a common bottleneck
-    in multi-node training), a single full gradient AllReduce operation for 400 GB
-    would take 400 GB / 200 GB/s = 2 seconds. If a training step takes, for example,
-    3 seconds of computation, spending 2 seconds on communication means only ~33%
-    efficiency (1s compute / (1s compute + 2s comm)). If gradient compression techniques
-    can reduce the gradient size by 8x (e.g., using FP8 or Top-K sparsity), the communication
-    time would drop to 0.25 seconds per step, significantly improving efficiency to
-    ~80% (1s compute / (1s compute + 0.25s comm)). The candidate should quantify the
-    communication overhead by estimating the effective network bandwidth and the gradient
-    data volume per step relative to the available MI300X compute.
-status: published
+  realistic_solution: 'Baseline gradient size = 100B * 2 bytes (BF16) = 200 GB. Ring
+    AllReduce on the inter-node 22 GB/s unidirectional ring transfers 2*(31/32) *
+    200 GB ≈ 387.5 GB → ~17.6 s of pure inter-node ring; with hierarchical reduction
+    this collapses to roughly 2*(3/4) * 200 GB / 22 GB/s ≈ 13.6 s on the 4-node ring
+    of per-node-reduced shards. The baseline 1.6 s figure assumes good NVLink/IF reduction
+    first and bucketed overlap. PowerSGD r=8 compresses 200 GB to roughly r * H *
+    2 bytes per layer ≈ 5-10 GB total → AllReduce ~0.4 s, fits inside the 600 ms backward;
+    convergence overhead is typically 1-3% extra steps for r=8. FP8 gradients halve
+    the 200 GB to 100 GB → AllReduce ~0.8 s, *still over* the 600 ms backward; convergence
+    is mostly preserved (within 1%) for FP8 with careful loss-scale calibration. PowerSGD
+    wins on raw throughput; FP8 wins on convergence quality. Recommended: PowerSGD
+    r=8 if the model tolerates rank-r approximation (most LLMs do), else FP8.'
+  common_mistake: 'Computing AllReduce time as `payload / bandwidth` — that omits
+    the 2*(N-1)/N ring factor and ignores hierarchical inter-node reduction. Another
+    common mistake: treating compression purely as a throughput knob without accounting
+    for convergence overhead — e.g., 1-bit SGD looks like a 16x speedup but typically
+    costs 1.5-2x more steps to converge for foundation models.'
+  napkin_math: 'Baseline ring AllReduce inter-node: 2*(N-1)/N * 200 GB / 22 GB/s.
+    Flat 32-rank ring: 387.5 / 22 ≈ 17.6 s. Hierarchical (4-node ring of shards):
+    2*(3/4) * 200 / 22 ≈ 13.6 s naive, ~1.6 s with NVLink/IF intra-node reduction
+    first and bucketed overlap of ~85% of comm against backward. PowerSGD r=8: payload
+    ≈ 200 GB / 25 = 8 GB → AllReduce ≈ 0.4 s. FP8 gradients: payload = 100 GB → AllReduce
+    ≈ 0.8 s. Convergence cost: PowerSGD r=8 ≈ +1-3% steps; FP8 ≈ +0-1% steps with
+    calibrated loss scale.'
+status: archived
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
@@ -68,3 +62,6 @@ human_reviewed:
   by: null
   date: null
   notes: null
+deletion_reason: Archived after G.H cleanup rewrite still failed Phase D's strict
+  judge bar (G.L re-judge). Pre-Phase-D legacy item that doesn't meet today's parallelism
+  prompt standards.

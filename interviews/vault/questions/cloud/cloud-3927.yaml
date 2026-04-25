@@ -7,29 +7,26 @@ topic: communication-computation-overlap
 competency_area: parallelism
 bloom_level: understand
 phase: both
-title: Pipeline Bubble Minimization via 1F1B Scheduling
-scenario: Your 4-stage pipeline-parallel training of a 70B model has a pipeline bubble
-  at the end of each micro-batch cycle. With 4 stages and 8 micro-batches, the GPipe
-  schedule wastes significant GPU time in bubble periods. A colleague suggests switching
-  to the 1F1B (one-forward-one-backward) schedule.
-question: How does switching from GPipe to 1F1B change the bubble fraction and activation
-  memory for 4 stages and 8 micro-batches?
+title: 1F1B vs GPipe — What 1F1B Actually Saves
+scenario: Your 4-stage pipeline-parallel training of a 70B model on H100s uses 8 micro-batches per global
+  step. A colleague claims that switching from GPipe to 1F1B (one-forward-one-backward) will reduce the
+  pipeline bubble. Evaluate the claim quantitatively and identify what 1F1B does in fact change.
+question: For 4 stages and 8 micro-batches, what is the bubble fraction under GPipe versus 1F1B, and what does 1F1B actually save if not bubble time?
 details:
-  realistic_solution: 'GPipe: all forwards first, then all backwards. Bubble = (k-1)
-    micro-batch times at the end = (4-1) x t = 3t. 1F1B: after the warm-up phase (k-1
-    forward passes), alternate one forward and one backward per step. Bubble only
-    during warm-up (k-1 forward passes) and cool-down (k-1 backward passes). For m
-    micro-batches and k stages: GPipe bubble fraction = (k-1)/m. 1F1B bubble fraction
-    = (k-1)/(m + k-1). With k=4, m=8: GPipe = 3/8 = 37.5% bubble. 1F1B = 3/11 = 27.3%
-    bubble. Additionally, 1F1B reduces peak memory from O(m) to O(k) by freeing activations
-    earlier.'
-  common_mistake: Thinking 1F1B eliminates the pipeline bubble entirely. It reduces
-    the bubble from O(k-1) micro-batches (where k is the number of stages) to a startup
-    phase, but a bubble still exists during the warm-up and cool-down phases.
-  napkin_math: '70B model, 4 stages. Each micro-batch forward+backward per stage:
-    ~200ms. GPipe total: (8 + 3) x 200ms = 2200ms, bubble = 600ms (27%). 1F1B total:
-    (8 + 3) x 200ms = 2200ms (same total, but memory reduced from 8x to 4x activation
-    storage).'
+  realistic_solution: 'GPipe and 1F1B share the *same* steady-state bubble fraction: (k-1)/(m + k - 1).
+    For k = 4 and m = 8 that is 3/11 ≈ 27.3% under both schedules. 1F1B''s real win is peak activation
+    memory: in GPipe, all m micro-batches'' forward activations are kept resident until the global flush,
+    giving O(m) activation memory. In 1F1B, after the warmup (k-1 forwards), each forward is followed
+    by a backward that releases that micro-batch''s activations, so peak activation memory is O(k). At
+    k=4, m=8 this is a 2x reduction in stored activations per stage, which directly determines whether
+    the 70B model fits in HBM.'
+  common_mistake: 'Claiming 1F1B reduces the bubble fraction. It does not: both schedules share (k-1)/(m
+    + k - 1). The improvement is in peak activation memory (O(m) → O(k)), which is what enables larger
+    micro-batch counts and therefore *indirectly* shrinks the bubble fraction by allowing larger m.'
+  napkin_math: 'k = 4, m = 8. GPipe bubble fraction = 1F1B bubble fraction = (4-1) / (8 + 4 - 1) = 3/11
+    ≈ 27.3%. Activation memory: GPipe stores 8 micro-batches'' forward activations at peak; 1F1B stores
+    at most k = 4. If each micro-batch''s per-stage activation is ~5 GB, GPipe peak is 40 GB versus 1F1B''s
+    20 GB — only 1F1B leaves headroom on an 80 GB H100 for weights, gradients, and the optimizer shard.'
 status: published
 provenance: imported
 requires_explanation: false

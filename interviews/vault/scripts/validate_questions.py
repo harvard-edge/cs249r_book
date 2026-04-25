@@ -31,7 +31,7 @@ BASE = Path(__file__).parent.parent  # vault root (scripts/ is one level down)
 CORPUS_PATH = BASE / "corpus.json"
 RESULTS_DIR = BASE / "scripts" / "_validation_results"
 
-MODEL = "gemini-2.5-flash"
+MODEL = "gemini-3.1-pro-preview"
 
 # ─── Gemini Client ────────────────────────────────────────────
 # Try API first (fast), fall back to CLI (uses cached OAuth)

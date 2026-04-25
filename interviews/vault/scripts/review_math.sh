@@ -1,11 +1,11 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════
 # Math Review: Launch parallel Gemini reviews of all questions
-# Uses gemini-2.5-flash to verify napkin math in every question
+# Uses gemini-3.1-pro-preview to verify napkin math in every question
 # ═══════════════════════════════════════════════════════════════
 set -euo pipefail
 
-MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+MODEL="${GEMINI_MODEL:-gemini-3.1-pro-preview}"
 INTERVIEWS_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPORTS_DIR="${INTERVIEWS_DIR}/_reviews"
 CHUNKS_DIR="/tmp/staffml-review-chunks"
