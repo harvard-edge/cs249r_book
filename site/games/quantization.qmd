@@ -1,70 +1,105 @@
 ---
 title: "Sharp Shot"
 subtitle: "Compress a model before the target blurs."
-description: "A browser mini-game from MLSysBook Playground. Shoot a target with per-layer precision dials. Teaches mixed-precision quantization through visual noise — blur, jitter, and drift representing real per-layer sensitivity to low-precision arithmetic."
+description: "A browser mini-game from MLSysBook Playground. Tune per-layer precision dials, watch the accuracy meter respond, then shoot a target whose blur, jitter, and drift reflect the noise each layer introduces. Teaches mixed-precision quantization through the asymmetry that makes it real."
 page-layout: article
 format:
   html:
     include-in-header:
       - text: |
           <link rel="stylesheet" href="/assets/games/common.css">
-          <script src="/assets/games/common.js" defer></script>
-          <script src="/assets/games/quantization.js" defer></script>
+          <script type="module">
+            import "/assets/games/runtime.mjs";
+            import "/assets/games/quantization.mjs";
+          </script>
 ---
 
 ```{=html}
-<div class="mlsp-game-container" role="region" aria-label="Sharp Shot mini-game">
+<div class="mlsp-game-container" role="region" aria-label="Quantization Sharp Shot mini-game">
   <canvas id="mlsp-canvas" class="mlsp-game-canvas" width="680" height="460"></canvas>
   <div class="mlsp-game-hud">
-    <span class="mlsp-score">bits <span id="mlsp-bits">192</span> / <span id="mlsp-budget">96</span> · shots <span id="mlsp-shots">10</span> · hits <span id="mlsp-hits">0</span></span>
+    <span class="mlsp-score">bits <span id="mlsp-bits">192</span> / <span id="mlsp-budget">96</span> · acc <span id="mlsp-acc">100</span>% · shots <span id="mlsp-shots">10</span> · score <span id="mlsp-score">0</span></span>
     <span>1-6 cycles a layer · space to fire · <kbd>R</kbd> retry</span>
+    <button type="button" class="mlsp-fullscreen-btn" onclick="this.closest('.mlsp-game-container').requestFullscreen()" title="Full Screen" aria-label="Full Screen">⛶</button>
   </div>
 </div>
 
 <div id="mlsp-aha-slot"></div>
 
 <script>
-(function mountSharpShot(){
-  function boot() {
-    if (!window.MLSP || !MLSP.games || !MLSP.games.quantization) return setTimeout(boot, 30);
+(function bootSharpShot(){
+  function tryBoot() {
+    if (!window.MLSP || !MLSP.games || !MLSP.games.quantization) return setTimeout(tryBoot, 30);
     var canvas = document.getElementById("mlsp-canvas");
     var $bits   = document.getElementById("mlsp-bits");
     var $budget = document.getElementById("mlsp-budget");
+    var $acc    = document.getElementById("mlsp-acc");
     var $shots  = document.getElementById("mlsp-shots");
-    var $hits   = document.getElementById("mlsp-hits");
+    var $score  = document.getElementById("mlsp-score");
     var ahaSlot = document.getElementById("mlsp-aha-slot");
-    var api = MLSP.games.quantization(canvas, {
+    var pendingResult = null;
+    var resolvedApi = null;
+
+    Promise.resolve(MLSP.games.quantization(canvas, {
       onScoreChange: function(s) {
         $bits.textContent = s.bitsUsed;
         $budget.textContent = s.budget;
+        $acc.textContent = s.accuracy;
         $shots.textContent = s.shotsLeft;
-        $hits.textContent = s.hits;
+        $score.textContent = s.score;
       },
-      onGameOver: function() {
-        MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText);
+      onGameOver: function(result) {
+        if (resolvedApi) attachAha(resolvedApi, result);
+        else pendingResult = result;
       },
       onRetry: function() { window.location.reload(); }
+    })).then(function(api) {
+      resolvedApi = api;
+      if (pendingResult) attachAha(api, pendingResult);
     });
+
+    function attachAha(api, result) {
+      MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText, api.ahaLink);
+      var card = ahaSlot.querySelector(".mlsp-aha-card");
+      if (card && api.buildShareText) {
+        var share = document.createElement("button");
+        share.type = "button";
+        share.textContent = "📋 Copy share text";
+        share.style.cssText = "margin-top:0.75rem;background:#a31f34;color:#fff;border:none;padding:0.4rem 0.85rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;";
+        share.addEventListener("click", function() {
+          var txt = api.buildShareText(result);
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(txt).then(function(){
+              share.textContent = "✓ Copied!";
+              setTimeout(function(){ share.textContent = "📋 Copy share text"; }, 1800);
+            });
+          }
+        });
+        card.appendChild(share);
+      }
+    }
   }
-  boot();
+  tryBoot();
 })();
 </script>
 ```
 
-## How it works
+## How to play
 
-A target sits downrange. Your weapon has six per-layer precision dials (embedding, attn.1, ffn.1, attn.2, ffn.2, output) and a total **bit budget of 96**. Every layer starts at fp32 (32 bits) — well over budget. Lowering precision frees bits for the budget, but it visually degrades your sight:
+A target sits downrange. Your weapon has six per-layer precision dials (embedding, attn.1, ffn.1, attn.2, ffn.2, output) and a total **bit budget of 96**. Every layer starts at fp32 (32 bits) — well over budget. Lowering precision frees bits, but it visually degrades the sight in three different ways depending on which layer you compressed:
 
-- **Edge layers** (embedding + output) at **int4**: the target **drifts** away from where it appears — systematic bias. You aim at the bullseye, but the true target has shifted. This is the [LLM.int8 cliff](https://arxiv.org/abs/2208.07339) (Dettmers et al., 2022) in visual form — embeddings and output heads collapse hard at very low precision.
+- **Edge layers** (embedding + output) at **int4**: the target **drifts** away from where it appears — systematic bias. You aim at the bullseye, but the true target has shifted. This is the [LLM.int8 cliff](https://arxiv.org/abs/2208.07339) (Dettmers et al., 2022) — embeddings and output heads collapse hard at very low precision.
 - **Attention layers** at low precision: the target **jitters** — softmax amplifies numerical noise.
 - **FFN layers** at low precision: the target **blurs** — reduced contrast, most robust to aggressive quantization.
 
-You have **10 shots**. Hit **7 or more** to ship the model. If you miss, the game briefly reveals where the *true* target was so you can see how far your sight was misaligned.
+The **estimated accuracy meter** updates live as you cycle dials, so you can balance budget vs. accuracy *before* you fire.
 
-## Why this matters
+You have **10 shots**. Each shot scores **3 / 2 / 1 / 0** points by zone (bullseye / inner / outer / miss). Reach **18 points to ship the model**. If you miss completely, the game briefly reveals where the *true* target was so you can see how far your sight was misaligned by the configuration you chose.
+
+## The Systems Concept
 
 Production quantization (GPTQ, AWQ, SmoothQuant) spends most of its time navigating exactly this asymmetry: most of a model can be aggressively quantized, but a few layers — typically the first and last — cannot. Mixed-precision bit-allocation algorithms like [HAWQ](https://arxiv.org/abs/1905.03696) (Dong et al. 2019) search for the right per-layer budget automatically. You just did a 30-second version by eye.
 
 ---
 
-*Part of [MLSysBook Playground](/games/).*
+*Part of [MLSysBook Playground](/games/). Found a bug? [Report an issue](https://github.com/harvard-edge/cs249r_book/issues/new?labels=bug&title=Bug+in+Game).*

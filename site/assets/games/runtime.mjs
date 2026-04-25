@@ -243,6 +243,7 @@ export function floatText(stage, x, y, text, color, opts = {}) {
   let age = 0;
   const handler = (ticker) => {
     const dt = ticker.deltaMS;
+    if (!t || t.destroyed || !t.position) { PIXI.Ticker.shared.remove(handler); return; }
     age += dt;
     if (age >= lifeMs) { t.destroy(); PIXI.Ticker.shared.remove(handler); return; }
     t.position.y -= dt * 0.035;

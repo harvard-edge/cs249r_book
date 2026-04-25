@@ -1,5 +1,6 @@
 /* ============================================================
-   MLSysBook Playground — OOM (v6, Pixi + pedagogy fixes)
+   MLSysBook Playground — Tensor Tetris (v6, Pixi + pedagogy fixes)
+   (registry id stays "oom"; the failure state is OOM, the game is Tetris)
    ------------------------------------------------------------
    What changed from v5 (per pedagogue audit):
      1. KV cache REMOVED. Replaced with a "parameters (W)" block:
@@ -125,9 +126,9 @@ export async function mountOom(canvas, opts = {}) {
   let filters = null;
   getFilters().then(f => { filters = f; });
 
-  const titleText = new PIXI.Text({ text: "OOM", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 15, fontWeight: "700", fill: COL.text } });
+  const titleText = new PIXI.Text({ text: "Tensor Tetris", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 15, fontWeight: "700", fill: COL.text } });
   titleText.anchor.set(0.5, 0); titleText.position.set(W / 2, 14);
-  const subtitleText = new PIXI.Text({ text: "← → move · space drop · activations dominate · backward & step free memory", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 10.5, fill: COL.muted } });
+  const subtitleText = new PIXI.Text({ text: "← → move · space drop · memory frees on training events, not completed rows", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 10.5, fill: COL.muted } });
   subtitleText.anchor.set(0.5, 0); subtitleText.position.set(W / 2, 36);
   const phaseText = new PIXI.Text({ text: "FORWARD — packing tensors", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 11, fontWeight: "700", fill: COL.muted } });
   phaseText.anchor.set(0.5, 0); phaseText.position.set(W / 2, 56);
@@ -148,6 +149,12 @@ export async function mountOom(canvas, opts = {}) {
   bestText.anchor.set(1, 0); bestText.position.set(W - 20, H - 32);
   const dailyText = new PIXI.Text({ text: "", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 9, fill: 0x999999 } });
   dailyText.position.set(20, H - 14);
+  const eventTitle = new PIXI.Text({ text: "why blocks vanish", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 10, fontWeight: "700", fill: COL.text } });
+  const eventLine1 = new PIXI.Text({ text: "3 placements → backward", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 9, fill: COL.blueStroke } });
+  const eventLine2 = new PIXI.Text({ text: "newest activations free first", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 8.5, fill: COL.muted } });
+  const eventLine3 = new PIXI.Text({ text: "6 placements → step()", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 9, fill: COL.orangeStroke } });
+  const eventLine4 = new PIXI.Text({ text: "gradients get used + cleared", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 8.5, fill: COL.muted } });
+  const eventLine5 = new PIXI.Text({ text: "rows themselves do not clear", style: { fontFamily: "Helvetica Neue, Arial", fontSize: 8.5, fontStyle: "italic", fill: COL.mitRed } });
 
   /* Legend (left side) — now four kinds: activation, gradient, optimizer, parameters */
   const legendData = [
@@ -164,6 +171,7 @@ export async function mountOom(canvas, opts = {}) {
     stepBarFrame, stepBarFill, bwdBarFrame, bwdBarFill,
     stepLabel, stepCounter, bwdLabel,
     scoreText, timerText, bestText, dailyText,
+    eventTitle, eventLine1, eventLine2, eventLine3, eventLine4, eventLine5,
     legendGfx, ...legendLabels
   );
 
@@ -570,6 +578,13 @@ export async function mountOom(canvas, opts = {}) {
     const bwdFrac = state.backwardProgress / BACKWARD_BLOCKS;
     if (bwdFrac > 0) bwdBarFill.roundRect(bbx, by + bbh * (1 - bwdFrac), bbw, bbh * bwdFrac, 2).fill({ color: COL.blueStroke });
     bwdLabel.position.set(bbx, by - 14);
+    const infoX = bbx + bbw + 12;
+    eventTitle.position.set(infoX, by + 2);
+    eventLine1.position.set(infoX, by + 18);
+    eventLine2.position.set(infoX, by + 31);
+    eventLine3.position.set(infoX, by + 54);
+    eventLine4.position.set(infoX, by + 67);
+    eventLine5.position.set(infoX, by + 90);
 
     /* Legend (left) */
     const lx = 20, ly = hbmY;
@@ -585,7 +600,7 @@ export async function mountOom(canvas, opts = {}) {
     timerText.text = "⏱ " + secs + "s";
     timerText.style.fill = secs <= 10 ? COL.redStroke : COL.text;
     bestText.text = "all-time best " + alltimeBestRef.v;
-    dailyText.text = "daily " + today + " · day " + dayNumber() + " · space = hard drop · R = retry";
+    dailyText.text = "daily " + today + " · day " + dayNumber() + " · hard drop speeds packing; events do the freeing";
   }
 
   function drawGameOver() {
@@ -608,12 +623,12 @@ export async function mountOom(canvas, opts = {}) {
 
   return {
     id: "oom",
-    name: "OOM",
+    name: "Tensor Tetris",
     ahaLabel: "You just played at",
     ahaText: "Training OOM is dominated by activations, not weights — that's why recomputation, ZeRO, and smaller batches exist (Korthikanti et al. 2022).",
     ahaLink: { href: "https://arxiv.org/abs/2205.05198", label: "Korthikanti et al. 2022 →" },
     buildShareText(r) {
-      return "MLSysBook Playground · OOM · day " + dayNumber() + "\n" +
+      return "MLSysBook Playground · Tensor Tetris · day " + dayNumber() + "\n" +
         "packed " + r.score + " tensors\n" +
         r.emojiGrid + "\n" +
         "play → mlsysbook.ai/games/oom/";

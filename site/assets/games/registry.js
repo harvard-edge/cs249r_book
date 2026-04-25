@@ -8,52 +8,158 @@ window.MLSP = window.MLSP || {};
 
 MLSP.registry = [
   {
-    id: "prune",
-    name: "Pulse Prune",
-    tagline: "Click the dim weights. Keep the bright ones.",
-    url: "/games/prune.html",
-    script: "/assets/games/prune.js",
-    teaches: "Magnitude-based pruning.",
+    id: "lander",
+    name: "Gradient Lander",
+    tagline: "Balance batch size and learning rate to converge safely.",
+    url: "/games/lander.html",
+    module: "/assets/games/lander.mjs",
+    teaches: "Large Batch Training & Convergence.",
+    featured404: true,
+    inline404: true,
     available: true
   },
   {
-    id: "straggler",
-    name: "Straggler",
-    tagline: "Don't be the slow GPU.",
-    url: "/games/straggler.html",
-    script: "/assets/games/straggler.mjs",
-    teaches: "Tail latency in distributed training; ring all-reduce.",
-    /* ESM-only game; the 404 randomiser uses legacy <script> injection,
-       so exclude from random rotation until 404 supports module loading.
-       Still listed in the gallery via straggler.qmd. */
-    available: false
+    id: "pipeline",
+    name: "Pipeline Pacer",
+    tagline: "Keep the GPUs fed without bubbling.",
+    url: "/games/pipeline.html",
+    module: "/assets/games/pipeline.mjs",
+    teaches: "Pipeline Parallelism.",
+    featured404: false,
+    inline404: true,
+    available: true
   },
   {
     id: "oom",
-    name: "OOM",
-    tagline: "Pack tensors into HBM before you crash.",
+    name: "Tensor Tetris",
+    tagline: "Pack training memory before you OOM.",
     url: "/games/oom.html",
-    script: "/assets/games/oom.js",
-    teaches: "GPU memory management under live allocation.",
+    module: "/assets/games/oom.mjs",
+    teaches: "Training Memory Constraints.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "prune",
+    name: "Pulse Prune",
+    tagline: "Shrink a network without breaking it.",
+    url: "/games/prune.html",
+    module: "/assets/games/prune.mjs",
+    teaches: "Model Compression & Pruning.",
+    featured404: false,
+    inline404: true,
     available: true
   },
   {
     id: "quantization",
-    name: "Sharp Shot",
-    tagline: "Shoot a target. Lower precision = cheaper but blurry.",
+    name: "Quantization Sharp Shot",
+    tagline: "Compress a model before the target blurs.",
     url: "/games/quantization.html",
-    script: "/assets/games/quantization.js",
-    teaches: "Mixed-precision quantization and per-layer sensitivity.",
+    module: "/assets/games/quantization.mjs",
+    teaches: "Mixed-Precision Quantization.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "batch",
+    name: "Batch Size Balancer",
+    tagline: "Push throughput to the edge of OOM.",
+    url: "/games/batch.html",
+    module: "/assets/games/batch.mjs",
+    teaches: "Throughput vs. Memory.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "moe",
+    name: "MoE Router",
+    tagline: "Distribute tokens, balance the experts.",
+    url: "/games/moe.html",
+    module: "/assets/games/moe.mjs",
+    teaches: "Mixture of Experts.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "loader",
+    name: "Data Loader Dash",
+    tagline: "The CPU preparing data before the GPU starves.",
+    url: "/games/loader.html",
+    module: "/assets/games/loader.mjs",
+    teaches: "The I/O Bottleneck.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "checkpoint",
+    name: "Checkpoint Roulette",
+    tagline: "Fault tolerance and checkpointing at scale.",
+    url: "/games/checkpoint.html",
+    module: "/assets/games/checkpoint.mjs",
+    teaches: "Fault Tolerance.",
+    featured404: false,
+    inline404: true,
     available: true
   },
   {
     id: "roofline",
-    name: "Roofline Runner",
-    tagline: "Catch kernels under the ceiling.",
+    name: "Roofline Rider",
+    tagline: "The Roofline model: Compute vs Memory bound.",
     url: "/games/roofline.html",
-    script: "/assets/games/_archive/roofline.js",
-    teaches: "Memory-bound vs compute-bound; the ridge point.",
-    available: false
+    module: "/assets/games/roofline.mjs",
+    teaches: "Hardware Acceleration.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "allreduce",
+    name: "All-Reduce Rhythm",
+    tagline: "Keep the gradients flowing in a perfect ring.",
+    url: "/games/allreduce.html",
+    module: "/assets/games/allreduce.mjs",
+    teaches: "Collective Communication.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "topology",
+    name: "Topology Tycoon",
+    tagline: "Build the fabric, avoid the bottlenecks.",
+    url: "/games/topology.html",
+    module: "/assets/games/topology.mjs",
+    teaches: "Network Fabrics.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "kvcache",
+    name: "KV Cache Packer",
+    tagline: "Pack the pages. Defrag the cache.",
+    url: "/games/kvcache.html",
+    module: "/assets/games/kvcache.mjs",
+    teaches: "LLM Serving & PagedAttention.",
+    featured404: false,
+    inline404: true,
+    available: true
+  },
+  {
+    id: "cluster",
+    name: "Cluster Commander",
+    tagline: "Pack your workloads, avoid fragmentation.",
+    url: "/games/cluster.html",
+    module: "/assets/games/cluster.mjs",
+    teaches: "Fleet Orchestration.",
+    featured404: false,
+    inline404: true,
+    available: true
   }
 ];
 

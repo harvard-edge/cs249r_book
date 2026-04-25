@@ -57,6 +57,9 @@ export async function mountPulsePrune(canvas, opts = {}) {
   const { app, stage, width: W, height: H } = await mountPixiOnCanvas(canvas, { bg: COL.white });
   const { rand, today } = dailySeed("prune");
   const alltimeBestRef = { v: bestScore.get("prune") };
+  const startOnFirstAction = !!opts.startOnFirstAction;
+  const safeFirstHint = !!opts.safeFirstHint;
+  const relaxedHitTest = !!opts.relaxedHitTest;
 
   /* --- Network topology --- */
   const neurons = [];
@@ -131,12 +134,20 @@ export async function mountPulsePrune(canvas, opts = {}) {
     total: weights.length,
     removedImp: 0,
     timeLeft: TIME_LIMIT_MS,
+    started: !startOnFirstAction,
     over: false,
     won: false,
     hoverIdx: -1,
     inferencePulse: null,
     pulseCooldown: 1200
   };
+  const safestWeightIdx = safeFirstHint
+    ? weights.reduce((bestIdx, w, i, arr) => {
+        if (bestIdx < 0) return i;
+        if (w.magnitude < arr[bestIdx].magnitude) return i;
+        return bestIdx;
+      }, -1)
+    : -1;
 
   /* --- Hit-testing input --- */
   const handlePointerMove = (e) => {
@@ -177,7 +188,7 @@ export async function mountPulsePrune(canvas, opts = {}) {
     return r.bottom > 0 && r.top < (window.innerHeight || document.documentElement.clientHeight);
   }
   function findHover(px, py) {
-    let best = -1, bestD = 12;
+    let best = -1, bestD = relaxedHitTest ? 18 : 12;
     for (let i = 0; i < weights.length; i++) {
       if (weights[i].pruned) continue;
       const d = distToSegment(px, py, weights[i].from.x, weights[i].from.y, weights[i].to.x, weights[i].to.y);
@@ -189,6 +200,7 @@ export async function mountPulsePrune(canvas, opts = {}) {
   /* --- Mechanics --- */
   function pruneWeight(w) {
     if (w.pruned || state.over) return;
+    if (!state.started) state.started = true;
     w.pruned = true;
     state.pruned++;
     state.sparsity = (state.pruned / state.total) * 100;
@@ -349,12 +361,14 @@ export async function mountPulsePrune(canvas, opts = {}) {
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
     if (!state.over) {
-      state.timeLeft -= dt;
-      if (state.timeLeft <= 0) {
-        state.timeLeft = 0;
-        state.over = true;
-        state.won = state.sparsity >= TARGET_SPARSITY && state.accuracy >= ACCURACY_FLOOR;
-        endGame();
+      if (state.started) {
+        state.timeLeft -= dt;
+        if (state.timeLeft <= 0) {
+          state.timeLeft = 0;
+          state.over = true;
+          state.won = state.sparsity >= TARGET_SPARSITY && state.accuracy >= ACCURACY_FLOOR;
+          endGame();
+        }
       }
       if (!state.inferencePulse) {
         state.pulseCooldown -= dt;
@@ -376,6 +390,7 @@ export async function mountPulsePrune(canvas, opts = {}) {
         accuracy: state.accuracy,
         sparsity: state.sparsity,
         timeLeft: state.timeLeft,
+        started: state.started,
         alltimeBest: alltimeBestRef.v
       });
     }
@@ -392,13 +407,21 @@ export async function mountPulsePrune(canvas, opts = {}) {
       if (w.pruned) continue;
       const baseAlpha = Math.max(0.1, Math.min(1, w.magnitude * 0.7));
       const active = w.activation;
-      const alpha = Math.min(1, baseAlpha + active * 0.5);
+      const safeHintPulse = (!state.started && i === safestWeightIdx)
+        ? (0.18 + 0.18 * (0.5 + 0.5 * Math.sin(performance.now() * 0.008)))
+        : 0;
+      const alpha = Math.min(1, baseAlpha + active * 0.5 + safeHintPulse);
       let color;
       if (i === state.hoverIdx) color = COL.mitRed;
+      else if (!state.started && i === safestWeightIdx) color = COL.greenStroke;
       else if (w.magnitude > 0.55) color = COL.blueStroke;
       else if (w.magnitude > 0.30) color = COL.blueMid;
       else color = COL.blueFaint;
-      const lineWidth = (i === state.hoverIdx) ? 3 : 1.2 + w.magnitude * 1.8;
+      const lineWidth = (i === state.hoverIdx)
+        ? 3
+        : (!state.started && i === safestWeightIdx)
+          ? 3.2
+          : 1.2 + w.magnitude * 1.8;
       edgesGfx.moveTo(w.from.x, w.from.y);
       edgesGfx.lineTo(w.to.x, w.to.y);
       edgesGfx.stroke({ width: lineWidth, color, alpha });
@@ -482,12 +505,14 @@ export async function mountPulsePrune(canvas, opts = {}) {
     accuracyLabel.position.set(barX, accY - 13);
 
     const secs = Math.ceil(state.timeLeft / 1000);
-    timerLabel.text = `⏱ ${secs}s`;
-    timerLabel.style.fill = secs <= 10 ? 0xc44444 : 0x555555;
+    timerLabel.text = state.started ? `⏱ ${secs}s` : "⏱ starts on first click";
+    timerLabel.style.fill = state.started && secs <= 10 ? 0xc44444 : 0x555555;
     timerLabel.anchor.set(1, 0);
     timerLabel.position.set(W - 20, spY - 14);
 
-    dailyLabel.text = `daily ${today} · day ${dayNumber()} · all-time best ${alltimeBestRef.v}% · R retry`;
+    dailyLabel.text = state.started
+      ? `daily ${today} · day ${dayNumber()} · all-time best ${alltimeBestRef.v}% · R retry`
+      : `click a faint weight to begin · all-time best ${alltimeBestRef.v}%`;
     dailyLabel.position.set(barX, accY + accH + 4);
   }
 

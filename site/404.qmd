@@ -10,80 +10,255 @@ format:
 ---
 
 ```{=html}
-<div class="mlsp-404-banner" role="alert">
-  <strong>404 — you arrived here because the page is missing.</strong> The URL may have moved, or it never existed. Enjoy a game while you figure out where you were going.
-</div>
-
-<p class="mlsp-404-nav">Looking for something? <a href="/">home</a> · <a href="/vol1/">Volume I</a> · <a href="/vol2/">Volume II</a> · <a href="/games/">more games</a> · <a href="https://github.com/harvard-edge/cs249r_book/issues/new">report broken link</a></p>
-
-<div class="mlsp-game-container" role="region" aria-label="Random MLSysBook Playground mini-game">
-  <canvas id="mlsp-canvas" class="mlsp-game-canvas" width="680" height="460"></canvas>
-  <div class="mlsp-game-hud">
-    <span class="mlsp-score" id="mlsp-hud">loading game…</span>
-    <span id="mlsp-hint">&nbsp;</span>
+<section class="mlsp-404-hero" aria-labelledby="mlsp-404-title">
+  <p class="mlsp-404-eyebrow">ROUTE NOT FOUND</p>
+  <h1 id="mlsp-404-title">That request fell off the graph.</h1>
+  <p class="mlsp-404-lede">The page moved, the link broke, or the path never existed. Recover fast, or run a 30-second systems demo while you reorient.</p>
+  <div class="mlsp-404-actions">
+    <a class="mlsp-404-primary" href="/">Go Home</a>
+    <a class="mlsp-404-secondary" href="/vol1/">Volume I</a>
+    <a class="mlsp-404-secondary" href="/vol2/">Volume II</a>
+    <a class="mlsp-404-secondary" href="/games/">Open Playground</a>
+    <a class="mlsp-404-secondary" href="https://github.com/harvard-edge/cs249r_book/issues/new">Report Broken Link</a>
   </div>
+</section>
+
+<div class="mlsp-404-lab">
+  <div class="mlsp-404-lab-head">
+    <div>
+      <p class="mlsp-404-kicker">FEATURED SYSTEMS DEMO</p>
+      <h2 id="mlsp-feature-title">loading…</h2>
+      <p id="mlsp-feature-copy" class="mlsp-404-copy">Booting the playground...</p>
+    </div>
+    <div class="mlsp-404-switcher-wrap">
+      <span class="mlsp-404-switcher-label">Try another concept</span>
+      <div id="mlsp-switcher" class="mlsp-404-switcher" role="tablist" aria-label="Choose a concept demo"></div>
+    </div>
+  </div>
+
+  <div class="mlsp-game-container" role="region" aria-label="Featured MLSysBook Playground mini-game">
+    <canvas id="mlsp-canvas" class="mlsp-game-canvas" width="680" height="460"></canvas>
+    <div class="mlsp-game-hud">
+      <span class="mlsp-score" id="mlsp-hud">loading demo…</span>
+      <span id="mlsp-hint">Choose a concept or just start playing.</span>
+    </div>
+  </div>
+
+  <p class="mlsp-404-footnote">The default demo is tuned for a 404: fast to understand, starts on first click, and teaches one systems idea. Deeper/weirder concepts still live in the full <a href="/games/">Playground</a>.</p>
 </div>
 
 <div id="mlsp-aha-slot"></div>
 
-<p class="mlsp-404-more">More games at <a href="/games/">/games/</a> · <a href="/">Back to mlsysbook.ai</a></p>
+<div class="mlsp-404-destinations">
+  <a class="mlsp-404-destination" href="/tinytorch/"><strong>TinyTorch</strong><span>Build your own ML framework</span></a>
+  <a class="mlsp-404-destination" href="/labs/"><strong>Labs</strong><span>Hands-on systems exercises</span></a>
+  <a class="mlsp-404-destination" href="/slides/"><strong>Slides</strong><span>Course and lecture material</span></a>
+  <a class="mlsp-404-destination" href="/instructors/"><strong>Instructor Hub</strong><span>Teaching resources and course kits</span></a>
+</div>
 
 <script>
 (function mount404Game(){
+  var currentApi = null;
+  var currentToken = 0;
+
   function boot() {
-    if (!window.MLSP || !MLSP.pickRandomGame) return setTimeout(boot, 30);
-    var game = MLSP.pickRandomGame();
-    if (!game) {
-      document.getElementById("mlsp-hud").textContent = "no games available";
+    if (!window.MLSP || !MLSP.registry) return setTimeout(boot, 30);
+    MLSP.games = MLSP.games || {};
+
+    var featured = getFeatured404Games();
+    if (!featured.length) {
+      document.getElementById("mlsp-hud").textContent = "no demos available";
       return;
     }
-    // Dynamically load the chosen game's script, then mount it.
-    var s = document.createElement("script");
-    s.src = game.script;
-    s.onload = function() {
+
+    buildSwitcher(featured);
+    mountGame(featured[0]);
+  }
+
+  function getFeatured404Games() {
+    var inline = (MLSP.registry || []).filter(function(g) {
+      return g.inline404 === true && (g.module || g.script);
+    });
+    inline.sort(function(a, b) {
+      return (b.featured404 === true) - (a.featured404 === true);
+    });
+    return inline;
+  }
+
+  function buildSwitcher(games) {
+    var switcher = document.getElementById("mlsp-switcher");
+    switcher.innerHTML = "";
+    games.forEach(function(game) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mlsp-404-chip";
+      btn.textContent = game.name;
+      btn.setAttribute("role", "tab");
+      btn.dataset.gameId = game.id;
+      btn.addEventListener("click", function() { mountGame(game); });
+      switcher.appendChild(btn);
+    });
+  }
+
+  function mountGame(game) {
+    var token = ++currentToken;
+    var $hud  = document.getElementById("mlsp-hud");
+    var $hint = document.getElementById("mlsp-hint");
+    var $title = document.getElementById("mlsp-feature-title");
+    var $copy = document.getElementById("mlsp-feature-copy");
+    var ahaSlot = document.getElementById("mlsp-aha-slot");
+
+    if (currentApi && currentApi.destroy) {
+      try { currentApi.destroy(); } catch (e) {}
+      currentApi = null;
+    }
+    ahaSlot.innerHTML = "";
+    var canvas = resetCanvas();
+
+    setActiveChip(game.id);
+    $title.textContent = game.name;
+    $copy.textContent = describeGame(game);
+    $hud.textContent = "loading " + game.name.toLowerCase() + "…";
+    $hint.innerHTML = hintForGame(game);
+
+    loadGame(game).then(function() {
+      if (token !== currentToken) return;
       if (!MLSP.games || !MLSP.games[game.id]) {
-        document.getElementById("mlsp-hud").textContent = "game failed to load";
+        $hud.textContent = "game failed to load";
         return;
       }
-      var canvas = document.getElementById("mlsp-canvas");
-      var $hud  = document.getElementById("mlsp-hud");
-      var $hint = document.getElementById("mlsp-hint");
-      var ahaSlot = document.getElementById("mlsp-aha-slot");
-      $hint.innerHTML = "playing <strong>" + game.name + "</strong> · <kbd>R</kbd> to retry";
-      var api = MLSP.games[game.id](canvas, {
+      var pendingResult = null;
+      var resolvedApi = null;
+      Promise.resolve(MLSP.games[game.id](canvas, createGameOptions(game, {
         onScoreChange: function(s) {
-          if (typeof s.accuracy === "number" && typeof s.sparsity === "number") {
-            $hud.textContent = s.accuracy.toFixed(1) + "% acc · " + s.sparsity.toFixed(0) + "% sparse";
-          }
+          $hud.textContent = formatHud(game, s);
         },
         onGameOver: function(result) {
-          MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText);
-          var card = ahaSlot.querySelector(".mlsp-aha-card");
-          if (card && api.buildShareText && result) {
-            var share = document.createElement("button");
-            share.type = "button";
-            share.textContent = "📋 Copy share text";
-            share.style.cssText = "margin-top:0.75rem;background:#a31f34;color:#fff;border:none;padding:0.4rem 0.85rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;";
-            share.addEventListener("click", function() {
-              var txt = api.buildShareText(result);
-              if (navigator.clipboard) {
-                navigator.clipboard.writeText(txt).then(function(){
-                  share.textContent = "✓ Copied!";
-                  setTimeout(function(){ share.textContent = "📋 Copy share text"; }, 1800);
-                });
-              }
-            });
-            card.appendChild(share);
-          }
+          if (resolvedApi) attachAha(resolvedApi, result);
+          else pendingResult = result;
         },
-        onRetry: function() { window.location.reload(); }
+        onRetry: function() { mountGame(game); }
+      }))).then(function(api) {
+        if (token !== currentToken) {
+          if (api && api.destroy) {
+            try { api.destroy(); } catch (e) {}
+          }
+          return;
+        }
+        currentApi = api;
+        resolvedApi = api;
+        if (pendingResult) attachAha(api, pendingResult);
       });
-    };
-    s.onerror = function() {
-      document.getElementById("mlsp-hud").textContent = "game script failed to load";
-    };
-    document.head.appendChild(s);
+
+      function attachAha(api, result) {
+        MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText, api.ahaLink);
+        var card = ahaSlot.querySelector(".mlsp-aha-card");
+        if (card && api.buildShareText && result) {
+          var share = document.createElement("button");
+          share.type = "button";
+          share.textContent = "📋 Copy share text";
+          share.style.cssText = "margin-top:0.75rem;background:#a31f34;color:#fff;border:none;padding:0.4rem 0.85rem;border-radius:4px;cursor:pointer;font-size:0.85rem;font-weight:600;";
+          share.addEventListener("click", function() {
+            var txt = api.buildShareText(result);
+            if (navigator.clipboard) {
+              navigator.clipboard.writeText(txt).then(function(){
+                share.textContent = "✓ Copied!";
+                setTimeout(function(){ share.textContent = "📋 Copy share text"; }, 1800);
+              });
+            }
+          });
+          card.appendChild(share);
+        }
+      }
+    }).catch(function() {
+      if (token === currentToken) $hud.textContent = "game script failed to load";
+    });
   }
+
+  function resetCanvas() {
+    var oldCanvas = document.getElementById("mlsp-canvas");
+    if (oldCanvas) {
+      var fresh = oldCanvas.cloneNode(false);
+      oldCanvas.parentNode.replaceChild(fresh, oldCanvas);
+      return fresh;
+    }
+    var container = document.querySelector(".mlsp-game-container");
+    var newCanvas = document.createElement("canvas");
+    newCanvas.id = "mlsp-canvas";
+    newCanvas.className = "mlsp-game-canvas";
+    newCanvas.width = 680;
+    newCanvas.height = 460;
+    container.insertBefore(newCanvas, container.firstChild);
+    return newCanvas;
+  }
+
+  function createGameOptions(game, baseOpts) {
+    var opts = {};
+    for (var k in baseOpts) opts[k] = baseOpts[k];
+    if (game.id === "prune") {
+      opts.startOnFirstAction = true;
+      opts.safeFirstHint = true;
+      opts.relaxedHitTest = true;
+    }
+    return opts;
+  }
+
+  function setActiveChip(gameId) {
+    var chips = document.querySelectorAll(".mlsp-404-chip");
+    for (var i = 0; i < chips.length; i++) {
+      var active = chips[i].dataset.gameId === gameId;
+      chips[i].classList.toggle("is-active", active);
+      chips[i].setAttribute("aria-selected", active ? "true" : "false");
+    }
+  }
+
+  function loadGame(game) {
+    if (game.module) {
+      return import("/assets/games/runtime.mjs").then(function() {
+        return import(game.module);
+      });
+    }
+    return new Promise(function(resolve, reject) {
+      var s = document.createElement("script");
+      s.src = game.script;
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  function describeGame(game) {
+    if (game.id === "prune") return "A calm, click-first pruning demo. Cut the faint weights, protect the bright ones, and see how magnitude pruning trades sparsity against accuracy.";
+    if (game.id === "quantization") return "A more demanding demo: lower precision saves bits, but the target starts lying to you. Great for replay, slightly more setup.";
+    if (game.id === "oom") return "A systems-heavy memory toy. Useful, but we keep it as an optional concept because it asks more from you than the flagship does.";
+    return game.teaches;
+  }
+
+  function hintForGame(game) {
+    if (game.id === "prune") return "Default flagship demo · click a faint weight to begin · <kbd>R</kbd> retry";
+    if (game.id === "quantization") return "Cycle precision, then fire · <kbd>1-6</kbd> layer dials · <kbd>SPACE</kbd> shoot · <kbd>R</kbd> retry";
+    if (game.id === "oom") return "Move and hard-drop blocks · <kbd>← →</kbd> move · <kbd>SPACE</kbd> drop · <kbd>R</kbd> retry";
+    return "playing <strong>" + game.name + "</strong> · <kbd>R</kbd> retry";
+  }
+
+  function formatHud(game, s) {
+    if (!s) return game.name + " · " + game.teaches;
+    if (game.id === "prune" && typeof s.accuracy === "number" && typeof s.sparsity === "number") {
+      if (s.started === false) return "click a faint weight to start · protect bright weights";
+      return s.accuracy.toFixed(1) + "% acc · " + s.sparsity.toFixed(0) + "% sparse";
+    }
+    if (typeof s.stepsCompleted === "number" && typeof s.idlePct === "number") {
+      return "step " + s.stepsCompleted + " · idle " + s.idlePct.toFixed(0) + "%";
+    }
+    if (typeof s.bitsUsed === "number" && typeof s.accuracy === "number") {
+      return s.bitsUsed + " / " + s.budget + " bits · " + s.accuracy + "% acc";
+    }
+    if (typeof s.score === "number") {
+      return "score " + s.score;
+    }
+    return game.name + " · " + game.teaches;
+  }
+
   boot();
 })();
 </script>

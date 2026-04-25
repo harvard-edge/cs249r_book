@@ -247,7 +247,7 @@ MLSP.games.oom = function(canvas, opts) {
     ctx.clearRect(-20, -20, W + 40, H + 40);
 
     ctx.fillStyle = "#333"; ctx.font = "bold 15px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "center";
-    ctx.fillText("OOM", W/2, 24);
+    ctx.fillText("Tensor Tetris", W/2, 24);
     ctx.font = "10.5px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#888";
     ctx.fillText("← → move · space drop · every 3 blocks = backward · every 6 blocks = step() freeing grads", W/2, 42);
 
@@ -364,11 +364,11 @@ MLSP.games.oom = function(canvas, opts) {
 
   return {
     id: "oom",
-    name: "OOM",
+    name: "Tensor Tetris",
     ahaLabel: "You just played at",
     ahaText: "GPU memory management with lifetimes. Every training step you just drove: forward pass accumulates activations, backward consumes them, and the optimizer step frees gradients. Your packing rhythm *is* the training loop. During inference the residents are different — optimizer state goes away, KV cache grows with sequence length. Real systems fight fragmentation with caching allocators and trade compute for memory via activation checkpointing and offload.",
     buildShareText: function(r) {
-      return "MLSysBook Playground · OOM · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
+      return "MLSysBook Playground · Tensor Tetris · Day " + (MLSP.dayNumber ? MLSP.dayNumber() : today) + "\n" +
              "packed " + r.score + " tensors\n" +
              r.emojiGrid + "\n" +
              "play → mlsysbook.ai/games/oom/";
