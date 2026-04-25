@@ -1419,7 +1419,7 @@ def _(
 
     # Save ledger
     ledger.save(
-        chapter="v2_06",
+        chapter=6,
         design={
             "partA_prediction": partA_prediction.value or "no_selection",
             "partA_correct": partA_prediction.value == "C",

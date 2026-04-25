@@ -1377,7 +1377,7 @@ def _(COLORS, partA_prediction, partB_prediction, partC_prediction, partD_predic
       partA_reflection, partB_reflection, partC_reflection, partD_reflection,
       ledger, mo, decision_input, decision_ui):
     ledger.save(
-        chapter="v2_08",
+        chapter=8,
         design={
             "partA_prediction": partA_prediction.value or "no_selection",
             "partA_correct": partA_prediction.value == "C",

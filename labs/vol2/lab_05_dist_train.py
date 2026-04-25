@@ -1426,7 +1426,7 @@ def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partC_reflec
     _context = "3d_parallel" if _tp > 1 or _pp > 1 else "data_parallel"
 
     ledger.save(
-        chapter="v2_05",
+        chapter=5,
         design={
             "context": _context,
             "tp_degree": _tp,
