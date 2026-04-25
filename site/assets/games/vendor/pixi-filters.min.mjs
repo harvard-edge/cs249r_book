@@ -6,7 +6,7 @@
  * http://www.opensource.org/licenses/mit-license
  * 
  * Copyright 2025, PixiJS Team, All Rights Reserved
- */import{Filter as f,GpuProgram as c,GlProgram as m,deprecation as h,TexturePool as y,Texture as _,Color as S,BlurFilter as qt,DEG_TO_RAD as G,AlphaFilter as Zt,BlurFilterPass as rn,TextureSource as Ht,ImageSource as Qt,ObservablePoint as Jt,Point as eo,ViewSystem as no}from"/assets/games/vendor/pixi.min.mjs";var p=`in vec2 aPosition;
+ */import{Filter as f,GpuProgram as c,GlProgram as m,deprecation as h,TexturePool as y,Texture as _,Color as S,BlurFilter as qt,DEG_TO_RAD as G,AlphaFilter as Zt,BlurFilterPass as rn,TextureSource as Ht,ImageSource as Qt,ObservablePoint as Jt,Point as eo,ViewSystem as no}from"./pixi.min.mjs";var p=`in vec2 aPosition;
 out vec2 vTextureCoord;
 
 uniform vec4 uInputSize;
