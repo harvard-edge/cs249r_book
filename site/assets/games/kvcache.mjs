@@ -45,6 +45,8 @@ export async function mountKVCache(canvas, opts = {}) {
       
       g.eventMode = "static";
       g.on("pointerdown", () => handleGridClick(r, c));
+      g.on("pointerover", () => drawHover(r));
+      g.on("pointerout", () => clearHover());
     }
   }
 
@@ -69,6 +71,16 @@ export async function mountKVCache(canvas, opts = {}) {
   const nextLabel = new PIXI.Text({ text: "Next Request:", style: { fontSize: 14, fill: colors.text } });
   nextLabel.anchor.set(0.5); nextLabel.position.set(W / 2, startY - 40);
   bgLayer.addChild(nextLabel);
+  const instructionText = new PIXI.Text({
+    text: "Click a row with enough contiguous empty pages to place the incoming request.",
+    style: { fontSize: 11, fill: 0x666666, fontFamily: "Helvetica Neue, Arial" }
+  });
+  instructionText.anchor.set(0.5);
+  instructionText.position.set(W / 2, startY + gridH + 18);
+  bgLayer.addChild(instructionText);
+
+  const hoverGraphic = new PIXI.Graphics();
+  gridLayer.addChild(hoverGraphic);
 
   let pagedMode = false;
   let pagedUnlocked = false;
@@ -81,8 +93,25 @@ export async function mountKVCache(canvas, opts = {}) {
     reqBox.clear();
     const reqW = currentReqLength * (CELL + PADDING) - PADDING;
     reqBox.roundRect(W / 2 - reqW / 2, startY - 25, reqW, CELL, 4).fill(pagedMode ? colors.paged : colors.req);
+    nextLabel.text = `Next request: ${currentReqLength} KV pages`;
   }
   drawReq();
+
+  function drawHover(r) {
+    hoverGraphic.clear();
+    if (over) return;
+    const startC = checkContiguous(r, currentReqLength);
+    const ok = pagedMode || startC !== -1;
+    const x = pagedMode ? startX : startX + Math.max(0, startC) * (CELL + PADDING);
+    const w = pagedMode ? gridW - PADDING : currentReqLength * (CELL + PADDING) - PADDING;
+    hoverGraphic.roundRect(x, startY + r * (CELL + PADDING), w, CELL, 4)
+      .fill({ color: ok ? 0x3d9e5a : 0xc44444, alpha: 0.24 })
+      .stroke({ color: ok ? 0x3d9e5a : 0xc44444, width: 2, alpha: 0.7 });
+  }
+
+  function clearHover() {
+    hoverGraphic.clear();
+  }
 
   function checkContiguous(r, length) {
     let count = 0;
@@ -111,9 +140,10 @@ export async function mountKVCache(canvas, opts = {}) {
           grid[r][startC + i] = { id: reqId, ttl, color: colors.req };
         }
         score++;
+        floatText(stage, W/2, startY - 6, `served ${currentReqLength} pages`, 0x3d9e5a, { size: 12 });
         onPlaced();
       } else {
-        floatText(stage, startX + c * (CELL + PADDING), startY + r * (CELL + PADDING), "No Space!", 0xc44444);
+        floatText(stage, startX + c * (CELL + PADDING), startY + r * (CELL + PADDING), `Need ${currentReqLength} contiguous`, 0xc44444);
       }
     } else {
       // Phase 2: Paged mode. Click anywhere to place.
@@ -138,6 +168,7 @@ export async function mountKVCache(canvas, opts = {}) {
           burst(stage, startX + spot.cc * (CELL + PADDING) + CELL/2, startY + spot.rr * (CELL + PADDING) + CELL/2, colors.paged, 3, {speed: 1, lifeMs: 300});
         }
         score++;
+        floatText(stage, W/2, startY - 6, `paged ${currentReqLength} blocks`, 0x3d9e5a, { size: 12 });
         onPlaced();
       } else {
         floatText(stage, W/2, startY - 10, "Cache Full!", 0xc44444);
@@ -149,6 +180,7 @@ export async function mountKVCache(canvas, opts = {}) {
     scoreText.text = "Served: " + score;
     if (opts.onScoreChange) opts.onScoreChange({ score, timeLeft: Math.max(0, TOTAL_TIME - timeElapsed) });
     currentReqLength = generateReq();
+    clearHover();
     drawReq();
   }
 
@@ -189,6 +221,7 @@ export async function mountKVCache(canvas, opts = {}) {
       pagedUnlocked = true;
       pagedMode = true;
       phaseText.text = "Phase 2: PAGED MODE UNLOCKED";
+      instructionText.text = "Paged mode: click anywhere with enough free pages. Press Space to compact rows.";
       phaseText.style.fill = 0x3d9e5a;
       flash(stage, 0x3d9e5a, 600);
       floatText(stage, W/2, H/2, "PAGED MODE!", 0x3d9e5a, {size: 32});

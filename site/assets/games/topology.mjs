@@ -6,17 +6,19 @@ window.MLSP.games = window.MLSP.games || {};
 window.MLSP.games.topology = function(canvas, opts) { return mountTopology(canvas, opts); };
 
 export async function mountTopology(canvas, opts = {}) {
-  const { app, stage, width: W, height: H, onTick } = await mountPixiOnCanvas(canvas, { bg: 0x11151c });
+  const { app, stage, width: W, height: H, onTick } = await mountPixiOnCanvas(canvas, { bg: 0xf8f9fa });
 
   const COL = {
-    bg: 0x11151c,
-    node: 0x2a3b4c,
-    nodeSelect: 0xeeeeee,
+    bg: 0xf8f9fa,
+    node: 0xffffff,
+    nodeStroke: 0x6f7782,
+    nodeSelect: 0xa31f34,
     ib: 0x4a90c4, // Slow InfiniBand
     nvlink: 0x3d9e5a, // Fast NVLink
-    packet: 0xeeeeee,
+    packet: 0x333333,
     jam: 0xc44444,
-    text: 0xeeeeee
+    text: 0x333333,
+    muted: 0x777777
   };
 
   const state = {
@@ -37,6 +39,22 @@ export async function mountTopology(canvas, opts = {}) {
   const linkLayer = new P.Container();
   const packetLayer = new P.Container();
   stage.addChild(linkLayer, packetLayer, gameLayer);
+
+  const titleText = new P.Text({
+    text: "Build phase: click two GPUs to create a link",
+    style: { fill: COL.text, fontSize: 16, fontWeight: "700", fontFamily: "Helvetica Neue, Arial" }
+  });
+  titleText.anchor.set(0.5, 0);
+  titleText.position.set(W / 2, 18);
+  stage.addChild(titleText);
+
+  const statusText = new P.Text({
+    text: "First pair click creates InfiniBand; click the same pair again to upgrade to NVLink.",
+    style: { fill: COL.muted, fontSize: 12, fontFamily: "Helvetica Neue, Arial" }
+  });
+  statusText.anchor.set(0.5, 0);
+  statusText.position.set(W / 2, 42);
+  stage.addChild(statusText);
 
   const packetPool = Array.from({ length: 200 }, () => {
     const g = new P.Graphics();
@@ -67,27 +85,58 @@ export async function mountTopology(canvas, opts = {}) {
     nodeContainer.position.set(x, y);
 
     const box = new P.Graphics();
-    box.roundRect(-20, -20, 40, 40, 6).fill({ color: COL.node });
-    
-    const label = new P.Text({
-      text: i.toString(),
-      style: { fill: 0xffffff, fontSize: 16, fontWeight: "bold" }
-    });
-    label.anchor.set(0.5);
-
-    nodeContainer.addChild(box, label);
-    gameLayer.addChild(nodeContainer);
-
+    drawNodeBox(box, false);
     box.eventMode = 'static';
     box.cursor = 'pointer';
     box.on('pointerdown', () => handleNodeClick(i));
     
-    // Also allow clicking the text label
+    const label = new P.Text({
+      text: i.toString(),
+      style: { fill: COL.text, fontSize: 16, fontWeight: "bold", fontFamily: "Helvetica Neue, Arial" }
+    });
+    label.anchor.set(0.5);
     label.eventMode = 'static';
     label.cursor = 'pointer';
     label.on('pointerdown', () => handleNodeClick(i));
 
-    nodes.push({ x, y, box, container: nodeContainer });
+    nodeContainer.addChild(box, label);
+    gameLayer.addChild(nodeContainer);
+
+    nodes.push({ x, y, box, label, container: nodeContainer });
+  }
+
+  function canvasPoint(evt) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (evt.clientX - rect.left) * (canvas.width / rect.width),
+      y: (evt.clientY - rect.top) * (canvas.height / rect.height)
+    };
+  }
+
+  const onCanvasPointer = (evt) => {
+    if (state.phase !== 'build') return;
+    const p = canvasPoint(evt);
+    let best = -1;
+    let bestDist = Infinity;
+    for (let i = 0; i < nodes.length; i++) {
+      const d = Math.hypot(p.x - nodes[i].x, p.y - nodes[i].y);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+    if (best !== -1 && bestDist <= 34) {
+      evt.preventDefault();
+      handleNodeClick(best);
+    }
+  };
+  canvas.addEventListener('pointerdown', onCanvasPointer);
+
+  function drawNodeBox(box, selected) {
+    box.clear();
+    box.roundRect(-26, -26, 52, 52, 8)
+      .fill({ color: selected ? 0xfff4f6 : COL.node })
+      .stroke({ color: selected ? COL.nodeSelect : COL.nodeStroke, width: selected ? 3 : 1.5 });
   }
 
   function getLinkKey(u, v) { return u < v ? `${u},${v}` : `${v},${u}`; }
@@ -97,10 +146,12 @@ export async function mountTopology(canvas, opts = {}) {
 
     if (state.selectedNode === null) {
       state.selectedNode = i;
-      nodes[i].box.tint = COL.nodeSelect;
+      drawNodeBox(nodes[i].box, true);
+      statusText.text = `GPU ${i} selected. Click another GPU to create or upgrade a link.`;
     } else if (state.selectedNode === i) {
-      nodes[i].box.tint = 0xffffff;
+      drawNodeBox(nodes[i].box, false);
       state.selectedNode = null;
+      statusText.text = "Selection cleared. Click two GPUs to create a link.";
     } else {
       const u = state.selectedNode;
       const v = i;
@@ -109,22 +160,26 @@ export async function mountTopology(canvas, opts = {}) {
 
       if (type === 0) {
         type = 1; // IB
+        statusText.text = `Created InfiniBand link: GPU ${u} ↔ GPU ${v}. Click pair again to upgrade.`;
       } else if (type === 1) {
         if (state.nvlinksUsed < state.maxNvlinks) {
           type = 2; // NVLink
           state.nvlinksUsed++;
+          statusText.text = `Upgraded link to NVLink: GPU ${u} ↔ GPU ${v}.`;
         } else {
           type = 0; // Skip NVLink if full
+          statusText.text = "No NVLinks left; removed the link instead.";
         }
       } else if (type === 2) {
         type = 0; // None
         state.nvlinksUsed--;
+        statusText.text = `Removed link: GPU ${u} ↔ GPU ${v}.`;
       }
       
       if (type === 0) links.delete(key);
       else links.set(key, type);
 
-      nodes[u].box.tint = 0xffffff;
+      drawNodeBox(nodes[u].box, false);
       state.selectedNode = null;
       drawLinks();
       updateHUD();
@@ -140,8 +195,7 @@ export async function mountTopology(canvas, opts = {}) {
       const g = new P.Graphics();
       g.moveTo(nodes[u].x, nodes[u].y);
       g.lineTo(nodes[v].x, nodes[v].y);
-      g.stroke({ width, color: 0xffffff });
-      g.tint = type === 1 ? COL.ib : COL.nvlink;
+      g.stroke({ width, color: type === 1 ? COL.ib : COL.nvlink, alpha: 0.88 });
       g.alpha = 0.8;
       linkLayer.addChild(g);
       linkGraphics.set(key, g);
@@ -188,8 +242,10 @@ export async function mountTopology(canvas, opts = {}) {
       if (state.phase === 'build') {
         state.phase = 'run';
         state.time = 30; // 30s run phase
+        titleText.text = "Run phase: packets stress the fabric";
+        statusText.text = "Blue links are slower InfiniBand; green links are faster NVLink. Red links are congested.";
         if (state.selectedNode !== null) {
-          nodes[state.selectedNode].box.tint = 0xffffff;
+          drawNodeBox(nodes[state.selectedNode].box, false);
           state.selectedNode = null;
         }
       } else if (state.phase === 'run') {
@@ -298,6 +354,10 @@ export async function mountTopology(canvas, opts = {}) {
   return {
     id: "topology",
     ahaLabel: "You just experienced",
-    ahaText: "Bisection Bandwidth bottlenecks. A cluster's throughput isn't just about raw GPU speed; it's about the fabric connecting them. Fast NVLinks handle huge traffic without dropping speeds, while slow InfiniBand links quickly turn into traffic jams under load."
+    ahaText: "Bisection Bandwidth bottlenecks. A cluster's throughput isn't just about raw GPU speed; it's about the fabric connecting them. Fast NVLinks handle huge traffic without dropping speeds, while slow InfiniBand links quickly turn into traffic jams under load.",
+    destroy() {
+      canvas.removeEventListener('pointerdown', onCanvasPointer);
+      app.destroy(true, { children: true, texture: true });
+    }
   };
 }

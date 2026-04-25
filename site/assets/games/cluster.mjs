@@ -62,6 +62,12 @@ export async function mountCluster(canvas, opts = {}) {
   const queueLabel = new PIXI.Text({ text: "Job Queue", style: { fontSize: 14, fill: colors.text, fontWeight: "bold" } });
   queueLabel.position.set(20, 100);
   hudLayer.addChild(queueLabel);
+  const instructionText = new PIXI.Text({
+    text: "Place the first queued job on the grid. Large jobs need contiguous empty space.",
+    style: { fontSize: 12, fill: 0x666666, fontFamily: "Helvetica Neue, Arial" }
+  });
+  instructionText.position.set(20, 72);
+  hudLayer.addChild(instructionText);
 
   const queueBox = new PIXI.Graphics();
   queueBox.position.set(20, 130);
@@ -88,14 +94,23 @@ export async function mountCluster(canvas, opts = {}) {
   populateQueue();
 
   function drawQueue() {
+    queueBox.removeChildren();
     queueBox.clear();
     let qy = 0;
     for (let i = 0; i < queue.length; i++) {
       const job = queue[i];
       const s = job.size * 10;
-      queueBox.rect(0, qy, s, s).fill(job.color);
-      if (i === 0) queueBox.stroke({ width: 2, color: 0x333333 }); // Head of queue
-      qy += s + 10;
+      const x = i === 0 ? 0 : 8;
+      queueBox.roundRect(x, qy, s, s, 3).fill(job.color).stroke({ width: i === 0 ? 2 : 1, color: i === 0 ? 0x333333 : 0xffffff });
+      if (i === 0) {
+        const label = new PIXI.Text({
+          text: `${job.name} ${job.size}x${job.size}`,
+          style: { fontSize: 11, fill: colors.text, fontFamily: "Helvetica Neue, Arial", fontWeight: "700" }
+        });
+        label.position.set(s + 8, qy - 1);
+        queueBox.addChild(label);
+      }
+      qy += Math.max(s, 18) + 12;
     }
   }
 
@@ -143,12 +158,13 @@ export async function mountCluster(canvas, opts = {}) {
       queue.shift();
       score += job.size * job.size; // Score proportional to size
       scoreText.text = "Scheduled: " + score;
+      floatText(stage, startX + c * (CELL + PADDING) + 18, startY + r * (CELL + PADDING) - 12, `scheduled ${job.name}`, 0x3d9e5a, { size: 12 });
       if (opts.onScoreChange) opts.onScoreChange({ score, timeLeft: Math.max(0, TOTAL_TIME - timeElapsed) });
       populateQueue();
       clearHover();
       alarmActive = false; // Reset alarm if we could schedule
     } else {
-      floatText(stage, startX + c * (CELL + PADDING), startY + r * (CELL + PADDING), "Can't Fit!", colors.alarm);
+      floatText(stage, startX + c * (CELL + PADDING), startY + r * (CELL + PADDING), `Need ${job.size}x${job.size}`, colors.alarm);
     }
   }
 
