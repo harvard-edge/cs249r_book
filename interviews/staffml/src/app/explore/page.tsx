@@ -382,25 +382,91 @@ export default function ExplorePage() {
       }
     }
 
-    const drawNodeLink = (source: AtlasNode, target: AtlasNode, alpha = 0.18) => {
+    const drawFlightRoute = (
+      source: AtlasNode,
+      target: AtlasNode,
+      {
+        alpha = 0.18,
+        color = "59,130,246",
+        width = 1,
+        dashed = false,
+      }: { alpha?: number; color?: string; width?: number; dashed?: boolean } = {},
+    ) => {
       const a = projectGlobe(source.lon, source.lat, rotation, globeRadius);
       const b = projectGlobe(target.lon, target.lat, rotation, globeRadius);
       if (a.depth < -0.78 && b.depth < -0.78) return;
+
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const lift = clamp(distance * 0.24, 18, 96);
+      const side = Math.sign(Math.sin(target.lon - source.lon)) || 1;
+      const cx = (a.x + b.x) / 2 + (-dy / distance) * lift * side;
+      const cy = (a.y + b.y) / 2 + (dx / distance) * lift * side;
+      const visibility = Math.max(0.2, (a.scale + b.scale) / 2);
+
+      ctx.save();
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = `rgba(59,130,246,${alpha * Math.max(0.2, (a.scale + b.scale) / 2)})`;
-      ctx.lineWidth = 1 / zoom;
+      ctx.quadraticCurveTo(cx, cy, b.x, b.y);
+      ctx.strokeStyle = `rgba(${color},${alpha * visibility})`;
+      ctx.lineWidth = width / zoom;
+      if (dashed) ctx.setLineDash([5 / zoom, 5 / zoom]);
       ctx.stroke();
+      ctx.restore();
+    };
+
+    const routeNodes = filteredNodes.length <= 220 ? filteredNodes : panelMatches;
+    const drawChainRoutes = (candidates: AtlasNode[]) => {
+      const byChain = new Map<string, AtlasNode[]>();
+      for (const node of candidates) {
+        for (const chainId of node.question.chain_ids ?? []) {
+          const group = byChain.get(chainId) ?? [];
+          group.push(node);
+          byChain.set(chainId, group);
+        }
+      }
+
+      for (const [chainId, group] of Array.from(byChain.entries())) {
+        const ordered = [...group]
+          .sort((a, b) =>
+            (a.question.chain_positions?.[chainId] ?? 0) -
+            (b.question.chain_positions?.[chainId] ?? 0),
+          )
+          .slice(0, 8);
+        for (let i = 1; i < ordered.length; i++) {
+          drawFlightRoute(ordered[i - 1], ordered[i], {
+            alpha: 0.58,
+            color: "245,158,11",
+            width: 2,
+          });
+        }
+      }
     };
 
     if (selectedNode) {
-      for (const node of relatedNodes) drawNodeLink(selectedNode, node, 0.24);
+      for (const node of relatedNodes) {
+        const sharesChain = selectedNode.question.chain_ids?.some((id) => node.question.chain_ids?.includes(id));
+        drawFlightRoute(selectedNode, node, {
+          alpha: sharesChain ? 0.46 : 0.20,
+          color: sharesChain ? "245,158,11" : "59,130,246",
+          width: sharesChain ? 2 : 1.3,
+          dashed: !sharesChain,
+        });
+      }
     } else if (filteredNodes.length <= 160) {
+      drawChainRoutes(routeNodes);
       const ordered = [...filteredNodes].sort((a, b) =>
         a.question.topic.localeCompare(b.question.topic) || a.lon - b.lon || a.lat - b.lat,
       );
-      for (let i = 1; i < ordered.length; i++) drawNodeLink(ordered[i - 1], ordered[i], 0.18);
+      for (let i = 1; i < ordered.length; i++) {
+        drawFlightRoute(ordered[i - 1], ordered[i], {
+          alpha: 0.22,
+          color: "59,130,246",
+          width: 1.2,
+          dashed: true,
+        });
+      }
 
       const byTopic = new Map<string, AtlasNode[]>();
       for (const node of filteredNodes) {
@@ -409,10 +475,25 @@ export default function ExplorePage() {
         byTopic.set(node.question.topic, group);
       }
       for (const group of Array.from(byTopic.values())) {
-        for (let i = 1; i < group.length; i++) drawNodeLink(group[i - 1], group[i], 0.24);
+        for (let i = 1; i < group.length; i++) {
+          drawFlightRoute(group[i - 1], group[i], {
+            alpha: 0.30,
+            color: "59,130,246",
+            width: 1.25,
+            dashed: true,
+          });
+        }
       }
     } else {
-      for (let i = 1; i < panelMatches.length; i++) drawNodeLink(panelMatches[i - 1], panelMatches[i], 0.10);
+      drawChainRoutes(routeNodes);
+      for (let i = 1; i < panelMatches.length; i++) {
+        drawFlightRoute(panelMatches[i - 1], panelMatches[i], {
+          alpha: 0.18,
+          color: "59,130,246",
+          width: 1,
+          dashed: true,
+        });
+      }
     }
 
     for (const { anchor, projection } of projectedAnchors) {
@@ -597,8 +678,8 @@ export default function ExplorePage() {
                 </h1>
                 <p className="text-sm text-textSecondary mt-1 max-w-2xl leading-relaxed">
                   Use this as a discovery planet: search for a concept, narrow by track or level,
-                  then follow connected question constellations into practice. Lines show local
-                  topic/chain neighborhoods, while cards keep the path easy to choose.
+                  then follow connected question routes into practice. Orange flight paths show
+                  question chains; blue routes show nearby topic neighborhoods.
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center shrink-0">
@@ -782,8 +863,9 @@ function EmptyPanel({
       </div>
       <h2 className="text-lg font-bold text-textPrimary mb-2">Question planet</h2>
       <p className="text-sm text-textSecondary leading-relaxed mb-5">
-        Each dot is a Vault question. Lines connect local topic and chain neighborhoods.
-        Use the planet to choose a question path, not to read exact set overlaps.
+        Each dot is a Vault question. Orange flight paths connect chain steps;
+        blue routes connect local topic neighborhoods. Use the planet to choose
+        a path, then use the cards for the exact question title.
       </p>
 
       {!hasActiveFilters && (
