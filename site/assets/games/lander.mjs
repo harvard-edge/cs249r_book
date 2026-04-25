@@ -138,6 +138,55 @@ export async function mountLander(canvas, opts = {}) {
   noiseText.position.set(18, 18);
   stage.addChild(noiseText);
 
+  // ── In-canvas HUD ── glanceable bars so the player never has to look away from the ship.
+  // VRAM (vertical, top-right). Color shifts blue → orange → red as memory depletes.
+  const vramBar = new P.Container();
+  vramBar.position.set(W - 36, 60);
+  const vramBarBg = new P.Graphics();
+  vramBarBg.rect(0, 0, 14, 200).fill({ color: 0xeef1f4 }).stroke({ color: 0xcfd5db, width: 1 });
+  vramBar.addChild(vramBarBg);
+  const vramBarFill = new P.Graphics();
+  vramBar.addChild(vramBarFill);
+  const vramLabel = new P.Text({ text: "VRAM", style: { fill: 0x666666, fontSize: 10, fontWeight: "700", letterSpacing: 1 }});
+  vramLabel.anchor.set(0.5, 1);
+  vramLabel.position.set(7, -4);
+  vramBar.addChild(vramLabel);
+  stage.addChild(vramBar);
+
+  // Speed (horizontal, bottom-left). Green safe-band, red danger-band, ticking marker.
+  const speedBar = new P.Container();
+  speedBar.position.set(22, H - 36);
+  const speedTrack = new P.Graphics();
+  // Safe zone (0..maxSafeSpeed), then danger zone — drawn once and held.
+  const speedW = 220;
+  const safeFrac = maxSafeSpeed / 4.5;          // 4.5 = visible-speed cap
+  speedTrack.rect(0, 0, speedW * safeFrac, 8).fill({ color: 0xd4edda }).stroke({ color: 0x3d9e5a, width: 1 });
+  speedTrack.rect(speedW * safeFrac, 0, speedW * (1 - safeFrac), 8).fill({ color: 0xf9d6d5 }).stroke({ color: 0xc44, width: 1 });
+  speedBar.addChild(speedTrack);
+  const speedTick = new P.Graphics();
+  speedBar.addChild(speedTick);
+  const speedLabel = new P.Text({ text: "DESCENT SPEED", style: { fill: 0x666666, fontSize: 10, fontWeight: "700", letterSpacing: 1 }});
+  speedLabel.position.set(0, -16);
+  speedBar.addChild(speedLabel);
+  const safeMarker = new P.Text({ text: "soft-landing limit ↑", style: { fill: 0x3d9e5a, fontSize: 9, fontWeight: "600" }});
+  safeMarker.anchor.set(0.5, 0);
+  safeMarker.position.set(speedW * safeFrac, 12);
+  speedBar.addChild(safeMarker);
+  stage.addChild(speedBar);
+
+  function drawHud() {
+    const fuelFrac = Math.max(0, Math.min(1, state.fuel / 100));
+    const filledH = 200 * fuelFrac;
+    const fillColor = fuelFrac > 0.5 ? 0x4a90c4 : (fuelFrac > 0.2 ? 0xc87b2a : 0xc44444);
+    vramBarFill.clear();
+    vramBarFill.rect(1, 1 + (200 - filledH), 12, filledH).fill({ color: fillColor });
+
+    const speed = Math.hypot(state.vx, state.vy);
+    const tickX = Math.min(speedW, (speed / 4.5) * speedW);
+    speedTick.clear();
+    speedTick.rect(tickX - 1, -3, 3, 14).fill({ color: 0x101827 });
+  }
+
   // ── Goal-pad pulse: the green platform breathes so the player's eye lands on it first ──
   const padPulse = new P.Graphics();
   padPulse.position.set(terrain.global.x, lossY(terrain.global.x));
@@ -193,6 +242,9 @@ export async function mountLander(canvas, opts = {}) {
   window.addEventListener('keyup', handleKeyup);
 
   app.ticker.add(() => {
+    // HUD drawn every frame so it never goes stale between win/crash and the aha card.
+    drawHud();
+
     // Goal pad always pulses (so the player's eye finds it before launch and during play).
     pulseT += 0.06;
     const r = 26 + Math.sin(pulseT) * 6;
