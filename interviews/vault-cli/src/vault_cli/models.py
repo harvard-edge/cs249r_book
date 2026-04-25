@@ -33,6 +33,7 @@ for _candidate in _REPO_ROOT_CANDIDATES:
 
 from enums import (  # noqa: E402, I001  # type: ignore[import-not-found]
     VALID_BLOOM_LEVELS,
+    VALID_COMPETENCY_AREAS,
     VALID_HUMAN_REVIEW_STATUSES,
     VALID_LEVELS,
     VALID_PHASES,
@@ -264,6 +265,20 @@ class Question(BaseModel):
     def _zone(cls, v: str) -> str:
         if v not in VALID_ZONES:
             raise ValueError(f"invalid zone {v!r}; must be one of {sorted(VALID_ZONES)}")
+        return v
+
+    @field_validator("competency_area")
+    @classmethod
+    def _area(cls, v: str) -> str:
+        # Closed enum (added 2026-04-25 — see fix_competency_areas.py).
+        # Catches Gemini-generated drafts that mistakenly populate the
+        # area field with a topic name or zone name instead of one of
+        # the 13 canonical competency areas.
+        if v not in VALID_COMPETENCY_AREAS:
+            raise ValueError(
+                f"invalid competency_area {v!r}; "
+                f"must be one of {sorted(VALID_COMPETENCY_AREAS)}"
+            )
         return v
 
     @field_validator("bloom_level")

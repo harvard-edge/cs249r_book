@@ -444,11 +444,15 @@ def main() -> int:
                         help="track:topic:zone:level (repeatable)")
     parser.add_argument("--auto-balance", action="store_true",
                         help="Pick balanced cells across tracks × topics × zones × levels.")
-    parser.add_argument("--total", type=int, default=12,
+    parser.add_argument("--total", type=int, default=30,
                         help="Total cells to generate (auto-balance only).")
-    parser.add_argument("--batch-size", type=int, default=12,
-                        help="Cells per Gemini call (max ~25 for visual, ~50 text-only).")
-    parser.add_argument("--max-calls", type=int, default=10,
+    parser.add_argument("--batch-size", type=int, default=30,
+                        help=("Cells per Gemini call. Defaults raised from 12 to "
+                              "30 on 2026-04-25 — Gemini Pro's 1M context easily "
+                              "handles 30 cells × ~2.5 KB prompt fragment, and "
+                              "the 250-call/day cap rewards larger batches. "
+                              "Use 20 for visual-bearing batches."))
+    parser.add_argument("--max-calls", type=int, default=20,
                         help="Hard cap on API calls per run.")
     parser.add_argument("--visual", action="store_true",
                         help="Request visual archetypes for visual-eligible topics.")
