@@ -22,7 +22,38 @@ export async function mountLander(canvas, opts = {}) {
     fuel: 100, // VRAM
     over: false, won: false,
     started: false,
+    reason: null,           // 'win' | 'diverged' | 'local-min' | 'off-course' | 'missed-basin' | 'oom'
+    gameOverFired: false,   // guard so onGameOver fires exactly once
     keys: { up: false, left: false, right: false }
+  };
+
+  // Per-failure aha messages — every loss type maps to a distinct ML systems lesson.
+  // The qmd's attachAha pulls these via api.aha(reason).
+  const AHA = {
+    win: {
+      label: "You just experienced",
+      text: "A balanced descent. The right learning rate steered you into the deep basin while a measured batch size kept VRAM in budget. In real training, that's the dream — fast convergence without the OOM tax."
+    },
+    diverged: {
+      label: "What just happened",
+      text: "You hit the global minimum at high speed. In SGD this is what an over-aggressive learning rate looks like: the optimizer overshoots the basin and the loss diverges. Smaller learning rate → softer touchdown."
+    },
+    "local-min": {
+      label: "What just happened",
+      text: "You settled in a basin — but not the deep one. Real loss landscapes have many local minima; without enough exploration (gradient noise, momentum, restarts), an optimizer can stop short of the optimum."
+    },
+    "off-course": {
+      label: "What just happened",
+      text: "Your update steps drifted out of the parameter space the model can handle. In practice this is what divergent training looks like: weights blow up, gradients overflow, and the run is unrecoverable."
+    },
+    "missed-basin": {
+      label: "What just happened",
+      text: "You touched down in a region with no basin — a flat or saddle area of the loss surface. The optimizer has no clear gradient signal to follow, and the model never learns the task well."
+    },
+    oom: {
+      label: "What just happened",
+      text: "You burned through your VRAM mid-run. Every increase in batch size compounds the working memory; once you OOM, the process is dead. In production, this is the brutal practical ceiling on large-batch training."
+    }
   };
 
   const gravity = 0.05;
@@ -301,6 +332,7 @@ export async function mountLander(canvas, opts = {}) {
     // Check bounds — off-screen is now an explicit "OFF COURSE" failure, not a silent stop.
     if (state.x < 0 || state.x > W) {
       state.over = true;
+      state.reason = "off-course";
       flash(stage, 0xc44444, 240, 0.30);
       floatText(stage, Math.max(20, Math.min(W - 20, state.x)), 50, "OFF COURSE", COL.crash, { size: 18 });
     }
@@ -324,49 +356,59 @@ export async function mountLander(canvas, opts = {}) {
       if (inGlobalPad(state.x)) {
         if (speed < maxSafeSpeed && Math.abs(state.angle) < maxSafeAngle) {
            state.won = true;
+           state.reason = "win";
            // Win celebration: green burst + soft green flash + small confirming shake.
            burst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
            flash(stage, 0x3d9e5a, 260, 0.28);
            shake(stage, 4, 220);
            floatText(stage, state.x, state.y - 30, "CONVERGED!", COL.pad, { size: 24 });
         } else {
+           state.reason = "diverged";
            burst(stage, state.x, state.y, COL.crash, 30);
            flash(stage, 0xc44444, 220, 0.34);
            shake(stage, impactShake, 320);
            ship.visible = false;
-           floatText(stage, state.x, state.y - 30, "DIVERGED (TOO FAST)", COL.crash, { size: 16 });
+           floatText(stage, state.x, state.y - 30, "DIVERGED — LR TOO HIGH", COL.crash, { size: 16 });
         }
       } else if (inLocalPad(state.x)) {
+        state.reason = "local-min";
         burst(stage, state.x, state.y, COL.crash, 30);
         flash(stage, 0xc87b2a, 200, 0.26);
         shake(stage, impactShake, 300);
         ship.visible = false;
-        floatText(stage, state.x, state.y - 30, "LOCAL MINIMUM (Suboptimal)", COL.crash, { size: 16 });
+        floatText(stage, state.x, state.y - 30, "LOCAL MINIMUM — SUBOPTIMAL", COL.crash, { size: 16 });
       } else {
+        state.reason = "missed-basin";
         burst(stage, state.x, state.y, COL.crash, 30);
         flash(stage, 0xc44444, 220, 0.34);
         shake(stage, impactShake, 320);
         ship.visible = false;
-        floatText(stage, state.x, state.y - 30, "GRADIENT EXPLOSION (Crash)", COL.crash, { size: 16 });
+        floatText(stage, state.x, state.y - 30, "MISSED THE BASIN", COL.crash, { size: 16 });
       }
     }
 
-    if (state.fuel <= 0 && flame.visible) {
+    // OOM: running out of VRAM mid-air ends the run, just as it kills a real training process.
+    if (state.fuel <= 0 && !state.over) {
+      state.over = true;
+      state.reason = "oom";
       flame.visible = false;
-      floatText(stage, state.x, state.y, "OOM!", COL.crash, {size: 14});
+      burst(stage, state.x, state.y, COL.crash, 26, { speed: 2.0, lifeMs: 700 });
+      flash(stage, 0xc44444, 240, 0.32);
+      shake(stage, 8, 280);
+      floatText(stage, state.x, state.y - 30, "OOM — VRAM EXHAUSTED", COL.crash, { size: 16 });
     }
 
-    if (state.over && opts.onGameOver) {
-      opts.onGameOver({
-         won: state.won
-      });
+    if (state.over && !state.gameOverFired && opts.onGameOver) {
+      state.gameOverFired = true;
+      opts.onGameOver({ won: state.won, reason: state.reason });
     }
   });
 
   return {
     id: "lander",
-    ahaLabel: "You just experienced",
-    ahaText: "Training with a massive batch size gives you a perfectly stable 'thrust' down the loss landscape, but it consumes your VRAM extremely fast. Finding the right balance between Batch Size (fuel burn rate) and Learning Rate (steering angle) is the only way to land in the global minimum without diverging or running out of memory.",
+    ahaLabel: AHA.win.label,                 // legacy fallback
+    ahaText: AHA.win.text,                   // legacy fallback
+    aha(reason) { return AHA[reason] || AHA.win; },
     destroy() {
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('keyup', handleKeyup);
