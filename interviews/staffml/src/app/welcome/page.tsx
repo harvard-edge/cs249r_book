@@ -27,7 +27,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect } from "react";
-import { Target, Crosshair, Shuffle, ArrowRight } from "lucide-react";
+import { Target, Crosshair, Shuffle, ArrowRight, Network } from "lucide-react";
 import {
   QUESTION_COUNT_FORMATTED,
   TOPIC_COUNT,
@@ -97,8 +97,8 @@ export default function WelcomePage() {
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">Open source</span>
         </div>
 
-        {/* ─── Three action cards ─── */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
+        {/* ─── Action cards ─── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
           <ActionCard
             icon={Shuffle}
             accent="blue"
@@ -115,6 +115,14 @@ export default function WelcomePage() {
             body="Untimed drills with spaced repetition. Rate yourself after each answer; the app schedules what you should see tomorrow."
             cta="Start practicing"
             onClick={() => handleAction("/practice")}
+          />
+          <ActionCard
+            icon={Network}
+            accent="purple"
+            title="Explore the Vault"
+            body="Radial drill-down from track to area to topic. Good when you want to understand the corpus before practicing."
+            cta="Open explorer"
+            onClick={() => handleAction("/explore")}
           />
           <ActionCard
             icon={Crosshair}
@@ -166,23 +174,26 @@ function ActionCard({
   body: string;
   cta: string;
   onClick: () => void;
-  accent: "blue" | "amber" | "red";
+  accent: "blue" | "amber" | "red" | "purple";
   primary?: boolean;
 }) {
   const accentBorder = {
     blue: "border-accentBlue/30 hover:border-accentBlue/60",
     amber: "border-accentAmber/30 hover:border-accentAmber/60",
     red: "border-accentRed/30 hover:border-accentRed/60",
+    purple: "border-accentPurple/30 hover:border-accentPurple/60",
   }[accent];
   const accentIcon = {
     blue: "text-accentBlue",
     amber: "text-accentAmber",
     red: "text-accentRed",
+    purple: "text-accentPurple",
   }[accent];
   const accentCta = {
     blue: "text-accentBlue",
     amber: "text-accentAmber",
     red: "text-accentRed",
+    purple: "text-accentPurple",
   }[accent];
 
   return (

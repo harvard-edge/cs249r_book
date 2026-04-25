@@ -2,22 +2,27 @@
 
 import { ChainInfo } from "@/lib/corpus";
 import { getLevelDef } from "@/lib/levels";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
 
 export default function ChainStrip({ chain, onNavigate }: {
   chain: ChainInfo;
   onNavigate: (questionId: string) => void;
 }) {
+  const isFirst = chain.position <= 0;
   const isLast = chain.position >= chain.total - 1;
+  const prevQ = !isFirst ? chain.questions[chain.position - 1] : null;
   const nextQ = !isLast ? chain.questions[chain.position + 1] : null;
+  const prevDef = prevQ ? getLevelDef(prevQ.level) : null;
   const nextDef = nextQ ? getLevelDef(nextQ.level) : null;
 
   return (
     <div className="border-t border-border pt-4 mt-1">
       {/* Progress dots */}
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-[10px] font-mono text-textTertiary uppercase tracking-wide">Chain</span>
+        <span className="text-[10px] font-mono text-textTertiary uppercase tracking-wide">
+          Part {chain.position + 1} of {chain.total}
+        </span>
         <div className="flex items-center gap-1">
           {chain.questions.map((q, i) => {
             const def = getLevelDef(q.level);
@@ -46,37 +51,80 @@ export default function ChainStrip({ chain, onNavigate }: {
             );
           })}
         </div>
-        <span className="text-[10px] font-mono text-textMuted ml-auto">
-          {chain.position + 1} / {chain.total}
-        </span>
       </div>
 
-      {/* Next question preview or completion */}
-      {isLast ? (
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-accentGreen/5 border border-accentGreen/20">
-          <CheckCircle2 className="w-4 h-4 text-accentGreen shrink-0" />
-          <span className="text-[13px] text-accentGreen font-medium">Chain complete</span>
-        </div>
-      ) : nextQ && nextDef ? (
-        <button
-          onClick={() => onNavigate(nextQ.id)}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface border border-borderSubtle hover:border-borderHighlight hover:bg-surfaceHover transition-all text-left group"
-        >
-          <div
-            className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
-            style={{ backgroundColor: `${nextDef.color}20`, border: `1px solid ${nextDef.color}40` }}
-          >
-            <span className="text-[9px] font-bold font-mono" style={{ color: nextDef.color }}>
-              {nextQ.level}
-            </span>
+      {/* Previous/next question previews. Showing both directions makes the
+          chain feel like a navigable path rather than a one-way suggestion. */}
+      <div className="grid gap-2 sm:grid-cols-2">
+        {prevQ && prevDef ? (
+          <ChainNavCard
+            label="Previous part"
+            question={prevQ}
+            color={prevDef.color}
+            direction="prev"
+            onClick={() => onNavigate(prevQ.id)}
+          />
+        ) : (
+          <div className="hidden sm:flex items-center gap-2 px-3 py-2.5 rounded-lg bg-surface/40 border border-borderSubtle text-[12px] text-textTertiary">
+            Start of chain
           </div>
-          <div className="flex-1 min-w-0">
-            <span className="text-[12px] text-textTertiary block">Next in chain</span>
-            <span className="text-[13px] text-textPrimary font-medium truncate block">{nextQ.title}</span>
+        )}
+
+        {nextQ && nextDef ? (
+          <ChainNavCard
+            label="Next part"
+            question={nextQ}
+            color={nextDef.color}
+            direction="next"
+            onClick={() => onNavigate(nextQ.id)}
+          />
+        ) : (
+          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-accentGreen/5 border border-accentGreen/20">
+            <CheckCircle2 className="w-4 h-4 text-accentGreen shrink-0" />
+            <span className="text-[13px] text-accentGreen font-medium">Chain complete</span>
           </div>
-          <ArrowRight className="w-4 h-4 text-textMuted group-hover:text-textPrimary shrink-0 transition-colors" />
-        </button>
-      ) : null}
+        )}
+      </div>
     </div>
+  );
+}
+
+function ChainNavCard({
+  label,
+  question,
+  color,
+  direction,
+  onClick,
+}: {
+  label: string;
+  question: ChainInfo["questions"][number];
+  color: string;
+  direction: "prev" | "next";
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-surface border border-borderSubtle hover:border-borderHighlight hover:bg-surfaceHover transition-all text-left group"
+    >
+      {direction === "prev" && (
+        <ArrowLeft className="w-4 h-4 text-textMuted group-hover:text-textPrimary shrink-0 transition-colors" />
+      )}
+      <div
+        className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
+        style={{ backgroundColor: `${color}20`, border: `1px solid ${color}40` }}
+      >
+        <span className="text-[9px] font-bold font-mono" style={{ color }}>
+          {question.level}
+        </span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <span className="text-[12px] text-textTertiary block">{label}</span>
+        <span className="text-[13px] text-textPrimary font-medium truncate block">{question.title}</span>
+      </div>
+      {direction === "next" && (
+        <ArrowRight className="w-4 h-4 text-textMuted group-hover:text-textPrimary shrink-0 transition-colors" />
+      )}
+    </button>
   );
 }

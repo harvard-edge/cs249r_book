@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, useEffect, useMemo } from "react";
-import { Search, X, Target, Crosshair, Flame, Calendar, ChevronUp, ChevronDown } from "lucide-react";
+import { Search, X, Target, Crosshair, Flame, Calendar, ChevronUp, ChevronDown, Network } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -275,6 +275,12 @@ function HomePage() {
                 >
                   <Target className="w-3 h-3" /> Browse
                 </Link>
+                <Link
+                  href="/explore"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-xs transition-colors"
+                >
+                  <Network className="w-3 h-3" /> Explorer
+                </Link>
               </div>
             </div>
           ) : (
@@ -299,7 +305,7 @@ function HomePage() {
               {/* Welcome guide */}
               <div className="p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 mb-3">
                 <span className="text-[10px] font-mono text-accentBlue uppercase block mb-2.5">New here? Start with one of these:</span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                   <Link
                     href="/practice?daily=1"
                     className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
@@ -318,6 +324,16 @@ function HomePage() {
                     <div>
                       <span className="text-sm font-bold text-textPrimary group-hover:text-accentGreen transition-colors block">Easy Mode</span>
                       <span className="text-[11px] text-textTertiary">L1 recall questions to warm up.</span>
+                    </div>
+                  </Link>
+                  <Link
+                    href="/explore"
+                    className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
+                  >
+                    <Network className="w-4 h-4 text-accentPurple shrink-0 mt-0.5" />
+                    <div>
+                      <span className="text-sm font-bold text-textPrimary group-hover:text-accentPurple transition-colors block">Vault Explorer</span>
+                      <span className="text-[11px] text-textTertiary">Radial map from tracks to topics.</span>
                     </div>
                   </Link>
                   <Link
