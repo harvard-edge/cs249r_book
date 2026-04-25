@@ -47,8 +47,10 @@ QUESTIONS_DIR = VAULT_DIR / "questions"
 VISUALS_DIR = VAULT_DIR / "visuals"
 
 VALID_KINDS = {"svg"}                          # what the website renders
-VALID_SOURCE_FORMATS = {"dot", "matplotlib", "hand"}
-SOURCE_EXT = {"dot": "dot", "matplotlib": "py"}
+# Source format is inferred from the filesystem: a `<basename>.dot` next
+# to `<basename>.svg` means DOT-built; `.py` means matplotlib-built; no
+# sibling means hand-authored. We do not encode this in the YAML schema.
+SOURCE_EXT_TO_FORMAT = {".dot": "dot", ".py": "matplotlib"}
 
 # Book SVG style: enforce these properties on every rendered SVG so DOT,
 # matplotlib, and hand-SVG outputs render identically in the practice page.
@@ -93,18 +95,17 @@ def discover_visuals() -> list[dict[str, Any]]:
         track_dir = VISUALS_DIR / track
         asset_path = track_dir / path
 
-        # Source format defaults to "hand" (no build step needed)
-        source_format = v.get("source_format", "hand")
-        if source_format not in VALID_SOURCE_FORMATS:
-            print(f"  ! {data.get('id')}: unknown source_format={source_format!r}",
-                  file=sys.stderr)
-            continue
-
-        # Source file: same basename, extension by source_format
+        # Infer source format by filesystem: look for a sibling file with
+        # a known build-source extension. Absent => hand-authored.
+        basename = asset_path.with_suffix("")
         source_path = None
-        if source_format != "hand":
-            ext = SOURCE_EXT[source_format]
-            source_path = track_dir / f"{Path(path).stem}.{ext}"
+        source_format = "hand"
+        for ext, fmt in SOURCE_EXT_TO_FORMAT.items():
+            cand = basename.with_suffix(ext)
+            if cand.exists():
+                source_path = cand
+                source_format = fmt
+                break
 
         records.append({
             "id": data["id"],
