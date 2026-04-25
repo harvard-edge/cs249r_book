@@ -96,6 +96,7 @@ CARBON_QUEBEC_GCO2_KWH = TraceableConstant(
     citation="IEA (2023), World Energy Outlook"
 )
 CARBON_FRANCE_GCO2_KWH = 50        # France (nuclear dominant)
+CARBON_IOWA_GCO2_KWH = 680         # Iowa reference mix used in MLSys·im carbon tutorials
 CARBON_POLAND_GCO2_KWH = 820       # Poland (coal dominant)
 CARBON_NORWAY_GCO2_KWH = 10        # Norway (hydroelectric)
 

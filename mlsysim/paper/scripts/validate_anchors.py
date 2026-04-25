@@ -68,11 +68,9 @@ def _fleet_16k_h100():
 def anchor1_resnet():
     """MLPerf ResNet-50 on DGX A100 (8x A100, batch=2048).
 
-    ResNet-50 achieves ~37% of peak dense FP16 Tensor Core FLOPS on A100
-    because its small convolution kernels cannot saturate the tensor
-    cores the way large GEMM-dominated Transformer layers can. This is
-    consistent with published MLPerf submissions showing ~115 TFLOP/s
-    per A100 out of 312 TFLOP/s dense FP16 Tensor Core peak (624 with sparsity).
+    ResNet-50 achieves lower end-to-end training efficiency than large
+    GEMM-dominated Transformer layers because its small convolution kernels,
+    data pipeline, and framework overhead cannot saturate A100 tensor cores.
     """
     model = mlsysim.Models.Vision.ResNet50
     hardware = mlsysim.Hardware.Cloud.A100
@@ -80,7 +78,7 @@ def anchor1_resnet():
 
     per_gpu_batch = 2048 // 8
     res = solver.solve(model, hardware, batch_size=per_gpu_batch,
-                       precision="fp16", efficiency=0.37, is_training=True)
+                       precision="fp16", efficiency=0.19, is_training=True)
 
     # Scale by 8 for ideal DP within one DGX node (NVLink makes DP overhead negligible)
     fleet_throughput = res.throughput.magnitude * 8
@@ -244,13 +242,13 @@ def anchor6_carbon():
     """GPT-3 training carbon: 10K V100s, 34 days, US grid.
 
     The paper computes carbon from Patterson et al.'s reported energy
-    (1198 MWh) multiplied by US grid carbon intensity (429 gCO2/kWh).
+    (1287 MWh) multiplied by US grid carbon intensity (429 gCO2/kWh).
     This is a simple formula validation, not a SustainabilityModel run,
     because Patterson's energy figure is a direct measurement, not
     derivable from TDP × time.
     """
     # Patterson et al. reported values (used in paper's pgfmath constants)
-    energy_mwh = 1198          # \GPTenergyMWh in paper.tex
+    energy_mwh = 1287          # \GPTenergyMWh in paper.tex
     grid_ci = 429              # \GPTgridCI in paper.tex (gCO2/kWh)
 
     carbon_t = energy_mwh * grid_ci / 1000  # = 514 tonnes
@@ -296,12 +294,12 @@ def anchor7_parallelism():
 # output against these to flag mismatches.
 
 PAPER_CLAIMS = {
-    "Anchor 1": {"key_value": 37487, "key_name": "throughput (s/s)", "reported": 38200},
+    "Anchor 1": {"key_value": 37500, "key_name": "throughput (s/s)", "reported": 38200},
     "Anchor 2": {"key_value": 43,    "key_name": "ITL (ms)",         "reported": "40-50"},
     "Anchor 3": {"key_value": 40.0,  "key_name": "MFU (%)",          "reported": "38-43"},
     "Anchor 4": {"key_value": 45,    "key_name": "MFU (%)",          "reported": 46},
     "Anchor 5": {"key_value": 65,    "key_name": "P* (B params)",    "reported": 70},
-    "Anchor 6": {"key_value": 514,   "key_name": "CO2 (tonnes)",     "reported": 552},
+    "Anchor 6": {"key_value": 552,   "key_name": "CO2 (tonnes)",     "reported": 552},
     "Anchor 7": {"key_value": "TP=8,PP=4,DP=512", "key_name": "parallelism", "reported": "TP=8,PP=4,DP=512"},
 }
 
@@ -343,7 +341,9 @@ def main():
             claim = PAPER_CLAIMS[key]
             paper_val = claim["key_value"]
 
-            # Check match (within 5% for numerics, exact for strings)
+            # Check match (within 5% for numerics, exact for strings).
+            # Paper values are rounded for readability; solver outputs may retain
+            # more precision (for example, 37,487 samples/s rounds to 37,500).
             if isinstance(solver_val, (int, float)) and isinstance(paper_val, (int, float)):
                 match = abs(solver_val - paper_val) / max(abs(paper_val), 1) < 0.05
             else:

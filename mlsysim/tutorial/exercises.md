@@ -1,4 +1,4 @@
-# ISCA Tutorial: Hands-On Exercises
+# MLSys·im Tutorial: Hands-On Exercises
 
 Eight exercises aligned with the eight tutorial parts.
 Each exercise is self-contained and takes 5-10 minutes.

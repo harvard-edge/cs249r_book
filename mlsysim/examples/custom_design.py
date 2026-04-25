@@ -49,7 +49,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # --- Designing a Hypothetical 'Generic Drone' ---
 # Evaluating Generic Drone Vision...
 # +============================================================+

@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 from mlsysim.hardware import Hardware, HardwareNode
-from mlsysim.core.constants import Q_
+from mlsysim.core.constants import Q_, TPUV4_FLOPS_BF16
 
 def test_hardware_registry():
     a100 = Hardware.A100
@@ -29,3 +29,9 @@ def test_json_serialization():
     json_data = a100.model_dump_json()
     assert "NVIDIA A100" in json_data
     assert "312" in json_data  # FP16 Tensor Core peak
+
+
+def test_tpuv4_is_not_alias_to_tpuv5p():
+    assert Hardware.TPUv4.name == "Google TPU v4"
+    assert Hardware.TPUv4 is not Hardware.TPUv5p
+    assert Hardware.TPUv4.compute.peak_flops == TPUV4_FLOPS_BF16

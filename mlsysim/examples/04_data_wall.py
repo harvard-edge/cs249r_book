@@ -63,7 +63,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # Evaluating ResNet-50 Training Data Pipeline...
 #
 # Storage Bandwidth: 3.0 GB/s

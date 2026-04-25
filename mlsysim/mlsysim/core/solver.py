@@ -275,7 +275,8 @@ class DistributedModel(BaseModel):
         # DP AllReduce exchanges gradients, which equal model size in the active precision.
         # With TP, each rank holds 1/tp_size of the model, so gradient buffer is smaller.
         # With ZeRO-1/2, AllReduce is replaced by Reduce-Scatter and All-Gather (same total volume but different patterns).
-        gradient_size = model.size_in_bytes() / tp_size
+        precision_bytes = PRECISION_MAP.get(precision, BYTES_FP16)
+        gradient_size = model.size_in_bytes(precision_bytes) / tp_size
         if is_lora:
             gradient_size = gradient_size * 0.01
         
@@ -424,8 +425,17 @@ class NetworkRooflineModel(BaseModel):
         """
         Solves for the distributed performance bound.
         """
+        from ._validation import validate_range
+        validate_range(efficiency, 1e-9, 1.0, "efficiency")
+        if model.parameters is None:
+            raise ValueError("NetworkRooflineModel requires a workload with a parameter count.")
+
         # 1. Supply (Fleet Capacity)
-        total_flops = (fleet.node.accelerator.compute.precision_flops.get(precision, fleet.node.accelerator.compute.peak_flops) * fleet.total_accelerators).to("TFLOPs/s")
+        total_flops = (
+            fleet.node.accelerator.compute.precision_flops.get(
+                precision, fleet.node.accelerator.compute.peak_flops
+            ) * fleet.total_accelerators
+        ).to("TFLOPs/s")
         # Bisection Bandwidth (total data movement capacity per step)
         bisection_bw = (fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio).to("GB/s")
         
@@ -449,18 +459,38 @@ class NetworkRooflineModel(BaseModel):
         # Convert BW to Byte/s for units to cancel to FLOP/Byte
         network_ridge = (total_flops / bisection_bw.to("byte/s")).to("flop/byte")
         
-        # 4. Results
-        is_network_bound = ci < network_ridge
-        achievable_flops = min(total_flops, bisection_bw.to("byte/s") * ci) * efficiency
-        
-        # Return results in a standardized PerformanceProfile
+        # 4. Results. Treat this as a one-step training lower-bound model:
+        # compute and network are independent ceilings; the slower one binds.
+        effective_flops = total_flops * efficiency
+        compute_time = (training_ops / effective_flops).to("ms")
+        network_time = (sync_bytes / bisection_bw).to("ms")
+        is_network_bound = network_time > compute_time
+        latency = max(compute_time.to("ms").magnitude, network_time.to("ms").magnitude) * ureg.ms
+
+        achieved_rate = (training_ops / latency.to("s")).to(total_flops.units)
+        mfu = min((achieved_rate / total_flops).to_base_units().magnitude, 1.0)
+        hfu = min(mfu * HFU_MFU_RATIO, 1.0)
+        throughput = (1 / latency.to("s")).to("1/s")
+
         return PerformanceProfile(
-            latency=(training_ops / achievable_flops).to("ms") if achievable_flops.magnitude > 0 else Q_("0 ms"),
-            throughput=(achievable_flops / training_ops).to("1/s"),
+            latency=latency,
+            latency_compute=compute_time,
+            latency_memory=network_time,
+            latency_overhead=Q_("0 ms"),
+            throughput=throughput,
+            bottleneck="Network" if is_network_bound else "Compute",
             arithmetic_intensity=ci,
-            peak_flops=total_flops,
-            achievable_flops=achievable_flops,
-            bottleneck="Network-Bound" if is_network_bound else "Compute-Bound"
+            energy=Q_("0 J"),
+            memory_footprint=sync_bytes,
+            peak_flops_actual=effective_flops,
+            peak_bw_actual=bisection_bw,
+            mfu=mfu,
+            hfu=hfu,
+            feasible=True,
+            constraint_trace=[
+                f"Network Roofline: CI {ci:~P} vs ridge {network_ridge:~P}; "
+                f"binding ceiling is {'network' if is_network_bound else 'compute'}."
+            ],
         )
 
 class ReliabilityModel(BaseModel):
@@ -1128,7 +1158,8 @@ class TailLatencyModel(BaseModel):
             p99_latency=Q_(p99_w_ms + service_latency_ms, "ms"),
             queue_utilization=rho,
             is_stable=is_stable,
-            slo_violation_probability=slo_headroom_ratio  # legacy field name; semantically a ratio
+            slo_headroom_ratio=slo_headroom_ratio,
+            slo_violation_probability=slo_headroom_ratio  # legacy alias; semantically a ratio
         )
 
 class EconomicsModel(BaseModel):

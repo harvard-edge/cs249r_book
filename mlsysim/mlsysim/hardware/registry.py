@@ -6,13 +6,15 @@ from ..core.constants import (
     H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8, H100_UNIT_COST,
     H200_MEM_BW, H200_MEM_CAPACITY, H200_TDP, H200_UNIT_COST,
     B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4, B200_UNIT_COST,
-    NVL72_FLOPS_FP8_TENSOR, NVL72_FLOPS_FP4_TENSOR, NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
+    NVL72_FLOPS_FP16_TENSOR, NVL72_FLOPS_FP8_TENSOR, NVL72_FLOPS_FP4_TENSOR,
+    NVL72_MEM_CAPACITY, NVL72_MEM_BW, NVL72_NVLINK_BW, NVL72_TDP, NVL72_UNIT_COST,
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP, MI300X_UNIT_COST,
     MI300X_FLOPS_FP8, MI300X_FLOPS_INT8, MI300X_FLOPS_FP32,
     MI250X_FLOPS_FP16_TENSOR, MI250X_FLOPS_FP32, MI250X_FLOPS_INT8, MI250X_MEM_BW, MI250X_MEM_CAPACITY, MI250X_TDP,
     GAUDI2_FLOPS_BF16, GAUDI2_FLOPS_FP8, GAUDI2_MEM_BW, GAUDI2_MEM_CAPACITY, GAUDI2_TDP,
     GAUDI3_FLOPS_BF16, GAUDI3_FLOPS_FP8, GAUDI3_MEM_BW, GAUDI3_MEM_CAPACITY, GAUDI3_TDP,
     TRAINIUM2_FLOPS_BF16, TRAINIUM2_FLOPS_FP8, TRAINIUM2_MEM_BW, TRAINIUM2_MEM_CAPACITY, TRAINIUM2_TDP,
+    TPUV4_FLOPS_BF16, TPUV4_MEM_BW,
     TPUV6_FLOPS_BF16, TPUV6_MEM_BW, TPUV6_MEM_CAPACITY,
     TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP, TPUV5P_FLOPS_INT8,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8, T4_UNIT_COST,
@@ -86,7 +88,15 @@ class CloudHardware(Registry):
     GB200_NVL72 = HardwareNode(
         name="NVIDIA GB200 NVL72",
         release_year=2024,
-        compute=ComputeCore(peak_flops=NVL72_FLOPS_FP8_TENSOR, precision_flops={"fp4": NVL72_FLOPS_FP4_TENSOR}),
+        compute=ComputeCore(
+            peak_flops=NVL72_FLOPS_FP16_TENSOR,
+            precision_flops={
+                "fp16": NVL72_FLOPS_FP16_TENSOR,
+                "bf16": NVL72_FLOPS_FP16_TENSOR,
+                "fp8": NVL72_FLOPS_FP8_TENSOR,
+                "fp4": NVL72_FLOPS_FP4_TENSOR,
+            },
+        ),
         memory=MemoryHierarchy(capacity=NVL72_MEM_CAPACITY, bandwidth=NVL72_MEM_BW),
         interconnect=IOInterconnect(name="NVLink Switch (Bisection)", bandwidth=NVL72_NVLINK_BW),
         tdp=NVL72_TDP,
@@ -159,6 +169,15 @@ class CloudHardware(Registry):
         dispatch_tax=0.04 * ureg.ms
     )
 
+    TPUv4 = HardwareNode(
+        name="Google TPU v4",
+        release_year=2021,
+        compute=ComputeCore(peak_flops=TPUV4_FLOPS_BF16, precision_flops={"bf16": TPUV4_FLOPS_BF16}),
+        memory=MemoryHierarchy(capacity=32 * ureg.GiB, bandwidth=TPUV4_MEM_BW),
+        tdp=200 * ureg.W,
+        dispatch_tax=0.04 * ureg.ms,
+    )
+
     T4 = HardwareNode(
         name="NVIDIA T4",
         release_year=2018,
@@ -183,9 +202,6 @@ class CloudHardware(Registry):
         dispatch_tax=0.001 * ureg.ms,
         metadata={"source_url": "https://www.cerebras.net/product-system/"}
     )
-
-    # Backward-compatible alias
-    TPUv4 = TPUv5p
 
 class WorkstationHardware(Registry):
     """Personal computing systems used for local development."""
@@ -359,7 +375,7 @@ class Hardware(Registry):
     Trainium2 = CloudHardware.Trainium2
     TPUv6 = CloudHardware.TPUv6
     TPUv5p = CloudHardware.TPUv5p
-    TPUv4 = CloudHardware.TPUv5p
+    TPUv4 = CloudHardware.TPUv4
     T4 = CloudHardware.T4
     CerebrasCS3 = CloudHardware.Cerebras_CS3
 

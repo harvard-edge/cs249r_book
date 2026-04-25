@@ -5,9 +5,8 @@ try:
 except ImportError:
     import sys
     print(
-        "mlsysim CLI requires additional dependencies.\n"
-        "Install with: pip install 'mlsysim[cli]'\n"
-        "\nFor the Python API (no CLI), use: import mlsysim",
+        "Unable to import the mlsysim CLI.\n"
+        "Install or repair the package with: pip install mlsysim",
         file=sys.stderr,
     )
     sys.exit(1)

@@ -54,7 +54,7 @@ print(f"OpEx (energy):     ${econ.opex_energy_usd:,.0f}")
 print(f"Total TCO:         ${econ.tco_usd:,.0f}")
 print(f"Carbon Footprint:  {econ.carbon_footprint_kg:.0f} kg CO₂")
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # --- Distributed Training Performance ---
 # Step Latency:       2004.60 millisecond
 # Scaling Efficiency: 92.7%

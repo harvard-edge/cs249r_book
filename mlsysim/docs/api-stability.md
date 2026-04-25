@@ -53,10 +53,10 @@ positions will not change.
 ```python
 from mlsysim import Hardware
 
-gpu = Hardware.H100_SXM        # All current entries are stable
-gpu = Hardware.A100_80GB
-gpu = Hardware.RTX_4090
-# ... every entry shipping in 0.1.0
+gpu = Hardware.H100            # All current entries are stable
+gpu = Hardware.A100
+gpu = Hardware.Cloud.H100
+# ... every entry shipping in 0.1.x
 ```
 
 New entries may be *added* in patch releases, but existing entries will not be
@@ -67,9 +67,9 @@ removed or renamed.
 ```python
 from mlsysim import Models
 
-model = Models.LLAMA3_70B      # All current entries are stable
+model = Models.Llama3_70B      # All current entries are stable
 model = Models.GPT2
-# ... every entry shipping in 0.1.0
+# ... every entry shipping in 0.1.x
 ```
 
 Same guarantee as Hardware: additions are allowed, removals are not.
@@ -92,7 +92,7 @@ stable:
 |-------|------|-------------|
 | `latency` | `pint.Quantity` | Wall-clock time for one forward pass |
 | `throughput` | `pint.Quantity` | Tokens/sec or samples/sec |
-| `bottleneck` | `str` | `"compute"` or `"memory"` |
+| `bottleneck` | `str` | `"Compute"` or `"Memory"` |
 | `mfu` | `float` | Model FLOPs Utilization (0.0-1.0) |
 | `feasible` | `bool` | Whether the workload fits in memory |
 | `energy` | `pint.Quantity` | Energy consumption per forward pass |
@@ -170,7 +170,7 @@ be removed in the next minor release.
 from mlsysim import BaseModel
 
 # Use instead:
-from mlsysim.solvers import ForwardModel
+from mlsysim.core.solver import ForwardModel
 ```
 
 The top-level `BaseModel` name was ambiguous (conflicts with Pydantic's
@@ -184,12 +184,13 @@ The top-level `BaseModel` name was ambiguous (conflicts with Pydantic's
 from mlsysim import ForwardModel, DistributedModel
 
 # Use instead:
-from mlsysim.solvers import ForwardModel, DistributedModel
+from mlsysim.solvers import DistributedModel
+from mlsysim.core.solver import ForwardModel
 ```
 
-Solver classes should be imported from `mlsysim.solvers`, not from the
-`mlsysim` top-level namespace. The top-level re-exports will be removed in
-v0.2.0 to keep the public API surface clean.
+Solver classes should be imported from `mlsysim.solvers` when available, not
+from the `mlsysim` top-level namespace. Base hierarchy types such as
+`ForwardModel` live in `mlsysim.core.solver`.
 
 ---
 

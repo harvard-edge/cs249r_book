@@ -45,7 +45,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # Scenario: Autonomous Vehicle Perception on Jetson Orin NX
 # Batch      | Status     | Latency         | Bottleneck
 # ------------------------------------------------------------

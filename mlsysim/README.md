@@ -83,6 +83,7 @@ Define your entire cluster and SLA constraints in a declarative `mlsys.yaml` fil
 ```yaml
 # example_cluster.yaml
 version: "1.0"
+name: "Llama-3 70B training audit"
 workload:
   name: "Llama3_70B"
   batch_size: 4096
@@ -108,7 +109,7 @@ Every command supports strict, schema-validated JSON output. If an `assert` cons
 mlsysim schema > schema.json
 
 # Run an evaluation in a CI pipeline
-tco=$(mlsysim --output json eval example_cluster.yaml | jq .macro.metrics.tco_usd)
+tco=$(mlsysim --output json eval example_cluster.yaml | jq .m_tco_usd)
 ```
 
 ### 5. Design Space Search (Optimizers)
@@ -173,7 +174,8 @@ MLSys·im is designed to be highly modular. Install only what you need:
 # Core physics engine only (fastest, smallest footprint)
 pip install mlsysim
 
-# Install with the beautiful Terminal UI & YAML support
+# The CLI and YAML support are included in the base package.
+# The [cli] extra is retained as a backward-compatible no-op.
 pip install "mlsysim[cli]"
 
 # Install with dependencies for interactive labs (Marimo, Plotly)

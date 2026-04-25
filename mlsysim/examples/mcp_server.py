@@ -14,7 +14,7 @@ To use with Claude Desktop, add to your config:
 "mcpServers": {
   "mlsysim": {
     "command": "python3",
-    "args": ["-m", "mlsysim.examples.mcp_server"]
+    "args": ["/path/to/MLSysBook/mlsysim/examples/mcp_server.py"]
   }
 }
 ```

@@ -78,10 +78,18 @@ __all__ = [
     "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
     "Fleet", "Node", "NetworkFabric", "PerformanceProfile",
     # Evaluation
-    "SystemEvaluator", "SystemEvaluation",
-    "Scenario", "Applications",
+    "SystemEvaluator", "SystemEvaluation", "SimulationConfig", "load_config",
+    "Scenario", "Applications", "Archetypes",
     # Registries
-    "Systems", "Tiers", "Infra",
+    "Systems", "Tiers", "Infra", "constants",
+    # Solvers
+    "SingleNodeModel", "DistributedModel", "ReliabilityModel", "SustainabilityModel",
+    "EconomicsModel", "ServingModel", "ContinuousBatchingModel", "WeightStreamingModel",
+    "TailLatencyModel", "CheckpointModel", "DataModel", "ScalingModel",
+    "OrchestrationModel", "CompressionModel", "EfficiencyModel", "TransformationModel",
+    "TopologyModel", "InferenceScalingModel", "SensitivitySolver", "SynthesisSolver",
+    "ResponsibleEngineeringModel", "ParallelismOptimizer", "BatchingOptimizer",
+    "PlacementOptimizer",
     # Submodules (for advanced use)
     "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
     # Visualization

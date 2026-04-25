@@ -91,16 +91,25 @@ def evaluate_main(
                     
                 for assertion in schema.constraints.asserts:
                     metric_val_str = all_metrics.get(assertion.metric)
-                    if metric_val_str is not None:
-                        metric_val = _parse_val(metric_val_str)
-                        if assertion.max is not None and metric_val > assertion.max:
-                            assertion_failures.append(f"{assertion.metric} ({metric_val}) exceeds max ({assertion.max})")
-                        if assertion.min is not None and metric_val < assertion.min:
-                            assertion_failures.append(f"{assertion.metric} ({metric_val}) is below min ({assertion.min})")
+                    if metric_val_str is None:
+                        assertion_failures.append(f"{assertion.metric} is not available in evaluation metrics")
+                        continue
+                    metric_val = _parse_val(metric_val_str)
+                    if assertion.max is not None and metric_val > assertion.max:
+                        assertion_failures.append(f"{assertion.metric} ({metric_val}) exceeds max ({assertion.max})")
+                    if assertion.min is not None and metric_val < assertion.min:
+                        assertion_failures.append(f"{assertion.metric} ({metric_val}) is below min ({assertion.min})")
             
             if assertion_failures:
-                render_scorecard(eval_obj, output_format=output_format)
                 msg = "\n".join([f"❌ {f}" for f in assertion_failures])
+                if output_format == "json":
+                    import json
+                    payload = eval_obj.to_dict()
+                    payload["status"] = "sla_failed"
+                    payload["violations"] = assertion_failures
+                    print(json.dumps(payload, indent=2, allow_nan=False))
+                    exit_with_code(ExitCode.SLA_FAIL)
+                render_scorecard(eval_obj, output_format=output_format)
                 print_error("SLA / Constraint Violation", msg, output_format=output_format)
                 exit_with_code(ExitCode.SLA_FAIL)
             

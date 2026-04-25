@@ -1,4 +1,4 @@
-# ISCA Tutorial: Prerequisites and Setup
+# MLSys·im Tutorial: Prerequisites and Setup
 
 Everything you need to run the hands-on exercises.
 
@@ -69,8 +69,8 @@ p = Engine.solve(Models.ResNet50, Hardware.A100, batch_size=1)
 print(f'ResNet-50 on A100: {p.latency:~P.2f}, bottleneck={p.bottleneck}')
 
 # Verify registries
-print(f'Hardware: {len(list(Hardware))} accelerators')
-print(f'Models:   {len(list(Models))} workloads')
+print(f'Hardware: {len(Hardware.list())} accelerators')
+print(f'Models:   {len(Models.list())} workloads')
 print('All checks passed.')
 "
 ```
@@ -78,8 +78,8 @@ print('All checks passed.')
 Expected output (approximate):
 
 ```
-mlsysim v0.1.0
-ResNet-50 on A100: 0.XX ms, bottleneck=memory
+mlsysim v0.1.1
+ResNet-50 on A100: 0.XX ms, bottleneck=Memory
 Hardware: XX accelerators
 Models:   XX workloads
 All checks passed.

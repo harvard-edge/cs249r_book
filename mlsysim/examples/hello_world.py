@@ -33,7 +33,7 @@ print(f"Latency:    {profile_batched.latency:~P}")
 print(f"Throughput: {profile_batched.throughput:~P}")
 print(f"MFU:        {profile_batched.mfu:.3f}")
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # Model:      Llama-3.1-8B
 # Hardware:   NVIDIA H100
 # Bottleneck: Memory

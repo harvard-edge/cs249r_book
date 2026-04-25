@@ -369,14 +369,14 @@ def plot_evaluation_scorecard(evaluation):
     Visualizes the supply-vs-demand scorecard for a SystemEvaluation.
     Follows the LEGO-style visualization pattern.
     """
-    # 1. PARAMETERS
-    from ..core.constants import Q_
     l1_metrics = evaluation.feasibility.metrics
     l2_metrics = evaluation.performance.metrics
     
     # 2. CALCULATION
-    l1_ratio = (l1_metrics['weight_size'] / l1_metrics['capacity']).to_base_units().magnitude
-    l2_ratio = (l2_metrics['latency'] / l2_metrics.get('sla_latency', Q_("1000 ms"))).to_base_units().magnitude
+    l1_ratio = float(l1_metrics.get("memory_utilization", 0.0))
+    latency_ms = float(l2_metrics.get("latency", 0.0))
+    sla_ms = float(l2_metrics.get("sla_latency_ms", 1000.0))
+    l2_ratio = latency_ms / sla_ms if sla_ms > 0 else 0.0
     
     levels = ['Memory (RAM)', 'Latency (SLA)']
     ratios = [l1_ratio, l2_ratio]

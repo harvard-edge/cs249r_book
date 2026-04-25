@@ -8,6 +8,19 @@ from rich.table import Table
 console_err = Console(stderr=True) # All diagnostics, warnings, UI go to stderr
 console_out = Console()            # stdout is reserved for the final payload
 
+
+def _json_safe(value: Any) -> Any:
+    """Recursively convert quantities and rich objects into JSON-safe values."""
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_safe(v) for v in value]
+    if hasattr(value, "magnitude") and hasattr(value, "units"):
+        return f"{value:~P}"
+    return value
+
 def print_error(title: str, message: str, output_format: str = "text"):
     """Renders a semantic error box, or a JSON error."""
     if output_format == "json":
@@ -176,7 +189,7 @@ def render_scorecard(eval_obj, output_format: str):
 def render_optimization(opt_name: str, opt_result, output_format: str):
     """Renders the output of any OptimizerResult."""
     if output_format == "json":
-        print(json.dumps(opt_result.model_dump(mode="json"), indent=2))
+        print(json.dumps(_json_safe(opt_result.model_dump(mode="python")), indent=2, allow_nan=False))
         return
     elif output_format == "markdown":
         print(f"## MLSys·im Optimize: {opt_name}")

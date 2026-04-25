@@ -58,9 +58,9 @@ def audit_main(
         elif "A100" in gpu_name:
             ref_hardware = Hardware.Cloud.A100
         elif "Apple" in gpu_name:
-            ref_hardware = Hardware.Workstation.MacBook  # We should ensure this exists
+            ref_hardware = Hardware.Workstation.MacBookM3Max
         else:
-            ref_hardware = Hardware.Edge.OrinNano # Fallback for demo
+            ref_hardware = Hardware.Edge.JetsonOrinNX
             
         # 3. Running Simulation
         model_obj = getattr(Models, workload, Models.Llama3_8B)

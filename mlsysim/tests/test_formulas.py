@@ -244,6 +244,10 @@ class TestAllToAll:
         result = calc_all_to_all_time(M, N, beta, alpha)
         assert result.m_as(ureg.second) == pytest.approx(expected, rel=1e-4)
 
+    def test_invalid_gpu_count_raises(self):
+        with pytest.raises(ValueError, match="n_gpus"):
+            calc_all_to_all_time(Q_("1e9 byte"), 0, Q_("50e9 byte/s"), Q_("500 ns"))
+
 
 # ======================================================================
 # calc_transformer_training_flops

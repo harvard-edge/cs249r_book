@@ -52,3 +52,17 @@ def test_engine_input_validation():
 
     with pytest.raises(ValueError, match="batch_size"):
         Engine.solve(resnet, a100, batch_size=0)
+
+
+def test_engine_handles_model_size_only_workloads():
+    """Registry workloads with model_size but no parameter count should still lower."""
+    perf = Engine.solve(Models.DLRM, Hardware.H200, batch_size=1)
+    assert perf.feasible is True
+    assert perf.memory_footprint.to("GB").magnitude > 0
+
+
+def test_nvl72_fp16_does_not_use_fp8_peak_silently():
+    """GB200 NVL72 exposes FP8/FP4 peaks, but FP16 should not alias to FP8."""
+    perf_fp16 = Engine.solve(Models.ResNet50, Hardware.NVL72, precision="fp16")
+    perf_fp8 = Engine.solve(Models.ResNet50, Hardware.NVL72, precision="fp8")
+    assert perf_fp16.peak_flops_actual < perf_fp8.peak_flops_actual

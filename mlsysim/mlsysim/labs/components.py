@@ -72,8 +72,10 @@ def RooflineVisualizer(system, profile):
     import plotly.graph_objects as go
     import numpy as np
     
-    peak_gflops = system.peak_flops.to('GFLOPs/s').magnitude
-    bw_gbs = system.memory_bw.to('GB/s').magnitude
+    peak_flops = getattr(system, "peak_flops", None) or system.compute.peak_flops
+    memory_bw = getattr(system, "memory_bw", None) or system.memory.bandwidth
+    peak_gflops = peak_flops.to('GFLOPs/s').magnitude
+    bw_gbs = memory_bw.to('GB/s').magnitude
     
     x_range = np.logspace(-1, 4, 100)
     y_roof = np.minimum(x_range * bw_gbs, peak_gflops)
@@ -143,7 +145,7 @@ def LatencyWaterfall(profile, previous_profile=None):
     return apply_plotly_theme(fig)
 
 def FailureBanner(condition, message, animation_class="shake-hard"):
-    """Renders a visceral failure banner when a constraint is violated."""
+    """Renders a visceral failure banner when ``condition`` is True."""
     if not condition:
         return mo.md("")
     return mo.Html(f"""

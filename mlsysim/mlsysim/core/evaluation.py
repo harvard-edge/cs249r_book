@@ -70,7 +70,7 @@ class SystemEvaluation(BaseModel):
 
     @property
     def passed_all(self) -> bool:
-        return all(l.status == "PASS" for l in [self.feasibility, self.performance, self.macro])
+        return all(l.status in {"PASS", "SKIPPED"} for l in [self.feasibility, self.performance, self.macro])
 
 class SystemEvaluator:
     """
@@ -116,7 +116,7 @@ class SystemEvaluator:
             precision=precision,
             efficiency=efficiency,
             fleet=fleet_obj,
-            tp_size=nodes,
+            tp_size=1,
             pp_size=1,
             duration_days=duration_days,
             raise_errors=False
@@ -129,12 +129,16 @@ class SystemEvaluator:
                 level_name="Memory Feasibility",
                 status="PASS" if profile.feasible else "FAIL",
                 summary=f"{profile.memory_footprint.to('GB'):~.1f} / {hardware_obj.memory.capacity.to('GB'):~.1f} used",
-                metrics={"memory_used_gb": profile.memory_footprint.to('GB').magnitude}
+                metrics={
+                    "memory_used_gb": profile.memory_footprint.to('GB').magnitude,
+                    "memory_capacity_gb": hardware_obj.memory.capacity.to('GB').magnitude,
+                    "memory_utilization": (profile.memory_footprint / hardware_obj.memory.capacity).to_base_units().magnitude,
+                }
             )
             performance = EvaluationLevel(
                 level_name="Single Node Performance",
-                status="PASS",
-                summary=f"{profile.bottleneck} Bound",
+                status="PASS" if profile.feasible else "FAIL",
+                summary=f"{profile.bottleneck} Bound" if profile.feasible else f"{profile.bottleneck} Bound (infeasible)",
                 metrics={
                     "latency": profile.latency.m_as("ms"),
                     "throughput": profile.throughput.m_as("1/s"),
@@ -171,6 +175,7 @@ class SystemEvaluator:
                 status="PASS",
                 summary=f"TCO: ${econ_res.tco_usd:,.0f}",
                 metrics={
+                    "tco_usd": econ_res.tco_usd,
                     "carbon_footprint": econ_res.carbon_footprint_kg / 1000.0,
                     "energy_cost": econ_res.opex_energy_usd,
                     "capex": econ_res.capex_usd

@@ -25,6 +25,7 @@ from mlsysim.core.solver import (
     OrchestrationModel,
     CompressionModel,
     DistributedModel,
+    NetworkRooflineModel,
     ReliabilityModel,
     EconomicsModel,
     EfficiencyModel,
@@ -680,7 +681,25 @@ class TestDistributedModel:
 
 
 # ======================================================================
-# 11. ReliabilityModel (additional coverage)
+# 11. NetworkRooflineModel
+# ======================================================================
+
+class TestNetworkRooflineModel:
+    """Tests for fleet-level network roofline bounds."""
+
+    def test_returns_valid_performance_profile(self):
+        solver = NetworkRooflineModel()
+        result = solver.solve(Models.Llama3_8B, Systems.Clusters.Research_256)
+        assert result.feasible is True
+        assert result.latency.magnitude > 0
+        assert result.throughput.magnitude > 0
+        assert result.bottleneck in {"Compute", "Network"}
+        assert result.peak_flops_actual.magnitude > 0
+        assert result.peak_bw_actual.magnitude > 0
+
+
+# ======================================================================
+# 12. ReliabilityModel (additional coverage)
 # ======================================================================
 
 class TestReliabilityModel:
@@ -740,6 +759,10 @@ class TestEconomicsModel:
         result = solver.solve(cluster, duration_days=30, grid=Infra.Quebec)
         expected = result.capex_usd + result.opex_energy_usd + result.opex_maintenance_usd
         assert result.tco_usd == pytest.approx(expected, rel=0.001)
+
+    def test_iowa_region_registered_for_examples(self):
+        """Placement examples reference Iowa, so it must resolve in the grid registry."""
+        assert Infra.Grids.Iowa.name.startswith("Iowa")
 
 
 # ======================================================================
@@ -1328,7 +1351,8 @@ class TestTailLatencyModel:
         """SLO headroom ratio must be >= 0. Values > 1.0 indicate SLO violation."""
         solver = TailLatencyModel()
         result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=1)
-        assert result.slo_violation_probability >= 0.0
+        assert result.slo_headroom_ratio >= 0.0
+        assert result.slo_violation_probability == result.slo_headroom_ratio
 
     @pytest.mark.parametrize("replicas", [1, 2, 4, 8, 16])
     def test_utilization_decreases_with_replicas(self, replicas):

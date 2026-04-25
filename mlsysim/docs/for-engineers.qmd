@@ -63,11 +63,11 @@ result = serving.solve(
     hardware=mlsysim.Hardware.Cloud.H100,
     seq_len=4096, batch_size=1
 )
-print(f"TTFT:       {result['ttft'].to('ms'):~.1f}")
-print(f"ITL:        {result['itl'].to('ms'):~.2f}")
-print(f"KV-cache:   {result['kv_cache_size'].to('GB'):~.1f}")
-print(f"Feasible:   {result['feasible']}")
-print(f"Mem util:   {result['memory_utilization']:.0%}")
+print(f"TTFT:       {result.ttft.to('ms'):~.1f}")
+print(f"ITL:        {result.itl.to('ms'):~.2f}")
+print(f"KV-cache:   {result.kv_cache_size.to('GB'):~.1f}")
+print(f"Feasible:   {result.feasible}")
+print(f"Mem util:   {result.memory_utilization:.0%}")
 ```
 
 The feasibility check tells you immediately whether the model plus its KV-cache fit in device memory -- before you discover the OOM at 3 AM in production.
@@ -87,7 +87,7 @@ model = mlsysim.Models.ResNet50
 for hw in [mlsysim.Hardware.Cloud.H100,
            mlsysim.Hardware.Cloud.A100,
            mlsysim.Hardware.Cloud.T4,
-           mlsysim.Hardware.Edge.JetsonAGX]:
+           mlsysim.Hardware.Edge.JetsonOrinNX]:
     p = Engine.solve(model=model, hardware=hw, batch_size=32, precision="fp16")
     print(f"{hw.name:20s}  {p.bottleneck:16s}  {p.latency.to('ms'):>8.2f~}  {p.throughput:>8.0f} img/s")
 ```
@@ -105,15 +105,15 @@ from mlsysim import DistributedModel
 dist = DistributedModel()
 result = dist.solve(
     model=mlsysim.Models.Language.Llama3_70B,
-    fleet=mlsysim.Systems.Clusters.H100_64,
+    fleet=mlsysim.Systems.Clusters.Research_256,
     batch_size=512, precision="fp16",
     tp_size=8, pp_size=4, microbatch_count=16
 )
-print(f"Scaling efficiency:  {result['scaling_efficiency']:.1%}")
-print(f"DP all-reduce:       {result['dp_communication_latency'].to('ms'):~.1f}")
-print(f"TP overhead:         {result['tp_communication_latency'].to('ms'):~.1f}")
-print(f"Pipeline bubble:     {result['bubble_fraction']:.1%}")
-print(f"Step latency:        {result['step_latency_total'].to('ms'):~.1f}")
+print(f"Scaling efficiency:  {result.scaling_efficiency:.1%}")
+print(f"DP all-reduce:       {result.dp_communication_latency.to('ms'):~.1f}")
+print(f"TP overhead:         {result.tp_communication_latency.to('ms'):~.1f}")
+print(f"Pipeline bubble:     {result.bubble_fraction:.1%}")
+print(f"Step latency:        {result.step_latency_total.to('ms'):~.1f}")
 ```
 
 Tune `tp_size`, `pp_size`, and `microbatch_count` to find the parallelism configuration that maximizes scaling efficiency for your cluster topology.
@@ -122,7 +122,7 @@ Tune `tp_size`, `pp_size`, and `microbatch_count` to find the parallelism config
 
 ## Composing Solvers for Real Questions
 
-The six solvers are designed to chain. Here are three common engineering workflows.
+The core solvers are designed to chain. Here are three common engineering workflows.
 
 ### "Can I serve Llama-70B on H100s within budget?"
 
@@ -141,13 +141,13 @@ result = serving.solve(
 # Step 2: What does that fleet cost?
 econ = EconomicsModel()
 cost = econ.solve(
-    fleet=mlsysim.Systems.Clusters.H100_8,
+    fleet=mlsysim.Systems.Clusters.Research_256,
     duration_days=365,
     kwh_price=0.08
 )
-print(f"Annual TCO: ${cost['tco_usd']:,.0f}")
-print(f"  CapEx:    ${cost['capex_usd']:,.0f}")
-print(f"  OpEx:     ${cost['total_opex_usd']:,.0f}")
+print(f"Annual TCO: ${cost.tco_usd:,.0f}")
+print(f"  CapEx:    ${cost.capex_usd:,.0f}")
+print(f"  OpEx:     ${cost.total_opex_usd:,.0f}")
 ```
 
 ### "Where should I train to minimize carbon?"
@@ -157,15 +157,16 @@ import mlsysim
 from mlsysim import SustainabilityModel
 
 sustain = SustainabilityModel()
-for grid in [mlsysim.Infra.Grids.Quebec, mlsysim.Infra.Grids.US_Average,
+for grid in [mlsysim.Infra.Grids.Quebec, mlsysim.Infra.Grids.US_Avg,
              mlsysim.Infra.Grids.Poland]:
     r = sustain.solve(
-        fleet=mlsysim.Systems.Clusters.H100_256,
+        fleet=mlsysim.Systems.Clusters.Research_256,
         duration_days=30,
         datacenter=grid
     )
-    print(f"{grid.name:12s}  {r['carbon_footprint_kg'].to('metric_ton'):>8.1f~}  "
-          f"PUE={r['pue']:.2f}  Water={r['water_usage_liters']:,.0f} L")
+    carbon_tons = r.carbon_footprint_kg / 1000.0
+    print(f"{grid.name:12s}  {carbon_tons:8.1f} tCO2e  "
+          f"PUE={r.pue:.2f}  Water={r.water_usage_liters:,.0f} L")
 ```
 
 For the theory behind PUE, carbon intensity, and the energy hierarchy, see the [Sustainable AI](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/15_sustainable_ai.pdf){target="_blank"} slide deck.
@@ -178,14 +179,14 @@ from mlsysim import ReliabilityModel
 
 rel = ReliabilityModel()
 result = rel.solve(
-    fleet=mlsysim.Systems.Clusters.H100_256,
+    fleet=mlsysim.Systems.Clusters.Research_256,
     job_duration_hours=720,       # 30 days
     checkpoint_time_s=120.0       # 2 minutes per checkpoint
 )
-print(f"Fleet MTBF:              {result['fleet_mtbf'].to('hour'):~.1f}")
-print(f"P(failure before done):  {result['failure_probability']:.1%}")
-print(f"Optimal ckpt interval:   {result['optimal_checkpoint_interval'].to('minute'):~.1f}")
-print(f"Expected failures:       {result['expected_failures']:.1f}")
+print(f"Fleet MTBF:              {result.fleet_mtbf.to('hour'):~.1f}")
+print(f"P(failure before done):  {result.failure_probability:.1%}")
+print(f"Optimal ckpt interval:   {result.optimal_checkpoint_interval.to('minute'):~.1f}")
+print(f"Expected failures:       {result.expected_failures:.1f}")
 ```
 
 This solver implements the [Young-Daly checkpoint model](https://github.com/harvard-edge/cs249r_book/releases/download/slides-latest/07_fault_tolerance.pdf){target="_blank"} -- essential for capacity planning on long training jobs.

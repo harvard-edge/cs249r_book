@@ -273,6 +273,7 @@ def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
     Returns:
         Quantity[second]: Estimated All-to-All time
     """
+    validate_at_least(n_gpus, 1, "n_gpus")
     msg = _ensure_unit(message_bytes, ureg.byte, "message_bytes")
     bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second, "bandwidth_bytes_s")
     lat = _ensure_unit(latency_s, ureg.second, "latency_s")

@@ -28,7 +28,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # --- Evaluating Nordic nRF52840 (Cortex-M4F) ---
 # +============================================================+
 # | MLSys-im SYSTEM EVALUATION

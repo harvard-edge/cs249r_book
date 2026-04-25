@@ -109,6 +109,7 @@ class TailLatencyResult(SolverResult):
     p99_latency: Quantity
     queue_utilization: float
     is_stable: bool
+    slo_headroom_ratio: float
     slo_violation_probability: float
 
 

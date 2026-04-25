@@ -47,7 +47,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # Scenario: Training Llama-3-70B on 512 H100 GPUs for 30 days
 #
 # Region                    | PUE    | Energy (MWh) | Carbon (Tonnes)

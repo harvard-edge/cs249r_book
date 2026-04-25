@@ -6,6 +6,7 @@ Usage:
 """
 
 from .core.solver import (
+    ForwardModel,
     SingleNodeModel,
     DistributedModel,
     ReliabilityModel,
@@ -33,6 +34,7 @@ from .core.solver import (
 )
 
 __all__ = [
+    "ForwardModel",
     "SingleNodeModel",
     "DistributedModel",
     "ReliabilityModel",

@@ -48,7 +48,7 @@ def __(mlsysim, mo, pd, plt, tax_slider):
     # 1. Setup the Demand and Fleet
     model = mlsysim.Models.Language.GPT3
     
-    fleet = mlsysim.Systems.Clusters.H100_1K
+    fleet = mlsysim.Systems.Clusters.Production_2K
     duration = 30.0 # days
     
     # 2. Run the Optimizer

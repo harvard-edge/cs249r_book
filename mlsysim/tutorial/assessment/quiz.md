@@ -1,4 +1,4 @@
-# mlsysim ISCA Tutorial: Pre/Post Assessment Quiz
+# MLSys·im Tutorial: Pre/Post Assessment Quiz
 
 ## Administration Instructions
 

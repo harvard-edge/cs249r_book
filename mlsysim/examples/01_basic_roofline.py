@@ -43,7 +43,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # Evaluating Llama-3 8B on an NVIDIA A100 vs H100...
 #
 # --- A100 Performance ---

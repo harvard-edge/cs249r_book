@@ -1,4 +1,4 @@
-# ISCA Tutorial Design Document
+# MLSys·im Tutorial Design Document
 
 ## First-Principles Performance Modeling for ML Systems: From Roofline to Fleet Design with mlsysim
 

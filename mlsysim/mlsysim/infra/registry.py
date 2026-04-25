@@ -2,7 +2,8 @@ from .types import GridProfile, RackProfile
 from ..core.constants import (
     PUE_LIQUID_COOLED, PUE_BEST_AIR, PUE_LEGACY,
     WUE_EVAPORATIVE, WUE_LIQUID,
-    CARBON_US_AVG_GCO2_KWH, CARBON_QUEBEC_GCO2_KWH, CARBON_POLAND_GCO2_KWH, CARBON_NORWAY_GCO2_KWH,
+    CARBON_US_AVG_GCO2_KWH, CARBON_QUEBEC_GCO2_KWH, CARBON_IOWA_GCO2_KWH,
+    CARBON_POLAND_GCO2_KWH, CARBON_NORWAY_GCO2_KWH,
     RACK_POWER_TRADITIONAL_KW, RACK_POWER_AI_TYPICAL_KW
 )
 
@@ -38,6 +39,20 @@ class Grids:
         lon=-98.5795,
         renewable_pct=21.0
     )
+    Iowa = GridProfile(
+        name="Iowa (Coal/Gas Reference)",
+        carbon_intensity_g_kwh=CARBON_IOWA_GCO2_KWH,
+        pue=PUE_BEST_AIR,
+        wue=WUE_EVAPORATIVE,
+        primary_source="coal_gas",
+        lat=42.0329,
+        lon=-93.5815,
+        renewable_pct=64.0,
+        metadata={
+            "description": "Reference high-carbon grid profile used in MLSys·im tutorials for regional contrast.",
+            "last_verified": "2026-04-25",
+        },
+    )
     Poland = GridProfile(
         name="Poland (Coal)",
         carbon_intensity_g_kwh=CARBON_POLAND_GCO2_KWH,
@@ -66,5 +81,7 @@ class Infra:
     Racks = Racks
     
     Quebec = Grids.Quebec
+    Norway = Grids.Norway
     US_Avg = Grids.US_Avg
+    Iowa = Grids.Iowa
     Poland = Grids.Poland

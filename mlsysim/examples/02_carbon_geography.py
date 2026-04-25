@@ -45,7 +45,7 @@ def main():
 if __name__ == "__main__":
     main()
 
-# Expected output (mlsysim v0.1.0):
+# Expected output (mlsysim v0.1.1):
 # Evaluating a 30-day training run on 256x H100 GPUs...
 #
 # Total Energy Consumed: 125.4 megawatt_hour

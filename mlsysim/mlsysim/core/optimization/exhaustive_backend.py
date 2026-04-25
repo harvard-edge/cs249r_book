@@ -54,7 +54,7 @@ class ExhaustiveBackend(OptimizerProtocol):
             flat_points = np.column_stack([m.ravel() for m in mesh])
             values = np.array([self.objective_fn(pt) for pt in flat_points])
             best_idx = int(np.argmin(values))
-            best_val = float(flat_points[best_idx, 0])
+            best_val = [float(v) for v in flat_points[best_idx]]
             optimal_obj = float(values[best_idx])
 
         solve_time_ms = (time.time() - start_time) * 1000
@@ -66,7 +66,10 @@ class ExhaustiveBackend(OptimizerProtocol):
         return OptimizationResult(
             feasible=feasible,
             optimal_value=optimal_obj,
-            best_configuration={"optimal_variable": best_val},
+            best_configuration={
+                "optimal_variable": best_val[0] if isinstance(best_val, list) else best_val,
+                "optimal_variables": best_val if isinstance(best_val, list) else [best_val],
+            },
             metrics={"grid_points_evaluated": total_points},
             solver_name="numpy.exhaustive_grid",
             solve_time_ms=solve_time_ms,

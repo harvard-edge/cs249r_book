@@ -40,6 +40,16 @@ class Workload(BaseModel):
         directly.  Subclasses (Transformer, CNN, etc.) override this with
         architecture-specific lowering.
         """
+        if self.parameters is None and self.model_size is not None:
+            weight_bytes = self.model_size.to(ureg.byte)
+            ops = self.inference_flops if self.inference_flops else (0 * ureg.flop)
+            return ComputationGraph(
+                name=self.name,
+                total_ops=ops,
+                parameter_count=0 * ureg.count,
+                weight_bytes=weight_bytes,
+                arithmetic_intensity=(ops / weight_bytes).to("flop/byte") if weight_bytes.magnitude > 0 else 0 * ureg.flop / ureg.byte,
+            )
         if self.parameters is None:
             raise NotImplementedError(
                 f"{type(self).__name__} has no 'parameters'; override lower() or set parameters."

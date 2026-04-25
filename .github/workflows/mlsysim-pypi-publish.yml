@@ -137,8 +137,9 @@ jobs:
           # Published packages should come from code that has been merged to dev.
           # This prevents accidentally tagging a stale branch or feature branch.
           if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/dev" 2>/dev/null; then
-            echo "::warning::Tagged commit is not an ancestor of origin/dev."
-            echo "This is allowed but unusual. Continuing anyway (publish discipline rests on reviewer)."
+            echo "::error::Tagged commit is not an ancestor of origin/dev."
+            echo "Merge the release commit to dev before publishing MLSys·im."
+            exit 1
           else
             echo "✅ Tagged commit is reachable from origin/dev"
           fi
@@ -234,7 +235,7 @@ jobs:
   publish-pypi:
     name: '📦 Publish to PyPI'
     needs: [verify, test, build]
-    if: ${{ !inputs.skip_pypi }}
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.skip_pypi }}
     runs-on: ubuntu-latest
     environment:
       name: pypi-mlsysim
@@ -276,7 +277,7 @@ jobs:
   verify-pypi:
     name: '🔬 Verify from PyPI'
     needs: [verify, publish-pypi]
-    if: always() && (needs.publish-pypi.result == 'success' || inputs.skip_pypi)
+    if: ${{ needs.publish-pypi.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: 🐍 Setup Python
@@ -326,7 +327,7 @@ jobs:
   github-release:
     name: '🏷️ GitHub Release'
     needs: [verify, build, publish-pypi]
-    if: always() && needs.build.result == 'success' && (needs.publish-pypi.result == 'success' || inputs.skip_pypi)
+    if: ${{ always() && needs.build.result == 'success' && (needs.publish-pypi.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_pypi)) }}
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout (full history for tag resolution)
@@ -449,7 +450,7 @@ jobs:
   docs-redeploy:
     name: '📚 Trigger Docs Redeploy'
     needs: [verify, publish-pypi]
-    if: ${{ needs.publish-pypi.result == 'success' }}
+    if: ${{ always() && needs.verify.result == 'success' && (needs.publish-pypi.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.skip_pypi)) }}
     runs-on: ubuntu-latest
     steps:
       - name: 📚 Dispatch mlsysim-publish-live.yml on dev
