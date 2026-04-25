@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
+import clsx from "clsx";
 import {
   ArrowLeft,
   ArrowRight,
@@ -496,7 +497,18 @@ function relatedQuestions(question: Question, all: Question[]) {
       const sharesChain = question.chain_ids?.some((id) => candidate.chain_ids?.includes(id));
       return sharesChain || candidate.topic === question.topic;
     })
-    .slice(0, 10);
+    .sort((a, b) => {
+      const chainId = question.chain_ids?.find((id) => a.chain_ids?.includes(id) || b.chain_ids?.includes(id));
+      if (chainId) {
+        const aPos = a.chain_positions?.[chainId] ?? 999;
+        const bPos = b.chain_positions?.[chainId] ?? 999;
+        if (aPos !== bPos) return aPos - bPos;
+      }
+      const levelDelta = levelIndex(a.level) - levelIndex(b.level);
+      if (levelDelta !== 0) return levelDelta;
+      return a.title.localeCompare(b.title);
+    })
+    .slice(0, 18);
 }
 
 function LevelRing({
@@ -784,6 +796,19 @@ function QuestionPanel({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
+  const activeChainId = question.chain_ids?.[0] ?? null;
+  const chainPath = activeChainId
+    ? [question, ...related.filter((item) => item.chain_ids?.includes(activeChainId))]
+        .sort((a, b) =>
+          (a.chain_positions?.[activeChainId] ?? 999) -
+          (b.chain_positions?.[activeChainId] ?? 999),
+        )
+    : [];
+  const chainIds = new Set(chainPath.map((item) => item.id));
+  const topicNeighbors = related
+    .filter((item) => item.topic === question.topic && !chainIds.has(item.id))
+    .slice(0, 8);
+
   return (
     <div className="p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
@@ -830,17 +855,63 @@ function QuestionPanel({
 
       <section>
         <h3 className="text-[11px] font-mono uppercase tracking-wide text-textTertiary mb-2">
-          Nearby questions
+          Why these are nearby
         </h3>
-        {related.length > 0 ? (
-          <div className="space-y-2">
-            {related.map((item) => (
-              <QuestionButton key={item.id} question={item} onClick={() => onSelect(item.id)} />
-            ))}
+        <p className="text-[12px] text-textSecondary leading-relaxed mb-4">
+          StaffML links questions by chain first, then by topic. Use chains as a learning path;
+          use topic neighbors to move sideways within the same concept.
+        </p>
+
+        {chainPath.length > 1 ? (
+          <div className="mb-5">
+            <h4 className="text-[10px] font-mono uppercase tracking-wide text-accentAmber mb-2">
+              Chain path
+            </h4>
+            <div className="relative space-y-2 before:absolute before:left-[13px] before:top-4 before:bottom-4 before:w-px before:bg-accentAmber/25">
+              {chainPath.map((item, index) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => item.id !== question.id && onSelect(item.id)}
+                  className={clsx(
+                    "relative w-full text-left pl-9 pr-3 py-3 rounded-lg border transition-colors",
+                    item.id === question.id
+                      ? "border-accentAmber/40 bg-accentAmber/10"
+                      : "border-borderSubtle bg-surface/50 hover:bg-surface hover:border-borderHighlight",
+                  )}
+                >
+                  <span
+                    className={clsx(
+                      "absolute left-[7px] top-4 w-3.5 h-3.5 rounded-full border-2 bg-background",
+                      item.id === question.id ? "border-accentAmber" : "border-accentAmber/50",
+                    )}
+                  />
+                  <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono uppercase text-textTertiary">
+                    <span>Step {index + 1}</span>
+                    <span>{item.level}</span>
+                    {item.id === question.id && <span className="text-accentAmber">current</span>}
+                  </div>
+                  <p className="text-sm font-semibold text-textPrimary leading-snug">{item.title}</p>
+                </button>
+              ))}
+            </div>
           </div>
-        ) : (
+        ) : null}
+
+        {topicNeighbors.length > 0 ? (
+          <div>
+            <h4 className="text-[10px] font-mono uppercase tracking-wide text-textTertiary mb-2">
+              Same topic: {titleCase(question.topic)}
+            </h4>
+            <div className="space-y-2">
+              {topicNeighbors.map((item) => (
+                <QuestionButton key={item.id} question={item} onClick={() => onSelect(item.id)} />
+              ))}
+            </div>
+          </div>
+        ) : chainPath.length > 1 ? null : (
           <p className="text-sm text-textTertiary">
-            No topic or chain neighbors are visible for this question yet.
+            No chain or same-topic neighbors are visible for this question yet.
           </p>
         )}
       </section>
