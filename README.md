@@ -416,6 +416,26 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
 
 ---
 
+## License
+
+This is a multi-component repository, and **each component is released under its own license** to match its purpose. The file inside each directory (e.g. `tinytorch/LICENSE`, `interviews/staffml/LICENSE`) is authoritative.
+
+| Component | License | What it means |
+|---|---|---|
+| Textbook (`book/`), Labs (`labs/`), Kits (`kits/`), Slides (`slides/`), Instructors (`instructors/`) | [CC-BY-NC-SA 4.0](LICENSE.md) | Share and adapt for **non-commercial** use, with attribution and same-license sharing. |
+| [TinyTorch](tinytorch/LICENSE) | MIT | Permissive — use, modify, redistribute, including commercially. |
+| [MLSys·im](mlsysim/LICENSE.md) | Apache 2.0 | Permissive with explicit patent grant. |
+| [StaffML](interviews/staffml/LICENSE) | AGPL v3 | Strong copyleft — modifications to deployed services must be published. Commercial licensing available; contact the authors. |
+| [StaffML question corpus](interviews/vault/questions/LICENSE) | CC BY-NC 4.0 | Research and educational use; commercial use requires permission. |
+| [TinyDigits dataset](tinytorch/datasets/tinydigits/LICENSE) | BSD 3-Clause | Permissive (matches sklearn ancestry). |
+| [TinyTalks dataset](tinytorch/datasets/tinytalks/LICENSE) | CC BY 4.0 | Permissive with attribution; commercial use allowed. |
+
+A user-facing summary lives at [mlsysbook.ai/about/license](https://mlsysbook.ai/about/license.html).
+
+If you are an institution considering adoption, or a company interested in commercial terms for a copyleft component, please reach out to [edu@tinyML.org](mailto:edu@tinyML.org).
+
+---
+
 ## Contributors
 
 Thanks goes to these wonderful people who have contributed to making this resource better for everyone!
