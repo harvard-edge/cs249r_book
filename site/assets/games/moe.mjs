@@ -1,5 +1,5 @@
-import { mountPixiOnCanvas, burst, flash, shake, tween } from "/assets/games/runtime.mjs";
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+import { mountPixiOnCanvas, burst, flash, shake, tween } from "./runtime.mjs";
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 export async function mountMoe(canvas, opts = {}) {
   const { app, stage, width: W, height: H } = await mountPixiOnCanvas(canvas, { bg: 0xf8f9fa });

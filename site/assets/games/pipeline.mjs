@@ -1,5 +1,5 @@
-import { mountPixiOnCanvas, burst, flash, shake } from "/assets/games/runtime.mjs";
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+import { mountPixiOnCanvas, burst, flash, shake } from "./runtime.mjs";
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 export async function mountPipeline(canvas, opts = {}) {
   const { app, stage, width: W, height: H } = await mountPixiOnCanvas(canvas, { bg: 0xffffff });

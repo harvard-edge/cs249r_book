@@ -9,8 +9,8 @@ format:
       - text: |
           <link rel="stylesheet" href="/assets/games/common.css">
           <script type="module">
-            import "/assets/games/runtime.mjs";
-            import "/assets/games/lander.mjs";
+            import "../assets/games/runtime.mjs";
+            import "../assets/games/lander.mjs";
           </script>
 ---
 
@@ -18,8 +18,13 @@ format:
 <div class="mlsp-game-container" role="region" aria-label="Gradient Lander mini-game">
   <canvas id="mlsp-canvas" class="mlsp-game-canvas" width="680" height="460"></canvas>
   <div class="mlsp-game-hud">
-    <span class="mlsp-score">VRAM <span id="mlsp-vram">100</span>% · Speed <span id="mlsp-speed">0</span></span>
-    <span>↑ increase batch size (thrust) · ← → steer learning rate · <kbd>R</kbd> retry</span>
+    <span class="mlsp-controls-line">
+      <kbd>↑</kbd> thrust (batch size) ·
+      <kbd>←</kbd> <kbd>→</kbd> steer learning rate ·
+      <kbd>R</kbd> retry
+    </span>
+    <span class="mlsp-sr-only" aria-live="polite">VRAM <span id="mlsp-vram">100</span>%, descent speed <span id="mlsp-speed">0</span></span>
+    <span class="mlsp-sr-only" id="mlsp-announce" aria-live="assertive" role="status"></span>
     <button type="button" class="mlsp-fullscreen-btn" onclick="this.closest('.mlsp-game-container').requestFullscreen()" title="Full Screen" aria-label="Full Screen">⛶</button>
   </div>
 </div>
@@ -44,6 +49,18 @@ format:
         if (s.speed > 40) { $speed.style.color = "#c44444"; } else { $speed.style.color = "inherit"; }
       },
       onGameOver: function(result) {
+        var ann = document.getElementById("mlsp-announce");
+        if (ann) {
+          var labels = {
+            "win": "Converged on the global minimum.",
+            "diverged": "Diverged. Learning rate too high.",
+            "local-min": "Settled in a local minimum. Suboptimal.",
+            "off-course": "Off course. Weights diverged.",
+            "missed-basin": "Missed the basin. No clear gradient.",
+            "oom": "Out of memory. VRAM exhausted."
+          };
+          ann.textContent = (labels[result && result.reason] || "Run ended.") + " Press R or click Try Again.";
+        }
         if (resolvedApi) attachAha(resolvedApi, result);
         else pendingResult = result;
       },
@@ -54,7 +71,40 @@ format:
     });
 
     function attachAha(api, result) {
-      MLSP.showAhaCard(ahaSlot, api.ahaLabel, api.ahaText, api.ahaLink);
+      // Per-failure aha: each loss type maps to a distinct ML systems lesson.
+      // Falls back to the legacy single-message API for safety.
+      var aha = (api.aha && result && result.reason) ? api.aha(result.reason) : null;
+      var label = aha ? aha.label : api.ahaLabel;
+      var text  = aha ? aha.text  : api.ahaText;
+      var link  = aha && aha.link ? aha.link : api.ahaLink;
+      MLSP.showAhaCard(ahaSlot, label, text, link);
+      attachShareRow(result);
+    }
+
+    function attachShareRow(result) {
+      if (!result || !result.shareText) return;
+      var card = ahaSlot.querySelector(".mlsp-aha-card");
+      if (!card || card.querySelector(".mlsp-share-row")) return;
+      var row = document.createElement("div");
+      row.className = "mlsp-share-row";
+      var pre = document.createElement("pre");
+      pre.className = "mlsp-share-text";
+      pre.textContent = result.shareText;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mlsp-share-btn";
+      btn.textContent = "📋 copy result";
+      btn.addEventListener("click", function() {
+        navigator.clipboard.writeText(result.shareText).then(function() {
+          btn.textContent = "✅ copied";
+          setTimeout(function() { btn.textContent = "📋 copy result"; }, 1500);
+        }).catch(function() {
+          btn.textContent = "(copy failed)";
+        });
+      });
+      row.appendChild(pre);
+      row.appendChild(btn);
+      card.appendChild(row);
     }
   }
   tryBoot();
@@ -64,14 +114,30 @@ format:
 
 ## How to play
 
-1. Use <kbd>←</kbd> and <kbd>→</kbd> to steer the learning-rate trajectory across the loss landscape.
-2. Hold <kbd>↑</kbd> to increase batch size. It stabilizes descent like thrust, but burns VRAM quickly.
-3. Touch down slowly on the deepest green platform. Orange platforms are local minima; high speed means divergence.
+The game starts paused so you can read the controls. Press <kbd>Enter</kbd> (or <kbd>Space</kbd>, or <kbd>↑</kbd>) to launch when you're ready.
+
+- <kbd>↑</kbd> hold to thrust — increases batch size, stabilizes descent, burns VRAM.
+- <kbd>←</kbd> <kbd>→</kbd> tilt — steer the learning-rate trajectory across the loss landscape.
+- Watch the dashed line under your ship — that's your altitude over the ground beneath. Watch the small blue circle ahead of your ship — that's where you'll land if you do nothing.
+- Touch down on the **green pad** (the global minimum) at low speed and near-vertical angle. The green pad pulses so you can spot it instantly.
+- Hit the orange pads → local minimum (suboptimal). Hit anything else → divergence. Run out of VRAM → OOM.
+- Click <kbd>↺ TRY AGAIN</kbd> in the canvas, or press <kbd>R</kbd>, to retry. The terrain is the same for everyone playing today.
+- **On a phone or tablet:** the canvas is divided into three vertical zones — tap-and-hold the **left third** to steer left, the **right third** to steer right, the **center** to thrust (and to launch from the READY screen). The game also respects your OS *Reduce Motion* preference.
 
 ## The Systems Concept
 
-Large batches can make optimization feel smoother because gradient noise falls, but the memory bill rises. The game turns that tradeoff into a landing problem: stability helps only if you still have enough memory and the learning-rate trajectory reaches the basin you actually wanted.
+Large batches make optimization feel smoother because gradient noise falls — but the memory bill rises. Lander turns that tradeoff into a landing problem: stability only helps if you still have enough VRAM left and the learning-rate trajectory actually reaches the basin you wanted.
+
+Each failure mode in the game maps to a real one in training:
+
+- **Diverged (LR too high)** — over-aggressive learning rate overshoots the minimum.
+- **Local minimum** — optimizer settles in a sub-optimal basin without enough exploration.
+- **Missed the basin** — landed in a flat or saddle region, no clear gradient signal.
+- **Off course** — weights drift out of the parameter space the model can handle.
+- **OOM** — VRAM exhausted; the run dies the way real training processes do.
+
+A "soft landing" on the global minimum is the only outcome where every constraint held simultaneously. That is the dream of large-batch training.
 
 ---
 
-*Part of [MLSysBook Playground](/games/). Found a bug? [Report an issue](https://github.com/harvard-edge/cs249r_book/issues/new?labels=bug&title=Bug+in+Game).*
+*Part of the [MLSysBook Playground](/games/) — try the other 13 games.* Found a bug? [Report an issue](https://github.com/harvard-edge/cs249r_book/issues/new?labels=bug&title=Bug+in+Game).

@@ -24,8 +24,8 @@
 import {
   mountPixiOnCanvas, dailySeed, dayNumber, bestScore,
   pop, flash, burst, floatText, shake, distToSegment, tween, getFilters
-} from "/assets/games/runtime.mjs";
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+} from "./runtime.mjs";
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 const TARGET_SPARSITY = 60;
 const ACCURACY_FLOOR = 50;

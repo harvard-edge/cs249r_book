@@ -1,5 +1,9 @@
-import { mountPixiOnCanvas, burst, floatText } from "/assets/games/runtime.mjs";
-import * as P from "/assets/games/vendor/pixi.min.mjs";
+// Module-relative imports so the game works at any deploy base
+// (mlsysbook.ai/, harvard-edge.github.io/cs249r_book_dev/, localhost:N/, …).
+// Absolute "/assets/..." paths break on any non-root deployment.
+import { mountPixiOnCanvas, burst, floatText, flash, shake, dailySeed } from "./runtime.mjs";
+import { bestScore, dayNumber } from "./runtime.mjs";
+import * as P from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
 window.MLSP.games = window.MLSP.games || {};
@@ -21,17 +25,65 @@ export async function mountLander(canvas, opts = {}) {
     angle: 0, // radians
     fuel: 100, // VRAM
     over: false, won: false,
+    started: false,
+    reason: null,           // 'win' | 'diverged' | 'local-min' | 'off-course' | 'missed-basin' | 'oom'
+    gameOverFired: false,   // guard so onGameOver fires exactly once
     keys: { up: false, left: false, right: false }
+  };
+
+  // Per-failure aha messages — every loss type maps to a distinct ML systems lesson.
+  // The qmd's attachAha pulls these via api.aha(reason).
+  const AHA = {
+    win: {
+      label: "You just experienced",
+      text: "A balanced descent. The right learning rate steered you into the deep basin while a measured batch size kept VRAM in budget. In real training, that's the dream — fast convergence without the OOM tax."
+    },
+    diverged: {
+      label: "What just happened",
+      text: "You hit the global minimum at high speed. In SGD this is what an over-aggressive learning rate looks like: the optimizer overshoots the basin and the loss diverges. Smaller learning rate → softer touchdown."
+    },
+    "local-min": {
+      label: "What just happened",
+      text: "You settled in a basin — but not the deep one. Real loss landscapes have many local minima; without enough exploration (gradient noise, momentum, restarts), an optimizer can stop short of the optimum."
+    },
+    "off-course": {
+      label: "What just happened",
+      text: "Your update steps drifted out of the parameter space the model can handle. In practice this is what divergent training looks like: weights blow up, gradients overflow, and the run is unrecoverable."
+    },
+    "missed-basin": {
+      label: "What just happened",
+      text: "You touched down in a region with no basin — a flat or saddle area of the loss surface. The optimizer has no clear gradient signal to follow, and the model never learns the task well."
+    },
+    oom: {
+      label: "What just happened",
+      text: "You burned through your VRAM mid-run. Every increase in batch size compounds the working memory; once you OOM, the process is dead. In production, this is the brutal practical ceiling on large-batch training."
+    }
   };
 
   const gravity = 0.05;
   const thrustPower = 0.15;
-  const rotSpeed = 0.08;
-  const maxSafeSpeed = 2.0;
+  const rotSpeed = 0.055;            // tuned down from 0.08 — easier precision, still feels responsive
+  const maxSafeSpeed = 2.4;          // tuned up from 2.0 — first-time forgiveness, still teaches the lesson
+  const maxSafeAngle = 0.6;          // tuned up from 0.5 (~34°) — same reasoning
+
+  // Daily seed: every player worldwide gets the same loss landscape today.
+  // Reset at UTC midnight via dailySeed() implementation.
+  const seed = dailySeed("lander");
+  const day = dayNumber();
+  const seededRand = seed.rand;
   const terrain = createTerrain();
 
+  // Honor the user's OS-level reduced-motion preference. Disables four animations
+  // (goal-pad pulse, CTA pulse, camera shake, particle bursts on losses).
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const safeShake = (target, amount, ms) => { if (!reduceMotion) shake(target, amount, ms); };
+  const safeBurst = (s, x, y, c, n, o) => { if (!reduceMotion) burst(s, x, y, c, n, o); };
+
   function rand(min, max) {
-    return min + Math.random() * (max - min);
+    return min + seededRand() * (max - min);
   }
 
   function createTerrain() {
@@ -40,7 +92,7 @@ export async function mountLander(canvas, opts = {}) {
     const rightX = rand(W * 0.68, W * 0.83);
     return {
       phase: rand(0, Math.PI * 2),
-      slope: rand(-8, 8),
+      slope: rand(-4, 4),  // tuned down from rand(-8, 8) — caps random unfairness from extreme tilts
       global: { x: globalX, width: rand(86, 112), wellWidth: rand(72, 92), depth: rand(50, 66) },
       locals: [
         { x: leftX, width: rand(70, 92), wellWidth: rand(54, 70), depth: rand(24, 36) },
@@ -107,33 +159,203 @@ export async function mountLander(canvas, opts = {}) {
   const padLocal2 = new P.Graphics();
   padLocal2.roundRect(terrain.locals[1].x - terrain.locals[1].width / 2, lossY(terrain.locals[1].x) - 3, terrain.locals[1].width, 6, 3).fill({ color: COL.localPad });
 
-  const globalLabel = new P.Text({ text: "global minimum", style: { fill: 0x3d9e5a, fontSize: 11, fontWeight: "bold" }});
+  const globalLabel = new P.Text({ text: "GLOBAL MINIMUM", style: { fill: 0x3d9e5a, fontSize: 11, fontWeight: "800", letterSpacing: 1 }});
   globalLabel.anchor.set(0.5);
-  globalLabel.position.set(terrain.global.x, lossY(terrain.global.x) - 18);
-  const localLabel = new P.Text({ text: "local minima", style: { fill: 0x9a6620, fontSize: 10 }});
-  localLabel.anchor.set(0.5);
-  localLabel.position.set(terrain.locals[0].x, lossY(terrain.locals[0].x) - 17);
+  globalLabel.position.set(terrain.global.x, lossY(terrain.global.x) - 20);
+  // Both local pads now labeled symmetrically (right one was previously mute).
+  const localLabel1 = new P.Text({ text: "local min", style: { fill: 0x9a6620, fontSize: 10, fontWeight: "600" }});
+  localLabel1.anchor.set(0.5);
+  localLabel1.position.set(terrain.locals[0].x, lossY(terrain.locals[0].x) - 17);
+  const localLabel2 = new P.Text({ text: "local min", style: { fill: 0x9a6620, fontSize: 10, fontWeight: "600" }});
+  localLabel2.anchor.set(0.5);
+  localLabel2.position.set(terrain.locals[1].x, lossY(terrain.locals[1].x) - 17);
 
-  stage.addChild(bg, contourLayer, basinWash, surface, padGlobal, padLocal1, padLocal2, globalLabel, localLabel);
+  stage.addChild(bg, contourLayer, basinWash, surface, padGlobal, padLocal1, padLocal2, globalLabel, localLabel1, localLabel2);
 
-  // Ship
+  // Predictive trajectory marker — translucent target showing where the ship will be in
+  // ~0.5 s if the player keeps coasting (no thrust). Helps a new player anticipate the basin.
+  const traj = new P.Graphics();
+  stage.addChild(traj);
+
+  // Altitude reference: faint vertical line from ship to the ground directly below.
+  // Reads as a "how high am I" cue without competing with the trajectory arrow.
+  const altLine = new P.Graphics();
+  stage.addChild(altLine);
+
+  // Ship — layered silhouette so the protagonist of the screen reads cleanly.
+  // Soft outer halo + crisp body + interior highlight stripe.
   const ship = new P.Graphics();
-  ship.moveTo(0, -15).lineTo(10, 10).lineTo(-10, 10).lineTo(0, -15).fill({color: COL.ship});
+  // outer halo
+  ship.moveTo(0, -17).lineTo(12, 12).lineTo(-12, 12).closePath().fill({ color: COL.ship, alpha: 0.18 });
+  // body
+  ship.moveTo(0, -15).lineTo(10, 10).lineTo(-10, 10).closePath().fill({ color: COL.ship });
+  // crisp outline
+  ship.moveTo(0, -15).lineTo(10, 10).lineTo(-10, 10).closePath().stroke({ color: 0x2c5775, width: 1.5 });
+  // inner highlight (catches the eye even at small scale)
+  ship.moveTo(0, -11).lineTo(4, 6).lineTo(-4, 6).closePath().fill({ color: 0xeaf3fa, alpha: 0.65 });
   stage.addChild(ship);
 
-  // Flame
+  // Flame — layered for depth: outer glow + core, both visible only when thrusting.
   const flame = new P.Graphics();
-  flame.moveTo(-5, 10).lineTo(0, 25).lineTo(5, 10).fill({color: COL.thrust});
+  // outer glow
+  flame.moveTo(-7, 10).lineTo(0, 30).lineTo(7, 10).closePath().fill({ color: COL.thrust, alpha: 0.35 });
+  // core
+  flame.moveTo(-4, 10).lineTo(0, 23).lineTo(4, 10).closePath().fill({ color: 0xffd28a });
   flame.visible = false;
   ship.addChild(flame);
 
-  const noiseText = new P.Text({ text: "stochastic gradient noise", style: { fill: 0x777777, fontSize: 13 }});
-  noiseText.position.set(18, 18);
+  // Loss-landscape legend — anchored to the basin so it reads as chart annotation,
+  // not a free-floating label. Less visual noise, more pedagogical signal.
+  const noiseText = new P.Text({
+    text: "loss landscape",
+    style: { fill: 0x6f7782, fontSize: 11, fontWeight: "700", letterSpacing: 1 }
+  });
+  noiseText.position.set(18, H - 100);
   stage.addChild(noiseText);
 
+  // Daily-puzzle + personal-best chip (top-center). Reads as "you're on day 4,
+  // your softest landing today was 1.4 — try to beat it."
+  const dayChip = new P.Text({
+    text: bestSoftText(),
+    style: { fill: 0x6f7782, fontSize: 11, fontWeight: "600", letterSpacing: 0.5, align: "center" }
+  });
+  dayChip.anchor.set(0.5, 0);
+  dayChip.position.set(W / 2, 16);
+  stage.addChild(dayChip);
+
+  function bestSoftText() {
+    const bestRaw = bestScore.get("lander-soft");
+    if (!bestRaw) return `Day #${day} · land softer than yesterday`;
+    // Stored as impact-speed × 100 (screen-velocity, dimensionless). Show as v=X.XX.
+    const v = (bestRaw / 100).toFixed(2);
+    return `Day #${day} · your softest landing: v=${v}`;
+  }
+
+  // ── In-canvas HUD ── glanceable bars so the player never has to look away from the ship.
+  // VRAM (vertical, top-right). Color shifts blue → orange → red as memory depletes.
+  const vramBar = new P.Container();
+  vramBar.position.set(W - 36, 60);
+  const vramBarBg = new P.Graphics();
+  vramBarBg.rect(0, 0, 14, 200).fill({ color: 0xeef1f4 }).stroke({ color: 0xcfd5db, width: 1 });
+  vramBar.addChild(vramBarBg);
+  const vramBarFill = new P.Graphics();
+  vramBar.addChild(vramBarFill);
+  const vramLabel = new P.Text({ text: "VRAM", style: { fill: 0x666666, fontSize: 10, fontWeight: "700", letterSpacing: 1 }});
+  vramLabel.anchor.set(0.5, 1);
+  vramLabel.position.set(7, -4);
+  vramBar.addChild(vramLabel);
+  stage.addChild(vramBar);
+
+  // Speed (horizontal, bottom-left). Green safe-band, red danger-band, ticking marker.
+  const speedBar = new P.Container();
+  speedBar.position.set(22, H - 36);
+  const speedTrack = new P.Graphics();
+  // Safe zone (0..maxSafeSpeed), then danger zone — drawn once and held.
+  const speedW = 220;
+  const safeFrac = maxSafeSpeed / 4.5;          // 4.5 = visible-speed cap
+  speedTrack.rect(0, 0, speedW * safeFrac, 8).fill({ color: 0xd4edda }).stroke({ color: 0x3d9e5a, width: 1 });
+  speedTrack.rect(speedW * safeFrac, 0, speedW * (1 - safeFrac), 8).fill({ color: 0xf9d6d5 }).stroke({ color: 0xc44, width: 1 });
+  speedBar.addChild(speedTrack);
+  const speedTick = new P.Graphics();
+  speedBar.addChild(speedTick);
+  const speedLabel = new P.Text({ text: "DESCENT SPEED", style: { fill: 0x666666, fontSize: 10, fontWeight: "700", letterSpacing: 1 }});
+  speedLabel.position.set(0, -16);
+  speedBar.addChild(speedLabel);
+  const safeMarker = new P.Text({ text: "soft-landing limit ↑", style: { fill: 0x3d9e5a, fontSize: 9, fontWeight: "600" }});
+  safeMarker.anchor.set(0.5, 0);
+  safeMarker.position.set(speedW * safeFrac, 12);
+  speedBar.addChild(safeMarker);
+  stage.addChild(speedBar);
+
+  function drawHud() {
+    const fuelFrac = Math.max(0, Math.min(1, state.fuel / 100));
+    const filledH = 200 * fuelFrac;
+    const fillColor = fuelFrac > 0.5 ? 0x4a90c4 : (fuelFrac > 0.2 ? 0xc87b2a : 0xc44444);
+    vramBarFill.clear();
+    vramBarFill.rect(1, 1 + (200 - filledH), 12, filledH).fill({ color: fillColor });
+
+    const speed = Math.hypot(state.vx, state.vy);
+    const tickX = Math.min(speedW, (speed / 4.5) * speedW);
+    speedTick.clear();
+    speedTick.rect(tickX - 1, -3, 3, 14).fill({ color: 0x101827 });
+  }
+
+  // ── Goal-pad pulse: the green platform breathes so the player's eye lands on it first ──
+  const padPulse = new P.Graphics();
+  padPulse.position.set(terrain.global.x, lossY(terrain.global.x));
+  stage.addChildAt(padPulse, stage.getChildIndex(padGlobal));
+  let pulseT = 0;
+
+  // ── RETRY pill: appears after game-over, clickable + responds to R key ──
+  const retryBtn = new P.Container();
+  retryBtn.position.set(W / 2, H / 2 + 50);
+  retryBtn.eventMode = "static";
+  retryBtn.cursor = "pointer";
+  retryBtn.visible = false;
+  const retryBg = new P.Graphics();
+  retryBg.roundRect(-78, -18, 156, 36, 18).fill({ color: 0xa31f34 }).stroke({ color: 0x6f1424, width: 1.5 });
+  retryBtn.addChild(retryBg);
+  const retryLbl = new P.Text({ text: "↺  TRY AGAIN", style: { fill: 0xffffff, fontSize: 14, fontWeight: "700", letterSpacing: 1 }});
+  retryLbl.anchor.set(0.5);
+  retryBtn.addChild(retryLbl);
+  retryBtn.on("pointertap", () => { if (opts.onRetry) opts.onRetry(); });
+  // Added to stage AFTER the READY overlay block so its z-order is on top.
+
+  // ── READY overlay: full-canvas card the player must dismiss with ↑ ──
+  const ready = new P.Container();
+  const readyDim = new P.Graphics();
+  readyDim.rect(0, 0, W, H).fill({ color: 0x101827, alpha: 0.78 });
+  ready.addChild(readyDim);
+  const readyTitle = new P.Text({ text: "GRADIENT LANDER", style: { fill: 0xffffff, fontSize: 32, fontWeight: "800", letterSpacing: 2 }});
+  readyTitle.anchor.set(0.5);
+  readyTitle.position.set(W / 2, H / 2 - 70);
+  ready.addChild(readyTitle);
+  const readyGoal = new P.Text({ text: "Land softly on the GREEN pad — the global minimum.", style: { fill: 0xd4edda, fontSize: 16 }});
+  readyGoal.anchor.set(0.5);
+  readyGoal.position.set(W / 2, H / 2 - 30);
+  ready.addChild(readyGoal);
+  const readyControls = new P.Text({
+    text: "↑  hold to thrust  (burns VRAM)\n← →  steer learning rate",
+    style: { fill: 0xffffff, fontSize: 15, align: "center", lineHeight: 22 }
+  });
+  readyControls.anchor.set(0.5);
+  readyControls.position.set(W / 2, H / 2 + 14);
+  ready.addChild(readyControls);
+  const readyHint = new P.Text({
+    text: "Take your time — read the controls.",
+    style: { fill: 0xb8c2cc, fontSize: 12, fontStyle: "italic" }
+  });
+  readyHint.anchor.set(0.5);
+  readyHint.position.set(W / 2, H / 2 + 56);
+  ready.addChild(readyHint);
+  const readyCta = new P.Text({
+    text: "press  ENTER  to launch",
+    style: { fill: 0xffd6a8, fontSize: 18, fontWeight: "700", letterSpacing: 1.5 }
+  });
+  readyCta.anchor.set(0.5);
+  readyCta.position.set(W / 2, H / 2 + 86);
+  ready.addChild(readyCta);
+  stage.addChild(ready);
+  stage.addChild(retryBtn);    // retry pill goes on top of everything else
+  let ctaPulseT = 0;
+
+  function launch() {
+    if (!state.started) { state.started = true; ready.visible = false; }
+  }
+
   const handleKeydown = (e) => {
-    if (e.key === 'ArrowUp') { e.preventDefault(); state.keys.up = true; }
-    if (e.key === 'ArrowLeft') { e.preventDefault(); state.keys.left = true; }
+    // Pre-game launch: accept Enter (primary), Space, or ↑ — any of the three works
+    // so the player isn't blocked by guessing the "right" key.
+    if (!state.started && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowUp')) {
+      e.preventDefault();
+      launch();
+      // ↑ should ALSO start thrusting (preserves existing keyboard pattern); Enter/Space
+      // just launch and wait for the player to press ↑.
+      if (e.key === 'ArrowUp') state.keys.up = true;
+      return;
+    }
+    if (e.key === 'ArrowUp')    { e.preventDefault(); state.keys.up = true; }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); state.keys.left = true; }
     if (e.key === 'ArrowRight') { e.preventDefault(); state.keys.right = true; }
     if (e.key.toLowerCase() === 'r' && state.over && opts.onRetry) opts.onRetry();
   };
@@ -145,7 +367,65 @@ export async function mountLander(canvas, opts = {}) {
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('keyup', handleKeyup);
 
+  // ── Touch zones (mobile / pointer): three invisible Pixi rects mapping to ←, →, ↑.
+  // Center zone doubles as the "press to launch" trigger so the READY card responds
+  // to a tap as well as the keyboard ↑.
+  function makeZone(x, y, w, h, onDown, onUp) {
+    const z = new P.Graphics();
+    z.rect(x, y, w, h).fill({ color: 0x000000, alpha: 0 });
+    z.eventMode = "static";
+    z.cursor = "default";
+    z.on("pointerdown",  onDown);
+    z.on("pointerup",    onUp);
+    z.on("pointerupoutside", onUp);
+    z.on("pointercancel",     onUp);
+    stage.addChild(z);
+    return z;
+  }
+  const colW = W / 3;
+  makeZone(0, 0, colW, H,
+    () => { state.keys.left = true; },
+    () => { state.keys.left = false; });
+  makeZone(W - colW, 0, colW, H,
+    () => { state.keys.right = true; },
+    () => { state.keys.right = false; });
+  makeZone(colW, 0, colW, H,
+    () => { state.keys.up = true; launch(); },
+    () => { state.keys.up = false; });
+
+  // Re-pin overlay UI to the top so touch zones don't intercept clicks meant
+  // for the READY overlay or the RETRY button.
+  stage.setChildIndex(ready, stage.children.length - 1);
+  stage.setChildIndex(retryBtn, stage.children.length - 1);
+
   app.ticker.add(() => {
+    // HUD drawn every frame so it never goes stale between win/crash and the aha card.
+    drawHud();
+
+    // Goal pad pulses to attract the eye — held static when reduce-motion is on
+    // (a static green ring still reads as the goal; the breathing is decoration).
+    if (!reduceMotion) {
+      pulseT += 0.06;
+      const r = 26 + Math.sin(pulseT) * 6;
+      padPulse.clear();
+      padPulse.circle(0, 0, r).stroke({ color: COL.pad, width: 2, alpha: 0.55 });
+      padPulse.circle(0, 0, r * 0.55).stroke({ color: COL.pad, width: 1.4, alpha: 0.35 });
+    } else if (padPulse.geometry == null || pulseT === 0) {
+      padPulse.clear();
+      padPulse.circle(0, 0, 28).stroke({ color: COL.pad, width: 2, alpha: 0.5 });
+      pulseT = -1; // sentinel: drawn once, never again
+    }
+
+    if (!state.started) {
+      // Pre-game: pulse the "press UP" prompt so it reads as an action, not a static label.
+      if (!reduceMotion) {
+        ctaPulseT += 0.08;
+        readyCta.alpha = 0.75 + 0.25 * Math.sin(ctaPulseT);
+      } else {
+        readyCta.alpha = 1.0;
+      }
+      return;
+    }
     if (state.over) return;
 
     if (state.keys.left) state.angle -= rotSpeed;
@@ -169,8 +449,43 @@ export async function mountLander(canvas, opts = {}) {
     ship.y = state.y;
     ship.rotation = state.angle;
 
-    // Check bounds
-    if (state.x < 0 || state.x > W) state.over = true; // Off screen
+    // Trajectory marker: project 30 frames ahead under coast (gravity only, no thrust).
+    const tAhead = 30;
+    const predX = state.x + state.vx * tAhead;
+    const predY = state.y + state.vy * tAhead + 0.5 * gravity * tAhead * tAhead;
+    traj.clear();
+    traj.circle(predX, predY, 5).stroke({ color: COL.ship, width: 1.5, alpha: 0.55 });
+    traj.moveTo(state.x, state.y).lineTo(predX, predY).stroke({ color: COL.ship, width: 1, alpha: 0.22 });
+
+    // Altitude reference: faint dashed line from ship straight down to the surface beneath.
+    // Only drawn when the ship has actual headroom — avoids visual noise near touchdown.
+    altLine.clear();
+    const groundBelow = lossY(state.x);
+    if (groundBelow - state.y > 18) {
+      const dashLen = 4;
+      let yCursor = state.y + 14;
+      while (yCursor < groundBelow - 4) {
+        altLine.moveTo(state.x, yCursor).lineTo(state.x, Math.min(yCursor + dashLen, groundBelow - 4)).stroke({ color: 0xa0aab4, width: 1, alpha: 0.45 });
+        yCursor += dashLen + 4;
+      }
+    }
+
+    // Thrust juice: emit small puff opposite to ship's angle every other frame.
+    if (state.keys.up && state.fuel > 0) {
+      if ((Math.random() < 0.55)) {
+        const puffX = state.x + Math.sin(state.angle) * 14;
+        const puffY = state.y + Math.cos(state.angle) * 14;
+        burst(stage, puffX, puffY, COL.thrust, 1, { speed: 1.2, lifeMs: 380 });
+      }
+    }
+
+    // Check bounds — off-screen is now an explicit "OFF COURSE" failure, not a silent stop.
+    if (state.x < 0 || state.x > W) {
+      state.over = true;
+      state.reason = "off-course";
+      flash(stage, 0xc44444, 240, 0.30);
+      floatText(stage, Math.max(20, Math.min(W - 20, state.x)), 50, "OFF COURSE", COL.crash, { size: 18 });
+    }
     
     // Landing logic
     const speed = Math.hypot(state.vx, state.vy);
@@ -184,43 +499,108 @@ export async function mountLander(canvas, opts = {}) {
     if (state.y + 10 >= groundY) {
       state.over = true;
       state.y = groundY - 10;
-      
+      state.impactSpeed = speed;
+      state.vramAtImpact = Math.max(0, Math.floor(state.fuel));
+
+      // Impact magnitude scales every consequence — gentle landings vs crash divergence.
+      const impactShake = Math.min(18, speed * 3);
+
       if (inGlobalPad(state.x)) {
-        if (speed < maxSafeSpeed && Math.abs(state.angle) < 0.5) {
+        if (speed < maxSafeSpeed && Math.abs(state.angle) < maxSafeAngle) {
            state.won = true;
+           state.reason = "win";
+           // Best-soft-landing tracking. Lower is better; store as int (×100) for compare.
+           const softCenti = Math.round(speed * 100);
+           const prev = bestScore.get("lander-soft");
+           if (!prev || softCenti < prev) {
+             bestScore.set("lander-soft", softCenti);
+             state.newBest = true;
+             dayChip.text = bestSoftText();
+           }
+           // Win celebration: green burst + soft green flash + small confirming shake.
+           safeBurst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
+           flash(stage, 0x3d9e5a, 260, 0.28);
+           safeShake(stage, 4, 220);
            floatText(stage, state.x, state.y - 30, "CONVERGED!", COL.pad, { size: 24 });
         } else {
-           burst(stage, state.x, state.y, COL.crash, 30);
+           state.reason = "diverged";
+           safeBurst(stage, state.x, state.y, COL.crash, 30);
+           flash(stage, 0xc44444, 220, 0.34);
+           safeShake(stage, impactShake, 320);
            ship.visible = false;
-           floatText(stage, state.x, state.y - 30, "DIVERGED (TOO FAST)", COL.crash, { size: 16 });
+           floatText(stage, state.x, state.y - 30, "DIVERGED — LR TOO HIGH", COL.crash, { size: 16 });
         }
       } else if (inLocalPad(state.x)) {
-        burst(stage, state.x, state.y, COL.crash, 30);
+        state.reason = "local-min";
+        safeBurst(stage, state.x, state.y, COL.crash, 30);
+        flash(stage, 0xc87b2a, 200, 0.26);
+        safeShake(stage, impactShake, 300);
         ship.visible = false;
-        floatText(stage, state.x, state.y - 30, "LOCAL MINIMUM (Suboptimal)", COL.crash, { size: 16 });
+        floatText(stage, state.x, state.y - 30, "LOCAL MINIMUM — SUBOPTIMAL", COL.crash, { size: 16 });
       } else {
-        burst(stage, state.x, state.y, COL.crash, 30);
+        state.reason = "missed-basin";
+        safeBurst(stage, state.x, state.y, COL.crash, 30);
+        flash(stage, 0xc44444, 220, 0.34);
+        safeShake(stage, impactShake, 320);
         ship.visible = false;
-        floatText(stage, state.x, state.y - 30, "GRADIENT EXPLOSION (Crash)", COL.crash, { size: 16 });
+        floatText(stage, state.x, state.y - 30, "MISSED THE BASIN", COL.crash, { size: 16 });
       }
     }
 
-    if (state.fuel <= 0 && flame.visible) {
+    // OOM: running out of VRAM mid-air ends the run, just as it kills a real training process.
+    if (state.fuel <= 0 && !state.over) {
+      state.over = true;
+      state.reason = "oom";
       flame.visible = false;
-      floatText(stage, state.x, state.y, "OOM!", COL.crash, {size: 14});
+      safeBurst(stage, state.x, state.y, COL.crash, 26, { speed: 2.0, lifeMs: 700 });
+      flash(stage, 0xc44444, 240, 0.32);
+      safeShake(stage, 8, 280);
+      floatText(stage, state.x, state.y - 30, "OOM — VRAM EXHAUSTED", COL.crash, { size: 16 });
     }
 
-    if (state.over && opts.onGameOver) {
+    if (state.over && !state.gameOverFired && opts.onGameOver) {
+      state.gameOverFired = true;
+      retryBtn.visible = true;
+      // Recolor the retry pill to match the outcome — green confirms a win,
+      // MIT-red invites another try after a loss.
+      if (state.won) {
+        retryBg.clear();
+        retryBg.roundRect(-78, -18, 156, 36, 18).fill({ color: 0x3d9e5a }).stroke({ color: 0x256b3a, width: 1.5 });
+        retryLbl.text = "↺  PLAY AGAIN";
+      }
       opts.onGameOver({
-         won: state.won
+        won: state.won,
+        reason: state.reason,
+        impactSpeed: state.impactSpeed,
+        vramAtImpact: state.vramAtImpact,
+        newBest: !!state.newBest,
+        shareText: buildShareText(state)
       });
     }
   });
 
+  function buildShareText(s) {
+    const v = (s.impactSpeed || 0).toFixed(2);
+    const vram = s.vramAtImpact ?? 0;
+    const head = `🚀 Gradient Lander · Day #${day}`;
+    const tail = "mlsysbook.ai/games/lander";
+    if (s.reason === "win") {
+      const star = s.newBest ? "  ⭐ new personal best!" : "";
+      return `${head}\n🟢 CONVERGED · v=${v} · VRAM ${vram}%${star}\n${tail}`;
+    }
+    if (s.reason === "diverged")     return `${head}\n🔴 DIVERGED — LR too high (v=${v})\n${tail}`;
+    if (s.reason === "local-min")    return `${head}\n🟠 LOCAL MIN — suboptimal solution\n${tail}`;
+    if (s.reason === "off-course")   return `${head}\n🔴 OFF COURSE — weights diverged\n${tail}`;
+    if (s.reason === "missed-basin") return `${head}\n🔴 MISSED THE BASIN — no clear gradient\n${tail}`;
+    if (s.reason === "oom")          return `${head}\n🔴 OOM — VRAM exhausted mid-run\n${tail}`;
+    return `${head}\n${tail}`;
+  }
+
   return {
     id: "lander",
-    ahaLabel: "You just experienced",
-    ahaText: "Training with a massive batch size gives you a perfectly stable 'thrust' down the loss landscape, but it consumes your VRAM extremely fast. Finding the right balance between Batch Size (fuel burn rate) and Learning Rate (steering angle) is the only way to land in the global minimum without diverging or running out of memory.",
+    ahaLabel: AHA.win.label,                 // legacy fallback
+    ahaText: AHA.win.text,                   // legacy fallback
+    aha(reason) { return AHA[reason] || AHA.win; },
     destroy() {
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('keyup', handleKeyup);
