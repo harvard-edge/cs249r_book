@@ -8,6 +8,7 @@ import {
   Library, Target, Crosshair, BarChart3, BookOpen, Github,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
   Star, Bug, Send, Atom,
+  Network,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
@@ -17,6 +18,7 @@ import { useTheme } from "@/components/ThemeProvider";
 
 const primaryLinks = [
   { href: "/", label: "Vault", icon: Library },
+  { href: "/explore", label: "Explore", icon: Network },
   { href: "/practice", label: "Practice", icon: Target },
   { href: "/gauntlet", label: "Mock Interview", icon: Crosshair },
   { href: "/progress", label: "Progress", icon: BarChart3 },

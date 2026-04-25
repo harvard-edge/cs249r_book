@@ -427,6 +427,33 @@ const VAULT_API = process.env.NEXT_PUBLIC_VAULT_API
 
 // In-memory cache for hydrated questions during one session.
 const _detailsCache = new Map<string, Question>();
+let _staticDetailsCache: Map<string, Question> | null = null;
+
+function shouldUseStaticDetails(): boolean {
+  if (process.env.NEXT_PUBLIC_VAULT_FALLBACK?.toLowerCase() === "static") return true;
+  if (typeof window === "undefined") return false;
+  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+}
+
+async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
+  if (!_staticDetailsCache) {
+    const mod = await import("../data/corpus.json");
+    const fullQuestions = mod.default as unknown as Question[];
+    _staticDetailsCache = new Map(fullQuestions.map((q) => [q.id, q]));
+  }
+  const full = _staticDetailsCache.get(id);
+  if (!full) return undefined;
+  const merged: Question = {
+    ...summary,
+    ...full,
+    details: {
+      ...summary.details,
+      ...full.details,
+    },
+  };
+  _detailsCache.set(id, merged);
+  return merged;
+}
 
 /**
  * Fetch the FULL question (with `scenario` and `details.*`) from the
@@ -440,11 +467,15 @@ export async function getQuestionFullDetail(id: string): Promise<Question | unde
   const summary = questions.find(q => q.id === id);
   if (!summary) return undefined;
 
+  if (shouldUseStaticDetails()) {
+    return getStaticFullDetail(id, summary);
+  }
+
   try {
     const res = await fetch(`${VAULT_API}/questions/${encodeURIComponent(id)}`, {
       signal: AbortSignal.timeout(5_000),
     });
-    if (!res.ok) return summary;
+    if (!res.ok) return (await getStaticFullDetail(id, summary)) ?? summary;
     // Worker returns a DENORMALIZED row (flat fields straight from the D1
     // questions table) — common_mistake / realistic_solution / napkin_math
     // live at the top level, NOT under `details`. Re-nest to match the
@@ -474,9 +505,10 @@ export async function getQuestionFullDetail(id: string): Promise<Question | unde
     _detailsCache.set(id, merged);
     return merged;
   } catch {
-    // Worker unreachable → serve summary. Callers should handle missing
-    // scenario/details gracefully (skeleton UI, hide sections, etc.).
-    return summary;
+    // Worker unreachable → serve the bundled full corpus when available.
+    // This keeps local previews usable even when the Worker blocks localhost
+    // via CORS, and gives production a graceful fallback on transient outages.
+    return (await getStaticFullDetail(id, summary)) ?? summary;
   }
 }
 

@@ -22,6 +22,7 @@ import Footer from "./Footer";
 const ROUTES_WITHOUT_FOOTER = new Set<string>([
   "/practice",
   "/gauntlet",
+  "/explore",
   "/simulator",
   "/roofline",
 ]);

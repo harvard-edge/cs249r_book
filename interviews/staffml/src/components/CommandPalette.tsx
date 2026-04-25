@@ -28,7 +28,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search, X, Target, Crosshair, BookOpen, BarChart3, Info,
-  FileText, Cpu, ArrowRight,
+  FileText, Cpu, ArrowRight, Network,
 } from "lucide-react";
 import clsx from "clsx";
 import { searchTopics } from "@/lib/taxonomy";
@@ -42,6 +42,7 @@ type Result =
 
 const PAGES: Result[] = [
   { kind: "page", title: "Vault",          subtitle: "Browse all topics",        href: "/",          icon: BookOpen },
+  { kind: "page", title: "Explore",        subtitle: "Visual question atlas",    href: "/explore",   icon: Network },
   { kind: "page", title: "Practice",       subtitle: "Untimed, with helpers",    href: "/practice",  icon: Target },
   { kind: "page", title: "Mock Interview", subtitle: "Timed, the gauntlet",      href: "/gauntlet",  icon: Crosshair },
   { kind: "page", title: "Progress",       subtitle: "Stats and weak spots",     href: "/progress",  icon: BarChart3 },

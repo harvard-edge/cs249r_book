@@ -1142,7 +1142,7 @@ function PracticePage() {
                           */}
                           <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-textTertiary">
                             <Lightbulb className="w-3 h-3" />
-                            <span>Stuck? Use the <span className="text-accentBlue font-medium">Ask Interviewer</span> panel on the right →</span>
+                            <span>Stuck? Use <span className="text-accentBlue font-medium">Ask Interviewer</span> in the tools panel →</span>
                           </div>
                         </div>
                       ) : (
@@ -1347,30 +1347,27 @@ function PracticePage() {
               </div>
 
               {/*
-                Right-column order follows Chip Huyen's feedback:
-                  - Ask Interviewer first (the novel feature; beginners
-                    discover it via the nudge under the textarea). Keep
-                    it collapsible — non-AI users see a thin header, not
-                    a giant empty chat panel shouting "you're doing this
-                    wrong." The `key` prop force-remounts on persona
-                    swap so pre-reveal and post-reveal transcripts stay
-                    separate.
-                  - Hardware reference defaults OPEN. Practitioners
-                    doing bandwidth/FLOPS calcs consult it constantly;
-                    forcing a click every 15 seconds is the #1 friction
-                    point Chip flagged.
-                  - Napkin calculator defaults CLOSED. It is an invoked
-                    tool, not a consulted reference — only expand when
-                    actively computing something.
+                Right-column order:
+                  - Hardware reference first and open: it is the stable
+                    reference table students need while reading the problem.
+                  - Napkin calculator stays closed: it is an invoked tool,
+                    not persistent context.
+                  - Ask Interviewer / Ask Tutor stays last and open: it can
+                    grow as a chat transcript without pushing references out
+                    of the initial viewport, while remaining visible enough
+                    to teach users the clarification/tutoring workflow. The
+                    `key` prop force-remounts on persona swap so pre-reveal
+                    and post-reveal transcripts stay separate.
               */}
+              <HardwareRef defaultOpen={true} />
+              <NapkinCalc defaultOpen={false} />
               <AskInterviewer
                 key={`${current.id}-${showAnswer ? "study" : "interview"}`}
                 questionContext={current.scenario}
+                defaultOpen={true}
                 mode={showAnswer ? "study" : "interview"}
                 canonicalAnswer={showAnswer ? current.details.realistic_solution : undefined}
               />
-              <HardwareRef defaultOpen={true} />
-              <NapkinCalc defaultOpen={false} />
             </div>
           </div>
         ) : (
