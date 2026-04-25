@@ -9,24 +9,32 @@ bloom_level: create
 phase: both
 title: Orin Ethernet Switch AllReduce
 scenario: A 4-node array of Jetson AGX Orins connected via a 1 Gigabit Ethernet switch
-  performs an AllReduce on a 10 MB layer gradient. The switch supports full-duplex.
-question: Create a topology mapping and calculate the time taken to synchronize using
-  a tree topology versus a ring topology.
+  performs an AllReduce on a 10 MB layer gradient. The switch supports full-duplex,
+  but one of the four uplinks is degraded - it negotiated only 100 Mbps after a flaky
+  PHY auto-negotiation - while the other three remain at 1 Gbps.
+question: Create a topology mapping and calculate AllReduce time for both ring and
+  tree, accounting for the asymmetric 100 Mbps uplink. Identify which topology degrades
+  more gracefully under this link failure.
 visual:
   kind: svg
   path: edge-2273.svg
   alt: Nodes connected through a central Ethernet Switch but logically forming a Ring.
   caption: Logical Ring over Physical Switch.
 details:
-  realistic_solution: 'In a tree topology, the root becomes a bottleneck: $2 \times
-    10$ MB $= 20$ MB ($160$ Mb) over 1 Gbps takes $160$ ms. In Ring AllReduce, data
-    transferred per link is $2 \times (3/4) \times 10 = 15$ MB ($120$ Mb). Since the
-    switch is full-duplex, the Ring runs concurrently, taking $120$ Mb / $1000$ Mbps
-    $= 120$ ms. The Ring is 40 ms faster.'
-  common_mistake: Assuming the 1 GbE switch means broadcast is cost-free, ignoring
-    the ingress bottleneck at the root node.
-  napkin_math: Tree bottleneck = 160Mb / 1000Mbps = 160ms. Ring = 120Mb / 1000Mbps
-    = 120ms.
+  realistic_solution: 'Ring is bottlenecked by the slowest link. Each ring link carries
+    2*(3/4)*10 = 15 MB = 120 Mb; over 100 Mbps that takes 1200 ms - a 10x slowdown
+    versus 120 ms on a healthy ring. Tree placement, however, can route around the
+    bad uplink: if the degraded node is a leaf, it sends/receives only its own 10 MB
+    payload twice (reduce + broadcast) at 100 Mbps = 1600 ms, but if the degraded
+    uplink hosts the root, it sees 20 MB / 100 Mbps = 1600 ms. With careful root
+    selection, tree degrades gracefully (only the slow leaf pays the penalty); ring
+    cannot avoid the bad link because every node must traverse it.'
+  common_mistake: Applying the textbook bandwidth-symmetric ring formula and concluding
+    ring still beats tree, missing that ring is a serial chain - a single slow link
+    multiplies total time, while a tree with smart root placement isolates the failure.
+  napkin_math: 'Healthy ring: 120 Mb / 1000 Mbps = 120 ms. Degraded ring (100 Mbps
+    link): 120 Mb / 100 Mbps = 1200 ms. Tree with degraded leaf: only that leaf''s
+    20 MB traverses the slow link = 1600 ms, but other 3 leaves finish in 160 ms.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 9

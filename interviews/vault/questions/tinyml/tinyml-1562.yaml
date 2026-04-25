@@ -9,23 +9,32 @@ bloom_level: evaluate
 phase: both
 title: Hailo-8 PCIe Gen3 Saturated
 scenario: A Hailo-8 accelerator is connected to a low-power host via PCIe Gen3 x1,
-  which provides ~1 GB/s. The host streams 1080p RGB video at 60 fps for real-time
-  segmentation.
-question: Evaluate the PCIe bandwidth utilization percentage for the input stream
-  alone.
+  which provides ~1 GB/s of raw lane bandwidth. The host streams 1080p RGB video
+  at 60 fps for real-time segmentation. PCIe Gen3 uses 128b/130b encoding (~1.5%
+  overhead) and TLP framing adds another ~10% (24-byte header per ~256 B payload).
+  The Hailo-8 also returns a 4 MB segmentation mask per frame on the same x1 link
+  (full-duplex).
+question: Evaluate the achievable PCIe Gen3 x1 utilization for the input stream
+  AND the return mask path, accounting for 128b/130b encoding plus TLP framing overhead.
+  Determine whether the link can sustain 60 fps with both directions active.
 visual:
   kind: svg
   path: tinyml-1562.svg
   alt: Host node pushing 373 MB/s to Hailo-8 over a 1000 MB/s link.
   caption: PCIe Gen3 x1 Bandwidth Utilization.
 details:
-  realistic_solution: 1080p RGB is $1920 \times 1080 \times 3$ bytes = 6.22 MB per
-    frame. At 60 fps, the data rate is $6.22 \times 60 = 373.2$ MB/s. The PCIe Gen3
-    x1 provides 1000 MB/s, yielding a utilization of $373.2 / 1000 = 37.3\%$. The
-    link is sufficient for input but leaves room for output tensors.
-  common_mistake: Calculating bits instead of bytes for the PCIe transfer or forgetting
-    the 3-channel RGB multiplier.
-  napkin_math: 2M pixels * 3B * 60fps = 360 MB/s. 360 / 1000 = 36% utilization.
+  realistic_solution: '1080p RGB = 1920*1080*3 = 6.22 MB/frame; at 60 fps = 373.2
+    MB/s ingress. Effective PCIe Gen3 x1 bandwidth after 128b/130b (~1.5%) and TLP
+    framing (~10%) overhead = 1000 * 0.985 * 0.9 = 886 MB/s per direction. Ingress
+    utilization = 373 / 886 = 42%. The 4 MB mask return at 60 fps = 240 MB/s on
+    the return lane = 27% utilization. Both directions fit comfortably on a full-duplex
+    Gen3 x1, but a second 4 MB tensor would push ingress past 73% and start contending
+    for TLP credits, inflating tail latency.'
+  common_mistake: Comparing payload to the raw 1 GB/s line rate without subtracting
+    encoding (128b/130b) and TLP framing overhead - a common 13-15% optimism error
+    that hides marginal saturation cases.
+  napkin_math: 'Effective BW per direction = 1000 * 0.985 * 0.9 = 886 MB/s; ingress
+    = 373/886 = 42%; egress = 240/886 = 27%.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 5

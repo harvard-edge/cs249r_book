@@ -11,8 +11,9 @@ title: PagedAttention Block Size Fragmentation
 scenario: An edge deployment of an LLM on a Jetson AGX Orin uses PagedAttention for
   KV cache management. The system architect must choose between a block size of 16
   tokens and 256 tokens.
-question: Evaluate the fragmentation trade-offs of large versus small KV cache page
-  sizes.
+question: Evaluate the page-table management overhead trade-off (not internal fragmentation)
+  between 16-token and 256-token blocks - specifically the iGPU MMU TLB pressure
+  on Orin and the host-side page-table walk cost during attention kernel launches.
 visual:
   kind: svg
   path: edge-2357.svg
@@ -20,15 +21,21 @@ visual:
     to 16-token blocks.
   caption: KV Cache Internal Fragmentation Ratio.
 details:
-  realistic_solution: Smaller block sizes (e.g., 16 tokens) minimize internal fragmentation
-    because very few allocated token slots are wasted if a sequence ends prematurely.
-    However, they increase page table management overhead. Larger blocks (256 tokens)
-    optimize memory bandwidth and reduce lookup overhead, but severely increase internal
-    memory fragmentation, wasting Orin's limited unified memory on half-empty blocks.
-  common_mistake: Assuming large blocks are always better for GPU memory bandwidth
-    without recognizing the memory waste of internal fragmentation for variable sequences.
-  napkin_math: 'Seq length 257: 256-block uses 2 blocks (512 capacity, ~50% waste).
-    16-block uses 17 blocks (272 capacity, ~5% waste).'
+  realistic_solution: '16-token blocks generate 16x more block-table entries per
+    sequence. For a 32-session, 1024-token workload: 16-block needs 32 * 64 = 2048
+    block-table entries that the attention kernel must dereference per launch; 256-block
+    needs only 32 * 4 = 128 entries. The Orin iGPU MMU has a smaller TLB than discrete
+    GPUs (~512 entries vs 8K+ on H100), so 16-block KV thrashes the TLB and adds
+    ~5-15% kernel-launch overhead. Memory access granularity also matters: HBM-style
+    burst-aligned access wants 256-byte minimum, and 16-token blocks (each ~8 KB
+    on Llama-2-7B) still align well, but the page-walk cost per attention head
+    multiplies. Choose 64-128 tokens as a tinyML-edge sweet spot.'
+  common_mistake: Focusing only on internal fragmentation and missing that on iGPUs
+    the TLB capacity and page-walk overhead bound the practical lower limit on block
+    size.
+  napkin_math: '16-block: 32 sessions * 64 entries = 2048 page table entries / launch
+    (TLB-thrash). 256-block: 32 * 4 = 128 entries (TLB-friendly). Sweet spot = 64-128
+    tokens.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 9

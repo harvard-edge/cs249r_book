@@ -8,22 +8,32 @@ competency_area: networking
 bloom_level: understand
 phase: both
 title: Hailo-8 Camera Fan-in Link
-scenario: 4x Hailo-8 IP cameras individually extract 4 MB INT8 feature maps per frame
-  at 30 fps. They all transmit over gigabit ethernet (125 MB/s) to a central switch.
-question: Calculate the total bandwidth required and determine if the 1 Gbps link
-  is saturated.
+scenario: 4x Hailo-8 cameras individually extract 4 MB INT8 feature maps per frame
+  at 30 fps. The receiving server's PCIe Gen3 x4 NIC ingests at 4 GB/s peak, but
+  host-side memory ingestion (pinned-buffer copy + cache pollution) sustains only
+  1.2 GB/s before evicting active model state from L3.
+question: Calculate aggregate ingress bandwidth and identify the binding constraint
+  - is it the NIC ingress, the PCIe lane, or the host memory ingestion path that
+  saturates first?
 visual:
   kind: svg
   path: edge-2364.svg
   alt: Four cameras feeding into a single saturated network switch.
   caption: 4:1 Fan-in network topology causing congestion.
 details:
-  realistic_solution: Each camera produces 4 MB * 30 fps = 120 MB/s. Four cameras
-    produce 4 * 120 = 480 MB/s total. The 1 Gbps switch handles 125 MB/s. 480 MB/s
-    > 125 MB/s, so the network link is massively saturated.
-  common_mistake: Calculating bandwidth as 4 * 30 = 120 Mbps, forgetting to multiply
-    by the 4 MB feature map size.
-  napkin_math: 4 * 4 * 30 = 480 MB/s > 125 MB/s. Saturated.
+  realistic_solution: 'Aggregate ingress = 4 cameras * 4 MB * 30 fps = 480 MB/s.
+    NIC ingress (4 GB/s) handles it easily. PCIe Gen3 x4 (~3.5 GB/s effective) handles
+    it. Host memory ingestion sustains 1.2 GB/s without cache eviction - 480 MB/s
+    fits, leaving 720 MB/s headroom. The binding constraint is the host-memory ingestion
+    path. If a 5th camera were added (600 MB/s aggregate), still fits. At 10 cameras
+    (1.2 GB/s), cache pollution starts evicting active model weights, doubling cache-miss
+    latency on inference - the system fails not from raw bandwidth but from cache
+    interference.'
+  common_mistake: Reporting only the NIC saturation point and missing that at scale,
+    the host-memory ingestion path causes inference latency degradation long before
+    bandwidth runs out.
+  napkin_math: '480 MB/s aggregate; NIC 4000 MB/s OK; PCIe 3500 MB/s OK; host ingest
+    1200 MB/s headroom = 60%. Cache-eviction onset at ~10 cameras.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 5

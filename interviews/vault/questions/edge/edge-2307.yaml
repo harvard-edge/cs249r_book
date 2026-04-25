@@ -8,20 +8,25 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: Calculate memory bandwidth overhead for sequential image preprocessing
-scenario: 'A Jetson AGX Orin (up to 204.8 GB/s LPDDR5) processes 4K video frames (3840x2160,
-  3 channels, 1 byte/channel) at 60 FPS. The pre-processing pipeline involves 3 sequential
-  memory-bound operations: read raw frame, normalize and write, then read to format
-  into a tensor and write.'
+scenario: 'A Jetson AGX Orin (up to 204.8 GB/s LPDDR5) processes 4K video frames
+  (3840x2160, 3 channels, INT8 input) at 60 FPS. The pre-processing pipeline performs
+  three steps: (1) read raw INT8 frame, (2) normalize to FP16 and write back (the
+  data type expands from 1 to 2 bytes per channel), (3) read the FP16 normalized
+  buffer and write the final NCHW tensor for the NPU.'
 question: Calculate the minimum memory bandwidth consumed by this pre-processing pipeline
   as a percentage of total available bandwidth.
 details:
-  realistic_solution: One 4K frame is 3840 x 2160 x 3 = 24.88 MB. At 60 FPS, the raw
-    data rate is ~1.49 GB/s. The pipeline requires 5 memory accesses per pixel (read
-    raw, write norm; read norm, write tensor; read tensor to NPU). 1.49 GB/s x 5 =
-    ~7.45 GB/s. This uses 7.45 / 204.8 = ~3.6% of the available memory bandwidth.
-  common_mistake: Forgetting that each sequential preprocessing step requires both
-    a read and a write to DRAM, drastically underestimating memory traffic.
-  napkin_math: 1.49 GB/s * 5 accesses / 204.8 GB/s = 3.6%
+  realistic_solution: 'Frame size INT8 = 3840*2160*3 = 24.88 MB. At 60 FPS raw read
+    rate = 1.49 GB/s. After normalization to FP16, each subsequent buffer is 2x larger
+    = 49.76 MB/frame = 2.99 GB/s. Per-frame DRAM traffic: read INT8 (1.49) + write
+    FP16 (2.99) + read FP16 (2.99) + write FP16 NCHW (2.99) + final read by NPU (2.99)
+    = 13.45 GB/s. Utilization = 13.45 / 204.8 = 6.6% of LPDDR5 bandwidth, nearly
+    2x the naive 1-byte-per-channel estimate.'
+  common_mistake: Forgetting that the normalization step expands INT8 to FP16, doubling
+    the byte traffic of every step downstream of the conversion.
+  napkin_math: 'Per-frame bytes = 24.88 (in) + 49.76*2 (norm RW) + 49.76*2 (tensor
+    RW) + 49.76 (NPU read) = 24.88 + 199.04 + 49.76 = ~224 MB; at 60 FPS = 13.45
+    GB/s; 13.45 / 204.8 = 6.6%.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 8

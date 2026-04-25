@@ -135,7 +135,8 @@ Each output object must include this schema:
   "common_mistake": "<1-2 sentence misconception this catches>",
   "napkin_math": "<compact calculation; must contain a digit>",
   "expected_time_minutes": <integer 4-15>,
-  "competency_area": "<from the cell's competency_area>"{visual_field_spec}
+  "competency_area": "<EXACTLY one of: deployment, parallelism, networking, latency, memory, compute, data, power, precision, reliability, optimization, architecture, cross-cutting>",
+  "bloom_level": "<EXACTLY one of: remember, understand, apply, analyze, evaluate, create — must match the cell's `valid_blooms` set>"{visual_field_spec}
 }}
 
 Hardware reference:
@@ -149,7 +150,20 @@ Rules:
 - One question per cell, in array order, with cell_index matching.
 - Use real hardware specs from the reference. Pick the most natural
   hardware for the track if not specified.
-- Match Bloom level for the cell.
+- bloom_level MUST be in the cell's `valid_blooms` set. The zone × bloom
+  matrix is enforced server-side: zone=recall admits remember/understand
+  only; zone=evaluation admits analyze/evaluate; zone=mastery admits
+  analyze/evaluate/create. A mismatch causes the YAML to be rejected.
+- competency_area is a CLOSED enum (13 values). Do NOT use the topic name
+  ("queueing-theory") or zone name ("evaluation") here. Use the closest
+  canonical area for the topic (e.g. queueing-theory → latency,
+  duty-cycling → power, fault-tolerance-checkpointing → reliability).
+- For L5/L6+ cells especially: AVOID trivial framings (raw division of
+  payload by bandwidth; "compute X / Y"). The judge rejects these as
+  "too shallow for Staff level." Instead, require integration across
+  systems (e.g. memory + compute trade-off, parallelism strategy choice
+  with synchronization cost), a non-obvious failure mode, or a
+  quantitative argument that holds under specific hardware constraints.
 - Diverse scenarios: do not duplicate canonical questions (KV-cache for
   Llama-70B, Ring AllReduce on 4 ranks).
 - napkin_math compact and machine-checkable; must contain a digit.
@@ -191,11 +205,44 @@ def parse_target(spec: str) -> dict[str, Any]:
     return dict(zip(["track", "topic", "zone", "level"], parts))
 
 
-def bloom_for_level(level: str) -> str:
-    return {
+def bloom_for_zone_level(zone: str, level: str) -> str:
+    """Pick a bloom_level compatible with both zone (ZONE_BLOOM_AFFINITY)
+    and level (level-coarse mapping). v0.1.2: the prior `bloom_for_level`
+    helper ignored zone, which produced YAMLs that violated the new
+    `_zone_bloom_compatible` Pydantic validator (e.g. zone=recall +
+    bloom=analyze at L4). This version picks the level-preferred bloom
+    if it's valid for the zone, otherwise the zone's nearest admissible
+    bloom.
+    """
+    sys.path.insert(0, str(SCHEMA_DIR))
+    try:
+        from enums import ZONE_BLOOM_AFFINITY  # type: ignore
+    except ImportError:
+        ZONE_BLOOM_AFFINITY = {}  # fallback during initial bootstrap
+    level_pref = {
         "L1": "remember", "L2": "understand", "L3": "apply",
         "L4": "analyze", "L5": "evaluate", "L6+": "create",
     }.get(level, "apply")
+    admits = ZONE_BLOOM_AFFINITY.get(zone, set())
+    if not admits or level_pref in admits:
+        return level_pref
+    # Prefer the highest admissible bloom ≤ level preference.
+    bloom_rank = ["remember", "understand", "apply",
+                  "analyze", "evaluate", "create"]
+    pref_rank = bloom_rank.index(level_pref)
+    for b in reversed(bloom_rank[: pref_rank + 1]):
+        if b in admits:
+            return b
+    # Fallback: first admissible.
+    for b in bloom_rank:
+        if b in admits:
+            return b
+    return level_pref
+
+
+# Backward-compat alias used elsewhere in the script.
+def bloom_for_level(level: str) -> str:
+    return bloom_for_zone_level(zone="", level=level)
 
 
 def auto_balance(total: int, want_visual: bool, seed: int = 0) -> list[dict[str, Any]]:
@@ -301,7 +348,10 @@ def build_yaml(cell: dict[str, Any], parsed: dict[str, Any], qid: str) -> dict[s
         "topic": cell["topic"],
         "competency_area": parsed.get("competency_area",
                                        cell.get("competency_area", "cross-cutting")),
-        "bloom_level": bloom_for_level(cell["level"]),
+        "bloom_level": parsed.get(
+            "bloom_level",
+            bloom_for_zone_level(cell.get("zone", ""), cell["level"]),
+        ),
         "phase": parsed.get("phase", "both"),
         "title": str(parsed["title"]).strip(),
         "scenario": str(parsed["scenario"]).strip(),
@@ -346,15 +396,26 @@ def generate_batch(cells: list[dict[str, Any]], model: str,
     n = len(cells)
     has_visual = any(c.get("with_visual") for c in cells)
 
+    sys.path.insert(0, str(SCHEMA_DIR))
+    try:
+        from enums import ZONE_BLOOM_AFFINITY  # type: ignore
+    except ImportError:
+        ZONE_BLOOM_AFFINITY = {}
+
     cells_for_prompt = []
     for i, c in enumerate(cells):
+        valid_blooms = sorted(ZONE_BLOOM_AFFINITY.get(c["zone"], set())) or [
+            bloom_for_level(c["level"])
+        ]
         entry = {
             "index": i,
             "track": c["track"],
             "topic": c["topic"],
             "zone": c["zone"],
             "level": c["level"],
-            "bloom": bloom_for_level(c["level"]),
+            "preferred_bloom": bloom_for_zone_level(c["zone"], c["level"]),
+            "valid_blooms": valid_blooms,
+            "competency_area": c.get("competency_area", "cross-cutting"),
             "with_visual": bool(c.get("with_visual")),
         }
         if entry["with_visual"]:
@@ -399,6 +460,17 @@ def generate_batch(cells: list[dict[str, Any]], model: str,
     failures = []
     by_index = {it.get("cell_index", i): it for i, it in enumerate(items)}
 
+    # B.4: validate-at-write. Round-trip every generated doc through
+    # Pydantic before disk write. If validation fails (e.g. zone-bloom
+    # mismatch, malformed competency_area, illegal visual.path), record
+    # the failure and skip — never persist a self-contradicting draft.
+    try:
+        sys.path.insert(0, str(VAULT_DIR.parent / "vault-cli" / "src"))
+        from vault_cli.models import Question  # type: ignore
+        _validate = lambda d: Question.model_validate(d)
+    except ImportError:
+        _validate = lambda d: None  # bootstrap fallback
+
     for i, cell in enumerate(cells):
         parsed = by_index.get(i)
         if parsed is None:
@@ -407,6 +479,14 @@ def generate_batch(cells: list[dict[str, Any]], model: str,
         try:
             qid = next_id_for_track(cell["track"], used_ids)
             doc = build_yaml(cell, parsed, qid)
+            try:
+                _validate(doc)
+            except Exception as ve:
+                failures.append({
+                    "index": i, "id": qid,
+                    "error": f"validate-at-write rejected: {ve}",
+                })
+                continue
             yaml_path = QUESTIONS_DIR / cell["track"] / f"{qid}.yaml"
             yaml_path.parent.mkdir(parents=True, exist_ok=True)
             yaml_path.write_text(

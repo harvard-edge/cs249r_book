@@ -11,21 +11,26 @@ title: Orin Edge Llama Batch Cache
 scenario: A Jetson AGX Orin is serving Llama-3-8B locally at batch size 8 for an edge
   customer service kiosk. The model uses 32 layers, 8 KV heads, and 128 head dim at
   FP16.
-question: Analyze the KV cache growth rate per token and calculate the memory consumed
-  at a context length of 2048 tokens.
+question: Analyze the KV cache growth per token, compute total cache size at 2048
+  tokens, and determine whether the Orin's 204.8 GB/s LPDDR5 bandwidth or the cache
+  capacity becomes the binding constraint on per-token decode latency at this context
+  length.
 visual:
   kind: svg
   path: edge-2270.svg
   alt: Bar chart showing memory linear growth reaching 2GB at 2048 tokens.
   caption: KV Cache growth by sequence length.
 details:
-  realistic_solution: 'Per token across the batch: $2 \times 32 \times 8 \times 128
-    \times 8 \times 2$ bytes $= 1,048,576$ bytes (1 MB) per step. For 2048 tokens,
-    the cache grows to $1$ MB $\times 2048 = 2$ GB. The Orin''s RAM can easily handle
-    this, but bandwidth overhead will slow decoding.'
-  common_mistake: Calculating the cache for a single sequence and forgetting to scale
-    by the active batch size.
-  napkin_math: 2 * 32 * 8 * 128 * 8 (batch) * 2B = 1 MB/token. 1 MB * 2048 = 2 GB.
+  realistic_solution: 'Per-token cache across the batch: 2 (K+V) * 32 layers * 8 KV
+    heads * 128 dim * 8 batch * 2B = 1 MB/token, reaching 2 GB at 2048 tokens. Capacity
+    fits in Orin''s 32-64 GB unified memory, so capacity is NOT binding. Bandwidth
+    is binding: each decode step must stream the entire 2 GB cache plus model weights
+    (~16 GB for Llama-3-8B FP16), and at 204.8 GB/s the cache alone caps decode at
+    ~100 steps/s, with weights pulling effective throughput to ~11 steps/s.'
+  common_mistake: Computing the cache for a single sequence and ignoring the batch-8
+    multiplier, or assuming Orin''s ample DRAM means bandwidth is also fine.
+  napkin_math: 'Cache: 2*32*8*128*8*2B = 1 MB/token, *2048 = 2 GB. Bandwidth-bound
+    decode rate: 204.8 GB/s / (2 GB cache + 16 GB weights) = 11 tokens/s.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 6

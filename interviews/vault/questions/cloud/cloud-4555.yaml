@@ -13,14 +13,18 @@ scenario: Synchronous checkpointing of a 1T parameter model across 1024 H100 GPU
 question: Design an asynchronous memory-tiering approach to reduce GPU blocking time
   to under 10 seconds.
 details:
-  realistic_solution: A 1T parameter FP16 model with Adam state is ~6TB total, or
-    roughly 6GB per GPU. To minimize blocking, dump the 6GB state synchronously from
-    GPU HBM to local node CPU DRAM over PCIe Gen5, which takes milliseconds. The GPUs
-    immediately resume training while a background CPU thread streams the DRAM buffer
-    to the persistent object storage concurrently.
-  common_mistake: Suggesting faster networked storage without addressing the synchronous
-    blocking behavior of the training loop itself.
-  napkin_math: 6TB / 1024 = 6GB per GPU copied to RAM.
+  realistic_solution: 'Footprint with 8-bit optimizer states (Adam-8bit): weights
+    FP16 = 2 TB; gradients FP16 = 2 TB; Adam-8bit = 2 TB; total = 6 TB. Standard
+    FP32 Adam states would yield: weights 2 TB + grads 2 TB + Adam (m+v) FP32 =
+    8 TB; total = 12 TB. We assume 8-bit optimizer (the default for 1T-class training).
+    Per GPU: 6 TB / 1024 = 6 GB. Dump 6 GB GPU->host DRAM over PCIe Gen5 (~64 GB/s)
+    takes ~0.1 s. Training resumes while a background CPU thread streams the DRAM
+    buffer to object storage at 5-10 GB/s.'
+  common_mistake: Reporting the 6 TB footprint without specifying the optimizer
+    precision; FP32 Adam doubles the optimizer state to 8 TB and shifts the per-GPU
+    dump cost.
+  napkin_math: '8-bit optimizer: 6 TB total (2W + 2G + 2 OptState). FP32 Adam: 12
+    TB total (2W + 2G + 8 OptState in m+v FP32). Per GPU at 1024: 6 GB or 12 GB.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

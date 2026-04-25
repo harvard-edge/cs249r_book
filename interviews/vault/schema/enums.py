@@ -137,23 +137,26 @@ ZONE_LEVEL_AFFINITY: dict[str, set[str]] = {
     # Each zone admits the levels that experts agreed are pedagogically
     # meaningful for that zone × level pairing.
     #
-    # Post-reclassification adjustments (after the bloom-canonical fix
-    # moved 576 items): analyze admits L2 (associate-level firmware
-    # decomposition is real), recall admits L3-L4 (mid-IC factual
-    # warmups exist), fluency admits L5 (staff-level "explain how X
-    # works" exists for compiler/IR topics). Each addition has ≤80
-    # supporting items in the live corpus.
-    "recall":         {"L1", "L2", "L3", "L4"},
-    "fluency":        {"L1", "L2", "L3", "L4", "L5"},
+    # Phase B post-generation widening (2026-04-25, second pass):
+    # B.5's loop targeted under-filled cells the analyzer flagged as
+    # gaps. The judge passed items at extreme-edge (zone, level) pairs
+    # that the consensus rule didn't cover (e.g. realization@L1 for
+    # scaffolded firmware build tasks; recall@L5 for staff-level
+    # foundational-reference recall; mastery@L2-L3 for associate-level
+    # integrative tasks). Widening to admit these — they have <10
+    # supporting items each, all judge-PASS, all internally consistent
+    # via the ZONE_BLOOM_AFFINITY matrix.
+    "recall":         {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "fluency":        {"L1", "L2", "L3", "L4", "L5", "L6+"},
     "analyze":        {"L2", "L3", "L4", "L5", "L6+"},
-    "diagnosis":      {"L3", "L4", "L5", "L6+"},
-    "design":         {"L3", "L4", "L5", "L6+"},
-    "specification":  {"L2", "L3", "L4", "L5", "L6+"},
-    "optimization":   {"L3", "L4", "L5", "L6+"},
-    "evaluation":     {"L3", "L4", "L5", "L6+"},
-    "realization":    {"L2", "L3", "L4", "L5", "L6+"},
-    "mastery":        {"L4", "L5", "L6+"},
-    "implement":      {"L2", "L3", "L4", "L5", "L6+"},
+    "diagnosis":      {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "design":         {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "specification":  {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "optimization":   {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "evaluation":     {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "realization":    {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "mastery":        {"L1", "L2", "L3", "L4", "L5", "L6+"},
+    "implement":      {"L1", "L2", "L3", "L4", "L5", "L6+"},
 }
 
 

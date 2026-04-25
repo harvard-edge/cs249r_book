@@ -8,10 +8,13 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Paged KV Cache Allocation for Edge LLM
-scenario: Serving a 7B parameter LLM on a Jetson AGX Orin (up to 204.8 GB/s LPDDR5).
-  Memory fragmentation severely limits concurrent chat sessions.
-question: Design a paged memory manager that computes the maximum number of concurrent
-  sequences given 4GB of dedicated KV cache RAM and 16-token page blocks.
+scenario: Serving Llama-2-7B on a Jetson AGX Orin (32 GB unified LPDDR5, 204.8 GB/s).
+  Llama-2-7B has 32 layers, 32 KV heads, head_dim=128, FP16. Memory fragmentation
+  on the long-tail of session lengths is forcing premature OOM evictions.
+question: Design a paged KV manager that diagnoses why on-device LLM serving on
+  Orin diverges from H100 PagedAttention assumptions (unified memory, no HBM/host
+  split, smaller page TLB), and compute the maximum concurrent 1024-token sessions
+  given 4 GB of KV-dedicated memory and 16-token page blocks.
 visual:
   kind: svg
   path: edge-2295.svg
@@ -19,14 +22,19 @@ visual:
     layout.
   caption: Paged Allocation Blocks
 details:
-  realistic_solution: For a 7B model (assume 32 layers, 32 KV heads, 128 head dim,
-    FP16), a single token takes 2 * 32 * 32 * 128 * 2 bytes = 512KB. A 16-token page
-    is 8MB. With 4GB total RAM, we have 4096MB / 8MB = 512 pages. Concurrency depends
-    on sequence length; if max length is 1024 tokens (64 pages), maximum concurrent
-    sequences is 512 / 64 = 8.
-  common_mistake: Calculating token size incorrectly by forgetting the factor of 2
-    for key and value pairs.
-  napkin_math: 4096 / (16 * 0.5) = 512 pages
+  realistic_solution: 'Per token (Llama-2-7B): 2 (K+V) * 32 layers * 32 KV heads *
+    128 dim * 2 B = 512 KB. 16-token page = 8 MB. Total pages in 4 GB = 512. A 1024-token
+    session needs 64 pages, so 8 concurrent sessions fit. Architectural diagnosis:
+    on Orin, paged KV does NOT need host/HBM swapping (unlike H100/vLLM) since memory
+    is unified, but it still pays internal-fragmentation cost (avg 8 MB wasted per
+    session in the partial last page) and TLB pressure on the iGPU MMU which has
+    smaller TLBs than discrete GPUs - keep page size at 16 tokens, not 4, to avoid
+    TLB thrashing.'
+  common_mistake: 'Using H100/vLLM assumptions (page size 4-8 tokens, host-side swap
+    pool) directly on Orin: smaller pages cause TLB thrash on the unified-memory
+    MMU; a swap pool is irrelevant because there is no host-vs-device split.'
+  napkin_math: '512 KB/token; 8 MB/page; 512 pages in 4 GB; 64 pages per 1024-token
+    session; 512/64 = 8 concurrent sessions.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

@@ -9,9 +9,11 @@ bloom_level: analyze
 phase: both
 title: H100 GPipe Efficiency
 scenario: Training a 50B parameter LLM across an 8-GPU H100 server using GPipe pipeline
-  parallelism. The microbatch size is 4 and there are 4 pipeline stages.
-question: Analyze the pipeline bubble fraction and determine the efficiency loss caused
-  by pipeline stalls.
+  parallelism with 4 stages and 8 microbatches. Stage 0 (embedding + early layers)
+  takes 12ms per microbatch, stages 1-2 each take 10ms, and stage 3 (final layers
+  + loss head) takes 14ms because of the LM head's large vocabulary projection.
+question: Analyze the pipeline bubble fraction under this heterogeneous stage timing
+  and explain why the bubble overhead diverges from the textbook (p-1)/(m+p-1) formula.
 visual:
   kind: svg
   path: cloud-4491.svg
@@ -19,12 +21,17 @@ visual:
     a pipeline batch.
   caption: Pipeline Bubble Stalls
 details:
-  realistic_solution: 'The candidate uses the GPipe bubble formula: (p-1) / (m + p
-    - 1) where p is stages and m is microbatches. This reveals a very high bubble
-    fraction, indicating poor efficiency.'
-  common_mistake: Mixing up microbatch count with stage count, or not recognizing
-    that m=4 is too small for p=4.
-  napkin_math: (4 - 1) / (4 + 4 - 1) = 3 / 7 = 42.8% bubble
+  realistic_solution: With heterogeneous stages, the steady-state cycle time is gated
+    by the slowest stage (14ms), so each microbatch advances at the slow stage's rate.
+    The candidate computes total time as (p-1)*t_max for fill + m*t_max for steady
+    state + (p-1)*t_max for drain, then subtracts useful work sum(m*t_i). Pure (p-1)/(m+p-1)
+    underestimates the bubble because the fast stages idle waiting for the slow stage.
+  common_mistake: Plugging into (p-1)/(m+p-1) directly and ignoring that fast stages
+    sit idle on every microbatch they finish before stage 3 is ready, which inflates
+    the effective bubble.
+  napkin_math: 'Fill+drain = 2*(p-1)*t_max = 2*3*14 = 84ms; steady = m*t_max = 8*14
+    = 112ms; total = 196ms. Useful work = 8*(12+10+10+14) = 368 GPU-ms. Bubble fraction
+    = 1 - 368/(4*196) = 1 - 0.469 = 53% bubble.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

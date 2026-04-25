@@ -9,23 +9,33 @@ bloom_level: create
 phase: both
 title: Edge Multi-Camera Sizing
 scenario: A perception system on a Jetson AGX Orin processes 4 concurrent 1080p video
-  streams at 30fps. The object detection model requires 50 GOPs per frame in INT8.
-question: Formulate the total continuous TOPS requirement and specify whether the
-  15W, 30W, or 60W power mode is required, assuming 30% sustained NPU utilization.
+  streams at 30 fps. Two distinct INT8 models run heterogeneously - object detection
+  at 50 GOPs/frame on streams 1-2, and a depth estimator at 80 GOPs/frame on streams
+  3-4. Each model also incurs 60 MB/frame of activation memory traffic. Orin's LPDDR5
+  bandwidth is 204.8 GB/s.
+question: Formulate the system's TOPS requirement AND the LPDDR5 memory-bandwidth
+  requirement, then specify whether the system is compute-bound or bandwidth-bound.
+  Identify the minimum Orin power mode (15W, 30W, or 60W) that satisfies both.
 details:
-  realistic_solution: The theoretical requirement is 4 streams * 30 fps * 50 GOPs
-    = 6,000 GOPs or 6 TOPS. To sustain this at 30% hardware utilization, the NPU must
-    be capable of 20 peak TOPS. The lowest 15W mode on the Orin provides well over
-    this capacity and is sufficient.
-  common_mistake: Confusing GOPs (Operations) with MACs (Multiply-Accumulates) or
-    forgetting to divide the theoretical TOPS by the realistic utilization factor.
-  napkin_math: (4 * 30 * 50) / 0.30 = 20 TOPS required.
-status: draft
+  realistic_solution: 'Compute: 2*30*50 + 2*30*80 = 7800 GOPs/s = 7.8 TOPS theoretical.
+    At 30% utilization, need 26 peak TOPS. Bandwidth: 4 streams * 30 fps * 60 MB =
+    7.2 GB/s of activations alone, plus model weight streaming - bandwidth budget
+    requires 25-40 GB/s realized BW. 15W mode on Orin throttles LPDDR5 from 204.8
+    to ~67 GB/s; with the 60% utilization tax of real workloads (~40 GB/s effective),
+    15W is JUST enough on bandwidth but tight. 15W also caps NPU TOPS to ~20 TOPS,
+    short of the 26 needed - so 30W is required. Answer: 30W mode minimum, gated by
+    COMPUTE not bandwidth.'
+  common_mistake: Computing TOPS only and missing that 15W mode also throttles LPDDR5
+    bandwidth, which can fail the system even if compute looks adequate.
+  napkin_math: 'Compute: (2*30*50 + 2*30*80)/0.3 = 26 TOPS. BW: 4*30*60 = 7.2 GB/s
+    activations + ~30 GB/s weights = 37 GB/s. 15W mode: 20 TOPS, ~67 GB/s -> compute-fails;
+    30W mode required.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 8
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -35,3 +45,9 @@ tags:
 - gemini-generated
 - target-specification-L6+
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

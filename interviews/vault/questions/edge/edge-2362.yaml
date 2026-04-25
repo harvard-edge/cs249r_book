@@ -8,11 +8,14 @@ competency_area: architecture
 bloom_level: understand
 phase: both
 title: KV Cache Pre-allocation Memory Waste
-scenario: A 7B parameter LLM running locally on a Jetson AGX Orin with 32GB RAM uses
-  standard static KV cache allocation, frequently crashing with out-of-memory errors
-  for concurrent queries.
-question: Explain why pre-allocating the maximum possible sequence length for every
-  request leads to severe memory exhaustion.
+scenario: 'A Llama-2-7B model running locally on a Jetson AGX Orin with 32GB unified
+  memory uses standard static KV cache allocation. Model architecture: 32 layers,
+  32 KV heads, head_dim=128, FP16, max context 4096 tokens. Weights occupy ~13.5 GB,
+  leaving ~18 GB for KV cache and activations. The system frequently OOMs at 3+ concurrent
+  queries.'
+question: Explain why static KV pre-allocation OOMs on this Orin configuration, and
+  compute the exact maximum batch size before OOM (a) under static max-length allocation
+  and (b) under dynamic paged allocation, given the unified-memory budget.
 visual:
   kind: svg
   path: edge-2362.svg
@@ -20,21 +23,23 @@ visual:
     for dynamic paging.
   caption: 'KV Cache Allocation Efficiency: Static vs Paged.'
 details:
-  realistic_solution: Static KV cache allocation reserves memory assuming every prompt
-    will reach the maximum model context length. Since real-world requests have highly
-    variable and often short lengths, the vast majority of this reserved memory is
-    left empty. This massive internal fragmentation artificially starves the system
-    of usable RAM, preventing concurrent request processing.
-  common_mistake: Assuming the OOM is due to model weights being too large rather
-    than recognizing the dynamic scaling nature of KV cache tensors.
-  napkin_math: Max seq = 4096. Actual seq = 128. Waste = (4096 - 128) / 4096 = 96.8%
-    memory wasted.
-status: draft
+  realistic_solution: 'KV per token: 2 * 32 * 32 * 128 * 2B = 512 KB. Per-session
+    max-context allocation: 512 KB * 4096 = 2 GB per session. With 18 GB available
+    for KV after weights, static max-length allows ~9 concurrent sessions. But if
+    actual length averages 256 tokens (real-world chat), 96% of that 2 GB sits empty
+    per session. Dynamic paged allocation (16-token blocks) lets each session use
+    only its actual length: 9 sessions * 0.125 GB = 1.1 GB used, freeing ~17 GB. Paged
+    allocation supports ~144 concurrent short sessions before OOM, a 16x improvement.'
+  common_mistake: Blaming the OOM on model weight footprint and missing that KV cache
+    grows linearly with both sessions and per-session length.
+  napkin_math: 'Static: 18 GB / 2 GB = 9 sessions. Paged at 256-token avg: 18 GB /
+    0.125 GB = 144 sessions. 16x improvement.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 8
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -44,3 +49,9 @@ tags:
 - gemini-generated
 - target-evaluation-L2
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

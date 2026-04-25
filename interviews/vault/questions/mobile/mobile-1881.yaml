@@ -9,9 +9,15 @@ bloom_level: create
 phase: both
 title: 5G Model Update Bottleneck
 scenario: A Snapdragon 8 Gen 3 phone downloads an updated 2GB INT8 LLM over a 5G connection
-  averaging 150 Mbps, before distributing sub-modules to the NPU.
-question: Create a specification for the maximum tolerable latency budget for the
-  download and memory transfer phases if the update must complete in under 3 minutes.
+  averaging 150 Mbps, then must mmap-decrypt-and-rehash chunks while serializing
+  them to UFS 4.0 storage. The decryption pipeline runs on a single Cryptography
+  Extension core sustaining 1.2 GB/s, and the UFS 4.0 sustains 4 GB/s sequential
+  writes. The download and decrypt-write pipelines can overlap, but each stage's
+  buffer is capped at 64 MB (a single page-pool ring).
+question: Create a specification giving the latency budget for each pipeline stage
+  (download, decrypt+rehash, write), identify the binding bottleneck under the 64
+  MB ring constraint, and determine whether the 3-minute end-to-end SLA is feasible
+  with all stages overlapped.
 visual:
   kind: svg
   path: mobile-1881.svg
@@ -19,13 +25,18 @@ visual:
     its NPU.
   caption: Model download and local transfer pipeline.
 details:
-  realistic_solution: A 2GB payload is $2 \times 8 = 16$ Gigabits. Over 150 Mbps,
-    download takes $16,000 / 150 = 106.6$ seconds. Transferring 2GB over UFS 4.0 to
-    RAM and NPU takes less than 1 second. The 3-minute (180s) budget leaves a generous
-    72-second margin for network fluctuations or connection drops.
-  common_mistake: Confusing Megabytes per second (MB/s) with Megabits per second (Mbps)
-    when calculating the download time.
-  napkin_math: 2GB = 16Gb. 16,000Mb / 150Mbps = 106s. 106s < 180s budget.
+  realistic_solution: 'Stage rates: download = 150 Mbps = 18.75 MB/s; decrypt = 1200
+    MB/s; UFS write = 4000 MB/s. Pipeline rate is gated by the slowest stage = download
+    at 18.75 MB/s. End-to-end time = 2048 / 18.75 = 109 s. The 64 MB ring buffer
+    matters only if a faster stage downstream stalls; it does not, since download
+    is the slowest. Decrypt and write together add a one-time fill-and-drain cost
+    of 64 MB / 1200 MB/s + 64 MB / 4000 MB/s = 53 ms + 16 ms = 69 ms (negligible).
+    Total = 109.07 s, comfortably inside the 180 s SLA.'
+  common_mistake: Concluding the 4 GB/s UFS write speed dominates and ignoring that
+    the pipeline can never run faster than the slowest stage (download at 18.75 MB/s
+    is 213x slower than UFS).
+  napkin_math: 'Download = 2048 MB / 18.75 MB/s = 109 s; pipeline fill cost = 64/1200
+    + 64/4000 = 0.069 s; total ~ 109 s < 180 s SLA.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 6

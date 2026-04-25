@@ -9,10 +9,14 @@ bloom_level: evaluate
 phase: both
 title: AR Host-Client Wi-Fi Bottleneck
 scenario: A multiplayer AR game utilizes 4 Apple A17 Pro devices. Three client devices
-  synchronize their 1 MB local pose-graphs to the single host device over a local
-  20 MB/s Wi-Fi link.
-question: Evaluate whether a 30 Hz sync rate is physically sustainable for the host
-  receiving data concurrently from the 3 clients.
+  synchronize their 1 MB local pose-graphs to the host over Wi-Fi 6, which negotiated
+  asymmetric rates - 30 MB/s downlink (host->client) and 12 MB/s uplink (client->host)
+  due to AP placement. Pose-graph sync uses TCP with ~6% framing overhead. The host
+  also publishes a 256 KB world-state snapshot at 60 Hz back to clients.
+question: Analyze whether a 30 Hz pose-graph sync from 3 clients is sustainable on
+  the asymmetric Wi-Fi link, accounting for TCP framing overhead and the concurrent
+  60 Hz host->client world-state stream that consumes downlink capacity. Identify
+  which direction (uplink or downlink) saturates first.
 visual:
   kind: svg
   path: mobile-1897.svg
@@ -20,14 +24,18 @@ visual:
     one central host node.
   caption: Client to Host Sync Topology
 details:
-  realistic_solution: At 30 Hz, each of the 3 clients attempts to send 1 MB * 30 =
-    30 MB/s to the host. The total inbound data rate at the host would be 3 * 30 MB/s
-    = 90 MB/s. Because the Wi-Fi link is capped at 20 MB/s, this architecture falls
-    short by a massive 70 MB/s and is completely unsustainable.
-  common_mistake: Calculating bandwidth for just a single client (30 MB/s) and assuming
-    it fits, or comparing the per-frame payload directly to the per-second bandwidth
-    limit.
-  napkin_math: 3 clients * 1 MB * 30 Hz = 90 MB/s > 20 MB/s
+  realistic_solution: 'Uplink (clients->host): 3 * 1 MB * 30 Hz * 1.06 = 95.4 MB/s
+    against 12 MB/s budget - 8x oversubscribed and saturated. Downlink (host->clients):
+    3 * 0.256 MB * 60 Hz * 1.06 = 48.8 MB/s against 30 MB/s budget - also saturated,
+    but only 1.6x. The uplink direction is the harder bottleneck. Pose-graph sync
+    must drop to ~3.7 Hz at full payload, OR delta-encode pose updates to ~50 KB
+    each which gives 3 * 0.05 * 30 * 1.06 = 4.8 MB/s, fitting comfortably.'
+  common_mistake: Treating Wi-Fi as a symmetric bandwidth budget and applying a single
+    cap to both directions; missing that the host also has its own outbound traffic
+    on the same channel.
+  napkin_math: 'Uplink need = 3 * 1 * 30 * 1.06 = 95.4 MB/s; budget 12 MB/s -> 8x
+    over. Downlink need = 3 * 0.256 * 60 * 1.06 = 48.8 MB/s; budget 30 MB/s -> 1.6x
+    over.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 6

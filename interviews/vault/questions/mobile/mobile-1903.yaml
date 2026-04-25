@@ -8,23 +8,32 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Mobile AR Pipelining
-scenario: An AR application processes camera frames on the CPU before passing them
-  to the Snapdragon 8 Gen 3 Hexagon NPU (45 TOPS) for object tracking.
-question: Evaluate the system throughput in FPS if CPU preprocessing takes 15ms per
-  frame and NPU inference takes 10ms, assuming a single buffered sequential pipeline.
+scenario: An AR application runs a 3-stage pipeline on Snapdragon 8 Gen 3, double-buffered
+  with stage-level overlap allowed. Stage 1 (CPU preprocessing) takes 15 ms/frame,
+  stage 2 (NPU inference on Hexagon, 45 TOPS) takes 10 ms/frame, stage 3 (GPU render
+  composite) takes 8 ms/frame. The CPU-to-NPU DMA setup adds 1 ms per frame and
+  is NOT overlappable with NPU compute on this SoC because it shares the LPDDR5
+  bus with stage 1's image-fetch reads.
+question: Evaluate the steady-state FPS of the double-buffered pipeline given the
+  3-stage breakdown, the non-overlappable DMA setup penalty, and the per-stage
+  service times. Identify which stage is the bottleneck.
 visual:
   kind: svg
   path: mobile-1903.svg
   alt: Gantt chart showing sequential CPU then NPU execution per frame.
   caption: Sequential Processing Pipeline
 details:
-  realistic_solution: Since it is a sequential pipeline without overlap, total time
-    per frame is 15ms + 10ms = 25ms. FPS is 1000 / 25 = 40 FPS. (If double buffered,
-    it would be max(15, 10) = 66.6 FPS, so the candidate must clarify the sequential
-    nature).
-  common_mistake: Assuming pipelined execution (max) when the prompt specifies a single
-    buffered sequential pipeline (sum).
-  napkin_math: 1000 / (15 + 10) = 40 FPS
+  realistic_solution: 'In a double-buffered pipeline, throughput is gated by the
+    slowest stage. Effective stage-1 time = 15 ms + 1 ms DMA = 16 ms (DMA bus shared,
+    not overlappable). Stages: 16 / 10 / 8 ms. Bottleneck is stage 1 at 16 ms/frame
+    -> 62.5 FPS. End-to-end latency for the first frame remains 16+10+8 = 34 ms,
+    but steady-state FPS is bounded by max(stage_i) = 16 ms. If DMA could be overlapped,
+    stage 1 drops to 15 ms -> 66.6 FPS - the 1 ms DMA tax costs ~4 FPS.'
+  common_mistake: Adding all three stage times (16+10+8 = 34 ms -> 29 FPS), forgetting
+    that double-buffering decouples stages so throughput is gated by the max stage,
+    not the sum.
+  napkin_math: 'Stage 1 = 15 + 1 = 16 ms (DMA non-overlap); max(16, 10, 8) = 16 ms
+    -> 1000/16 = 62.5 FPS.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 9

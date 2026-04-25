@@ -10,22 +10,32 @@ phase: both
 title: A17 OS Termination Grace
 scenario: An Apple A17 performs personalized on-device training. If the user minimizes
   the app, the OS grants a 1.5-second termination grace period. The model state is
-  300 MB.
-question: Analyze the storage bottleneck and determine if the state can be saved before
-  termination using a UFS 4.0 storage drive capable of 4 GB/s writes.
+  300 MB across ~200 tensors (weights + optimizer state). Tensor serialization (pickling
+  + endian fix-ups + chunking into 4 MB blocks) on a single perf core takes 8 ms
+  per tensor, and the writes compete with a concurrent media-cache flush also writing
+  to UFS 4.0 at 1.5 GB/s.
+question: Analyze whether the 300 MB checkpoint can land within the 1.5 s grace
+  period given (a) per-tensor serialization cost, (b) UFS contention with the media-cache
+  flush, and (c) the overlap (or non-overlap) of CPU serialization and storage I/O.
+  Identify the binding stage.
 visual:
   kind: svg
   path: mobile-1891.svg
   alt: Gantt showing 75ms save fitting easily within 1500ms grace period.
   caption: State Save vs Grace Period.
 details:
-  realistic_solution: The UFS 4.0 drive writes at 4 GB/s ($4000$ MB/s). Saving 300
-    MB takes $300 / 4000 = 0.075$ seconds (75 ms). The 1.5-second grace period is
-    overwhelmingly sufficient. However, if the CPU must serialize the tensors before
-    writing, the CPU compute speed may become the actual bottleneck.
-  common_mistake: Assuming flash storage speeds on mobile are too slow for large checkpointing
-    without actually checking the UFS 4.0 specs.
-  napkin_math: 300 MB / 4000 MB/s = 0.075s. 0.075s << 1.5s.
+  realistic_solution: 'CPU serialization: 200 tensors * 8 ms = 1.6 s on a single perf
+    core - already exceeds the 1.5 s budget. UFS contention: 4000 - 1500 = 2500 MB/s
+    available, write time = 300/2500 = 120 ms. So the binding stage is CPU serialization,
+    NOT storage. The fix is to (a) parallelize serialization across 4 perf cores
+    (1.6 s / 4 = 400 ms), (b) overlap with writes via async I/O. With both, total
+    time ~= max(400 ms, 120 ms) = 400 ms, well inside the 1.5 s grace period.'
+  common_mistake: Looking only at raw UFS bandwidth and concluding 75 ms is fine,
+    missing the CPU-side serialization tax that scales with tensor count, and missing
+    UFS contention from the concurrent media-cache flush.
+  napkin_math: 'Serial CPU: 200 * 8 ms = 1600 ms (BLOCKED). Parallel 4-core: 400
+    ms. UFS write under contention: 300 MB / 2500 MB/s = 120 ms. Total (overlapped,
+    parallel): 400 ms < 1500 ms.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 5
