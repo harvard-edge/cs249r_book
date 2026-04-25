@@ -140,33 +140,58 @@ export async function mountLander(canvas, opts = {}) {
   const padLocal2 = new P.Graphics();
   padLocal2.roundRect(terrain.locals[1].x - terrain.locals[1].width / 2, lossY(terrain.locals[1].x) - 3, terrain.locals[1].width, 6, 3).fill({ color: COL.localPad });
 
-  const globalLabel = new P.Text({ text: "global minimum", style: { fill: 0x3d9e5a, fontSize: 11, fontWeight: "bold" }});
+  const globalLabel = new P.Text({ text: "GLOBAL MINIMUM", style: { fill: 0x3d9e5a, fontSize: 11, fontWeight: "800", letterSpacing: 1 }});
   globalLabel.anchor.set(0.5);
-  globalLabel.position.set(terrain.global.x, lossY(terrain.global.x) - 18);
-  const localLabel = new P.Text({ text: "local minima", style: { fill: 0x9a6620, fontSize: 10 }});
-  localLabel.anchor.set(0.5);
-  localLabel.position.set(terrain.locals[0].x, lossY(terrain.locals[0].x) - 17);
+  globalLabel.position.set(terrain.global.x, lossY(terrain.global.x) - 20);
+  // Both local pads now labeled symmetrically (right one was previously mute).
+  const localLabel1 = new P.Text({ text: "local min", style: { fill: 0x9a6620, fontSize: 10, fontWeight: "600" }});
+  localLabel1.anchor.set(0.5);
+  localLabel1.position.set(terrain.locals[0].x, lossY(terrain.locals[0].x) - 17);
+  const localLabel2 = new P.Text({ text: "local min", style: { fill: 0x9a6620, fontSize: 10, fontWeight: "600" }});
+  localLabel2.anchor.set(0.5);
+  localLabel2.position.set(terrain.locals[1].x, lossY(terrain.locals[1].x) - 17);
 
-  stage.addChild(bg, contourLayer, basinWash, surface, padGlobal, padLocal1, padLocal2, globalLabel, localLabel);
+  stage.addChild(bg, contourLayer, basinWash, surface, padGlobal, padLocal1, padLocal2, globalLabel, localLabel1, localLabel2);
 
   // Predictive trajectory marker — translucent target showing where the ship will be in
   // ~0.5 s if the player keeps coasting (no thrust). Helps a new player anticipate the basin.
   const traj = new P.Graphics();
   stage.addChild(traj);
 
-  // Ship
+  // Altitude reference: faint vertical line from ship to the ground directly below.
+  // Reads as a "how high am I" cue without competing with the trajectory arrow.
+  const altLine = new P.Graphics();
+  stage.addChild(altLine);
+
+  // Ship — layered silhouette so the protagonist of the screen reads cleanly.
+  // Soft outer halo + crisp body + interior highlight stripe.
   const ship = new P.Graphics();
-  ship.moveTo(0, -15).lineTo(10, 10).lineTo(-10, 10).lineTo(0, -15).fill({color: COL.ship});
+  // outer halo
+  ship.moveTo(0, -17).lineTo(12, 12).lineTo(-12, 12).closePath().fill({ color: COL.ship, alpha: 0.18 });
+  // body
+  ship.moveTo(0, -15).lineTo(10, 10).lineTo(-10, 10).closePath().fill({ color: COL.ship });
+  // crisp outline
+  ship.moveTo(0, -15).lineTo(10, 10).lineTo(-10, 10).closePath().stroke({ color: 0x2c5775, width: 1.5 });
+  // inner highlight (catches the eye even at small scale)
+  ship.moveTo(0, -11).lineTo(4, 6).lineTo(-4, 6).closePath().fill({ color: 0xeaf3fa, alpha: 0.65 });
   stage.addChild(ship);
 
-  // Flame
+  // Flame — layered for depth: outer glow + core, both visible only when thrusting.
   const flame = new P.Graphics();
-  flame.moveTo(-5, 10).lineTo(0, 25).lineTo(5, 10).fill({color: COL.thrust});
+  // outer glow
+  flame.moveTo(-7, 10).lineTo(0, 30).lineTo(7, 10).closePath().fill({ color: COL.thrust, alpha: 0.35 });
+  // core
+  flame.moveTo(-4, 10).lineTo(0, 23).lineTo(4, 10).closePath().fill({ color: 0xffd28a });
   flame.visible = false;
   ship.addChild(flame);
 
-  const noiseText = new P.Text({ text: "stochastic gradient noise", style: { fill: 0x777777, fontSize: 13 }});
-  noiseText.position.set(18, 18);
+  // Loss-landscape legend — anchored to the basin so it reads as chart annotation,
+  // not a free-floating label. Less visual noise, more pedagogical signal.
+  const noiseText = new P.Text({
+    text: "loss landscape",
+    style: { fill: 0x6f7782, fontSize: 11, fontWeight: "700", letterSpacing: 1 }
+  });
+  noiseText.position.set(18, H - 100);
   stage.addChild(noiseText);
 
   // ── In-canvas HUD ── glanceable bars so the player never has to look away from the ship.
@@ -319,6 +344,19 @@ export async function mountLander(canvas, opts = {}) {
     traj.clear();
     traj.circle(predX, predY, 5).stroke({ color: COL.ship, width: 1.5, alpha: 0.55 });
     traj.moveTo(state.x, state.y).lineTo(predX, predY).stroke({ color: COL.ship, width: 1, alpha: 0.22 });
+
+    // Altitude reference: faint dashed line from ship straight down to the surface beneath.
+    // Only drawn when the ship has actual headroom — avoids visual noise near touchdown.
+    altLine.clear();
+    const groundBelow = lossY(state.x);
+    if (groundBelow - state.y > 18) {
+      const dashLen = 4;
+      let yCursor = state.y + 14;
+      while (yCursor < groundBelow - 4) {
+        altLine.moveTo(state.x, yCursor).lineTo(state.x, Math.min(yCursor + dashLen, groundBelow - 4)).stroke({ color: 0xa0aab4, width: 1, alpha: 0.45 });
+        yCursor += dashLen + 4;
+      }
+    }
 
     // Thrust juice: emit small puff opposite to ship's angle every other frame.
     if (state.keys.up && state.fuel > 0) {
