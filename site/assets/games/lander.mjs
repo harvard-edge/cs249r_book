@@ -1,4 +1,5 @@
-import { mountPixiOnCanvas, burst, floatText, flash, shake } from "/assets/games/runtime.mjs";
+import { mountPixiOnCanvas, burst, floatText, flash, shake, dailySeed } from "/assets/games/runtime.mjs";
+import { bestScore, dayNumber } from "/assets/games/runtime.mjs";
 import * as P from "/assets/games/vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
@@ -61,10 +62,16 @@ export async function mountLander(canvas, opts = {}) {
   const rotSpeed = 0.055;            // tuned down from 0.08 — easier precision, still feels responsive
   const maxSafeSpeed = 2.4;          // tuned up from 2.0 — first-time forgiveness, still teaches the lesson
   const maxSafeAngle = 0.6;          // tuned up from 0.5 (~34°) — same reasoning
+
+  // Daily seed: every player worldwide gets the same loss landscape today.
+  // Reset at UTC midnight via dailySeed() implementation.
+  const seed = dailySeed("lander");
+  const day = dayNumber();
+  const seededRand = seed.rand;
   const terrain = createTerrain();
 
   function rand(min, max) {
-    return min + Math.random() * (max - min);
+    return min + seededRand() * (max - min);
   }
 
   function createTerrain() {
@@ -194,6 +201,23 @@ export async function mountLander(canvas, opts = {}) {
   noiseText.position.set(18, H - 100);
   stage.addChild(noiseText);
 
+  // Daily-puzzle + personal-best chip (top-center). Reads as "you're on day 4,
+  // your softest landing today was 1.4 — try to beat it."
+  const dayChip = new P.Text({
+    text: bestSoftText(),
+    style: { fill: 0x6f7782, fontSize: 11, fontWeight: "600", letterSpacing: 0.5, align: "center" }
+  });
+  dayChip.anchor.set(0.5, 0);
+  dayChip.position.set(W / 2, 16);
+  stage.addChild(dayChip);
+
+  function bestSoftText() {
+    const bestRaw = bestScore.get("lander-soft");
+    if (!bestRaw) return `Day #${day} · land softer than anyone else today`;
+    const v = (bestRaw / 100).toFixed(2);
+    return `Day #${day} · your softest landing today: ${v} m/s`;
+  }
+
   // ── In-canvas HUD ── glanceable bars so the player never has to look away from the ship.
   // VRAM (vertical, top-right). Color shifts blue → orange → red as memory depletes.
   const vramBar = new P.Container();
@@ -249,6 +273,21 @@ export async function mountLander(canvas, opts = {}) {
   stage.addChildAt(padPulse, stage.getChildIndex(padGlobal));
   let pulseT = 0;
 
+  // ── RETRY pill: appears after game-over, clickable + responds to R key ──
+  const retryBtn = new P.Container();
+  retryBtn.position.set(W / 2, H / 2 + 50);
+  retryBtn.eventMode = "static";
+  retryBtn.cursor = "pointer";
+  retryBtn.visible = false;
+  const retryBg = new P.Graphics();
+  retryBg.roundRect(-78, -18, 156, 36, 18).fill({ color: 0xa31f34 }).stroke({ color: 0x6f1424, width: 1.5 });
+  retryBtn.addChild(retryBg);
+  const retryLbl = new P.Text({ text: "↺  TRY AGAIN", style: { fill: 0xffffff, fontSize: 14, fontWeight: "700", letterSpacing: 1 }});
+  retryLbl.anchor.set(0.5);
+  retryBtn.addChild(retryLbl);
+  retryBtn.on("pointertap", () => { if (opts.onRetry) opts.onRetry(); });
+  // Added to stage AFTER the READY overlay block so its z-order is on top.
+
   // ── READY overlay: full-canvas card the player must dismiss with ↑ ──
   const ready = new P.Container();
   const readyDim = new P.Graphics();
@@ -274,6 +313,7 @@ export async function mountLander(canvas, opts = {}) {
   readyCta.position.set(W / 2, H / 2 + 70);
   ready.addChild(readyCta);
   stage.addChild(ready);
+  stage.addChild(retryBtn);    // retry pill goes on top of everything else
   let ctaPulseT = 0;
 
   const handleKeydown = (e) => {
@@ -387,7 +427,9 @@ export async function mountLander(canvas, opts = {}) {
     if (state.y + 10 >= groundY) {
       state.over = true;
       state.y = groundY - 10;
-      
+      state.impactSpeed = speed;
+      state.vramAtImpact = Math.max(0, Math.floor(state.fuel));
+
       // Impact magnitude scales every consequence — gentle landings vs crash divergence.
       const impactShake = Math.min(18, speed * 3);
 
@@ -395,6 +437,14 @@ export async function mountLander(canvas, opts = {}) {
         if (speed < maxSafeSpeed && Math.abs(state.angle) < maxSafeAngle) {
            state.won = true;
            state.reason = "win";
+           // Best-soft-landing tracking. Lower is better; store as int (×100) for compare.
+           const softCenti = Math.round(speed * 100);
+           const prev = bestScore.get("lander-soft");
+           if (!prev || softCenti < prev) {
+             bestScore.set("lander-soft", softCenti);
+             state.newBest = true;
+             dayChip.text = bestSoftText();
+           }
            // Win celebration: green burst + soft green flash + small confirming shake.
            burst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
            flash(stage, 0x3d9e5a, 260, 0.28);
@@ -438,9 +488,34 @@ export async function mountLander(canvas, opts = {}) {
 
     if (state.over && !state.gameOverFired && opts.onGameOver) {
       state.gameOverFired = true;
-      opts.onGameOver({ won: state.won, reason: state.reason });
+      retryBtn.visible = true;
+      opts.onGameOver({
+        won: state.won,
+        reason: state.reason,
+        impactSpeed: state.impactSpeed,
+        vramAtImpact: state.vramAtImpact,
+        newBest: !!state.newBest,
+        shareText: buildShareText(state)
+      });
     }
   });
+
+  function buildShareText(s) {
+    const v = (s.impactSpeed || 0).toFixed(2);
+    const vram = s.vramAtImpact ?? 0;
+    const head = `🚀 Gradient Lander · Day #${day}`;
+    const tail = "mlsysbook.ai/games/lander";
+    if (s.reason === "win") {
+      const star = s.newBest ? "  ⭐ new personal best!" : "";
+      return `${head}\n🟢 CONVERGED · v=${v} · VRAM ${vram}%${star}\n${tail}`;
+    }
+    if (s.reason === "diverged")     return `${head}\n🔴 DIVERGED — LR too high (v=${v})\n${tail}`;
+    if (s.reason === "local-min")    return `${head}\n🟠 LOCAL MIN — suboptimal solution\n${tail}`;
+    if (s.reason === "off-course")   return `${head}\n🔴 OFF COURSE — weights diverged\n${tail}`;
+    if (s.reason === "missed-basin") return `${head}\n🔴 MISSED THE BASIN — no clear gradient\n${tail}`;
+    if (s.reason === "oom")          return `${head}\n🔴 OOM — VRAM exhausted mid-run\n${tail}`;
+    return `${head}\n${tail}`;
+  }
 
   return {
     id: "lander",
