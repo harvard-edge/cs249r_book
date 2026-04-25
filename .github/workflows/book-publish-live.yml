@@ -22,9 +22,10 @@ name: '📚 Book · 🚀 Publish (Live)'
 # Deploys to: gh-pages branch (production site)
 # Secrets:    GITHUB_TOKEN
 # Vars:       BOOK_ROOT, BOOK_QUARTO, BOOK_DOCKER, BOOK_TOOLS, BOOK_DEPS,
-#             BOOK_DEPLOY_PATH (the gh-pages subdirectory under which Vol1/Vol2
-#             are deployed — read by both this workflow and book-preview-dev.yml
-#             so the same /book/vol{1,2}/ relative URLs resolve on dev + live)
+#             VOL1_DEPLOY_PATH (top-level gh-pages dir for Vol I, e.g. "vol1"),
+#             VOL2_DEPLOY_PATH (top-level gh-pages dir for Vol II, e.g. "vol2").
+#             Both are read here AND in book-preview-dev.yml so the same
+#             /vol1/ and /vol2/ URLs resolve identically on dev + live.
 #
 # Related:
 #   - book-build-container.yml — Reusable build matrix called for production builds
@@ -802,15 +803,15 @@ jobs:
       - name: 📝 Update per-volume version in index.qmd
         run: |
           # The volume version display lives in TWO places per volume:
-          #   index-vol{N}.qmd                 (project-root, renders /book/vol{N}/index.html)
-          #   contents/vol{N}/index.qmd        (deep, renders /book/vol{N}/contents/vol{N}/index.html)
+          #   index-vol{N}.qmd                 (project-root, renders /vol{N}/index.html)
+          #   contents/vol{N}/index.qmd        (deep, renders /vol{N}/contents/vol{N}/index.html)
           # Both have a `doi: "vX.Y.Z"` line that surfaces in the title block,
           # and version-link.js picks up the v\d+\.\d+\.\d+ string to hyperlink
           # it to the releases page. The deep file remains the canonical
           # sidebar "Volume home"; the root file is what the public URL hits.
           #
           # We MUST update both — otherwise the publicly-rendered welcome page
-          # at /book/vol{N}/ would display a stale version after the publish.
+          # at /vol{N}/ would display a stale version after the publish.
           # The bare "vX.Y.Z" form (no `vol{N}-` prefix) is what readers see;
           # the per-volume git tag itself uses the vol{N}-v prefix.
 
@@ -1308,17 +1309,18 @@ jobs:
 
           DEPLOY_TARGET="${{ github.event.inputs.deploy_target }}"
 
-          # Single source of truth for the book deploy path on gh-pages.
-          # The dev preview workflow (book-preview-dev.yml) reads the same
-          # variable, so /book/vol{1,2}/ resolves identically on both targets.
-          # The landing page's volume cards (site/index.qmd) link relative to
-          # this path, which is why the two must always agree.
-          BOOK_PATH="${{ vars.BOOK_DEPLOY_PATH }}"
-          if [ -z "$BOOK_PATH" ]; then
-            echo "❌ vars.BOOK_DEPLOY_PATH is unset — refusing to run destructive rm with empty deploy path."
+          # Each volume gets its own top-level path on gh-pages, sibling to
+          # /labs/, /kits/, /tinytorch/, etc. The dev preview reads the same
+          # two variables so /vol1/ and /vol2/ resolve identically on both
+          # targets. The landing page's volume cards (site/index.qmd) and the
+          # navbar/footer/announcement absolute URLs link to these paths.
+          VOL1_PATH="${{ vars.VOL1_DEPLOY_PATH }}"
+          VOL2_PATH="${{ vars.VOL2_DEPLOY_PATH }}"
+          if [ -z "$VOL1_PATH" ] || [ -z "$VOL2_PATH" ]; then
+            echo "❌ vars.VOL1_DEPLOY_PATH or vars.VOL2_DEPLOY_PATH is unset — refusing to run destructive rm with empty deploy path."
             exit 1
           fi
-          echo "📂 Book deploy path: /$BOOK_PATH/ (from vars.BOOK_DEPLOY_PATH)"
+          echo "📂 Volume deploy paths: /$VOL1_PATH/ and /$VOL2_PATH/ (from vars.VOL1_DEPLOY_PATH, vars.VOL2_DEPLOY_PATH)"
 
           # Clone gh-pages branch
           git clone --depth=1 --branch=gh-pages https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git gh-pages-repo
@@ -1332,13 +1334,15 @@ jobs:
           # =================================================================
           # SUBDIRECTORY DEPLOYMENT STRUCTURE
           # =================================================================
-          # Each subsite has its own directory:
-          #   /                  - Landing page (AI Engineering)
-          #   /$BOOK_PATH/vol1/  - Volume I  (vars.BOOK_DEPLOY_PATH=book → /book/vol1/)
-          #   /$BOOK_PATH/vol2/  - Volume II (vars.BOOK_DEPLOY_PATH=book → /book/vol2/)
-          #   /tinytorch/        - TinyTorch framework
-          #   /kits/             - Hardware Kits
-          #   /labs/             - Labs
+          # Each subsite has its own top-level directory:
+          #   /                - Landing page (AI Engineering)
+          #   /$VOL1_PATH/     - Volume I  (vars.VOL1_DEPLOY_PATH=vol1 → /vol1/)
+          #   /$VOL2_PATH/     - Volume II (vars.VOL2_DEPLOY_PATH=vol2 → /vol2/)
+          #   /tinytorch/      - TinyTorch framework
+          #   /kits/           - Hardware Kits
+          #   /labs/           - Labs
+          #   /book/           - LEGACY single-volume textbook (untouched here;
+          #                      to be replaced post-cutover with a chooser)
           # =================================================================
 
           # Clean up stale root-level files from old deployment structure
@@ -1354,30 +1358,30 @@ jobs:
           echo "✅ Stale files removed"
 
           # =================================================================
-          # Deploy Volume I to /$BOOK_PATH/vol1/ (if target is vol1 or all)
+          # Deploy Volume I to /$VOL1_PATH/ (if target is vol1 or all)
           # =================================================================
           if [[ "$DEPLOY_TARGET" == "vol1" || "$DEPLOY_TARGET" == "all" ]]; then
             if [ -d "../vol1-site" ]; then
-              echo "📦 Deploying Volume I to /$BOOK_PATH/vol1/..."
-              rm -rf "$BOOK_PATH/vol1/"
-              mkdir -p "$BOOK_PATH/vol1"
-              cp -r ../vol1-site/* "$BOOK_PATH/vol1/"
-              echo "✅ Volume I deployed to /$BOOK_PATH/vol1/"
+              echo "📦 Deploying Volume I to /$VOL1_PATH/..."
+              rm -rf "$VOL1_PATH/"
+              mkdir -p "$VOL1_PATH"
+              cp -r ../vol1-site/* "$VOL1_PATH/"
+              echo "✅ Volume I deployed to /$VOL1_PATH/"
             else
               echo "⚠️ Volume I site not found - skipping"
             fi
           fi
 
           # =================================================================
-          # Deploy Volume II to /$BOOK_PATH/vol2/ (if target is vol2 or all)
+          # Deploy Volume II to /$VOL2_PATH/ (if target is vol2 or all)
           # =================================================================
           if [[ "$DEPLOY_TARGET" == "vol2" || "$DEPLOY_TARGET" == "all" ]]; then
             if [ -d "../vol2-site" ]; then
-              echo "📦 Deploying Volume II to /$BOOK_PATH/vol2/..."
-              rm -rf "$BOOK_PATH/vol2/"
-              mkdir -p "$BOOK_PATH/vol2"
-              cp -r ../vol2-site/* "$BOOK_PATH/vol2/"
-              echo "✅ Volume II deployed to /$BOOK_PATH/vol2/"
+              echo "📦 Deploying Volume II to /$VOL2_PATH/..."
+              rm -rf "$VOL2_PATH/"
+              mkdir -p "$VOL2_PATH"
+              cp -r ../vol2-site/* "$VOL2_PATH/"
+              echo "✅ Volume II deployed to /$VOL2_PATH/"
             else
               echo "⚠️ Volume II site not found - skipping"
             fi
@@ -1391,10 +1395,11 @@ jobs:
             if [ -f "$LANDING_BUILD/index.html" ]; then
               echo "📦 Deploying rendered landing page to root..."
               # Copy all landing page output (HTML, CSS, JS, covers, assets)
-              # but preserve existing subsite directories (book/, kits/, etc.)
-              # Build the skip-list regex with the configured book path so
-              # the landing-page copy never clobbers /$BOOK_PATH/.
-              SKIP_DIRS_REGEX="^($BOOK_PATH|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|about|community|newsletter)$"
+              # but preserve existing subsite directories. The skip list
+              # includes both the new top-level volume paths and the legacy
+              # /book/ tree (the single-volume textbook stays untouched here;
+              # cutover to a chooser is a separate step post-release).
+              SKIP_DIRS_REGEX="^($VOL1_PATH|$VOL2_PATH|book|kits|tinytorch|labs|mlsysim|slides|instructors|interviews|about|community|newsletter)$"
               for item in "$LANDING_BUILD"/*; do
                 basename="$(basename "$item")"
                 # Skip site_libs — the gh-pages root already has its own from the book
@@ -1407,14 +1412,14 @@ jobs:
               done
               echo "✅ Landing page deployed to root"
             else
-              echo "⚠️ Landing page build not found — creating redirect to /$BOOK_PATH/vol1/"
-              printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/%s/vol1/"><link rel="canonical" href="https://mlsysbook.ai/%s/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/%s/vol1/">ML Systems Volume I</a>...</p></body></html>\n' "$BOOK_PATH" "$BOOK_PATH" "$BOOK_PATH" > index.html
+              echo "⚠️ Landing page build not found — creating redirect to /$VOL1_PATH/"
+              printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/%s/"><link rel="canonical" href="https://mlsysbook.ai/%s/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/%s/">ML Systems Volume I</a>...</p></body></html>\n' "$VOL1_PATH" "$VOL1_PATH" "$VOL1_PATH" > index.html
             fi
           else
             # For non-all deployments, keep existing root or create redirect
             if [ ! -f "index.html" ]; then
-              echo "📦 Creating root redirect to /$BOOK_PATH/vol1/..."
-              printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/%s/vol1/"><link rel="canonical" href="https://mlsysbook.ai/%s/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/%s/vol1/">ML Systems Volume I</a>...</p></body></html>\n' "$BOOK_PATH" "$BOOK_PATH" "$BOOK_PATH" > index.html
+              echo "📦 Creating root redirect to /$VOL1_PATH/..."
+              printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/%s/"><link rel="canonical" href="https://mlsysbook.ai/%s/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/%s/">ML Systems Volume I</a>...</p></body></html>\n' "$VOL1_PATH" "$VOL1_PATH" "$VOL1_PATH" > index.html
             fi
           fi
 
@@ -1431,10 +1436,12 @@ jobs:
 
           echo "📊 Deployed content structure:"
           ls -la | head -15
-          if [ -d "$BOOK_PATH" ]; then
-            echo "📊 Book directory contents (/$BOOK_PATH/):"
-            ls -la "$BOOK_PATH/" | head -10
-          fi
+          for VPATH in "$VOL1_PATH" "$VOL2_PATH"; do
+            if [ -d "$VPATH" ]; then
+              echo "📊 /$VPATH/ contents:"
+              ls -la "$VPATH/" | head -10
+            fi
+          done
           if [ -d "vol1" ]; then
             echo "📊 Vol1 directory contents:"
             ls -la vol1/ | head -10
@@ -1463,13 +1470,14 @@ jobs:
 
           # Commit with comprehensive validation
           echo "📝 Creating deployment commit..."
-          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} to /$BOOK_PATH/ from commit ${{ github.sha }}
+          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} to /$VOL1_PATH/ + /$VOL2_PATH/ from commit ${{ github.sha }}
 
-          Combined HTML site with PDF and EPUB assets for download.
+          Two-volume textbook with PDF and EPUB assets for download.
 
-          - HTML: Interactive web textbook at /$BOOK_PATH/
-          - Vol1 PDF/EPUB: /$BOOK_PATH/vol1/assets/downloads/
-          - Vol2 PDF/EPUB: /$BOOK_PATH/vol2/assets/downloads/
+          - Vol1 HTML: /$VOL1_PATH/
+          - Vol1 PDF/EPUB: /$VOL1_PATH/assets/downloads/
+          - Vol2 HTML: /$VOL2_PATH/
+          - Vol2 PDF/EPUB: /$VOL2_PATH/assets/downloads/
           - Release: ${{ needs.validate-inputs.outputs.new_version }}
           - Files updated: $CHANGED_FILES"
 
@@ -1512,19 +1520,19 @@ jobs:
           echo "  - Files updated: $CHANGED_FILES"
           echo "  - Commit hash: $COMMIT_HASH"
           echo "  - Branch: gh-pages"
-          echo "  - Deploy path: /$BOOK_PATH/"
+          echo "  - Deploy paths: /$VOL1_PATH/ and /$VOL2_PATH/"
           echo ""
           echo "🌐 Site URLs:"
-          echo "  - Textbook: https://mlsysbook.ai/$BOOK_PATH/"
+          echo "  - Volume I:  https://mlsysbook.ai/$VOL1_PATH/"
+          echo "  - Volume II: https://mlsysbook.ai/$VOL2_PATH/"
           echo "  - TinyTorch: https://mlsysbook.ai/tinytorch/"
           echo "  - Hardware Kits: https://mlsysbook.ai/kits/"
-          echo "  - Root (redirects to /$BOOK_PATH/): https://mlsysbook.ai/"
           echo ""
           echo "📄 Direct Asset Links:"
-          echo "  - Vol1 PDF:  https://mlsysbook.ai/$BOOK_PATH/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf"
-          echo "  - Vol1 EPUB: https://mlsysbook.ai/$BOOK_PATH/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub"
-          echo "  - Vol2 PDF:  https://mlsysbook.ai/$BOOK_PATH/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf"
-          echo "  - Vol2 EPUB: https://mlsysbook.ai/$BOOK_PATH/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub"
+          echo "  - Vol1 PDF:  https://mlsysbook.ai/$VOL1_PATH/assets/downloads/Machine-Learning-Systems-Vol1.pdf"
+          echo "  - Vol1 EPUB: https://mlsysbook.ai/$VOL1_PATH/assets/downloads/Machine-Learning-Systems-Vol1.epub"
+          echo "  - Vol2 PDF:  https://mlsysbook.ai/$VOL2_PATH/assets/downloads/Machine-Learning-Systems-Vol2.pdf"
+          echo "  - Vol2 EPUB: https://mlsysbook.ai/$VOL2_PATH/assets/downloads/Machine-Learning-Systems-Vol2.epub"
           echo ""
           echo "⏰ Note: Changes may take 1-5 minutes to appear due to CDN caching."
         env:
@@ -2046,7 +2054,8 @@ jobs:
           echo "- 🌐 **Deployment**: Combined HTML + PDF + EPUB deployed to GitHub Pages (gh-pages branch)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Access Your Published Textbook:" >> $GITHUB_STEP_SUMMARY
-          echo "- 📖 [Interactive Web Textbook](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📖 [Volume I: Foundations](https://mlsysbook.ai/${{ vars.VOL1_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📘 [Volume II: At Scale](https://mlsysbook.ai/${{ vars.VOL2_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔥 [TinyTorch Framework](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
           echo "- ⚙️ [Hardware Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
@@ -2054,13 +2063,13 @@ jobs:
           echo "- 📄 [Download Vol2 PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol2.pdf)" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 [Download Vol1 EPUB](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol1.epub)" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 [Download Vol2 EPUB](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol2.epub)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🎓 [Share with Students](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🎓 [Share with Students](https://mlsysbook.ai/${{ vars.VOL1_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Build Status:" >> $GITHUB_STEP_SUMMARY
           echo "- 📋 **Quarto Build Container Workflow**: Should be running/completed" >> $GITHUB_STEP_SUMMARY
           echo "- 🏗️ **Quarto Build**: HTML + PDF + EPUB generation" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 **PDF Assets**: Available at \`/book/vol{1,2}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 **EPUB Assets**: Available at \`/book/vol{1,2}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Assets**: Available at \`/${{ vars.VOL1_DEPLOY_PATH }}/assets/downloads/\` and \`/${{ vars.VOL2_DEPLOY_PATH }}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 **EPUB Assets**: Available at \`/${{ vars.VOL1_DEPLOY_PATH }}/assets/downloads/\` and \`/${{ vars.VOL2_DEPLOY_PATH }}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
 
   cleanup-on-failure:
     name: '🧹 Cleanup Failed Release'
