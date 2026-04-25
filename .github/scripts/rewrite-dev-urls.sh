@@ -20,10 +20,10 @@ SHALLOW="${3:-}"
 
 # ── Site map ──────────────────────────────────────────────────────────────────
 # Maps mlsysbook.ai/<key>/ to the dev site path <value>/.
-# "vol1" and "vol2" live under "book/" on the dev site; everything else is 1:1.
+# Every subsite (including the volumes) is 1:1 — top-level on both targets.
 declare -A SUBSITES=(
-  [vol1]="book/vol1"
-  [vol2]="book/vol2"
+  [vol1]="vol1"
+  [vol2]="vol2"
   [tinytorch]="tinytorch"
   [kits]="kits"
   [labs]="labs"
@@ -40,10 +40,9 @@ declare -A SUBSITES=(
 # ── Compute prefix ────────────────────────────────────────────────────────────
 # PREFIX is the number of "../" hops needed to climb from the *current build
 # location* on dev back to the dev site root. It depends on how deep the
-# subsite lives on dev, NOT on the mlsysbook.ai key. e.g. vol1 lives at
-# /book/vol1/ on dev → 2 hops → PREFIX="../../". This was previously hard-
-# coded to "../" which broke nested subsites (vol1, vol2) — every cross-site
-# link, including the navbar title-href, landed one level too shallow.
+# subsite lives on dev. With every subsite at top level, depth is 1 and
+# PREFIX is "../". The depth computation below stays generic so a future
+# nested subsite (depth > 1) would still resolve correctly.
 #
 # SELF_PREFIX is "./" — a self-link rewrites to the current dir.
 SELF_PREFIX="./"

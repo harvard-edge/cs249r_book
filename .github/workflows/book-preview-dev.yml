@@ -19,7 +19,9 @@ name: '📚 Book · 👁️ Preview (Dev)'
 #
 # Deploys to: Dev preview site (via SSH to DEV_REPO)
 # Secrets:    GITHUB_TOKEN, SSH_DEPLOY_KEY
-# Vars:       BOOK_TOOLS, DEV_REPO, DEV_REPO_URL, BOOK_DEPLOY_PATH
+# Vars:       BOOK_TOOLS, DEV_REPO, DEV_REPO_URL,
+#             VOL1_DEPLOY_PATH (top-level dir for Vol I, mirrors live),
+#             VOL2_DEPLOY_PATH (top-level dir for Vol II, mirrors live)
 #
 # Related:
 #   - book-validate-dev.yml — Produces the build artifacts this workflow deploys
@@ -235,7 +237,6 @@ jobs:
           path: ./repo-scripts
           sparse-checkout: |
             ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py
-            .github/dev-landing/book-index.html
             .github/scripts/rewrite-dev-urls.sh
           sparse-checkout-cone-mode: false
 
@@ -281,37 +282,51 @@ jobs:
           echo "🔄 Entering target repository..."
           cd target-repo
 
-          echo "🧹 Cleaning /${{ vars.BOOK_DEPLOY_PATH }}/ subdirectory only (preserving other subsites)..."
-          rm -rf ${{ vars.BOOK_DEPLOY_PATH }}
-          mkdir -p ${{ vars.BOOK_DEPLOY_PATH }}
-
-          echo "🚚 Copying book content to /${{ vars.BOOK_DEPLOY_PATH }}/ subdirectory..."
-          cp -r "${{ github.workspace }}/preview-site/." ${{ vars.BOOK_DEPLOY_PATH }}/
-
-          # Copy book volume chooser page so /book/ doesn't 404
-          cp "${{ github.workspace }}/repo-scripts/.github/dev-landing/book-index.html" ${{ vars.BOOK_DEPLOY_PATH }}/index.html
-          touch .nojekyll
-
-          echo "🔍 Validating deployment content..."
-          if [ ! -f "${{ vars.BOOK_DEPLOY_PATH }}/vol1/index.html" ]; then
-            echo "❌ CRITICAL: ${{ vars.BOOK_DEPLOY_PATH }}/vol1/index.html is missing after copy. Aborting deployment."
+          # Per-volume top-level deploy paths. Mirrors book-publish-live.yml so
+          # /vol1/ and /vol2/ resolve identically on dev preview and live.
+          VOL1_PATH="${{ vars.VOL1_DEPLOY_PATH }}"
+          VOL2_PATH="${{ vars.VOL2_DEPLOY_PATH }}"
+          if [ -z "$VOL1_PATH" ] || [ -z "$VOL2_PATH" ]; then
+            echo "❌ vars.VOL1_DEPLOY_PATH or vars.VOL2_DEPLOY_PATH is unset — refusing to run destructive rm with empty path."
             exit 1
           fi
 
-          if [ ! -f "${{ vars.BOOK_DEPLOY_PATH }}/vol2/index.html" ]; then
-            echo "❌ CRITICAL: ${{ vars.BOOK_DEPLOY_PATH }}/vol2/index.html is missing after copy. Aborting deployment."
+          echo "🧹 Cleaning /$VOL1_PATH/ and /$VOL2_PATH/ subdirectories (preserving other subsites)..."
+          rm -rf "$VOL1_PATH" "$VOL2_PATH"
+          # Also clean up the legacy /book/ wrapper from the previous nested layout.
+          # Keeping it would leave zombie content at harvard-edge.github.io/cs249r_book_dev/book/.
+          rm -rf book
+          mkdir -p "$VOL1_PATH" "$VOL2_PATH"
+
+          echo "🚚 Copying Vol1 content to /$VOL1_PATH/..."
+          cp -r "${{ github.workspace }}/preview-site/vol1/." "$VOL1_PATH/"
+          echo "🚚 Copying Vol2 content to /$VOL2_PATH/..."
+          cp -r "${{ github.workspace }}/preview-site/vol2/." "$VOL2_PATH/"
+          touch .nojekyll
+
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "$VOL1_PATH/index.html" ]; then
+            echo "❌ CRITICAL: $VOL1_PATH/index.html is missing after copy. Aborting deployment."
+            exit 1
+          fi
+
+          if [ ! -f "$VOL2_PATH/index.html" ]; then
+            echo "❌ CRITICAL: $VOL2_PATH/index.html is missing after copy. Aborting deployment."
             exit 1
           fi
 
           echo "📦 Repository structure:"
           ls -la
           echo ""
-          echo "📦 /${{ vars.BOOK_DEPLOY_PATH }}/ contents:"
-          ls -la ${{ vars.BOOK_DEPLOY_PATH }}/ | head -10
+          echo "📦 /$VOL1_PATH/ contents:"
+          ls -la "$VOL1_PATH/" | head -10
+          echo ""
+          echo "📦 /$VOL2_PATH/ contents:"
+          ls -la "$VOL2_PATH/" | head -10
 
           echo "📦 Committing and pushing changes..."
           git add .
-          git commit -m "🚀 Deploy book dev preview to /${{ vars.BOOK_DEPLOY_PATH }}/ from ${{ steps.run_info.outputs.head_sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git commit -m "🚀 Deploy book dev preview to /$VOL1_PATH/ + /$VOL2_PATH/ from ${{ steps.run_info.outputs.head_sha }}" --allow-empty || echo "🟡 Nothing to commit"
 
           # Retry push with rebase to handle concurrent deploys
           for i in 1 2 3; do
@@ -326,4 +341,6 @@ jobs:
           # DEV_REPO contains org/repo format, extract just repo name for GitHub Pages URL
           REPO_NAME="${{ vars.DEV_REPO }}"
           REPO_NAME="${REPO_NAME##*/}"
-          echo "✅ Book deployed to: https://harvard-edge.github.io/${REPO_NAME}/${{ vars.BOOK_DEPLOY_PATH }}/"
+          echo "✅ Volumes deployed to:"
+          echo "   https://harvard-edge.github.io/${REPO_NAME}/$VOL1_PATH/"
+          echo "   https://harvard-edge.github.io/${REPO_NAME}/$VOL2_PATH/"
