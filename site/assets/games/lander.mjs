@@ -70,6 +70,15 @@ export async function mountLander(canvas, opts = {}) {
   const seededRand = seed.rand;
   const terrain = createTerrain();
 
+  // Honor the user's OS-level reduced-motion preference. Disables four animations
+  // (goal-pad pulse, CTA pulse, camera shake, particle bursts on losses).
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const safeShake = (target, amount, ms) => { if (!reduceMotion) shake(target, amount, ms); };
+  const safeBurst = (s, x, y, c, n, o) => { if (!reduceMotion) burst(s, x, y, c, n, o); };
+
   function rand(min, max) {
     return min + seededRand() * (max - min);
   }
@@ -337,21 +346,66 @@ export async function mountLander(canvas, opts = {}) {
   window.addEventListener('keydown', handleKeydown);
   window.addEventListener('keyup', handleKeyup);
 
+  // ── Touch zones (mobile / pointer): three invisible Pixi rects mapping to ←, →, ↑.
+  // Center zone doubles as the "press to launch" trigger so the READY card responds
+  // to a tap as well as the keyboard ↑.
+  function makeZone(x, y, w, h, onDown, onUp) {
+    const z = new P.Graphics();
+    z.rect(x, y, w, h).fill({ color: 0x000000, alpha: 0 });
+    z.eventMode = "static";
+    z.cursor = "default";
+    z.on("pointerdown",  onDown);
+    z.on("pointerup",    onUp);
+    z.on("pointerupoutside", onUp);
+    z.on("pointercancel",     onUp);
+    stage.addChild(z);
+    return z;
+  }
+  const colW = W / 3;
+  makeZone(0, 0, colW, H,
+    () => { state.keys.left = true; },
+    () => { state.keys.left = false; });
+  makeZone(W - colW, 0, colW, H,
+    () => { state.keys.right = true; },
+    () => { state.keys.right = false; });
+  makeZone(colW, 0, colW, H,
+    () => {
+      state.keys.up = true;
+      if (!state.started) { state.started = true; ready.visible = false; }
+    },
+    () => { state.keys.up = false; });
+
+  // Re-pin overlay UI to the top so touch zones don't intercept clicks meant
+  // for the READY overlay or the RETRY button.
+  stage.setChildIndex(ready, stage.children.length - 1);
+  stage.setChildIndex(retryBtn, stage.children.length - 1);
+
   app.ticker.add(() => {
     // HUD drawn every frame so it never goes stale between win/crash and the aha card.
     drawHud();
 
-    // Goal pad always pulses (so the player's eye finds it before launch and during play).
-    pulseT += 0.06;
-    const r = 26 + Math.sin(pulseT) * 6;
-    padPulse.clear();
-    padPulse.circle(0, 0, r).stroke({ color: COL.pad, width: 2, alpha: 0.55 });
-    padPulse.circle(0, 0, r * 0.55).stroke({ color: COL.pad, width: 1.4, alpha: 0.35 });
+    // Goal pad pulses to attract the eye — held static when reduce-motion is on
+    // (a static green ring still reads as the goal; the breathing is decoration).
+    if (!reduceMotion) {
+      pulseT += 0.06;
+      const r = 26 + Math.sin(pulseT) * 6;
+      padPulse.clear();
+      padPulse.circle(0, 0, r).stroke({ color: COL.pad, width: 2, alpha: 0.55 });
+      padPulse.circle(0, 0, r * 0.55).stroke({ color: COL.pad, width: 1.4, alpha: 0.35 });
+    } else if (padPulse.geometry == null || pulseT === 0) {
+      padPulse.clear();
+      padPulse.circle(0, 0, 28).stroke({ color: COL.pad, width: 2, alpha: 0.5 });
+      pulseT = -1; // sentinel: drawn once, never again
+    }
 
     if (!state.started) {
       // Pre-game: pulse the "press UP" prompt so it reads as an action, not a static label.
-      ctaPulseT += 0.08;
-      readyCta.alpha = 0.75 + 0.25 * Math.sin(ctaPulseT);
+      if (!reduceMotion) {
+        ctaPulseT += 0.08;
+        readyCta.alpha = 0.75 + 0.25 * Math.sin(ctaPulseT);
+      } else {
+        readyCta.alpha = 1.0;
+      }
       return;
     }
     if (state.over) return;
@@ -446,30 +500,30 @@ export async function mountLander(canvas, opts = {}) {
              dayChip.text = bestSoftText();
            }
            // Win celebration: green burst + soft green flash + small confirming shake.
-           burst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
+           safeBurst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
            flash(stage, 0x3d9e5a, 260, 0.28);
-           shake(stage, 4, 220);
+           safeShake(stage, 4, 220);
            floatText(stage, state.x, state.y - 30, "CONVERGED!", COL.pad, { size: 24 });
         } else {
            state.reason = "diverged";
-           burst(stage, state.x, state.y, COL.crash, 30);
+           safeBurst(stage, state.x, state.y, COL.crash, 30);
            flash(stage, 0xc44444, 220, 0.34);
-           shake(stage, impactShake, 320);
+           safeShake(stage, impactShake, 320);
            ship.visible = false;
            floatText(stage, state.x, state.y - 30, "DIVERGED — LR TOO HIGH", COL.crash, { size: 16 });
         }
       } else if (inLocalPad(state.x)) {
         state.reason = "local-min";
-        burst(stage, state.x, state.y, COL.crash, 30);
+        safeBurst(stage, state.x, state.y, COL.crash, 30);
         flash(stage, 0xc87b2a, 200, 0.26);
-        shake(stage, impactShake, 300);
+        safeShake(stage, impactShake, 300);
         ship.visible = false;
         floatText(stage, state.x, state.y - 30, "LOCAL MINIMUM — SUBOPTIMAL", COL.crash, { size: 16 });
       } else {
         state.reason = "missed-basin";
-        burst(stage, state.x, state.y, COL.crash, 30);
+        safeBurst(stage, state.x, state.y, COL.crash, 30);
         flash(stage, 0xc44444, 220, 0.34);
-        shake(stage, impactShake, 320);
+        safeShake(stage, impactShake, 320);
         ship.visible = false;
         floatText(stage, state.x, state.y - 30, "MISSED THE BASIN", COL.crash, { size: 16 });
       }
@@ -480,9 +534,9 @@ export async function mountLander(canvas, opts = {}) {
       state.over = true;
       state.reason = "oom";
       flame.visible = false;
-      burst(stage, state.x, state.y, COL.crash, 26, { speed: 2.0, lifeMs: 700 });
+      safeBurst(stage, state.x, state.y, COL.crash, 26, { speed: 2.0, lifeMs: 700 });
       flash(stage, 0xc44444, 240, 0.32);
-      shake(stage, 8, 280);
+      safeShake(stage, 8, 280);
       floatText(stage, state.x, state.y - 30, "OOM — VRAM EXHAUSTED", COL.crash, { size: 16 });
     }
 
