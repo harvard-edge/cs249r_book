@@ -41,7 +41,7 @@ H100_TDP = 700 * watt                     # SXM variant
 # NVIDIA H200 (Hopper, 2023) — Source: NVIDIA H200 Data Sheet
 # H200 shares the Hopper compute die with H100, only memory differs
 H200_MEM_BW = 4.8 * TB / second             # HBM3e
-H200_MEM_CAPACITY = 141 * GB               # NVIDIA specifies H200 as 141 GB (decimal)
+H200_MEM_CAPACITY = 131 * GiB              # 141 GB (NVIDIA spec) converted to GiB for consistency with other GPU constants
 H200_TDP = 700 * watt                       # Same as H100 SXM
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture

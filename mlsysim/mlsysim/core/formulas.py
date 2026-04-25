@@ -376,7 +376,8 @@ def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node,
     t_allreduce_inter = calc_ring_allreduce_time(reduced_message, n_nodes, inter_node_bw, inter_node_lat)
     
     # 3. Intra-node Broadcast (back to all GPUs)
-    t_broadcast = t_reduce # Symmetry assumption
+    # Broadcast only carries M/G bytes (the reduced shard), not the full M
+    t_broadcast = calc_ring_allreduce_time(reduced_message, gpus_per_node, intra_node_bw, intra_node_lat)
     
     return t_reduce + t_allreduce_inter + t_broadcast
 
