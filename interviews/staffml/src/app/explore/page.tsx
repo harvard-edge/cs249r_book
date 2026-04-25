@@ -727,12 +727,14 @@ function ExplorerPanel({
         )}
       </section>
 
-      <section className="rounded-xl border border-accentBlue/20 bg-accentBlue/5 p-4">
-        <h3 className="text-sm font-bold text-textPrimary mb-3">How to use this</h3>
-        <HowToStep step="1" title="Pick a track" text="Cloud, Edge, Mobile, TinyML, and Global are the highest-level slices." />
-        <HowToStep step="2" title="Zoom into an area" text="The next ring shows the skills inside that track: memory, deployment, latency, and more." />
-        <HowToStep step="3" title="Choose a topic path" text="Topic and level views lead to concrete questions you can practice immediately." />
-      </section>
+      {focus.kind === "root" && (
+        <section className="rounded-xl border border-accentBlue/20 bg-accentBlue/5 p-4">
+          <h3 className="text-sm font-bold text-textPrimary mb-3">How to use this</h3>
+          <HowToStep step="1" title="Pick a track" text="Cloud, Edge, Mobile, TinyML, and Global are the highest-level slices." />
+          <HowToStep step="2" title="Zoom into an area" text="The next ring shows the skills inside that track: memory, deployment, latency, and more." />
+          <HowToStep step="3" title="Choose a topic path" text="Topic and level views lead to concrete questions you can practice immediately." />
+        </section>
+      )}
     </div>
   );
 }
