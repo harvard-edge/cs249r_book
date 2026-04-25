@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, burst, floatText } from "/assets/games/runtime.mjs";
+import { mountPixiOnCanvas, burst, floatText, flash, shake } from "/assets/games/runtime.mjs";
 import * as P from "/assets/games/vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
@@ -223,8 +223,21 @@ export async function mountLander(canvas, opts = {}) {
     ship.y = state.y;
     ship.rotation = state.angle;
 
-    // Check bounds
-    if (state.x < 0 || state.x > W) state.over = true; // Off screen
+    // Thrust juice: emit small puff opposite to ship's angle every other frame.
+    if (state.keys.up && state.fuel > 0) {
+      if ((Math.random() < 0.55)) {
+        const puffX = state.x + Math.sin(state.angle) * 14;
+        const puffY = state.y + Math.cos(state.angle) * 14;
+        burst(stage, puffX, puffY, COL.thrust, 1, { speed: 1.2, lifeMs: 380 });
+      }
+    }
+
+    // Check bounds — off-screen is now an explicit "OFF COURSE" failure, not a silent stop.
+    if (state.x < 0 || state.x > W) {
+      state.over = true;
+      flash(stage, 0xc44444, 240, 0.30);
+      floatText(stage, Math.max(20, Math.min(W - 20, state.x)), 50, "OFF COURSE", COL.crash, { size: 18 });
+    }
     
     // Landing logic
     const speed = Math.hypot(state.vx, state.vy);
@@ -239,21 +252,34 @@ export async function mountLander(canvas, opts = {}) {
       state.over = true;
       state.y = groundY - 10;
       
+      // Impact magnitude scales every consequence — gentle landings vs crash divergence.
+      const impactShake = Math.min(18, speed * 3);
+
       if (inGlobalPad(state.x)) {
         if (speed < maxSafeSpeed && Math.abs(state.angle) < 0.5) {
            state.won = true;
+           // Win celebration: green burst + soft green flash + small confirming shake.
+           burst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
+           flash(stage, 0x3d9e5a, 260, 0.28);
+           shake(stage, 4, 220);
            floatText(stage, state.x, state.y - 30, "CONVERGED!", COL.pad, { size: 24 });
         } else {
            burst(stage, state.x, state.y, COL.crash, 30);
+           flash(stage, 0xc44444, 220, 0.34);
+           shake(stage, impactShake, 320);
            ship.visible = false;
            floatText(stage, state.x, state.y - 30, "DIVERGED (TOO FAST)", COL.crash, { size: 16 });
         }
       } else if (inLocalPad(state.x)) {
         burst(stage, state.x, state.y, COL.crash, 30);
+        flash(stage, 0xc87b2a, 200, 0.26);
+        shake(stage, impactShake, 300);
         ship.visible = false;
         floatText(stage, state.x, state.y - 30, "LOCAL MINIMUM (Suboptimal)", COL.crash, { size: 16 });
       } else {
         burst(stage, state.x, state.y, COL.crash, 30);
+        flash(stage, 0xc44444, 220, 0.34);
+        shake(stage, impactShake, 320);
         ship.visible = false;
         floatText(stage, state.x, state.y - 30, "GRADIENT EXPLOSION (Crash)", COL.crash, { size: 16 });
       }
