@@ -16,7 +16,8 @@
    Sharp Shot) keep working unchanged during the migration.
    ============================================================ */
 
-import * as PIXI from "/assets/games/vendor/pixi.min.mjs";
+// Module-relative so the runtime works at any deploy base.
+import * as PIXI from "./vendor/pixi.min.mjs";
 
 /* -----------------------------------------------------------
    Daily seed + best-score (legacy-compatible)
@@ -346,7 +347,7 @@ export function tween(target, prop, from, to, ms, ease = "outCubic") {
 let _filtersPromise = null;
 export function getFilters() {
   if (!_filtersPromise) {
-    _filtersPromise = import("/assets/games/vendor/pixi-filters.min.mjs");
+    _filtersPromise = import("./vendor/pixi-filters.min.mjs");
   }
   return _filtersPromise;
 }

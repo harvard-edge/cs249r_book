@@ -1,6 +1,9 @@
-import { mountPixiOnCanvas, burst, floatText, flash, shake, dailySeed } from "/assets/games/runtime.mjs";
-import { bestScore, dayNumber } from "/assets/games/runtime.mjs";
-import * as P from "/assets/games/vendor/pixi.min.mjs";
+// Module-relative imports so the game works at any deploy base
+// (mlsysbook.ai/, harvard-edge.github.io/cs249r_book_dev/, localhost:N/, …).
+// Absolute "/assets/..." paths break on any non-root deployment.
+import { mountPixiOnCanvas, burst, floatText, flash, shake, dailySeed } from "./runtime.mjs";
+import { bestScore, dayNumber } from "./runtime.mjs";
+import * as P from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
 window.MLSP.games = window.MLSP.games || {};
@@ -312,30 +315,47 @@ export async function mountLander(canvas, opts = {}) {
   readyGoal.position.set(W / 2, H / 2 - 30);
   ready.addChild(readyGoal);
   const readyControls = new P.Text({
-    text: "↑  thrust  (burns VRAM)\n← →  steer learning rate",
+    text: "↑  hold to thrust  (burns VRAM)\n← →  steer learning rate",
     style: { fill: 0xffffff, fontSize: 15, align: "center", lineHeight: 22 }
   });
   readyControls.anchor.set(0.5);
   readyControls.position.set(W / 2, H / 2 + 14);
   ready.addChild(readyControls);
-  const readyCta = new P.Text({ text: "▲  press UP to launch", style: { fill: 0xffd6a8, fontSize: 18, fontWeight: "700" }});
+  const readyHint = new P.Text({
+    text: "Take your time — read the controls.",
+    style: { fill: 0xb8c2cc, fontSize: 12, fontStyle: "italic" }
+  });
+  readyHint.anchor.set(0.5);
+  readyHint.position.set(W / 2, H / 2 + 56);
+  ready.addChild(readyHint);
+  const readyCta = new P.Text({
+    text: "press  ENTER  to launch",
+    style: { fill: 0xffd6a8, fontSize: 18, fontWeight: "700", letterSpacing: 1.5 }
+  });
   readyCta.anchor.set(0.5);
-  readyCta.position.set(W / 2, H / 2 + 70);
+  readyCta.position.set(W / 2, H / 2 + 86);
   ready.addChild(readyCta);
   stage.addChild(ready);
   stage.addChild(retryBtn);    // retry pill goes on top of everything else
   let ctaPulseT = 0;
 
+  function launch() {
+    if (!state.started) { state.started = true; ready.visible = false; }
+  }
+
   const handleKeydown = (e) => {
-    if (e.key === 'ArrowUp') {
+    // Pre-game launch: accept Enter (primary), Space, or ↑ — any of the three works
+    // so the player isn't blocked by guessing the "right" key.
+    if (!state.started && (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowUp')) {
       e.preventDefault();
-      state.keys.up = true;
-      if (!state.started) {
-        state.started = true;
-        ready.visible = false;
-      }
+      launch();
+      // ↑ should ALSO start thrusting (preserves existing keyboard pattern); Enter/Space
+      // just launch and wait for the player to press ↑.
+      if (e.key === 'ArrowUp') state.keys.up = true;
+      return;
     }
-    if (e.key === 'ArrowLeft') { e.preventDefault(); state.keys.left = true; }
+    if (e.key === 'ArrowUp')    { e.preventDefault(); state.keys.up = true; }
+    if (e.key === 'ArrowLeft')  { e.preventDefault(); state.keys.left = true; }
     if (e.key === 'ArrowRight') { e.preventDefault(); state.keys.right = true; }
     if (e.key.toLowerCase() === 'r' && state.over && opts.onRetry) opts.onRetry();
   };
@@ -370,10 +390,7 @@ export async function mountLander(canvas, opts = {}) {
     () => { state.keys.right = true; },
     () => { state.keys.right = false; });
   makeZone(colW, 0, colW, H,
-    () => {
-      state.keys.up = true;
-      if (!state.started) { state.started = true; ready.visible = false; }
-    },
+    () => { state.keys.up = true; launch(); },
     () => { state.keys.up = false; });
 
   // Re-pin overlay UI to the top so touch zones don't intercept clicks meant
