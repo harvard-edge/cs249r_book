@@ -13,6 +13,7 @@ the commits that touched that file.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -28,16 +29,34 @@ def _git(*args: str) -> str:
 
 
 def _base_ref() -> str:
-    # Prefer origin/main / origin/dev; fall back to HEAD~1.
-    for ref in ("origin/main", "origin/dev", "HEAD~1"):
+    """Determine the base ref to diff this PR/push against.
+
+    PR mode: GitHub Actions sets ``GITHUB_BASE_REF`` to the target branch
+    name (e.g. ``dev``); we diff against ``origin/<that>``. This is the
+    only reliable signal for "what is this PR proposing to add."
+
+    Push mode (no PR): GITHUB_BASE_REF is empty. Diff against ``HEAD~1``
+    so we only check files modified by the most recent push, not every
+    file that ever differed between branches.
+
+    The previous implementation walked a hard-coded list (origin/main,
+    origin/dev, HEAD~1) and returned the first that resolved. On a repo
+    where dev is many commits ahead of main, this swept up every YAML
+    edit between main and dev on every push to dev, producing 100+
+    spurious failures unrelated to the current change. See:
+    https://github.com/harvard-edge/cs249r_book/actions/runs/24937063459
+    """
+    base_env = os.environ.get("GITHUB_BASE_REF", "").strip()
+    if base_env:
+        candidate = f"origin/{base_env}"
         try:
             subprocess.run(
-                ["git", "rev-parse", "--verify", ref],
+                ["git", "rev-parse", "--verify", candidate],
                 check=True, capture_output=True,
             )
-            return ref
+            return candidate
         except subprocess.CalledProcessError:
-            continue
+            pass
     return "HEAD~1"
 
 
