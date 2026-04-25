@@ -27,8 +27,9 @@ export async function mountLander(canvas, opts = {}) {
 
   const gravity = 0.05;
   const thrustPower = 0.15;
-  const rotSpeed = 0.08;
-  const maxSafeSpeed = 2.0;
+  const rotSpeed = 0.055;            // tuned down from 0.08 — easier precision, still feels responsive
+  const maxSafeSpeed = 2.4;          // tuned up from 2.0 — first-time forgiveness, still teaches the lesson
+  const maxSafeAngle = 0.6;          // tuned up from 0.5 (~34°) — same reasoning
   const terrain = createTerrain();
 
   function rand(min, max) {
@@ -41,7 +42,7 @@ export async function mountLander(canvas, opts = {}) {
     const rightX = rand(W * 0.68, W * 0.83);
     return {
       phase: rand(0, Math.PI * 2),
-      slope: rand(-8, 8),
+      slope: rand(-4, 4),  // tuned down from rand(-8, 8) — caps random unfairness from extreme tilts
       global: { x: globalX, width: rand(86, 112), wellWidth: rand(72, 92), depth: rand(50, 66) },
       locals: [
         { x: leftX, width: rand(70, 92), wellWidth: rand(54, 70), depth: rand(24, 36) },
@@ -116,6 +117,11 @@ export async function mountLander(canvas, opts = {}) {
   localLabel.position.set(terrain.locals[0].x, lossY(terrain.locals[0].x) - 17);
 
   stage.addChild(bg, contourLayer, basinWash, surface, padGlobal, padLocal1, padLocal2, globalLabel, localLabel);
+
+  // Predictive trajectory marker — translucent target showing where the ship will be in
+  // ~0.5 s if the player keeps coasting (no thrust). Helps a new player anticipate the basin.
+  const traj = new P.Graphics();
+  stage.addChild(traj);
 
   // Ship
   const ship = new P.Graphics();
@@ -223,6 +229,14 @@ export async function mountLander(canvas, opts = {}) {
     ship.y = state.y;
     ship.rotation = state.angle;
 
+    // Trajectory marker: project 30 frames ahead under coast (gravity only, no thrust).
+    const tAhead = 30;
+    const predX = state.x + state.vx * tAhead;
+    const predY = state.y + state.vy * tAhead + 0.5 * gravity * tAhead * tAhead;
+    traj.clear();
+    traj.circle(predX, predY, 5).stroke({ color: COL.ship, width: 1.5, alpha: 0.55 });
+    traj.moveTo(state.x, state.y).lineTo(predX, predY).stroke({ color: COL.ship, width: 1, alpha: 0.22 });
+
     // Thrust juice: emit small puff opposite to ship's angle every other frame.
     if (state.keys.up && state.fuel > 0) {
       if ((Math.random() < 0.55)) {
@@ -256,7 +270,7 @@ export async function mountLander(canvas, opts = {}) {
       const impactShake = Math.min(18, speed * 3);
 
       if (inGlobalPad(state.x)) {
-        if (speed < maxSafeSpeed && Math.abs(state.angle) < 0.5) {
+        if (speed < maxSafeSpeed && Math.abs(state.angle) < maxSafeAngle) {
            state.won = true;
            // Win celebration: green burst + soft green flash + small confirming shake.
            burst(stage, state.x, state.y, COL.pad, 24, { speed: 2.4, lifeMs: 900 });
