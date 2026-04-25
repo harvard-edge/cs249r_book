@@ -394,15 +394,59 @@ class ModuleWorkflowCommand(BaseCommand):
 
         Uses the same conversion logic as 'tito src export' but only creates
         the student-facing notebook, without exporting to the tinytorch package.
+        Solution blocks (### BEGIN SOLUTION ... ### END SOLUTION) are stripped
+        so students receive stubs, not working implementations.
         """
+        import tempfile
+        import shutil
         from ..export_utils import convert_py_to_notebook
 
         src_path = self.config.project_root / "src" / module_name
         if not src_path.exists():
             return False
 
-        # Convert src/*.py to modules/*.ipynb using jupytext
-        return convert_py_to_notebook(src_path, self.venv_path, self.console)
+        src_file = src_path / f"{module_name}.py"
+        if not src_file.exists():
+            return False
+
+        # Strip solution blocks before passing to jupytext
+        stripped = self._strip_solutions(src_file.read_text(encoding="utf-8"))
+
+        # Write stripped source to a temp dir that mirrors the expected layout
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_module_dir = Path(tmp) / module_name
+            tmp_module_dir.mkdir()
+            tmp_src = tmp_module_dir / f"{module_name}.py"
+            tmp_src.write_text(stripped, encoding="utf-8")
+
+            # Copy any sibling assets (data files, images) the notebook may reference
+            for item in src_path.iterdir():
+                if item.name != f"{module_name}.py":
+                    dest = tmp_module_dir / item.name
+                    if item.is_dir():
+                        shutil.copytree(item, dest)
+                    else:
+                        shutil.copy2(item, dest)
+
+            return convert_py_to_notebook(tmp_module_dir, self.venv_path, self.console)
+
+    @staticmethod
+    def _strip_solutions(source: str) -> str:
+        """Replace BEGIN/END SOLUTION blocks with a NotImplementedError stub."""
+        lines = source.splitlines(keepends=True)
+        result = []
+        in_solution = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "### BEGIN SOLUTION":
+                in_solution = True
+                indent = line[: len(line) - len(line.lstrip())]
+                result.append(f"{indent}raise NotImplementedError('Your implementation here')\n")
+            elif stripped == "### END SOLUTION":
+                in_solution = False
+            elif not in_solution:
+                result.append(line)
+        return "".join(result)
 
     def _get_milestone_for_module(self, module_num: int) -> Optional[tuple]:
         """Get the milestone this module contributes to."""
