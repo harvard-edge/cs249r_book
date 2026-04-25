@@ -222,9 +222,10 @@ export async function mountLander(canvas, opts = {}) {
 
   function bestSoftText() {
     const bestRaw = bestScore.get("lander-soft");
-    if (!bestRaw) return `Day #${day} · land softer than anyone else today`;
+    if (!bestRaw) return `Day #${day} · land softer than yesterday`;
+    // Stored as impact-speed × 100 (screen-velocity, dimensionless). Show as v=X.XX.
     const v = (bestRaw / 100).toFixed(2);
-    return `Day #${day} · your softest landing today: ${v} m/s`;
+    return `Day #${day} · your softest landing: v=${v}`;
   }
 
   // ── In-canvas HUD ── glanceable bars so the player never has to look away from the ship.
@@ -543,6 +544,13 @@ export async function mountLander(canvas, opts = {}) {
     if (state.over && !state.gameOverFired && opts.onGameOver) {
       state.gameOverFired = true;
       retryBtn.visible = true;
+      // Recolor the retry pill to match the outcome — green confirms a win,
+      // MIT-red invites another try after a loss.
+      if (state.won) {
+        retryBg.clear();
+        retryBg.roundRect(-78, -18, 156, 36, 18).fill({ color: 0x3d9e5a }).stroke({ color: 0x256b3a, width: 1.5 });
+        retryLbl.text = "↺  PLAY AGAIN";
+      }
       opts.onGameOver({
         won: state.won,
         reason: state.reason,
