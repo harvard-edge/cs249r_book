@@ -7,36 +7,40 @@ topic: memory-hierarchy-design
 competency_area: memory
 bloom_level: create
 phase: both
-title: PCIe PCIe Bottleneck on Accelerator FPS
-scenario: A Hailo-8 accelerator (26 TOPS) runs object tracking on 1080p images (1920x1080,
-  3 channels). Host connection is PCIe Gen3 x2 providing exactly 2.0 GB/s bandwidth.
-  Sustained operation at full TOPS pushes the Hailo-8 to 2.5 W TDP, triggering thermal
-  throttling after 8 minutes of continuous operation in a fanless enclosure. Throttled
-  performance is ~70% of nominal.
-question: Design the system FPS budget by integrating PCIe ingestion bandwidth,
-  compute capacity, AND thermal throttling. Identify which constraint binds first
-  in steady-state operation past 8 minutes.
+title: PCIe vs Compute Bind-Flip Under Thermal Throttle
+scenario: A Hailo-8 accelerator (26 TOPS INT8) runs object tracking on 1080p images
+  (1920 x 1080 x 3 bytes = 6.22 MB raw RGB) at 50 GOPs per frame. The host connection
+  is PCIe Gen3 x2 (raw 2.0 GB/s, ~1.97 GB/s usable after 128b/130b encoding overhead).
+  Realised on-chip utilisation is 70%. The Hailo-8 sustains full TOPS for 8 minutes
+  in a fanless enclosure; once die temperature crosses 95 C, the firmware drops effective
+  compute to 70% of nominal indefinitely.
+question: Design the steady-state FPS budget by computing the PCIe-bound and compute-bound
+  FPS in both cold (pre-throttle) and warm (post-throttle) regimes, applying utilisation
+  as a multiplier on raw TOPS. Identify the binding constraint in each regime and
+  explain why the bind shifts after 8 minutes.
 details:
-  realistic_solution: 'Frame size = 6.22 MB; PCIe Gen3 x2 ingestion = 2000/6.22
-    = 321.5 FPS. Compute (assuming 50 GOPs/frame at 26 TOPS, 70% util) = 26000/50/0.7
-    = 743 FPS. PCIe binds first at 321 FPS. After 8 min of operation, thermal throttle
-    drops Hailo-8 effective TOPS by 30% to 18.2 TOPS -> 520 FPS compute. Throttled
-    compute (520) is still > PCIe-bound (321), so PCIe remains the binding constraint
-    in both cold AND warm-throttled regimes. The thermal warning from the judge
-    matters because for simpler boards (PCIe Gen3 x4), compute would be the bind
-    cold but PCIe could become bind warm - so the analysis must always integrate
-    all three.'
-  common_mistake: Calculating only PCIe-bound FPS in cold conditions and ignoring
-    that the binding constraint can SHIFT after thermal throttling kicks in - a
-    7-min benchmark looks rosy, an 8-hour deployment fails.
-  napkin_math: 'PCIe: 321 FPS. Compute cold: 743 FPS. Compute throttled: 520 FPS.
-    Bind = PCIe in both regimes here.'
-status: draft
+  realistic_solution: 'PCIe-bound FPS = 1970 MB/s usable / 6.22 MB per frame = 317
+    FPS (independent of thermal state). Compute-bound FPS, cold = 26000 GOPs/s * 0.70
+    utilisation / 50 GOPs per frame = 18200 / 50 = 364 FPS. Compute-bound FPS, warm
+    = 26000 * 0.70 * 0.70 / 50 = 12740 / 50 = 254.8 FPS. Cold regime: min(317, 364)
+    = 317 - PCIe binds. Warm regime: min(317, 255) = 255 - compute binds. The bind
+    flips at the 8-minute mark; an SLA expressed in terms of "300 FPS" passes for
+    the first 8 minutes and then fails by ~15%. The fix paths differ by regime: a
+    wider PCIe link (Gen3 x4) raises the cold ceiling but does nothing post-throttle,
+    while a heat sink that prevents the throttle preserves the 364 FPS compute ceiling
+    and keeps PCIe as the bind throughout.'
+  common_mistake: Multiplying utilisation into the wrong term (e.g., 26000 / 50 /
+    0.7 = 743 FPS) and so over-stating compute headroom by ~2x; or benchmarking only
+    the cold regime and missing that the binding stage flips from PCIe to compute
+    once the firmware throttle engages.
+  napkin_math: 'PCIe: 1970 / 6.22 = 317 FPS. Compute cold: 26000*0.7/50 = 364 FPS.
+    Compute warm: 26000*0.7*0.7/50 = 255 FPS. Bind = PCIe (cold) -> Compute (warm).'
+status: published
 provenance: llm-draft
 expected_time_minutes: 8
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -46,3 +50,9 @@ tags:
 - gemini-generated
 - target-optimization-L6+
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

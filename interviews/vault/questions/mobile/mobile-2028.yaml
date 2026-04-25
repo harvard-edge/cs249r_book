@@ -9,26 +9,40 @@ bloom_level: evaluate
 phase: both
 title: Facial Mesh Target FLOPS Budget
 scenario: A Snapdragon 8 Gen 3 processes an AR facial mesh model at 120 FPS, executing
-  25 MFLOPs per frame in INT8. The thermal budget for the AR application is 1.5W
-  sustained; at full INT8 NPU clock, the model draws 800 mW; if the GPU is concurrently
-  running display composition (~600 mW), the chip enters a mixed-precision fallback
-  mode where 30% of layers downgrade to FP16, costing 1.4x extra MFLOPs/frame.
+  25 MFLOPs per frame in INT8. The thermal budget for the AR application is 1.5W sustained;
+  at full INT8 NPU clock, the model draws 800 mW; if the GPU is concurrently running
+  display composition (~600 mW), the chip enters a mixed-precision fallback mode where
+  30% of layers downgrade to FP16, costing 1.4x extra MFLOPs/frame.
 question: Evaluate the required compute budget in GFLOPs/s under both nominal INT8
   operation AND the mixed-precision fallback mode. Determine whether the NPU still
   hits 120 FPS in fallback when GPU composition is active.
 details:
-  realistic_solution: 'The total compute required is the per-frame cost times the
-    frame rate: 25 MFLOPs * 120 FPS = 3000 MFLOPs per second. Dividing by 1000 gives
-    exactly 3.0 GFLOPs per second.'
-  common_mistake: Assuming MFLOPs scale linearly with resolution rather than just
-    multiplying operations directly by the frame rate.
-  napkin_math: 25 * 120 / 1000 = 3 GFLOPs
-status: draft
+  realistic_solution: 'Nominal INT8 mode. Per-second compute = 25 MFLOPs * 120 FPS
+    = 3.0 GFLOPs/s = 3 GOPS. Hexagon NPU peak is 45 TOPS INT8, so utilisation = 3
+    / 45000 = 0.007% - the workload is laughably easy on raw compute. Power: 800 mW
+    for the NPU + 600 mW for the GPU compositor = 1.4 W < 1.5 W thermal budget; nominal
+    mode passes. Mixed-precision fallback. The 30% layer downgrade to FP16 multiplies
+    per-frame work by 1.4x for the affected portion: effective MFLOPs/frame = 0.7
+    * 25 + 0.3 * 25 * 1.4 = 17.5 + 10.5 = 28 MFLOPs (a 12% increase over INT8). Per-
+    second work = 28 * 120 = 3.36 GFLOPs/s. FP16 throughput on Hexagon is half of
+    INT8 (~22.5 TFLOPS), so the FP16-portion utilisation = (10.5 * 120) / 22500 =
+    0.0056% - still trivially under-provisioned. The 120 FPS deadline is met in both
+    nominal and fallback modes by a 4-order-of- magnitude margin; throughput is not
+    the constraint. The thermal envelope is the actual constraint - at 1.4 W during
+    nominal mode the system is 93% of budget, leaving only 100 mW of headroom for
+    any other workload.'
+  common_mistake: Reporting only the nominal 3 GFLOPs/s figure and never computing
+    the fallback budget; or treating the 1.4x cost as multiplying the entire model
+    rather than only the 30% downgraded layers.
+  napkin_math: 'Nominal: 25 MFLOPs * 120 FPS = 3.0 GFLOPs/s. Fallback: 0.7 * 25 +
+    0.3 * 25 * 1.4 = 28 MFLOPs/frame -> 3.36 GFLOPs/s (12% increase). Both << 45 TOPS;
+    thermal at 1.4 W is the binding constraint, not compute.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 4
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -38,3 +52,9 @@ tags:
 - gemini-generated
 - target-implement-L5
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

@@ -11,27 +11,42 @@ title: ARKit Priority Queuing Tail Latency
 scenario: 'An Apple A17 Pro runs ARKit tasks: Hand Tracking (needs 60fps) and Plane
   Detection (runs at 10fps, takes 50 ms per frame) on a shared queue. The OS preemption
   cost is 800 us (cache flush + context switch), and the SoC enters thermal throttling
-  after 12 minutes of sustained ANE use, dropping effective per-frame compute by
-  18%. Both the Hand Tracking and Plane Detection threads share thermal budget.'
+  after 12 minutes of sustained ANE use, dropping effective per-frame compute by 18%.
+  Both the Hand Tracking and Plane Detection threads share thermal budget.'
 question: Analyze the tail latency for Hand Tracking under (a) FIFO vs (b) priority-with-preemption
   queueing, including the OS preemption cost and the post-12-minute thermal throttling.
-  Identify under which conditions priority-with-preemption still meets the 16.6
-  ms 60 FPS deadline.
+  Identify under which conditions priority-with-preemption still meets the 16.6 ms
+  60 FPS deadline.
 details:
-  realistic_solution: In a FIFO queue, if a Hand Tracking request arrives just after
-    a Plane Detection request, it is blocked for 50ms. Hand Tracking requires <16ms
-    latency for 60fps, meaning it drops 3 consecutive frames, ruining the UI experience.
-    A priority queue pre-empts or places the Hand Tracking request ahead of Plane
-    Detection, ensuring it processes immediately and meets the 16ms deadline.
-  common_mistake: Treating all ML models as having equal importance, leading to visually
-    critical UI updates stalling behind heavy, slow background tasks.
-  napkin_math: 50ms block / 16.6ms per frame = 3 frames dropped.
-status: draft
+  realistic_solution: 'FIFO scheduling. When a Hand Tracking frame arrives just after
+    a Plane Detection frame begins, it blocks for the remainder of the 50 ms Plane
+    Detection service. Worst-case Hand Tracking tail = ~50 ms (vs the 16.6 ms 60 FPS
+    deadline) - 3 consecutive frames dropped. Cold (pre-12-min) regime: the FIFO tail
+    is 50 ms regardless of preemption cost (FIFO does not preempt). Throttled regime:
+    18% effective compute drop pushes Plane Detection to 50 / 0.82 = 61 ms, worsening
+    the tail to ~61 ms. Priority-with-preemption. When a Hand Tracking arrival finds
+    Plane Detection mid-flight, the OS preempts it at the next preemption point, paying
+    the 800 us context-switch tax to switch in Hand Tracking. Cold-regime tail = Hand
+    Tracking service (assume ~5 ms) + 0.8 ms preempt = 5.8 ms - meets 16.6 ms with
+    margin. Throttled regime: Hand Tracking now takes 5/0.82 = 6.1 ms, plus 0.8 ms
+    preempt = 6.9 ms - still inside the 16.6 ms deadline. Priority preemption holds
+    the deadline both before and after thermal throttle, while FIFO fails in both
+    regimes. The 800 us tax is small relative to the 16.6 ms budget (~5%) so preemption
+    is the unambiguous win.'
+  common_mistake: Computing only the FIFO blocking case and missing that (a) the 800
+    us preempt tax must be paid every time the priority queue interrupts a longer
+    task, and (b) the 18% post-12-min throttle scales every service time, including
+    the preemption cost itself, but does not flip the qualitative answer because the
+    preempt tax is so small.
+  napkin_math: 'FIFO tail: 50 ms cold, 61 ms throttled - both fail 16.6 ms deadline.
+    Priority+preempt: 5 + 0.8 = 5.8 ms cold, 6.1 + 0.8 = 6.9 ms throttled - both pass.
+    Preempt overhead = 0.8/16.6 = 4.8% of budget.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 10
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -41,3 +56,9 @@ tags:
 - gemini-generated
 - target-realization-L4
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

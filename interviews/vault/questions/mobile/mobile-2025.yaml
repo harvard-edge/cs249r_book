@@ -7,30 +7,53 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: create
 phase: both
-title: Absolute SRAM Savings from INT4 Quantization
-scenario: A mobile application developer ports a 25M parameter NLP model from FP32
-  down to INT4 to fit entirely in the A17 Pro's 32 MB system cache (SLC). The full
-  FP32 model requires 100 MB, exceeding SLC; the team's goal is to fit weights +
-  working activations in SLC to eliminate LPDDR5 traffic.
-question: Formulate the quantization memory savings and calculate the absolute reduction
-  in model footprint in megabytes.
+title: A17 SLC-Resident Mixed-Precision Optimisation
+scenario: A mobile NLP feature on A17 Pro must hold weights + a 4 MB ping-pong activation
+  buffer (double-buffered for stage overlap) inside the 32 MB system-level cache (SLC).
+  The OS reserves 6 MB of SLC for other processes (camera ISP, GPU compositor), leaving
+  the app a hard 26 MB SLC budget. The model has 25M parameters arranged across 24
+  layers (10 attention layers, 14 MLP layers). A naive INT4 quantisation of all weights
+  fits trivially (25M * 0.5 B = 12.5 MB), but the team has profiled per- layer accuracy
+  sensitivity - the 4 outermost attention layers (3.2M params total) lose >2% F1 below
+  INT8 and require INT8 quantisation; the embedding table (4M params) requires FP16
+  to preserve token-id distance semantics. The remaining 17.8M params can tolerate
+  INT4. Inference throughput on Hexagon scales as 2x for INT4 vs INT8 vs FP16 (the
+  datasheet 45 TOPS INT8 figure halves to 22.5 TFLOPS FP16 and doubles to 90 TOPS
+  INT4).
+question: Formulate the mixed-precision allocation that (a) fits the 26 MB SLC budget
+  while reserving the 4 MB activation buffer, (b) honours the per-layer precision
+  floors, and (c) maximises decode throughput. Show the SLC budget arithmetic, compute
+  the realised throughput in TOPS- equivalent, and verify the answer is feasible.
+  Identify which constraint binds the design - capacity, activation buffer, or per-layer
+  accuracy.
 details:
-  realistic_solution: '25M parameters FP32 = 100 MB; INT4 = 25M * 0.5 = 12.5 MB.
-    Absolute reduction = 87.5 MB. The 12.5 MB INT4 model fits in the 32 MB SLC with
-    ~19.5 MB headroom for activations and KV-cache, eliminating LPDDR5 traffic for
-    inference. Note: A17 Pro SLC is 32 MB (NOT large enough for a 50 MB FP16 model
-    of similar parameter count, so 25M params at INT4 is the right sizing).'
-  common_mistake: Assuming INT4 uses 1 byte (yielding 18.75 MB rather than the correct
-    12.5 MB at 0.5 bytes), or sizing for an SLC larger than the A17 Pro''s actual
-    32 MB.
-  napkin_math: '25M * 4B - 25M * 0.5B = 87.5 MB reduction; final size = 12.5 MB
-    fits in 32 MB SLC.'
-status: draft
+  realistic_solution: 'Per-tier weight footprint. (a) Embedding FP16: 4M * 2 B = 8.0
+    MB (locked by token-distance semantics). (b) Outer attention INT8: 3.2M * 1 B
+    = 3.2 MB (locked by F1 floor). (c) Bulk INT4: 17.8M * 0.5 B = 8.9 MB. Total weights
+    = 20.1 MB. Plus 4 MB ping-pong activation buffer = 24.1 MB - inside the 26 MB
+    hard budget with 1.9 MB headroom. Throughput. Param-weighted effective TOPS =
+    0.712 * 90 (INT4 bulk) + 0.128 * 45 (INT8 attention) + 0.160 * 22.5 (FP16 embedding)
+    = 64.08 + 5.76 + 3.60 = 73.4 TOPS-equivalent, vs 90 TOPS for an all-INT4 lower
+    bound (infeasible) and 45 TOPS for an all-INT8 baseline (would total 25 + 4 =
+    29 MB, exceeds budget). Binding constraint: per-layer accuracy floors (the FP16
+    embedding alone consumes 8 MB, 31% of the budget). If that floor relaxed to INT8
+    with no F1 loss, weights fall to 16.1 MB and leave 5.9 MB for a larger activation
+    buffer or SLC headroom for other apps. Recommendation: ship the mixed allocation
+    above; investigate learned token-embedding quantisation as the next compression
+    lever.'
+  common_mistake: Reporting only the all-INT4 footprint (12.5 MB) and overstating
+    throughput at 90 TOPS without honouring the per-layer precision floors that the
+    accuracy-sensitivity profile imposes; or sizing against the full 32 MB SLC without
+    subtracting the OS-reserved 6 MB.
+  napkin_math: 'Tiers: 4M FP16 = 8 MB; 3.2M INT8 = 3.2 MB; 17.8M INT4 = 8.9 MB; weights
+    total = 20.1 MB; +4 MB activations = 24.1 MB inside 26 MB budget. Effective TOPS
+    = 0.712*90 + 0.128*45 + 0.160*22.5 = 73.4 TOPS-eq.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 5
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -40,3 +63,9 @@ tags:
 - gemini-generated
 - target-optimization-L6+
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

@@ -8,21 +8,50 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Cycle-Accurate Execution Cost Model for 1D Convolutions
-scenario: An engineer is designing an ultra-low power fall-detection algorithm using
-  an accelerometer and a bare-metal Cortex-M4.
-question: Design a cycle-accurate cost model that captures (a) MAC operations, (b)
-  register-spill overhead, (c) boundary padding logic, and (d) the cross-product
-  with input/output channels. Validate by computing total cycles for L_out=100,
-  K=3, C=16.
+scenario: An engineer is designing an ultra-low-power fall-detection
+  algorithm using a single-axis accelerometer feeding a bare-metal Cortex-M4
+  at 80 MHz. The first layer is a 1D convolution with output length
+  L_out=100, kernel K=3, input channels C_in=16, single output channel.
+  Inputs are INT16 (Q15). The Cortex-M4 supports SMLAD (signed dual MAC,
+  1 cycle, 2 INT16 MACs per cycle), LDM (multi-register load, 1 + n cycles
+  for n words), and has 13 general-purpose registers (R0-R12) of which 3
+  are reserved for kernel-pointer, output-pointer, and loop counter,
+  leaving 10 GPRs for live values.
+question: Design an explicit cycle-accurate cost model T_total =
+  T_load(C_in) + T_MAC(K, C_in) + T_spill(C_in, R_avail) + T_pad(K) +
+  T_store, applied per-output element, with separate accounting for
+  interior outputs (98 of them) and the 2 boundary outputs that must
+  perform zero-pad checks. Validate the model by computing total cycles
+  for the stated shape, and quantify the gap between this cycle-accurate
+  result and a naive "1.2x MAC" heuristic.
 details:
-  realistic_solution: The theoretical MAC operations are L_out * K * C. With DSP loop
-    unrolling, cycles_per_MAC approaches 1. The clock cycle formula becomes MACs *
-    1.2, assuming a 20% overhead for memory loads, register spilling, and boundary
-    padding logic.
-  common_mistake: Only calculating theoretical MACs and entirely ignoring the register
-    spilling and boundary checking overheads.
-  napkin_math: Output L=100, Kernel=3, Channels=16. MACs = 100 * 3 * 16 = 4800 MACs
-    = ~5760 CPU cycles.
+  realistic_solution: 'Cost model per output. Load input window (K * C_in =
+    48 INT16 = 24 words). With 4 LDM bursts of 6 words each: T_load = 4 *
+    (1 + 5) = 24 cycles. SMLAD does 2 INT16 MACs per cycle; per-output MACs
+    = K * C_in = 48; T_MAC = 48 / 2 = 24 cycles. Register spill: C_in = 16
+    halfwords (8 packed-pair registers) plus 3 kernel halfwords (2 packed
+    registers) = 10 live registers. Available = 10 GPRs; the running
+    accumulator and one address scratch take 2 more, so we spill 2 packed-
+    register pairs = 4 STR + 4 LDR = 8 cycles. T_spill = 8 cycles.
+    T_store = 1 STR = 1 cycle. T_padding = 0 for interior outputs.
+    T_interior = 24 + 24 + 8 + 1 = 57 cycles per output. Boundary outputs
+    (positions 0 and L_out-1, 2 outputs total) add a 6-cycle padding-check
+    sequence (CMP + B + zero-load) -> T_boundary = 57 + 6 = 63 cycles.
+    Total = 98 * 57 + 2 * 63 = 5586 + 126 = 5712 cycles. Loop and function-
+    prologue overhead at the outer loop adds ~200 cycles for the L_out
+    iteration -> T_total ~= 5912 cycles. At 80 MHz this layer executes in
+    73.9 us. The naive 1.2x heuristic predicts 4800 * 1.2 = 5760 cycles, a
+    2.6% under-estimate vs the cycle-accurate 5912 - close on this shape
+    but the heuristic loses fidelity at smaller C_in (where load and store
+    overhead dominate) and at larger K (where spill grows faster than MAC).'
+  common_mistake: 'Treating cycles_per_MAC as a fixed scalar (e.g., 1.2)
+    without decomposing into load, spill, MAC, and pad terms - this hides
+    the regimes where the model breaks: any C_in larger than 24 register-
+    pairs forces a different spill strategy and the heuristic
+    under-counts by 30%+.'
+  napkin_math: 'Per-output: T_load 24 + T_MAC 24 + T_spill 8 + T_store 1 =
+    57 cyc interior, 63 cyc boundary. Total = 98*57 + 2*63 + 200 loop =
+    5912 cyc. Naive 4800 * 1.2 = 5760 cyc (2.6% under). At 80 MHz: 73.9 us.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 15

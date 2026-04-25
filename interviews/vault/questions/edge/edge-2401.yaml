@@ -8,19 +8,37 @@ competency_area: precision
 bloom_level: remember
 phase: both
 title: Hailo-8 Min-Max Calibration
-scenario: A team deployed an object detection model to a Hailo-8 with Min-Max calibration
-  and observed a 10% mAP drop versus FP32 baseline. Switching to entropy (KL-divergence-minimizing)
-  calibration recovered most of the loss.
-question: Identify why Min-Max calibration drops 10% mAP versus entropy-based calibration
-  on the Hailo-8, in terms of how each method handles activation outliers and the
-  resulting INT8 scale factor.
+scenario: A team compiled YOLOv5s for the Hailo-8 using the Hailo Dataflow
+  Compiler (DFC). The Hailo-8 is a uniform per-tensor symmetric INT8 device
+  with no per-channel quantization for activations. Running DFC's default
+  Min-Max calibrator on a 1024-image set produced a 10% mAP drop vs. the FP32
+  baseline; switching DFC to its entropy (percentile/KL) calibrator recovered
+  most of the loss without retraining. The team observed that the SiLU-output
+  activations had a long upper tail (max ~84, 99.9th percentile ~12).
+question: Recall why Min-Max calibration collapses INT8 dynamic range on
+  Hailo-8 SiLU outputs while entropy calibration recovers most of the lost
+  mAP. Compute the symmetric-INT8 scale factor each calibrator selects for
+  this activation, and identify which downstream tensors lose the most
+  effective resolution under the Min-Max choice.
 details:
-  realistic_solution: This process is called calibration, which is a necessary step
-    in Post-Training Quantization to determine the scaling factors and zero points
-    for converting FP32 activations to INT8.
-  common_mistake: Confusing calibration with model fine-tuning or Quantization-Aware
-    Training (QAT).
-  napkin_math: Scale = (max - min) / 255
+  realistic_solution: 'Hailo-8 uses per-tensor symmetric INT8 (range [-127, 127]),
+    so the scale is set by max(|x|). Min-Max picks scale = 84/127 ~= 0.661, so
+    one INT8 step represents 0.661 in activation space, and the 99.9th-percentile
+    bulk of the tensor (|x| <= 12) collapses into only 12/0.661 ~= 18 INT8
+    levels - ~3.6 effective bits. Entropy calibration in the Hailo DFC clips at
+    a percentile (~99.99th, scale set near 12/127 ~= 0.094), keeping the bulk
+    of the distribution mapped to ~127 levels (~7 bits) at the cost of clipping
+    a handful of tail values. Because Hailo-8 lacks per-channel activation
+    quantization, the SiLU outlier in any channel poisons the entire tensor''s
+    scale, which is why the recovery is dramatic. The downstream conv layer
+    consuming this tensor loses the most resolution under Min-Max.'
+  common_mistake: Treating Min-Max as "safer because it never clips" without
+    recognising that on a per-tensor symmetric INT8 device a single outlier
+    discards 3-4 effective bits across the whole tensor, hurting accuracy far
+    more than a percentile clip would.
+  napkin_math: 'Symmetric INT8 scale = max(|x|)/127. Min-Max: 84/127 = 0.661;
+    bulk gets 12/0.661 ~= 18 levels (3.6 bits). Entropy (~99.99%): 12/127 =
+    0.094; bulk gets ~127 levels (7 bits).'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 4

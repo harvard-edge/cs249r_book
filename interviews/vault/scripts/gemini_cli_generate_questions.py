@@ -168,8 +168,38 @@ Rules:
   Llama-70B, Ring AllReduce on 4 ranks).
 - napkin_math compact and machine-checkable; must contain a digit.
 - Each question stands alone — no cross-references between cells.
-{visual_rules}
+{variant_rules}{visual_rules}
 Return only the JSON array.
+"""
+
+PARALLELISM_RULES = """- PARALLELISM-VARIANT: these cells target a parallelism gap (pipeline-
+  parallelism, collective-communication, kv-cache-management,
+  interconnect-topology). The judge has rejected prior parallelism
+  drafts as too shallow. To pass:
+  • FORBID single-step bandwidth division (e.g. "payload / bandwidth").
+    If your napkin_math is one division, reframe.
+  • REQUIRE concrete topology — name an actual interconnect appropriate
+    to the track:
+       - cloud / edge multi-accel: NVLink, NVSwitch, InfiniBand HDR/NDR,
+         RoCE v2, PCIe Gen4/5, Hailo-8 fabric
+       - mobile / multi-device: BLE, Wi-Fi 6/6E, 5G NR, LoRa, Thread
+       - tinyml / multi-MCU: SPI, I2C, UART, CAN, LoRa, ESP-NOW,
+         dual-core M7+M4, RP2040 dual-core
+  • REQUIRE a synchronization or pipeline-bubble cost — every parallelism
+    question must quantify ONE of: bubble fraction in a Gantt-style
+    pipeline, AllReduce ring/tree time with the 2(N-1)/N factor,
+    consensus latency in a distributed protocol, KV-cache fragmentation
+    overhead, or synchronization barrier wait under skew.
+  • REQUIRE a non-obvious failure mode in `common_mistake` — naming the
+    wrong topology (e.g. ring on shared CSMA medium), confusing
+    bandwidth-bound vs latency-bound, missing the all-to-all term in
+    AllReduce, treating MoE expert imbalance as load-balancing rather
+    than memory pressure.
+  • For tinyml multi-MCU: ground in real numbers — Cortex-M4 SPI at
+    5-25 MHz, LoRa at 5-50 kbps, ESP-NOW at 1 Mbps. Sub-millisecond
+    parallelism budgets are realistic; sub-microsecond is not.
+  • FORBID the canonical "Llama-70B KV cache on 4× H100" framing — pick
+    a different model size, batch composition, or hardware mix.
 """
 
 VISUAL_FIELD_SPEC = """,
@@ -195,6 +225,29 @@ VISUAL_RULES = """- For cells with with_visual=true, include the visual + visual
 # ---------------------------------------------------------------------------
 # Cell selection
 # ---------------------------------------------------------------------------
+
+# Inverse of COMPETENCY_AREA_TOPIC + extras for topics not in that map.
+# Used to set the per-cell `competency_area` default when --target is
+# explicit (otherwise everything would default to "cross-cutting" and
+# the practice page's area filter would mis-bucket them).
+TOPIC_TO_AREA: dict[str, str] = {
+    "compute-cost-estimation":          "compute",
+    "memory-hierarchy-design":          "memory",
+    "network-bandwidth-bottlenecks":    "networking",
+    "pipeline-parallelism":             "parallelism",
+    "queueing-theory":                  "latency",
+    "model-serving-infrastructure":     "deployment",
+    "data-pipeline-engineering":        "data",
+    "duty-cycling":                     "power",
+    "quantization-fundamentals":        "precision",
+    "fault-tolerance-checkpointing":    "reliability",
+    "communication-computation-overlap": "optimization",
+    "kv-cache-management":              "architecture",
+    "distributed-training-economics":   "cross-cutting",
+    "collective-communication":         "networking",
+    "interconnect-topology":            "networking",
+}
+
 
 def parse_target(spec: str) -> dict[str, Any]:
     """Parse `track:topic:zone:level` into a cell dict."""
@@ -390,9 +443,15 @@ def build_yaml(cell: dict[str, Any], parsed: dict[str, Any], qid: str) -> dict[s
 # ---------------------------------------------------------------------------
 
 def generate_batch(cells: list[dict[str, Any]], model: str,
-                   dry_run: bool, output_dir: Path) -> dict[str, Any]:
+                   dry_run: bool, output_dir: Path,
+                   prompt_variant: str = "default") -> dict[str, Any]:
     """Submit ONE batched call to Gemini covering all cells, parse the
-    array response, and write one YAML + (optional) visual source per cell."""
+    array response, and write one YAML + (optional) visual source per cell.
+
+    `prompt_variant` selects an additional rules block injected into
+    BATCH_PROMPT. Recognized: "default" (no extra rules), "parallelism"
+    (anti-shallow rules for parallelism cells per Phase D.2).
+    """
     n = len(cells)
     has_visual = any(c.get("with_visual") for c in cells)
 
@@ -424,12 +483,17 @@ def generate_batch(cells: list[dict[str, Any]], model: str,
             entry["visual_archetype"] = arch.get("archetype", "diagram")
         cells_for_prompt.append(entry)
 
+    variant_rules_text = ""
+    if prompt_variant == "parallelism":
+        variant_rules_text = PARALLELISM_RULES
+
     prompt = BATCH_PROMPT.format(
         n_cells=n,
         cells_json=json.dumps(cells_for_prompt, indent=2),
         hardware_reference=HARDWARE_REFERENCE,
         visual_field_spec=VISUAL_FIELD_SPEC if has_visual else "",
         visual_rules=VISUAL_RULES if has_visual else "",
+        variant_rules=variant_rules_text,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -471,30 +535,28 @@ def generate_batch(cells: list[dict[str, Any]], model: str,
     except ImportError:
         _validate = lambda d: None  # bootstrap fallback
 
-    for i, cell in enumerate(cells):
-        parsed = by_index.get(i)
-        if parsed is None:
-            failures.append({"index": i, "error": "missing in response"})
-            continue
+    # E.1: track validate-at-write failures separately so a single retry
+    # call can fix them. `validate_failures` carries (cell_index,
+    # error_message) tuples — retried as one batch at the end.
+    validate_failures: list[tuple[int, str]] = []
+
+    def _try_write(cell: dict[str, Any], parsed: dict[str, Any],
+                   index: int) -> bool:
+        """Validate then write one cell. Returns True on success."""
         try:
             qid = next_id_for_track(cell["track"], used_ids)
             doc = build_yaml(cell, parsed, qid)
             try:
                 _validate(doc)
             except Exception as ve:
-                failures.append({
-                    "index": i, "id": qid,
-                    "error": f"validate-at-write rejected: {ve}",
-                })
-                continue
+                validate_failures.append((index, str(ve)))
+                return False
             yaml_path = QUESTIONS_DIR / cell["track"] / f"{qid}.yaml"
             yaml_path.parent.mkdir(parents=True, exist_ok=True)
             yaml_path.write_text(
                 yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
                 encoding="utf-8",
             )
-
-            # Visual source artifact if present
             if cell.get("with_visual") and parsed.get("visual_source"):
                 arch = VISUAL_ARCHETYPES.get(cell["topic"], {})
                 ext = {"dot": "dot", "matplotlib": "py"}.get(
@@ -503,12 +565,107 @@ def generate_batch(cells: list[dict[str, Any]], model: str,
                 track_visuals.mkdir(parents=True, exist_ok=True)
                 (track_visuals / f"{qid}.{ext}").write_text(
                     str(parsed["visual_source"]), encoding="utf-8")
-            written.append({"index": i, "id": qid, "path": str(yaml_path)})
+            written.append({"index": index, "id": qid, "path": str(yaml_path)})
+            return True
         except Exception as exc:
-            failures.append({"index": i, "error": str(exc)})
+            failures.append({"index": index, "error": str(exc)})
+            return False
+
+    for i, cell in enumerate(cells):
+        parsed = by_index.get(i)
+        if parsed is None:
+            failures.append({"index": i, "error": "missing in response"})
+            continue
+        _try_write(cell, parsed, i)
+
+    # E.1 retry pass: if any validate-at-write rejections, send ONE more
+    # Gemini call with the failure context — Gemini is good at fixing
+    # constraint violations once it sees the specific error. Capped at
+    # one retry to avoid runaway API spend.
+    retry_calls_used = 0
+    if validate_failures and not dry_run:
+        retry_cells = [cells[idx] for idx, _ in validate_failures]
+        retry_errors = "\n".join(
+            f"  - cell_index={idx}: {err[:300]}"
+            for idx, err in validate_failures
+        )
+        # Re-run cells_for_prompt construction for just the failed cells
+        retry_cells_for_prompt = []
+        for new_i, (orig_idx, _) in enumerate(validate_failures):
+            c = cells[orig_idx]
+            valid_blooms = sorted(
+                ZONE_BLOOM_AFFINITY.get(c["zone"], set())
+            ) or [bloom_for_level(c["level"])]
+            retry_cells_for_prompt.append({
+                "index": new_i,
+                "track": c["track"],
+                "topic": c["topic"],
+                "zone": c["zone"],
+                "level": c["level"],
+                "preferred_bloom": bloom_for_zone_level(c["zone"], c["level"]),
+                "valid_blooms": valid_blooms,
+                "competency_area": c.get("competency_area", "cross-cutting"),
+                "with_visual": bool(c.get("with_visual")),
+            })
+        retry_prompt = (
+            "Your previous JSON had these validate-at-write violations:\n"
+            f"{retry_errors}\n\n"
+            "Re-emit ONLY the failed items as a JSON array, fixed. "
+            "Use the same schema as the original prompt. The CRITICAL "
+            "constraints to satisfy this time:\n"
+            "- competency_area MUST be one of {deployment, parallelism, "
+            "networking, latency, memory, compute, data, power, precision, "
+            "reliability, optimization, architecture, cross-cutting}.\n"
+            "- bloom_level MUST be in the cell's valid_blooms.\n"
+            "- Match cell_index to your output array index 0..N-1.\n\n"
+            "Cells to re-generate:\n\n"
+            f"{json.dumps(retry_cells_for_prompt, indent=2)}\n\n"
+            "Return only the JSON array."
+        )
+        retry_path = output_dir / f"prompt_retry_{int(time.time())}.txt"
+        retry_path.write_text(retry_prompt, encoding="utf-8")
+        print(f"  → retry call: {len(validate_failures)} validate-at-write "
+              f"failures, sending one corrective call ...", flush=True)
+        try:
+            retry_raw = call_gemini(retry_prompt, model)
+            retry_calls_used = 1
+            (output_dir / f"raw_retry_{int(time.time())}.txt").write_text(
+                retry_raw, encoding="utf-8")
+            retry_items = extract_json_array(retry_raw)
+            retry_by_index = {
+                it.get("cell_index", i): it
+                for i, it in enumerate(retry_items)
+            }
+            # Wipe validate_failures so successful retries won't
+            # double-count; failures that retry-fail get re-appended
+            # by _try_write.
+            recovered = 0
+            for new_i, (orig_idx, _) in enumerate(validate_failures):
+                parsed_retry = retry_by_index.get(new_i)
+                if parsed_retry is None:
+                    continue
+                # Reset validate_failures entry so a retry-pass
+                # failure reappends; on success it just doesn't.
+                if _try_write(cells[orig_idx], parsed_retry, orig_idx):
+                    recovered += 1
+            print(f"  → retry recovered {recovered}/"
+                  f"{len(validate_failures)} items", flush=True)
+        except Exception as retry_exc:
+            print(f"  ! retry call failed: {retry_exc}", flush=True)
+
+    # Surface validate_failures that didn't recover into the failures list
+    # (so downstream summary sees them).
+    written_indices = {w["index"] for w in written}
+    for orig_idx, err in validate_failures:
+        if orig_idx not in written_indices:
+            failures.append({
+                "index": orig_idx,
+                "error": f"validate-at-write rejected (after retry): {err[:200]}",
+            })
 
     return {"status": "ok", "n_cells": n, "written": written,
-            "failures": failures, "raw_path": str(raw_path)}
+            "failures": failures, "raw_path": str(raw_path),
+            "retry_calls_used": retry_calls_used}
 
 
 # ---------------------------------------------------------------------------
@@ -541,6 +698,14 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--sleep", type=float, default=2.0)
+    parser.add_argument("--prompt-variant", default="default",
+                        choices=["default", "parallelism"],
+                        help="Inject extra rules block: 'default' uses the "
+                             "stock prompt; 'parallelism' adds anti-shallow "
+                             "rules for parallelism-topic cells (Phase D.2).")
+    parser.add_argument("--targets-from", type=Path, default=None,
+                        help="Read --target strings from a file (one per "
+                             "line). Useful with hand-authored target lists.")
     args = parser.parse_args()
 
     if args.model != DEFAULT_MODEL and not args.allow_model_override:
@@ -551,10 +716,20 @@ def main() -> int:
     cells: list[dict[str, Any]] = []
     if args.auto_balance:
         cells = auto_balance(args.total, args.visual, seed=args.seed)
-    for spec in args.target:
+
+    # Targets can come from --target flags AND/OR a --targets-from file.
+    target_specs = list(args.target)
+    if args.targets_from:
+        for line in args.targets_from.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                target_specs.append(line)
+    for spec in target_specs:
         cell = parse_target(spec)
         cell["with_visual"] = args.visual and cell["topic"] in VISUAL_ARCHETYPES
-        cell["competency_area"] = "cross-cutting"
+        # Use the canonical topic→area mapping when known; fall back to
+        # cross-cutting only for unknown topics.
+        cell["competency_area"] = TOPIC_TO_AREA.get(cell["topic"], "cross-cutting")
         cells.append(cell)
 
     if not cells:
@@ -577,7 +752,8 @@ def main() -> int:
             time.sleep(args.sleep)
         print(f"\n[batch {bi+1}/{min(len(batches), args.max_calls)}] "
               f"{len(batch)} cells")
-        result = generate_batch(batch, args.model, args.dry_run, output_dir)
+        result = generate_batch(batch, args.model, args.dry_run, output_dir,
+                                prompt_variant=args.prompt_variant)
         summary["batches"].append(result)
         summary["calls_used"] += 0 if args.dry_run else 1
         if result["status"] == "ok":

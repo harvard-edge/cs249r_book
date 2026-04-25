@@ -7,28 +7,44 @@ topic: duty-cycling
 competency_area: power
 bloom_level: evaluate
 phase: both
-title: Compare duty cycle energy efficiency for mobile activity recognition
-scenario: A fitness app on an Apple A17 Pro Neural Engine continuously runs a 50 MFLOP
-  activity recognition model. The NPU consumes 1W when active and 10mW when asleep,
-  with a 2ms wake-up latency penalty.
-question: Apply per-frame energy accounting to compute the total energy of (a) immediate
-  30 FPS processing and (b) a 10 Hz batched duty cycle, then determine which approach
-  consumes less energy per second of operation.
+title: A17 NPU Wake Break-Even for Activity Recognition
+scenario: A fitness app on Apple A17 Pro runs a 50 MFLOP activity recognition model
+  on the Neural Engine. The NPU draws 1.0 W when active and 10 mW when rail-gated.
+  The wake transition takes 2 ms during which the rail draws 1.0 W (rail charge-up),
+  and a sleep transition adds 0.5 ms at 1.0 W (cache flush to LPDDR before gating).
+  The model itself completes in 0.8 ms of active compute per inference. The team must
+  choose an inference rate from {1, 5, 10, 30} Hz that minimises energy per second,
+  given that user-perceived responsiveness only requires updates every 100 ms (10
+  Hz).
+question: Implement the per-second energy accounting that includes (a) wake charge-up
+  energy, (b) compute energy, (c) sleep flush energy, and (d) the residual sleep current
+  between activations. Compute the break-even rate above which always-on (no rail
+  gating, just keep NPU active for the second) becomes cheaper than rate-gating, and
+  recommend the best rate from the candidate set.
 details:
-  realistic_solution: At 30 FPS, computing takes <1ms, but waking up 30 times adds
-    60ms of active power (1W) wake latency per second. At 10 Hz, waking up 10 times
-    adds only 20ms of wake latency, keeping the device in the 10mW sleep state for
-    an additional 40ms per second. The 10 Hz duty cycle amortizes the wake-up penalty,
-    significantly improving overall energy efficiency.
-  common_mistake: Ignoring the hardware wake-up latency and assuming energy is strictly
-    proportional to total FLOPs computed.
-  napkin_math: 30 * 2ms = 60ms vs 10 * 2ms = 20ms wake penalty
-status: draft
+  realistic_solution: 'Per-activation active time = wake 2 ms + compute 0.8 ms + sleep
+    0.5 ms = 3.3 ms at 1.0 W -> 3.3 mJ per activation. Per-second energy E(N) = N
+    * 3.3 mJ + (1000 - 3.3*N) ms * 0.01 W = 3.27 * N + 10 mJ/s. Sweep: E(1) = 13.3,
+    E(5) = 26.4, E(10) = 42.7, E(30) = 108.1. The always-on baseline = 1000 ms * 1.0
+    W = 1000 mJ/s. Solving E(N) = 1000 gives the break-even rate N_be = (1000 - 10)
+    / 3.27 ~= 303 Hz - far above any practical inference rate, so rate-gating always
+    wins for this workload. Among the candidate rates, 10 Hz is the right choice:
+    it exactly matches the 100 ms UX requirement, costs 42.7 mJ/s (~23x less than
+    always-on), and provides 4x the sample rate of 1 Hz at only 3.2x the energy. 30
+    Hz costs 2.5x more energy than 10 Hz for no UX benefit.'
+  common_mistake: Ignoring the wake/sleep transition energy (treating sleep as instantaneously
+    free) and concluding the higher-rate option is always-better. Or computing the
+    break-even by comparing only compute energy, missing that the 2.5 ms transition
+    tax dominates.
+  napkin_math: Per-activation active = 2 + 0.8 + 0.5 = 3.3 ms at 1 W = 3.3 mJ. E(N)
+    = 3.27N + 10 mJ/s. Always-on = 1000 mJ/s. Break-even at N ~ 303 Hz. Pick 10 Hz
+    -> 42.7 mJ/s (23x better than always-on).
+status: published
 provenance: llm-draft
 expected_time_minutes: 8
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -38,3 +54,9 @@ tags:
 - gemini-generated
 - target-implement-L5
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

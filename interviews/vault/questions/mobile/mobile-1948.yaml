@@ -7,18 +7,46 @@ topic: memory-hierarchy-design
 competency_area: memory
 bloom_level: understand
 phase: both
-title: KV Cache Placement Penalty
-scenario: A mobile transformer implementation on the Snapdragon 8 Gen 3 stores its
-  KV cache entirely in the main LPDDR5 RAM.
-question: Explain the primary architectural penalty of placing the KV cache in LPDDR5
-  versus NPU-local SRAM, in terms of energy-per-access and bandwidth ceiling.
+title: KV Cache Tier Penalty Per Token
+scenario: A mobile Llama-3-3B INT8 implementation on Snapdragon 8 Gen 3
+  stores its KV cache in LPDDR5 main memory. The full cache for a 2k-token
+  context is ~96 MB, far larger than the Hexagon NPU's ~8 MB on-chip TCM
+  (tightly-coupled memory) so it cannot fit in SRAM. The team is debating
+  whether to add a sliding-window L2 caching scheme that keeps the most-
+  recent N tokens of KV in TCM and pages the rest from LPDDR5 on demand.
+  Reference numbers - LPDDR5 read energy ~120 pJ/byte; on-chip TCM ~1.5
+  pJ/byte; LPDDR5 sustained read bandwidth ~50 GB/s; TCM read bandwidth ~400
+  GB/s.
+question: Explain the architectural penalty of fully LPDDR5-resident KV
+  cache versus a sliding-window TCM tier in terms of (a) energy per token
+  decode and (b) bandwidth-bound decode latency. Quantify both for a 2k-
+  context decode and identify the per-token attention bandwidth that
+  determines whether TCM tiering helps at all.
 details:
-  realistic_solution: Accessing off-chip LPDDR5 RAM incurs a massive power and latency
-    penalty compared to on-chip SRAM. The repeated reading of the KV cache for every
-    token will rapidly drain the battery and introduce memory bandwidth bottlenecks.
-  common_mistake: Focusing solely on capacity limits rather than the order-of-magnitude
-    difference in energy-per-bit fetched.
-  napkin_math: DRAM energy ~100x SRAM energy
+  realistic_solution: 'Each decode step reads the full KV cache once for the
+    attention reduction. 96 MB at 120 pJ/byte = 11.5 mJ per token in LPDDR5 -
+    a 30 token/s decode then burns 345 mW just on KV reads. From TCM the same
+    96 MB would cost 96e6 * 1.5 pJ = 0.144 mJ per token (80x less), but the
+    cache does not fit. Sliding-window TCM keeps the most-recent ~150k token-
+    KV-bytes (8 MB / 56 bytes per token KV ~= 150k tokens, but for a 2k
+    context only ~150 tokens worth fits given typical multi-head sizes) so
+    only ~7-8% of attention reads hit TCM and 92% still go to LPDDR5. Energy
+    per token = 0.92 * 11.5 + 0.08 * 0.144 = 10.6 mJ - a modest 8% saving.
+    Bandwidth: LPDDR5 50 GB/s caps decode at 50e9 / 96e6 = 520 tokens/s
+    theoretical (~30 tokens/s in practice after compute and other traffic).
+    TCM at 400 GB/s would lift the cap by 8x for the resident slice but
+    leaves the LPDDR5 ceiling unchanged for the 92% miss rate. Conclusion:
+    sliding-window TCM tiering helps but the win is marginal until the
+    context window shrinks below the TCM-resident size; the bigger lever is
+    quantising K/V to INT4 to cut the LPDDR5 traffic in half.'
+  common_mistake: 'Treating "store the KV cache in NPU SRAM" as a feasible
+    placement on mobile - on a Snapdragon 8 Gen 3 the Hexagon TCM is ~8 MB
+    while a 2k-context Llama-3-3B KV is ~96 MB, so SRAM-only is physically
+    impossible. The achievable design is a tiered scheme.'
+  napkin_math: 'Full KV in LPDDR5: 96 MB * 120 pJ/B = 11.5 mJ/token. Same in
+    TCM: 0.144 mJ/token (80x less). Sliding-window with ~8% TCM hit rate:
+    10.6 mJ/token (8% saving). LPDDR5 BW ceiling = 50 GB/s / 96 MB = 520
+    tok/s (theoretical). INT4 K/V halves traffic for ~2x decode rate.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 5

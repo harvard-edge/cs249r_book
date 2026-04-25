@@ -8,38 +8,45 @@ competency_area: networking
 bloom_level: understand
 phase: both
 title: Hailo-8 Camera Fan-in Link
-scenario: 4x Hailo-8 cameras individually extract 4 MB INT8 feature maps per frame
-  at 30 fps. The receiving server's PCIe Gen3 x4 NIC ingests at 4 GB/s peak, but
-  host-side memory ingestion (pinned-buffer copy + cache pollution) sustains only
-  1.2 GB/s before evicting active model state from L3.
-question: Calculate aggregate ingress bandwidth and identify the binding constraint
-  - is it the NIC ingress, the PCIe lane, or the host memory ingestion path that
-  saturates first?
+scenario: 4x Hailo-8 cameras stream 4 MB INT8 feature maps per frame at 30 fps through
+  a single 1 GbE top-of-rack switch into an x86 aggregator (Xeon-D, PCIe Gen3 x4 NIC
+  at 4 GB/s peak). The figure suggests the switch is the obvious fan-in point, but
+  the architect also needs to size headroom for adding a 5th and 6th camera and verify
+  whether the host-memory ingestion path (1.2 GB/s sustained before pinned-buffer
+  memcpy starts evicting model weights from the L3) becomes the next bottleneck.
+question: Compute the aggregate ingress bandwidth for the 4-camera baseline and for
+  a planned 6-camera expansion. For each, identify which stage saturates first - the
+  1 GbE switch, the PCIe Gen3 x4 NIC, or the host-memory ingestion path - and explain
+  the order in which constraints will bind as cameras are added.
 visual:
   kind: svg
   path: edge-2364.svg
   alt: Four cameras feeding into a single saturated network switch.
   caption: 4:1 Fan-in network topology causing congestion.
 details:
-  realistic_solution: 'Aggregate ingress = 4 cameras * 4 MB * 30 fps = 480 MB/s.
-    NIC ingress (4 GB/s) handles it easily. PCIe Gen3 x4 (~3.5 GB/s effective) handles
-    it. Host memory ingestion sustains 1.2 GB/s without cache eviction - 480 MB/s
-    fits, leaving 720 MB/s headroom. The binding constraint is the host-memory ingestion
-    path. If a 5th camera were added (600 MB/s aggregate), still fits. At 10 cameras
-    (1.2 GB/s), cache pollution starts evicting active model weights, doubling cache-miss
-    latency on inference - the system fails not from raw bandwidth but from cache
-    interference.'
-  common_mistake: Reporting only the NIC saturation point and missing that at scale,
-    the host-memory ingestion path causes inference latency degradation long before
-    bandwidth runs out.
-  napkin_math: '480 MB/s aggregate; NIC 4000 MB/s OK; PCIe 3500 MB/s OK; host ingest
-    1200 MB/s headroom = 60%. Cache-eviction onset at ~10 cameras.'
-status: draft
+  realistic_solution: 'Aggregate at 4 cameras = 4 * 4 MB * 30 fps = 480 MB/s; at 6
+    cameras = 720 MB/s. The 1 GbE switch caps at ~125 MB/s, so it is already saturated
+    3.8x over at the 4-camera baseline - this is the first constraint and matches
+    the figure''s fan-in congestion. Assume the switch is upgraded to 10 GbE (~1.18
+    GB/s usable). At 4 cameras (480 MB/s) the link clears with headroom, the PCIe
+    Gen3 x4 NIC (~3.5 GB/s effective) is unstressed, but the host-memory ingestion
+    path (1.2 GB/s before cache eviction) sits at 40%. At 6 cameras (720 MB/s) the
+    10 GbE link still passes (~60% utilised), the NIC is fine, but the host-memory
+    path is now at 60% and approaching the cache- pollution knee where pinned-buffer
+    memcpy starts evicting active model weights from the L3, doubling inference cache-miss
+    latency. Constraint ordering: 1 GbE switch (binds today), then host-memory ingestion
+    (binds at ~10 cameras post-upgrade), then PCIe NIC (never binds at this scale).'
+  common_mistake: Reporting only the obvious switch saturation and missing that after
+    a network upgrade the host-memory ingestion path becomes the next binding stage
+    long before raw NIC or PCIe bandwidth runs out.
+  napkin_math: 4 cams = 480 MB/s; 6 cams = 720 MB/s. 1 GbE = 125 MB/s (saturated 3.8x).
+    10 GbE = 1180 MB/s OK. Host ingest 1200 MB/s - knee at ~10 cameras.
+status: published
 provenance: llm-draft
 expected_time_minutes: 5
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -49,3 +56,9 @@ tags:
 - gemini-generated
 - target-diagnosis-L2
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

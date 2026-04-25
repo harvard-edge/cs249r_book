@@ -8,24 +8,46 @@ competency_area: optimization
 bloom_level: apply
 phase: both
 title: Triple-Buffering Pipeline Throughput Constraint
-scenario: A Cortex-M4 pipeline gathers data via SPI (5ms), computes an ML model (10ms),
-  and transmits via BLE (5ms).
-question: Apply a triple-buffering scheme using DMA, AND compute the strict SRAM
-  memory footprint required to maintain three independent stage buffers (input,
-  intermediate, output). Identify the SRAM cost as a fraction of typical 256 KB
-  Cortex-M4 SRAM.
+scenario: 'A Cortex-M4 (256 KB SRAM) pipeline gathers a 2 KB sample window
+  via SPI DMA (5 ms), runs an ML model that uses a 12 KB activation tensor
+  arena and produces a 512 B output (10 ms compute), and transmits via BLE
+  DMA (5 ms). To maximise throughput, the team plans true triple-buffering
+  - three frames are concurrently in flight at all times. Frame N is being
+  transmitted via BLE, frame N+1 is being computed, and frame N+2 is being
+  received via SPI.'
+question: Apply a true triple-buffer (three-frames-in-flight) scheme.
+  Compute the strict SRAM footprint needed to keep three concurrent frames
+  alive end-to-end - separate input, activation-arena, and output regions
+  per in-flight frame - and express that as a fraction of the 256 KB MCU
+  SRAM. Compare against the simpler ping-pong (two-frames-in-flight)
+  scheme and identify whether triple-buffering is feasible here, or
+  whether the activation arena forces a fallback.
 details:
-  realistic_solution: 'Three buffers needed: input (SPI sample frame, ~2 KB), intermediate
-    (model activation tensor, ~12 KB), output (BLE payload, ~512 B). Total SRAM
-    overhead = 14.5 KB minimum, plus alignment/padding ~ 16 KB. On a 256 KB Cortex-M4,
-    this is 6.25% of total SRAM - acceptable. If activation tensor grows to 64 KB
-    for a larger model, three buffers cost 196 KB (76%) and the M4 cannot fit weights
-    + arena + buffers, forcing two-buffer ping-pong with reduced overlap.'
-  common_mistake: Computing only the throughput improvement (10 ms bottleneck) and
-    missing that triple-buffering triples the SRAM cost - the design constraint
-    that often determines feasibility on tightly-budgeted MCUs.
-  napkin_math: 'Throughput: 1000/max(5,10,5) = 100 Hz. SRAM cost: 2 + 12 + 0.5 KB
-    + padding = 16 KB (6.25% of 256 KB).'
+  realistic_solution: 'Triple-buffer SRAM accounting (3 frames in flight).
+    Each in-flight frame needs its own input buffer, activation arena, and
+    output buffer, because all three buffers are simultaneously live - the
+    SPI DMA is filling frame N+2''s input, the compute is using frame
+    N+1''s arena, and the BLE DMA is reading frame N''s output. Per-frame
+    footprint = 2 KB (input) + 12 KB (arena) + 0.5 KB (output) = 14.5 KB.
+    Three frames = 3 * 14.5 = 43.5 KB. With 4-byte alignment/padding ~= 44
+    KB, or 17.2% of 256 KB SRAM - feasible. Ping-pong (two-frames-in-
+    flight) cost = 2 * 14.5 = 29 KB (~11.3% of SRAM). The throughput uplift
+    of triple over double is essentially zero in this 3-stage pipeline -
+    both schemes are gated by the 10 ms compute stage, so 100 fps maximum
+    either way - so triple-buffering buys robustness to jitter and
+    DMA-completion-IRQ latency, not raw throughput. Sensitivity. If the
+    activation arena grows to 64 KB (a larger model), triple-buffer cost
+    rises to 3 * (2 + 64 + 0.5) = 199.5 KB ~ 78% of SRAM, leaving only
+    ~50 KB for weights + stack + heap - typically infeasible. The team
+    must drop to ping-pong (133 KB, 52%) and live with the increased
+    sensitivity to scheduler jitter.'
+  common_mistake: 'Reporting the SRAM cost as 14.5 KB by adding one of each
+    buffer once - that is the single-frame-in-flight (no overlap) layout,
+    which gives no pipeline benefit. True triple-buffer needs three full
+    per-frame allocations because three frames are simultaneously live.'
+  napkin_math: 'Per-frame = 2 + 12 + 0.5 = 14.5 KB. Triple-buffer = 3 *
+    14.5 = 43.5 KB (~17% of 256 KB). Ping-pong = 29 KB (~11%). 64 KB
+    arena flips triple-buffer to 78% (infeasible).'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 7

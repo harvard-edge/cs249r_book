@@ -7,31 +7,56 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: evaluate
 phase: both
-title: QAT vs PTQ Trade-offs for Edge Degradation
-scenario: A robotics team maps an FP32 LiDAR model to INT8 on a Jetson AGX Orin,
-  observing a 3% mAP drop and 4x latency speedup. They have only 200 unlabeled scenes
-  available locally for calibration (no access to the original training dataset).
-  The fleet ships globally and operates in conditions never seen in the calibration
-  set.
-question: Evaluate the trade-off of QAT versus PTQ given the constraint of only 200
-  local calibration scenes and missing access to the original training set. Identify
-  whether QAT is even feasible here and what alternative recovery strategies exist
-  for fleet deployment.
+title: TensorRT PTQ Calibration on Orin with 200 Scenes
+scenario: A robotics team is using TensorRT 8.6 on Jetson AGX Orin to deploy a PointPillars
+  LiDAR detector. The team has only 200 unlabeled scenes locally (no original training
+  set, no labels) and must choose between TensorRT's three INT8 calibrators - IInt8MinMaxCalibrator,
+  IInt8EntropyCalibrator2, and IInt8LegacyCalibrator (percentile-based). A first pass
+  with IInt8MinMaxCalibrator on the 200 scenes produced a 3% mAP drop and 4x latency
+  speedup over FP32, but spot-checks on out-of-distribution night scenes showed double-digit
+  recall loss on small objects. QAT is infeasible because the team lacks labels and
+  the original dataset.
+question: Evaluate which TensorRT INT8 calibrator best fits the 200-scene unlabeled
+  constraint, why the dataset's coverage gap (no night scenes) limits any PTQ approach
+  regardless of calibrator choice, and what concrete TensorRT-side mitigations (per-tensor
+  vs per-channel weight quantization, layer-precision overrides, sparsity, or DLA
+  core fallback) are available before resorting to QAT. Justify the recommended pipeline
+  and note which Orin-specific knobs (DLA, --useDLACore, --fp16 mixed-precision fallback)
+  are relevant.
 details:
-  realistic_solution: PTQ is computationally cheap and requires no backpropagation,
-    but led to the 3% drop due to rounding errors. QAT simulates INT8 precision noise
-    during the forward pass of a fine-tuning regime. The trade-off is that while QAT
-    is highly likely to recover the lost 3% mAP by adapting the weights, it requires
-    vast GPU hours, the full original dataset, and a complex training pipeline.
-  common_mistake: Assuming QAT executes directly on the edge Orin device rather than
-    a cloud GPU cluster.
-  napkin_math: 32 / 8 = 4x
-status: draft
+  realistic_solution: 'Calibrator choice. IInt8EntropyCalibrator2 minimises KL divergence
+    between the FP32 and INT8 activation distributions and is TensorRT''s default
+    for vision; on the 3D-feature pyramid in PointPillars it typically beats Min-Max
+    by 1-2% mAP because LiDAR feature distributions have heavy tails that Min-Max
+    stretches across. The legacy percentile calibrator can edge it out for very long-tailed
+    distributions. Switch to IInt8EntropyCalibrator2 first - free win, no retraining.
+    The 200-scene coverage gap remains: PTQ can only adapt scales to whatever calibration
+    sees, so night scenes will still degrade. Mitigations available in TensorRT without
+    labels: (1) keep per-channel quantization on weights (the default; do not disable),
+    it usually preserves 0.5-1% mAP vs per-tensor weights; (2) use layer-precision
+    overrides (setPrecision(kFP16)) on the small first convs and the final detection
+    head, which carry the heaviest accuracy burden and have negligible TOPS impact;
+    (3) mixed FP16/INT8 builds via --best instead of --int8 - retain INT8 in the heavy
+    3D-conv backbone, FP16 elsewhere; (4) Orin-specific: offload sensitive layers
+    to DLA in FP16 (--useDLACore=0/1) so the GPU INT8 only runs the well-quantized
+    backbone. QAT is the right answer long-term but blocked here. Recommendation:
+    switch to Entropy calibrator + FP16 head/first-conv override + DLA fallback for
+    sensitive layers; collect a 2k-scene labeled night-driving set for QAT in the
+    next release.'
+  common_mistake: 'Treating QAT vs PTQ as the only knob and missing that TensorRT
+    exposes calibrator choice, per-layer precision overrides, and DLA fallback - all
+    of which can recover most of the gap without labels or retraining. Also: assuming
+    QAT can run on the Orin itself.'
+  napkin_math: 'PTQ choices ranked: per-channel weight INT8 + Entropy calibrator +
+    FP16 head ~ -0.5% mAP; Min-Max + per-tensor ~ -3% to -10% on OOD. Latency impact
+    of FP16 head < 5% (head is small). DLA offload preserves FP16 accuracy at no GPU
+    cost.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 7
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -41,3 +66,9 @@ tags:
 - gemini-generated
 - target-recall-L5
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

@@ -8,38 +8,44 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Mobile AR Pipelining
-scenario: An AR application runs a 3-stage pipeline on Snapdragon 8 Gen 3, double-buffered
-  with stage-level overlap allowed. Stage 1 (CPU preprocessing) takes 15 ms/frame,
-  stage 2 (NPU inference on Hexagon, 45 TOPS) takes 10 ms/frame, stage 3 (GPU render
-  composite) takes 8 ms/frame. The CPU-to-NPU DMA setup adds 1 ms per frame and
-  is NOT overlappable with NPU compute on this SoC because it shares the LPDDR5
-  bus with stage 1's image-fetch reads.
-question: Evaluate the steady-state FPS of the double-buffered pipeline given the
-  3-stage breakdown, the non-overlappable DMA setup penalty, and the per-stage
-  service times. Identify which stage is the bottleneck.
+scenario: An AR application runs a 3-stage pipeline on Snapdragon 8 Gen 3. The reference
+  figure shows the v1 implementation - a strictly sequential Gantt where stage 1 (CPU
+  preprocessing, 15 ms/frame), stage 2 (NPU inference on Hexagon at 45 TOPS, 10 ms/frame),
+  and stage 3 (GPU render composite, 8 ms/frame) execute back-to-back with no overlap,
+  yielding the trivial 1000/(15+10+8) = 30.3 FPS. The team is debating whether to
+  invest in double-buffering. A relevant constraint - the CPU-to-NPU DMA setup adds
+  1 ms per frame and is NOT overlappable with NPU compute on this SoC because it shares
+  the LPDDR5 bus with stage 1's image-fetch reads.
+question: Starting from the figure's sequential 30.3 FPS baseline, evaluate what steady-state
+  FPS double-buffering would unlock given the per-stage service times and the non-overlappable
+  1 ms DMA penalty that must attach to stage 1. Identify the binding stage in the
+  overlapped regime and quantify the FPS uplift over the sequential baseline.
 visual:
   kind: svg
   path: mobile-1903.svg
   alt: Gantt chart showing sequential CPU then NPU execution per frame.
   caption: Sequential Processing Pipeline
 details:
-  realistic_solution: 'In a double-buffered pipeline, throughput is gated by the
-    slowest stage. Effective stage-1 time = 15 ms + 1 ms DMA = 16 ms (DMA bus shared,
-    not overlappable). Stages: 16 / 10 / 8 ms. Bottleneck is stage 1 at 16 ms/frame
-    -> 62.5 FPS. End-to-end latency for the first frame remains 16+10+8 = 34 ms,
-    but steady-state FPS is bounded by max(stage_i) = 16 ms. If DMA could be overlapped,
-    stage 1 drops to 15 ms -> 66.6 FPS - the 1 ms DMA tax costs ~4 FPS.'
-  common_mistake: Adding all three stage times (16+10+8 = 34 ms -> 29 FPS), forgetting
-    that double-buffering decouples stages so throughput is gated by the max stage,
-    not the sum.
-  napkin_math: 'Stage 1 = 15 + 1 = 16 ms (DMA non-overlap); max(16, 10, 8) = 16 ms
-    -> 1000/16 = 62.5 FPS.'
-status: draft
+  realistic_solution: 'Sequential baseline (the figure): 15 + 1 + 10 + 8 = 34 ms per
+    frame -> 1000/34 = 29.4 FPS. Double-buffered overlap: throughput is gated by the
+    slowest stage; effective stage-1 time absorbs the non-overlappable DMA at 15 +
+    1 = 16 ms. Stage durations are now 16 / 10 / 8 ms, so the bottleneck is stage
+    1 at 16 ms per frame, giving steady- state 1000/16 = 62.5 FPS. End-to-end latency
+    for any one frame remains 16 + 10 + 8 = 34 ms (latency does not improve), but
+    throughput more than doubles. If the DMA could be moved off the LPDDR5 path (e.g.,
+    via a dedicated SLC channel), stage 1 would drop to 15 ms and lift the system
+    to 66.7 FPS - the 1 ms shared-bus tax costs ~4 FPS.'
+  common_mistake: Reading the figure's sequential 34 ms total as the steady-state
+    pipeline rate (29 FPS) and missing that double-buffering decouples stages so steady-state
+    throughput is gated by max(stage_i), not the sum.
+  napkin_math: 'Sequential = 1000/34 = 29.4 FPS. Overlapped: stage 1 = 15 + 1 = 16
+    ms (DMA non-overlap); max(16, 10, 8) = 16 ms -> 62.5 FPS. Uplift = 2.13x.'
+status: published
 provenance: llm-draft
 expected_time_minutes: 9
 requires_explanation: true
-validated: false
-math_verified: false
+validated: true
+math_verified: true
 human_reviewed:
   status: not-reviewed
   by: null
@@ -49,3 +55,9 @@ tags:
 - gemini-generated
 - target-recall-L5
 created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'
