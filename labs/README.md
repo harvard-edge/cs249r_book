@@ -58,7 +58,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     <tr>
       <td>01</td>
       <td><code>lab_01_ml_intro</code></td>
-      <td>The Magnitude Awakening</td>
+      <td>The AI Triad</td>
     </tr>
     <tr>
       <td>02</td>
@@ -234,7 +234,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
 
 ## The Design Ledger
 
-Every lab saves your predictions and design decisions to the **Design Ledger** — a persistence layer in your browser's localStorage. Later labs read earlier decisions: Lab 08's training memory budget builds on Lab 05's activation analysis, which builds on Lab 01's magnitude calibration. The capstone labs synthesize your full Design Ledger into a portfolio.
+Every lab saves your predictions and design decisions to the **Design Ledger** — an IndexedDB-backed persistence layer in your browser, with a local file fallback when running outside WebAssembly. Later labs read earlier decisions: Lab 08's training memory budget builds on Lab 05's activation analysis, which builds on Lab 01's magnitude calibration. The capstone labs synthesize your full Design Ledger into a portfolio.
 
 ## Running Labs
 
@@ -245,9 +245,11 @@ Visit the [Co-Labs site](https://mlsysbook.ai/labs/) and click any lab. They run
 ### Locally
 
 ```bash
-pip install mlsysim[labs]
 git clone https://github.com/harvard-edge/cs249r_book.git
-cd cs249r_book/labs
+cd cs249r_book
+python3 -m pip install -r labs/requirements.txt
+python3 -m pip install -e mlsysim
+cd labs
 marimo run vol1/lab_01_ml_intro.py
 ```
 

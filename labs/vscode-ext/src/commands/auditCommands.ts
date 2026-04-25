@@ -23,12 +23,12 @@ export function registerAuditCommands(context: vscode.ExtensionContext, root: st
 
       const labName = path.basename(filePath, '.py');
       vscode.window.showInformationMessage(
-        `Labs: Auditing ${labName} against 30-gate REVIEW_PROMPT checklist. ` +
-        `Use the review agent for full automated audit.`
+        `Labs: Opening ${labName} with the protocol checklist. ` +
+        `Run the pytest lab checks for automated validation.`
       );
 
-      // Open the review prompt alongside the lab for manual audit
-      const reviewPath = path.join(root, 'labs', 'REVIEW_PROMPT.md');
+      // Open the available protocol doc alongside the lab for manual audit.
+      const reviewPath = path.join(root, 'labs', 'PROTOCOL.md');
       if (fs.existsSync(reviewPath)) {
         await vscode.window.showTextDocument(
           vscode.Uri.file(reviewPath),

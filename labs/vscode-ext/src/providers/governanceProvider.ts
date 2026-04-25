@@ -45,9 +45,6 @@ export class GovernanceProvider implements vscode.TreeDataProvider<TreeNode> {
     const docs = [
       { file: 'PROTOCOL.md', label: 'Protocol', desc: '7 invariants', icon: 'shield' },
       { file: 'TEMPLATE.md', label: 'Template', desc: '22-cell standard', icon: 'symbol-structure' },
-      { file: 'REVIEW_PROMPT.md', label: 'Review Prompt', desc: '30-gate audit', icon: 'checklist' },
-      { file: 'ARCHITECTURE.md', label: 'Architecture', desc: 'Wall-solver mappings', icon: 'type-hierarchy' },
-      { file: 'LABS_SPEC.md', label: 'Labs Spec', desc: 'Build specification', icon: 'file-code' },
       { file: 'README.md', label: 'README', desc: 'Lab overview', icon: 'info' },
     ];
 
