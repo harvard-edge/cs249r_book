@@ -162,6 +162,11 @@ function PracticePage() {
   const [selectedZone, setSelectedZone] = useState<string | null>(null);
   const [napkinOnly, setNapkinOnly] = useState(false);
   const [visualOnly, setVisualOnly] = useState(false);
+  // notFoundQ holds the ?q= value when it resolves to no published question —
+  // either it's a typo, a draft not yet promoted, or an archived id. We
+  // surface a small banner instead of silently falling through to a random
+  // question, so deep-links from chat / docs are auditable.
+  const [notFoundQ, setNotFoundQ] = useState<string | null>(null);
   // "Chains only" restricts the pool to questions that are part of a
   // deepening chain (L1→L6+ on one topic). 890 chains cover ~30% of
   // the corpus. This toggle is the minimum-viable discoverability
@@ -285,6 +290,10 @@ function PracticePage() {
         }
         return; // Skip other param handling
       }
+      // ?q=<unknown>: surface a banner. Don't silently fall through to the
+      // default question (that hides the failure and breaks shared deep-links).
+      setNotFoundQ(qParam);
+      // Continue to default-flow setup so the page is still usable.
     }
 
     // Topic filter: ?topic=<concept>&level=<L3> — filter pool to that topic
@@ -939,6 +948,33 @@ function PracticePage() {
             unused features" rule).
       */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/*
+          Not-found banner — fires when ?q=<id> resolves to no published
+          question. Surfaces the failure instead of silently swapping to
+          a random question (which broke shared deep-links to drafts or
+          archived items in the past).
+        */}
+        {notFoundQ && (
+          <div
+            role="alert"
+            className="mx-8 lg:mx-12 mt-4 px-4 py-3 rounded-lg border border-accentRed/30 bg-accentRed/5 flex items-start gap-3"
+          >
+            <span className="text-accentRed font-bold shrink-0 mt-0.5">!</span>
+            <div className="text-sm text-textSecondary">
+              <span className="font-medium text-accentRed">
+                Question <code className="font-mono">{notFoundQ}</code> isn&rsquo;t in the published bundle.
+              </span>{" "}
+              It may be a draft awaiting review, an archived duplicate, or a
+              typo. The default question pool is shown below.{" "}
+              <button
+                onClick={() => setNotFoundQ(null)}
+                className="underline hover:no-underline text-textPrimary"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
         {current ? (
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* ── LEFT: problem + answer + reveal + post-reveal ── */}

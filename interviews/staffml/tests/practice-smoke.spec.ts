@@ -111,3 +111,82 @@ test.describe("Practice page — restructured layout", () => {
     await expect(page.getByRole("button", { name: /nailed it/i })).toBeVisible();
   });
 });
+
+/**
+ * Smoke tests covering yesterday's filter additions and the
+ * not-found-question fix.
+ */
+test.describe("Practice page — filters and deep-links", () => {
+  test("visual filter at L5 returns a non-empty pool with an inline SVG", async ({ page }) => {
+    await page.goto("/practice");
+    await expect(page.locator("h2.text-2xl, h2.lg\\:text-3xl").first())
+      .toBeVisible({ timeout: 10000 });
+
+    // Switch to L5 (where most published visuals live).
+    await page.getByRole("button", { name: /^L5\b/ }).click();
+    await page.waitForTimeout(300);
+
+    // Toggle visual filter.
+    await page.getByText("Visual questions only").click();
+    await page.waitForTimeout(500);
+
+    // Pool counter shows N questions in pool, N > 0.
+    const pool = page.locator("text=/\\d+ questions in pool/").first();
+    const text = (await pool.textContent()) || "";
+    const n = parseInt(text.match(/(\d+) questions/)?.[1] ?? "0", 10);
+    expect(n).toBeGreaterThan(0);
+
+    // The surfaced question renders an SVG <img> from /question-visuals/.
+    const main = page.getByRole("main");
+    await expect(main.locator("img[src*='/question-visuals/']").first())
+      .toBeVisible({ timeout: 5000 });
+  });
+
+  test("chained-only filter reduces pool but stays non-empty", async ({ page }) => {
+    await page.goto("/practice");
+    await expect(page.locator("h2.text-2xl, h2.lg\\:text-3xl").first())
+      .toBeVisible({ timeout: 10000 });
+
+    const before = (await page.locator("text=/\\d+ questions in pool/").first()
+      .textContent()) || "";
+    const beforeN = parseInt(before.match(/(\d+) questions/)?.[1] ?? "0", 10);
+
+    await page.getByText("Chained questions only").click();
+    await page.waitForTimeout(500);
+
+    const after = (await page.locator("text=/\\d+ questions in pool/").first()
+      .textContent()) || "";
+    const afterN = parseInt(after.match(/(\d+) questions/)?.[1] ?? "0", 10);
+
+    expect(afterN).toBeGreaterThan(0);
+    expect(afterN).toBeLessThan(beforeN);
+  });
+
+  test("?q=<known> deep-link surfaces the right question with its visual", async ({ page }) => {
+    // cloud-2847 was promoted to published in this branch; confirm the deep
+    // link lands on it AND its matplotlib-rendered SVG renders inline.
+    await page.goto("/practice?q=cloud-2847");
+    await page.waitForTimeout(1500);
+
+    // Title matches the YAML
+    const title = await page.locator("h2.text-2xl, h2.lg\\:text-3xl").first().textContent();
+    expect(title?.toLowerCase()).toContain("hockey");
+
+    // Visual rendered
+    const main = page.getByRole("main");
+    await expect(main.locator("img[src*='cloud-2847.svg']")).toBeVisible({ timeout: 5000 });
+  });
+
+  test("?q=<unknown> shows the not-found banner instead of silent fallthrough", async ({ page }) => {
+    await page.goto("/practice?q=cloud-this-id-does-not-exist");
+    await page.waitForTimeout(1000);
+
+    // Banner is visible and names the bad id
+    await expect(page.getByRole("alert").filter({ hasText: /cloud-this-id-does-not-exist/i }))
+      .toBeVisible();
+    await expect(page.getByText(/isn.t in the published bundle/i)).toBeVisible();
+
+    // Default question pool is still shown below
+    await expect(page.locator("h2.text-2xl, h2.lg\\:text-3xl").first()).toBeVisible();
+  });
+});
