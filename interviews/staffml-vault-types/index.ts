@@ -60,6 +60,26 @@ export interface HumanReview {
   notes?: string | null;
 }
 
+/**
+ * Static visual attached to a question.
+ *
+ * v0.1.2 hardened: kind is a closed enum (svg only), path matches
+ * `^[a-z0-9-]+\.svg$`, alt ≥10 chars, caption required ≥5 chars.
+ * Server-side Pydantic enforces these constraints; this interface is
+ * the shape the practice page consumes.
+ */
+export type VisualKind = "svg";
+
+export interface Visual {
+  kind: VisualKind;
+  /** Bare filename under interviews/vault/visuals/<track>/. */
+  path: string;
+  /** Accessibility description. ≥10 chars; ≤400 chars. */
+  alt: string;
+  /** Author-facing caption rendered below the figure. ≥5 chars; ≤120 chars. */
+  caption: string;
+}
+
 export interface QuestionDetails {
   realistic_solution: string;
   common_mistake?: string;
@@ -87,6 +107,8 @@ export interface Question {
   // Content
   title: string;
   scenario: string;
+  question?: string;
+  visual?: Visual;
   details: QuestionDetails;
 
   // Workflow

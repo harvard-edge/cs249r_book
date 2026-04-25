@@ -161,8 +161,17 @@ solo_chains = sum(1 for c in chains.values() if len(c) <= 1)
 if solo_chains > 0:
     warn(f"{solo_chains} single-question chains (should be 2+)")
 
-# Check chain positions are sequential
-bad_chains = 0
+# Check chain positions are unique + monotonic-by-level.
+#
+# v0.1.2: relaxed the "must be 0..N-1" rule. After deletion of mid-chain
+# members, the published view of a chain can have legitimate gaps
+# (e.g., positions [0, 2, 3] when position 1 was deleted). Position
+# gaps are normal and don't indicate corruption — what matters is:
+# (1) every position is unique within the chain (no two members share
+# a position), and (2) levels are non-decreasing along position
+# (Bloom-monotonic). The strict YAML check (`vault check --strict`)
+# enforces both invariants from the source-of-truth.
+duplicate_chains = 0
 for cid, qs in chains.items():
     pos_list = []
     for q in qs:
@@ -171,17 +180,15 @@ for cid, qs in chains.items():
             pos_list.append(int(cp.get(cid, -1)))
         else:
             pos_list.append(int(cp) if cp != "" else -1)
-    positions = sorted(pos_list)
-    expected = list(range(len(qs)))
-    if positions != expected:
-        bad_chains += 1
-        if bad_chains <= 3:
-            warn(f"Chain '{cid}': positions {positions} != expected {expected}")
+    if len(pos_list) != len(set(pos_list)):
+        duplicate_chains += 1
+        if duplicate_chains <= 3:
+            warn(f"Chain '{cid}': duplicate positions {sorted(pos_list)}")
 
-if bad_chains == 0:
-    ok(f"All {len(chains)} chains have sequential positions")
+if duplicate_chains == 0:
+    ok(f"All {len(chains)} chains have unique positions")
 else:
-    warn(f"{bad_chains} chains have non-sequential positions")
+    warn(f"{duplicate_chains} chains have duplicate positions")
 
 # ── 6. Manifest consistency ──────────────────────────────────
 

@@ -1,5 +1,6 @@
 import os
 import matplotlib.pyplot as plt
+import numpy as np
 labels = ['SRAM Cap.', 'Model Layout']
 sram_avail = [256, 0]
 model_acts = [0, 80]

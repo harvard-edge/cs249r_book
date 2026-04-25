@@ -8,32 +8,36 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The Leaking Inference Server
-scenario: Your team runs a 13B model on A100 80 GB GPUs for long-running inference sessions. After ~6
-  hours of continuous serving, `nvidia-smi` shows VRAM usage has crept from 32 GB to 74 GB, and the next
-  request triggers an OOM kill. Restarting the process fixes it for another 6 hours. The model weights
-  haven't changed. What is leaking and how do you find it?
-question: "What is leaking and how do you find it?"
+scenario: Your team runs a 13B model on A100 80 GB GPUs for long-running inference
+  sessions. After ~6 hours of continuous serving, `nvidia-smi` shows VRAM usage has
+  crept from 32 GB to 74 GB, and the next request triggers an OOM kill. Restarting
+  the process fixes it for another 6 hours. The model weights haven't changed. What
+  is leaking and how do you find it?
+question: What is leaking and how do you find it?
 details:
-  realistic_solution: 'The leak is almost certainly in the KV-cache allocator. Most serving frameworks
-    pre-allocate a KV-cache pool, but when requests are cancelled mid-generation (client disconnects,
-    timeouts), the allocated KV-cache blocks may not be returned to the free pool. Each orphaned block
-    holds memory proportional to the sequence length and number of layers. Over thousands of cancelled
-    requests, these orphaned blocks accumulate. A secondary source is CUDA graph capture: if the framework
-    re-captures CUDA graphs for new input shapes (dynamic batching with varying sequence lengths), each
-    captured graph allocates a private workspace that is never freed. Diagnosis: use `torch.cuda.memory_stats()`
-    to track `allocated_bytes.all.current` vs `reserved_bytes.all.current` — a growing gap between reserved
-    and allocated indicates fragmentation or leaks in the caching allocator. For the KV-cache specifically,
+  realistic_solution: 'The leak is almost certainly in the KV-cache allocator. Most
+    serving frameworks pre-allocate a KV-cache pool, but when requests are cancelled
+    mid-generation (client disconnects, timeouts), the allocated KV-cache blocks may
+    not be returned to the free pool. Each orphaned block holds memory proportional
+    to the sequence length and number of layers. Over thousands of cancelled requests,
+    these orphaned blocks accumulate. A secondary source is CUDA graph capture: if
+    the framework re-captures CUDA graphs for new input shapes (dynamic batching with
+    varying sequence lengths), each captured graph allocates a private workspace that
+    is never freed. Diagnosis: use `torch.cuda.memory_stats()` to track `allocated_bytes.all.current`
+    vs `reserved_bytes.all.current` — a growing gap between reserved and allocated
+    indicates fragmentation or leaks in the caching allocator. For the KV-cache specifically,
     instrument the block manager to log allocations and frees, then diff them.'
-  common_mistake: '"The model must be loading duplicate weights over time" or "Just increase the GPU memory."
-    The first is implausible for a static model; the second masks the root cause and fails on the next
-    model size up.'
-  napkin_math: 'KV-cache per request (13B model, 32 layers, 40 heads, d=128, seq=2048, FP16): $2 \times
-    32 \times 40 \times 128 \times 2048 \times 2 = $ **1.34 GB**. If 1% of requests are cancelled without
-    freeing their KV blocks, and the server handles 600 req/hr: leaked blocks/hr = 6 × 1.34 GB = **8 GB/hr**.
-    After 6 hours: **48 GB leaked** — exactly matching the observed creep from 32 GB to ~80 GB. Fix: implement
-    a KV-cache garbage collector that scans for blocks with no active request reference every 60 seconds.
-    CUDA graph leak: each captured graph workspace ≈ 50–200 MB. With 100 unique input shapes over 6 hours:
-    up to **20 GB** of dead graph workspaces.'
+  common_mistake: '"The model must be loading duplicate weights over time" or "Just
+    increase the GPU memory." The first is implausible for a static model; the second
+    masks the root cause and fails on the next model size up.'
+  napkin_math: 'KV-cache per request (13B model, 32 layers, 40 heads, d=128, seq=2048,
+    FP16): $2 \times 32 \times 40 \times 128 \times 2048 \times 2 = $ **1.34 GB**.
+    If 1% of requests are cancelled without freeing their KV blocks, and the server
+    handles 600 req/hr: leaked blocks/hr = 6 × 1.34 GB = **8 GB/hr**. After 6 hours:
+    **48 GB leaked** — exactly matching the observed creep from 32 GB to ~80 GB. Fix:
+    implement a KV-cache garbage collector that scans for blocks with no active request
+    reference every 60 seconds. CUDA graph leak: each captured graph workspace ≈ 50–200
+    MB. With 100 unique input shapes over 6 hours: up to **20 GB** of dead graph workspaces.'
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,47 +8,54 @@ competency_area: precision
 bloom_level: create
 phase: both
 title: The Foggy Road Catastrophe
-scenario: 'You are the tech lead for the perception team at a major automotive company. Your team''s new
-  ViT-based pedestrian detector, running in FP32, achieves 99.5% accuracy on your validation set. To meet
-  the production hardware budget, the model must be quantized. After a standard post-training static quantization
-  (PTQ) to INT8, the overall accuracy drops slightly to 98%, which seems acceptable. However, during fleet
-  validation, you discover a catastrophic failure: the INT8 model''s accuracy on pedestrians in foggy
-  conditions has plummeted to 35%.'
-question: "Why did INT8 PTQ preserve overall accuracy but fail on foggy pedestrians, and how would you fix it?"
+scenario: 'You are the tech lead for the perception team at a major automotive company.
+  Your team''s new ViT-based pedestrian detector, running in FP32, achieves 99.5%
+  accuracy on your validation set. To meet the production hardware budget, the model
+  must be quantized. After a standard post-training static quantization (PTQ) to INT8,
+  the overall accuracy drops slightly to 98%, which seems acceptable. However, during
+  fleet validation, you discover a catastrophic failure: the INT8 model''s accuracy
+  on pedestrians in foggy conditions has plummeted to 35%.'
+question: Why did INT8 PTQ preserve overall accuracy but fail on foggy pedestrians,
+  and how would you fix it?
 details:
-  realistic_solution: The core issue is almost certainly catastrophic activation clipping. The low-contrast
-    features in foggy images likely push activation values in certain layers outside the narrow dynamic
-    range captured during calibration on 'clean' data. The Softmax and GELU activations in ViTs are particularly
-    prone to producing extreme outliers that get saturated in INT8, destroying the model's ability to
+  realistic_solution: The core issue is almost certainly catastrophic activation clipping.
+    The low-contrast features in foggy images likely push activation values in certain
+    layers outside the narrow dynamic range captured during calibration on 'clean'
+    data. The Softmax and GELU activations in ViTs are particularly prone to producing
+    extreme outliers that get saturated in INT8, destroying the model's ability to
     discern fine-grained features.
-  common_mistake: A junior engineer might immediately suggest 'Just use Quantization-Aware Training (QAT)'.
-    This is a valid tool, but it's a brute-force solution, not a diagnosis. It doesn't explain *why* PTQ
-    failed, is computationally expensive, and may not even converge if the underlying issue is extreme.
-    Another common mistake is to blame the calibration dataset without a specific hypothesis, leading
-    to a vague 'let's just collect more fog data' plan, which wastes valuable time.
-  napkin_math: "The core constraint is the 33ms (30 FPS) latency budget on the Jetson AGX Orin. Let's\
-    \ assume our ViT requires 5 Trillion Operations per inference.\n\n1. **FP32 inference time:**\n  \
-    \ - Orin FP32 peak: ~5.3 TFLOPS (GPU)\n   - Time = 5 TOps / 5.3 TFLOPS ≈ 943ms → **way over budget**\
-    \ (need INT8)\n\n2. **INT8 inference time:**\n   - Orin INT8 peak: ~275 TOPS\n   - Time = 5 TOps /\
-    \ 275 TOPS ≈ 18ms → **within 33ms budget** ✓\n\n3. **The quantization dilemma:**\n   - FP32 dynamic\
-    \ range: ±3.4 × 10³⁸ with ~7 decimal digits precision\n   - INT8 dynamic range: [−128, 127] — only\
-    \ 256 discrete levels\n   - If calibration data is all clear-weather, the scale factor s = (max_activation\
-    \ − min_activation) / 255 is tuned for \"normal\" activations\n   - Fog activations with low contrast\
-    \ may cluster in a tiny sub-range, getting quantized to just 2–3 INT8 levels → information destroyed\n\
-    \n4. **Fix cost (QAT):**\n   - QAT requires ~10–20% of original training compute\n   - If original\
-    \ training was 1000 GPU-hours, QAT ≈ 100–200 GPU-hours\n   - But the real fix is mixed-precision:\
-    \ keep fog-sensitive layers (Softmax, final attention) in FP16 while keeping bulk compute in INT8\n\
+  common_mistake: A junior engineer might immediately suggest 'Just use Quantization-Aware
+    Training (QAT)'. This is a valid tool, but it's a brute-force solution, not a
+    diagnosis. It doesn't explain *why* PTQ failed, is computationally expensive,
+    and may not even converge if the underlying issue is extreme. Another common mistake
+    is to blame the calibration dataset without a specific hypothesis, leading to
+    a vague 'let's just collect more fog data' plan, which wastes valuable time.
+  napkin_math: "The core constraint is the 33ms (30 FPS) latency budget on the Jetson\
+    \ AGX Orin. Let's assume our ViT requires 5 Trillion Operations per inference.\n\
+    \n1. **FP32 inference time:**\n   - Orin FP32 peak: ~5.3 TFLOPS (GPU)\n   - Time\
+    \ = 5 TOps / 5.3 TFLOPS ≈ 943ms → **way over budget** (need INT8)\n\n2. **INT8\
+    \ inference time:**\n   - Orin INT8 peak: ~275 TOPS\n   - Time = 5 TOps / 275\
+    \ TOPS ≈ 18ms → **within 33ms budget** ✓\n\n3. **The quantization dilemma:**\n\
+    \   - FP32 dynamic range: ±3.4 × 10³⁸ with ~7 decimal digits precision\n   - INT8\
+    \ dynamic range: [−128, 127] — only 256 discrete levels\n   - If calibration data\
+    \ is all clear-weather, the scale factor s = (max_activation − min_activation)\
+    \ / 255 is tuned for \"normal\" activations\n   - Fog activations with low contrast\
+    \ may cluster in a tiny sub-range, getting quantized to just 2–3 INT8 levels →\
+    \ information destroyed\n\n4. **Fix cost (QAT):**\n   - QAT requires ~10–20% of\
+    \ original training compute\n   - If original training was 1000 GPU-hours, QAT\
+    \ ≈ 100–200 GPU-hours\n   - But the real fix is mixed-precision: keep fog-sensitive\
+    \ layers (Softmax, final attention) in FP16 while keeping bulk compute in INT8\n\
     \   - FP16 layers add ~5ms overhead → total ≈ 23ms, still within 33ms budget"
   options:
-  - The primary issue is insufficient hardware capability; upgrading to next-generation hardware will
-    resolve the performance gap without software changes.
-  - A junior engineer might immediately suggest 'Just use Quantization-Aware Training (QAT)'. This is
-    a valid tool, but it's a brute-force solution, not a diagnosis.
-  - The core issue is almost certainly catastrophic activation clipping. The low-contrast features in
-    foggy images likely push activation values in certain layers outside the narrow dynamic range captured
-    during calibration on 'clean' data.
-  - Replacing a multi-model pipeline with a single end-to-end model is always preferable for latency-critical
-    applications.
+  - The primary issue is insufficient hardware capability; upgrading to next-generation
+    hardware will resolve the performance gap without software changes.
+  - A junior engineer might immediately suggest 'Just use Quantization-Aware Training
+    (QAT)'. This is a valid tool, but it's a brute-force solution, not a diagnosis.
+  - The core issue is almost certainly catastrophic activation clipping. The low-contrast
+    features in foggy images likely push activation values in certain layers outside
+    the narrow dynamic range captured during calibration on 'clean' data.
+  - Replacing a multi-model pipeline with a single end-to-end model is always preferable
+    for latency-critical applications.
   correct_index: 2
 status: published
 provenance: imported
@@ -57,8 +64,6 @@ expected_time_minutes: 20
 chains:
 - id: edge-chain-146
   position: 3
-- id: edge-chain-152
-  position: 2
 - id: edge-chain-158
   position: 2
 validated: true
@@ -66,14 +71,14 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The FP32 peak for Orin is 137 TFLOPS (FP16/TF32), not 5.3 TFLOPS (FP32), making the FP32 calculation
-  incorrect for a Jetson AGX Orin.
+- The FP32 peak for Orin is 137 TFLOPS (FP16/TF32), not 5.3 TFLOPS (FP32), making
+  the FP32 calculation incorrect for a Jetson AGX Orin.
 validation_status_pro: ERROR
 validation_issues_pro:
-- The 'Napkin Math' section is incomplete; it states premises (5 T-Ops model, 33ms budget) but performs
-  no calculations or analysis.
-- The Reasoning Competency RC-5 (Strategic impact) is a weak fit for a question about diagnosing a specific
-  technical failure mode of quantization.
+- The 'Napkin Math' section is incomplete; it states premises (5 T-Ops model, 33ms
+  budget) but performs no calculations or analysis.
+- The Reasoning Competency RC-5 (Strategic impact) is a weak fit for a question about
+  diagnosing a specific technical failure mode of quantization.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

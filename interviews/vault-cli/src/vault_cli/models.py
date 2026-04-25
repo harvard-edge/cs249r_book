@@ -12,12 +12,15 @@ in the file itself and are validated on load.
 
 from __future__ import annotations
 
+import re
 import sys
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_VISUAL_PATH_RE = re.compile(r"^[a-z0-9-]+\.svg$")
 
 # Locate the vault's shared enums module regardless of install layout.
 _HERE = Path(__file__).resolve()
@@ -25,11 +28,23 @@ _REPO_ROOT_CANDIDATES = [
     _HERE.parents[3] / "vault" / "schema",                # interviews/vault/schema/
     _HERE.parents[4] / "interviews" / "vault" / "schema", # worktree root
 ]
+_VAULT_DIR: Path | None = None
 for _candidate in _REPO_ROOT_CANDIDATES:
     if (_candidate / "enums.py").exists():
         if str(_candidate) not in sys.path:
             sys.path.insert(0, str(_candidate))
+        # vault root is the parent of schema/. visuals/ lives next to it.
+        _VAULT_DIR = _candidate.parent
         break
+
+# Build-time check: if the vault working tree is reachable, validate that
+# every visual.path resolves to an actual SVG file. In production deploys
+# (no working tree, e.g. a Cloudflare worker), this resolves to None and
+# the file-existence check is skipped — the consumer trusts that the
+# build pipeline already validated.
+_VISUALS_DIR: Path | None = (
+    _VAULT_DIR / "visuals" if _VAULT_DIR and (_VAULT_DIR / "visuals").is_dir() else None
+)
 
 from enums import (  # noqa: E402, I001  # type: ignore[import-not-found]
     VALID_BLOOM_LEVELS,
@@ -41,6 +56,7 @@ from enums import (  # noqa: E402, I001  # type: ignore[import-not-found]
     VALID_STATUSES,
     VALID_TRACKS,
     VALID_ZONES,
+    ZONE_BLOOM_AFFINITY,
 )
 
 
@@ -126,29 +142,62 @@ class HumanReview(BaseModel):
 
 
 class Visual(BaseModel):
-    """Optional static visual attached to a question."""
+    """Static visual attached to a question.
+
+    v0.1.2 hardened: kind is a closed enum (svg only), path must match
+    `^[a-z0-9-]+\\.svg$`, alt ≥10 chars, caption required ≥5 chars. The
+    `mermaid` value was reserved but never shipped; removed to keep the
+    enum honest. Re-add when mermaid actually renders in the practice page.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     kind: str = "svg"
     path: str
     alt: str
-    caption: str | None = None
+    caption: str
 
     @field_validator("kind")
     @classmethod
     def _supported_kind(cls, v: str) -> str:
-        if v not in {"svg", "mermaid"}:
-            raise ValueError("visual.kind must be 'svg' or 'mermaid'")
+        if v != "svg":
+            raise ValueError(
+                f"visual.kind must be 'svg' (got {v!r}); "
+                "mermaid was reserved but never implemented"
+            )
         return v
 
     @field_validator("path")
     @classmethod
     def _safe_path(cls, v: str) -> str:
         if ".." in v or v.startswith("/") or "\\" in v:
-            raise ValueError(f"visual.path must be a safe relative filename; got {v!r}")
-        if not v.endswith(".svg"):
-            raise ValueError(f"visual.path must end in .svg; got {v!r}")
+            raise ValueError(
+                f"visual.path must be a safe relative filename; got {v!r}"
+            )
+        if not _VISUAL_PATH_RE.match(v):
+            raise ValueError(
+                f"visual.path must match ^[a-z0-9-]+\\.svg$ "
+                f"(lowercase + dash + dot only, must end in .svg); got {v!r}"
+            )
+        return v
+
+    @field_validator("alt")
+    @classmethod
+    def _alt_min_length(cls, v: str) -> str:
+        if len(v) < 10:
+            raise ValueError(
+                f"visual.alt must be ≥10 chars (a one-word alt is not "
+                f"informative); got {len(v)} chars: {v!r}"
+            )
+        return v
+
+    @field_validator("caption")
+    @classmethod
+    def _caption_min_length(cls, v: str) -> str:
+        if len(v) < 5:
+            raise ValueError(
+                f"visual.caption must be ≥5 chars; got {len(v)} chars: {v!r}"
+            )
         return v
 
 
@@ -325,6 +374,51 @@ class Question(BaseModel):
                     f"scenario contains forbidden token {token!r}; plaintext only"
                 )
         return v
+
+    @model_validator(mode="after")
+    def _zone_bloom_compatible(self) -> Question:
+        """Zone and bloom_level must agree on cognitive level.
+
+        v0.1.2 hard rule: every zone admits a specific Bloom verb set
+        (ZONE_BLOOM_AFFINITY). When zone says one thing and bloom_level
+        says another, the question's classification literally
+        contradicts itself. Fixed at the data boundary so future
+        generation runs can never write a self-contradicting item.
+        See lint-calibration-2026-04-25 (expert consensus) for the
+        rule's pedagogical justification.
+        """
+        if self.bloom_level is None:
+            return self
+        admits = ZONE_BLOOM_AFFINITY.get(self.zone)
+        if admits is None or self.bloom_level in admits:
+            return self
+        raise ValueError(
+            f"zone={self.zone!r} and bloom_level={self.bloom_level!r} "
+            f"are incompatible (zone={self.zone!r} admits "
+            f"{sorted(admits)}). Run reclassify_zone_bloom_mismatch.py "
+            f"to repair, or correct one of the two fields manually."
+        )
+
+    @model_validator(mode="after")
+    def _visual_path_resolves(self) -> Question:
+        """If a visual is declared, the SVG file MUST exist on disk.
+
+        Prevents the v0.1.1 regression where graphviz/matplotlib renders
+        crashed silently and a Question shipped with a `visual:` block
+        whose `path` pointed to a nonexistent SVG (e.g. mobile-1962). Skipped
+        in production deploys where the working tree is not present.
+        """
+        if self.visual is None or _VISUALS_DIR is None:
+            return self
+        svg = _VISUALS_DIR / self.track / self.visual.path
+        if not svg.is_file():
+            raise ValueError(
+                f"visual.path does not resolve to a real file: {svg} "
+                f"(question id={self.id}). Either render it via "
+                f"`render_visuals.py --id {self.id}` or remove the visual "
+                f"block from the YAML."
+            )
+        return self
 
 
 __all__ = [

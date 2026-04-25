@@ -132,17 +132,73 @@ VALID_TOPICS: frozenset[str] = frozenset({
 # soft-constraint warnings (paper line 397).
 
 ZONE_LEVEL_AFFINITY: dict[str, set[str]] = {
-    "recall":         {"L1", "L2"},
-    "fluency":        {"L2", "L3"},
-    "analyze":        {"L3", "L4"},
-    "diagnosis":      {"L3", "L4"},
-    "design":         {"L4", "L5"},
-    "specification":  {"L4", "L5"},
-    "optimization":   {"L4", "L5"},
-    "evaluation":     {"L5", "L6+"},
-    "realization":    {"L5", "L6+"},
-    "mastery":        {"L6+"},
-    "implement":      {"L2", "L3", "L4"},  # paper treats this as broadly-ranged
+    # Widened 2026-04-25 per expert consensus
+    # (tools/lint_calibration/consensus.yaml + user arbitration).
+    # Each zone admits the levels that experts agreed are pedagogically
+    # meaningful for that zone × level pairing.
+    #
+    # Post-reclassification adjustments (after the bloom-canonical fix
+    # moved 576 items): analyze admits L2 (associate-level firmware
+    # decomposition is real), recall admits L3-L4 (mid-IC factual
+    # warmups exist), fluency admits L5 (staff-level "explain how X
+    # works" exists for compiler/IR topics). Each addition has ≤80
+    # supporting items in the live corpus.
+    "recall":         {"L1", "L2", "L3", "L4"},
+    "fluency":        {"L1", "L2", "L3", "L4", "L5"},
+    "analyze":        {"L2", "L3", "L4", "L5", "L6+"},
+    "diagnosis":      {"L3", "L4", "L5", "L6+"},
+    "design":         {"L3", "L4", "L5", "L6+"},
+    "specification":  {"L2", "L3", "L4", "L5", "L6+"},
+    "optimization":   {"L3", "L4", "L5", "L6+"},
+    "evaluation":     {"L3", "L4", "L5", "L6+"},
+    "realization":    {"L2", "L3", "L4", "L5", "L6+"},
+    "mastery":        {"L4", "L5", "L6+"},
+    "implement":      {"L2", "L3", "L4", "L5", "L6+"},
+}
+
+
+# v0.1.2: zone × bloom_level compatibility matrix (HARD constraint).
+#
+# Each zone implies a cognitive verb. The bloom_level field is the
+# canonical Bloom's-taxonomy verb the question demands. When zone and
+# bloom_level disagree (e.g. zone=recall + bloom=evaluate), the
+# question's classification literally contradicts itself — one of the
+# two fields is wrong.
+#
+# Built per the Education-Reviewer recommendation (lint-calibration
+# 2026-04-25, expert consensus): use this matrix to deterministically
+# identify mistagged questions and reclassify by trusting bloom_level.
+# Rule design: each zone admits its dominant bloom + adjacent verbs in
+# Bloom's hierarchy (remember < understand < apply < analyze < evaluate
+# < create), but rejects clear hierarchy violations (e.g. mastery +
+# remember, evaluation + remember).
+
+ZONE_BLOOM_AFFINITY: dict[str, set[str]] = {
+    "recall":         {"remember", "understand"},
+    "fluency":        {"remember", "understand", "apply"},
+    "analyze":        {"apply", "analyze"},
+    "diagnosis":      {"apply", "analyze", "evaluate"},
+    "design":         {"apply", "analyze", "evaluate", "create"},
+    "specification":  {"apply", "analyze", "evaluate", "create"},
+    "optimization":   {"apply", "analyze", "evaluate", "create"},
+    "evaluation":     {"analyze", "evaluate"},
+    "realization":    {"apply", "analyze", "evaluate", "create"},
+    "mastery":        {"analyze", "evaluate", "create"},
+    "implement":      {"understand", "apply", "analyze", "evaluate", "create"},
+}
+
+
+# Bloom → canonical zone fallback used when a (zone, bloom) pair
+# violates ZONE_BLOOM_AFFINITY. Picks the most direct zone for each
+# bloom verb. Used by reclassification scripts; NOT used by validators.
+
+BLOOM_CANONICAL_ZONE: dict[str, str] = {
+    "remember":   "recall",
+    "understand": "fluency",
+    "apply":      "implement",
+    "analyze":    "analyze",
+    "evaluate":   "evaluation",
+    "create":     "design",
 }
 
 
@@ -158,4 +214,6 @@ __all__ = [
     "VALID_COMPETENCY_AREAS",
     "VALID_TOPICS",
     "ZONE_LEVEL_AFFINITY",
+    "ZONE_BLOOM_AFFINITY",
+    "BLOOM_CANONICAL_ZONE",
 ]

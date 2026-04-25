@@ -207,4 +207,29 @@ test.describe("Practice page — filters and deep-links", () => {
     await expect(page.locator("h2.text-2xl, h2.lg\\:text-3xl").first())
       .toBeVisible({ timeout: 5000 });
   });
+
+  test("clicking a question visual opens a zoom modal that ESC closes", async ({ page }) => {
+    // Deep-link to a known visual question (cloud-4492 — MoE routing
+    // diagram, PASS-promoted in the 2026-04-25 generation run).
+    await page.goto("/practice?q=cloud-4492");
+    await page.waitForTimeout(2000);
+
+    const img = page.getByTestId("question-visual-img");
+    await expect(img).toBeVisible({ timeout: 5000 });
+
+    // react-medium-image-zoom v5 portals a <dialog data-rmiz-modal>
+    // into body on zoom; the [open] attribute is set when shown.
+    // Use the library-specific selector to avoid collisions with
+    // unrelated nav popovers / feedback dialogs that share role="dialog".
+    await expect(page.locator("dialog[data-rmiz-modal][open]")).toHaveCount(0);
+
+    await img.click();
+    await expect(page.locator("dialog[data-rmiz-modal][open]"))
+      .toHaveCount(1, { timeout: 2000 });
+
+    // ESC closes the modal.
+    await page.keyboard.press("Escape");
+    await expect(page.locator("dialog[data-rmiz-modal][open]"))
+      .toHaveCount(0, { timeout: 2000 });
+  });
 });
