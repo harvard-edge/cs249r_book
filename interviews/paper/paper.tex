@@ -724,14 +724,14 @@ Each question is grounded in five components drawn from the schema:
   \item \textbf{Hardware constants}: real specifications drawn from vendor datasheets~\citep{nvidia2022h100,nvidia2022orin,amd2023mi300x,arm_cortex_m4} (H100: 80\,GB HBM3, 3.35\,TB/s, 495\,TFLOPS TF32 dense; MI300X: 192\,GB HBM3, 5.3\,TB/s; Orin: 275\,TOPS INT8; Cortex-M4: 168\,MHz, 256\,KB SRAM)
 \end{itemize}
 
-Some items also include a visual task feature: a static diagram, timing trace, topology sketch, or memory layout rendered alongside the scenario. Visual items are used only when the diagram carries reasoning content, such as deriving Ring AllReduce time from a ring diagram or identifying a queueing bottleneck from a latency curve. The visual asset is stored separately from the YAML so that the schema carries only metadata (kind, path, alt text, caption) while the website serves the figure as a static asset.
+Some items also include a visual task feature: a static diagram, timing trace, topology sketch, or memory layout rendered alongside the scenario. Visual items are used only when the diagram carries reasoning content beyond what prose alone conveys. To keep visual coverage principled rather than decorative, we maintain a curated catalog of visual archetypes that pair specific topics with the diagram class that best supports their reasoning act: ring/tree collective diagrams for collective communication, pipeline-bubble timelines for pipeline parallelism, KV-cache page layouts for cache management, queueing hockey-stick curves for tail-latency reasoning, memory-hierarchy data paths, interconnect topology placements, and sleep/wake duty-cycle and checkpoint/recovery timelines. A visual-coverage audit flags topics in the catalog that lack a visual exemplar, ensuring expansion of this archetype is gap-driven on the same footing as textual items. The visual asset is stored separately from the YAML so that the schema carries only metadata (kind, path, alt text, caption) while the website serves the figure as a static asset.
 
 All questions are grounded in the content and formulas of the \emph{Machine Learning Systems} textbook \citep{reddi2026mlsys, reddi2026a}, which provides the hardware specifications, architectural principles, and quantitative frameworks that serve as the foundation for question construction. The hardware constants are drawn from the MLSysIM infrastructure modeling framework \citep{reddi2026mlsysim}, ensuring that all questions reference the same specifications and that every napkin math answer can be independently verified against the framework. This prevents specification drift, a systematic error pattern where different questions cite different numbers for the same hardware, undermining the internal consistency that makes napkin math trustworthy. Hardware constants require maintenance as new accelerator generations ship; the methodology is designed to be timeless even as specific numbers evolve.
 
 \begin{figure}[t!]
   \centering
   \includegraphics[width=\columnwidth]{figures/fig-quality-pipeline.pdf}
-  \caption{\textbf{Multi-stage quality assurance pipeline.} Candidate questions pass through schema validation (Pydantic), three-stage deduplication (exact, fuzzy, semantic), and multi-model math verification (Gemini Flash broad review + Claude Opus deep review). Confirmed errors are corrected; duplicates are archived, never deleted.}
+  \caption{\textbf{Multi-stage quality assurance pipeline.} Candidate questions pass through schema validation (Pydantic), three-stage deduplication (exact, fuzzy, semantic), and multi-model math verification (Gemini Pro broad review + Claude Opus deep review on flagged items). Reviews are written as JSON reports rather than auto-applied; maintainers reconcile and apply confirmed corrections. Duplicates are archived, never deleted.}
   \label{fig:quality-pipeline}
   \end{figure}
  
@@ -740,6 +740,8 @@ All questions are grounded in the content and formulas of the \emph{Machine Lear
 Gap analysis identifies underfilled cells in the topic $\times$ zone $\times$ track space; construction prioritizes those cells. The coverage cube contains \numapplicablepairs{} semantically valid topic--track cells; summary statistics appear in \Cref{sec:coverage}. In practice, gap filling is staged: candidate items are first generated as drafts against explicit target specifications, then reviewed for scenario realism, answer alignment, napkin-math correctness, and user-facing clarity before promotion. This draft-first workflow is especially important for new item archetypes such as visual reasoning and incomplete-information questions, where schema validity alone is not enough to guarantee assessment quality.
 
 The gap process is iterative rather than one-shot. After each draft batch, tooling recomputes the empirical coverage tensor across track, competency area, zone, level, and phase; ranks the weakest cells; and validates new candidates against schema, topic--track applicability, zone--level affinity, duplicate-question checks, visual-asset checks, and chain integrity. New items are added only when they improve a measured gap or repair a known quality weakness. This prevents the corpus from growing by volume alone and keeps expansion tied to the competency model.
+
+A second, complementary loop monitors \emph{distribution health}, not just coverage holes. Coverage asks whether every cell has at least some questions; balance asks whether the questions are distributed evenly enough that no axis collapses. We compute the Gini coefficient and coefficient of variation over track $\times$ zone $\times$ level cross-products, weighting under-represented tracks (e.g., global, TinyML) and higher-order zones (e.g., realization, specification, mastery) more heavily so that imbalance triggers prioritized targeting. The planner is deterministic: given a corpus snapshot it emits the next batch of weak cells to fill, which makes expansion auditable across releases. Coverage-driven and balance-driven targeting run as alternating passes, so the bank converges toward a portfolio that is both complete and proportioned to the competency model.
 
 \subsection{LLM-Assisted Generation}
 \label{sec:llm-generation}
@@ -810,9 +812,9 @@ Confirmed duplicates are archived (status set to ``archived''), never deleted, p
 \subsection{Math Verification}
 \label{sec:math-review}
 
-Napkin math is the soul of \staffml{} and its most error-prone component. Hardware specifications change across generations, unit conversions cascade, and order-of-magnitude errors slip in easily. Verification combines automated checks with independent recomputation against MLSysIM constants: a broad pass flags arithmetic, specification, and unit issues; a second pass stress-tests logic; a final stage recomputes calculations from first principles so answers do not depend on a single model's draft. Discrepancies are reconciled before publication. Recent work on LLM-as-judge evaluation \citep{zheng2023judging} supports using cross-model agreement to improve reliability over single-model review. The corpus also allows community error reporting after release.
+Napkin math is the soul of \staffml{} and its most error-prone component. Hardware specifications change across generations, unit conversions cascade, and order-of-magnitude errors slip in easily. Verification combines automated checks with independent recomputation against a shared hardware-constants reference drawn from MLSysIM. The pipeline runs in two stages and is deliberately review-first rather than auto-correcting. A broad pass uses Gemini Pro to flag arithmetic, specification, and unit issues across the corpus in chunked JSON-strict batches; a deeper pass uses Claude Opus to reconcile flagged items by recomputing from first principles. Both stages emit structured review reports without mutating the source YAML, so maintainers retain the final say on every applied correction. Recent work on LLM-as-judge evaluation \citep{zheng2023judging} supports using cross-model agreement to improve reliability over single-model review. The corpus also allows community error reporting after release (\Cref{sec:qa}).
 
-The full published set was checked under this pipeline; items with incorrect or inconsistent mathematics relative to the stated hardware scenario were revised or dropped before release. Readers should still treat any large bank as living software: constants evolve with new accelerators, and formal psychometric validation remains future work (\Cref{sec:limitations}).
+The full published set was checked under this loop; items with incorrect or inconsistent mathematics relative to the stated hardware scenario were revised or dropped before release. Because the loop is iterative, every release-candidate snapshot can be re-verified against the same constants reference, and items previously marked \texttt{validated} are re-evaluated when their grounding constants change. Readers should still treat any large bank as living software: constants evolve with new accelerators, and formal psychometric validation remains future work (\Cref{sec:limitations}).
 
 \subsection{LLM Failure Modes: A Taxonomy}
 
@@ -846,7 +848,7 @@ Automated validation is necessary but not sufficient for assessment quality. \st
 \begin{figure}[t!]
   \centering
   \includegraphics[width=\columnwidth]{figures/fig-zone-distribution.pdf}
-  \caption{\textbf{Zone distribution.} Compound zones (diagnosis, evaluation, fluency) dominate by design: they most sharply differentiate Staff-level candidates.}
+  \caption{\textbf{Zone distribution.} Compound zones (diagnosis, fluency, evaluation) dominate by design: they most sharply differentiate Staff-level candidates.}
   \label{fig:zone-distribution}
   \end{figure}
 
@@ -862,12 +864,12 @@ The track distribution reflects both industry demand and regime breadth. Cloud i
 
 \subsection{Zone Distribution}
 
-\Cref{fig:zone-distribution} gives per-zone counts across the eleven ikigai zones. Compound zones (diagnosis, evaluation, fluency) dominate the corpus, which is intentional: they most sharply differentiate Staff-level candidates. All eight active zones exceed 500 questions{,} with diagnosis (1{,}436){,} evaluation (1{,}288){,} and fluency (1{,}132) leading the distribution.
+\Cref{fig:zone-distribution} gives per-zone counts across the eleven ikigai zones. Compound zones (diagnosis, fluency, evaluation) dominate the corpus, which is intentional: they most sharply differentiate Staff-level candidates. Ten of the eleven zones exceed 500 questions, with diagnosis (1{,}583), fluency (1{,}227), and evaluation (1{,}113) leading the distribution; only realization sits below the 500-question threshold and is targeted for growth in the next portfolio-balance pass (\Cref{sec:generation}).
 
 \subsection{Level and Bloom's Distribution}
 
 % Note: The values in the following paragraph are dynamically generated from corpus_stats.json via generate_macros.py. Do not hardcode them.
-The Bloom's distribution across the corpus reflects the cognitive demands of Staff-level interviews: Analyze (\bloomAnalyzeCount{} questions, \bloomAnalyzePct{}), Evaluate (\bloomEvaluateCount{}, \bloomEvaluatePct{}), Apply (\bloomApplyCount{}, \bloomApplyPct{}), Create (\bloomCreateCount{}, \bloomCreatePct{}), Understand (\bloomUnderstandCount{}, \bloomUnderstandPct{}), and Remember (\bloomRememberCount{}, \bloomRememberPct{}). The emphasis on Analyze and Evaluate reflects the higher-order reasoning required at the Staff level. \Cref{fig:format-balance} complements these category totals by stacking item formats (conceptual, calculation, design, diagnosis, tradeoff, optimization) across Bloom levels.
+The Bloom rollup, derived from each item's primary cognitive zone, places Analyze (\bloomAnalyzeCount{} questions, \bloomAnalyzePct{}) at the top, followed by Apply (\bloomApplyCount{}, \bloomApplyPct{}), Understand (\bloomUnderstandCount{}, \bloomUnderstandPct{}), Evaluate (\bloomEvaluateCount{}, \bloomEvaluatePct{}), Remember (\bloomRememberCount{}, \bloomRememberPct{}), and Create (\bloomCreateCount{}, \bloomCreatePct{}). The remaining items sit in compound zones (mastery, optimization, realization) that span multiple Bloom levels and are intentionally not folded into a single Bloom bucket; they read as Staff-level integrative reasoning rather than as a single cognitive verb. The dominance of Analyze, paired with the substantial mass in those multi-level compound zones, reflects the higher-order reasoning required at the Staff level. \Cref{fig:format-balance} complements these category totals by stacking item formats (conceptual, calculation, design, diagnosis, tradeoff, optimization) across Bloom levels.
 
 \subsection{Multi-Axis Coverage}
 
@@ -1073,6 +1075,8 @@ A ``strong hire'' signal at Staff level is consistent strength in compound zones
 
 Not all 11 zones are equally important for interview design. The five compound zones (diagnosis, specification, fluency, evaluation, and optimization) and mastery carry the most signal for Staff+ assessment. The four pure zones (recall, analyze, design, quantify) serve primarily as corpus organization categories and warm-up question pools; they are the building blocks from which compound zones are constructed, not assessment targets in their own right. Realization (design $\cap$ quantify), while theoretically defined, appears infrequently in practice because most sizing questions also require recall, making them fluency or specification questions instead.
 
+The practice interface exposes the four-axis structure as filters so candidates can shape a session against their target role: a TinyML candidate can isolate the TinyML track, an L5 candidate can restrict to L4--L6+ items, and a candidate preparing for a sequenced study path can switch to a chains-only view that surfaces the \numchains{} depth chains while hiding standalone questions. Visual-reasoning items are likewise filterable so candidates can practice diagram-driven reasoning specifically. These filters are a thin presentation layer over the same four-axis schema described in \Cref{sec:competency-model,sec:topics,sec:tracks,sec:levels}; no taxonomy is duplicated for the UI.
+
 % ============================================================================
 \section{Related Work}
 \label{sec:related}
@@ -1135,7 +1139,7 @@ The TinyTorch educational framework \citep{reddi2026tinytorch} provides a comple
 \section{Limitations}
 \label{sec:limitations}
 
-We identify four limitations of the current work.
+We identify six limitations of the current work.
 
 \textbf{No empirical validation.} The bank is checked for structural coherence, physics applicability, and mathematical consistency, but it has not yet been psychometrically validated with candidate response data. Correlating zone-level performance with engineering seniority is an important next step. Until such data exist, zone and level assignments reflect the design rubric, not measured item statistics.
 
