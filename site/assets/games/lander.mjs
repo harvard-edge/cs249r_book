@@ -21,6 +21,7 @@ export async function mountLander(canvas, opts = {}) {
     angle: 0, // radians
     fuel: 100, // VRAM
     over: false, won: false,
+    started: false,
     keys: { up: false, left: false, right: false }
   };
 
@@ -131,8 +132,48 @@ export async function mountLander(canvas, opts = {}) {
   noiseText.position.set(18, 18);
   stage.addChild(noiseText);
 
+  // ── Goal-pad pulse: the green platform breathes so the player's eye lands on it first ──
+  const padPulse = new P.Graphics();
+  padPulse.position.set(terrain.global.x, lossY(terrain.global.x));
+  stage.addChildAt(padPulse, stage.getChildIndex(padGlobal));
+  let pulseT = 0;
+
+  // ── READY overlay: full-canvas card the player must dismiss with ↑ ──
+  const ready = new P.Container();
+  const readyDim = new P.Graphics();
+  readyDim.rect(0, 0, W, H).fill({ color: 0x101827, alpha: 0.78 });
+  ready.addChild(readyDim);
+  const readyTitle = new P.Text({ text: "GRADIENT LANDER", style: { fill: 0xffffff, fontSize: 32, fontWeight: "800", letterSpacing: 2 }});
+  readyTitle.anchor.set(0.5);
+  readyTitle.position.set(W / 2, H / 2 - 70);
+  ready.addChild(readyTitle);
+  const readyGoal = new P.Text({ text: "Land softly on the GREEN pad — the global minimum.", style: { fill: 0xd4edda, fontSize: 16 }});
+  readyGoal.anchor.set(0.5);
+  readyGoal.position.set(W / 2, H / 2 - 30);
+  ready.addChild(readyGoal);
+  const readyControls = new P.Text({
+    text: "↑  thrust  (burns VRAM)\n← →  steer learning rate",
+    style: { fill: 0xffffff, fontSize: 15, align: "center", lineHeight: 22 }
+  });
+  readyControls.anchor.set(0.5);
+  readyControls.position.set(W / 2, H / 2 + 14);
+  ready.addChild(readyControls);
+  const readyCta = new P.Text({ text: "▲  press UP to launch", style: { fill: 0xffd6a8, fontSize: 18, fontWeight: "700" }});
+  readyCta.anchor.set(0.5);
+  readyCta.position.set(W / 2, H / 2 + 70);
+  ready.addChild(readyCta);
+  stage.addChild(ready);
+  let ctaPulseT = 0;
+
   const handleKeydown = (e) => {
-    if (e.key === 'ArrowUp') { e.preventDefault(); state.keys.up = true; }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      state.keys.up = true;
+      if (!state.started) {
+        state.started = true;
+        ready.visible = false;
+      }
+    }
     if (e.key === 'ArrowLeft') { e.preventDefault(); state.keys.left = true; }
     if (e.key === 'ArrowRight') { e.preventDefault(); state.keys.right = true; }
     if (e.key.toLowerCase() === 'r' && state.over && opts.onRetry) opts.onRetry();
@@ -146,6 +187,19 @@ export async function mountLander(canvas, opts = {}) {
   window.addEventListener('keyup', handleKeyup);
 
   app.ticker.add(() => {
+    // Goal pad always pulses (so the player's eye finds it before launch and during play).
+    pulseT += 0.06;
+    const r = 26 + Math.sin(pulseT) * 6;
+    padPulse.clear();
+    padPulse.circle(0, 0, r).stroke({ color: COL.pad, width: 2, alpha: 0.55 });
+    padPulse.circle(0, 0, r * 0.55).stroke({ color: COL.pad, width: 1.4, alpha: 0.35 });
+
+    if (!state.started) {
+      // Pre-game: pulse the "press UP" prompt so it reads as an action, not a static label.
+      ctaPulseT += 0.08;
+      readyCta.alpha = 0.75 + 0.25 * Math.sin(ctaPulseT);
+      return;
+    }
     if (state.over) return;
 
     if (state.keys.left) state.angle -= rotSpeed;
