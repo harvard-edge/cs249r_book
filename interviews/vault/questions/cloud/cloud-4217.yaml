@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4217
+track: cloud
+level: L4
+zone: design
+topic: storage-format-selection
+competency_area: data
+bloom_level: apply
+phase: both
+title: WebDataset for Distributed Training
+scenario: Your team trains a vision model on 100M images (50 TB) across 64 H100 GPUs
+  on 8 nodes. The current pipeline uses individual image files on a shared NFS mount.
+  Training throughput is 40% below target because the NFS metadata server is overwhelmed
+  by 64 workers each opening thousands of small files. How does WebDataset solve this,
+  and what shard size do you choose?
+question: How does WebDataset solve this, and what shard size do you choose?
+details:
+  realistic_solution: 'WebDataset packages images into tar archives (shards), converting
+    millions of small-file operations into sequential reads of large files. This eliminates
+    metadata server bottlenecks. Shard sizing: target 100-500 MB per shard. At 250
+    MB: 50 TB / 250 MB = 200K shards. Each of 64 workers gets 200K/64 = 3,125 shards.
+    Workers stream through shards sequentially — one open() call per shard instead
+    of thousands per shard''s contents. Shuffling: inter-shard shuffle (randomize
+    shard order per epoch) + intra-shard shuffle buffer (10K samples). NFS metadata:
+    200K file entries vs. 100M — 500× fewer metadata operations. Alternative: store
+    shards on S3, stream via HTTP range requests — eliminates NFS entirely.'
+  common_mistake: Choosing very small shards (10 MB) to maximize parallelism. This
+    recreates the small-file problem — 50 TB / 10 MB = 5M shards, and each worker
+    still opens/closes many files. Choosing very large shards (50 GB) causes imbalanced
+    loading and wastes memory.
+  napkin_math: 'Individual files: 100M open() + stat() calls per epoch × 64 workers
+    = 6.4B metadata ops. NFS metadata server: ~100K ops/s → 64,000 seconds = 17.8
+    hours just for metadata. WebDataset (250 MB shards): 200K open() calls per epoch
+    × 64 workers = 12.8M ops → 128 seconds. Metadata overhead: 17.8 hrs → 2 min (500×
+    improvement). Sequential read throughput: 200 GB/s aggregate (64 × 3.1 GB/s per
+    H100 node NVMe) > training consumption rate.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

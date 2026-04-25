@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-1061
+track: tinyml
+level: L3
+zone: analyze
+topic: mcu-compute-constraints
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: NPU Fallback Bottleneck on Ethos-U55
+scenario: You deploy an int8 quantized CNN on an ARM Cortex-M7 + Ethos-U55 (Corstone-300)
+  system running at 480 MHz with 512 KB of shared SRAM. The Ethos-U55 is configured
+  for 256 MACs/cycle. During profiling, you notice that overall inference latency
+  spikes drastically whenever a custom non-linear activation layer is inserted between
+  two heavy convolutional blocks, even though this activation layer has negligible
+  FLOPs compared to the convolutions. Explain why this massive latency spike occurs
+  and analyze the underlying compute and memory constraints of this heterogeneous
+  setup.
+question: Why this massive latency spike occurs and analyze the underlying compute
+  and memory constraints of this heterogeneous setup?
+details:
+  realistic_solution: The latency spike is caused by an NPU fallback. The Ethos-U55
+    only accelerates supported operations; unsupported layers like a custom activation
+    force the graph compiler to split the network into subgraphs. The NPU executes
+    the first convolutional block, writes the entire intermediate tensor back to the
+    shared 512 KB SRAM, and halts. The Cortex-M7 then wakes up, processes the custom
+    activation using CMSIS-NN at a significantly lower throughput, and writes the
+    results back to SRAM before the NPU can resume. This breaks the NPU's internal
+    data streaming and introduces massive context-switching and memory I/O overhead.
+  common_mistake: Candidates often assume the latency is due strictly to the M7's
+    lower clock speed or lack of floating-point units. They frequently miss the structural
+    penalty of subgraph partitioning and the fact that breaking the NPU pipeline to
+    fall back to the CPU forces expensive intermediate SRAM round-trips.
+  napkin_math: 'Ethos-U55 theoretical throughput: 480 MHz * 256 MACs/cycle = 122.8
+    GMAC/s. Cortex-M7 DSP throughput: 480 MHz * 2 MACs/cycle = 0.96 GMAC/s. The M7
+    is theoretically ~128x slower at compute. More importantly, if the activation
+    tensor is 100 KB, the NPU must write 100 KB to SRAM, and the M7 must read 100
+    KB and write 100 KB back. At 480 MHz, moving 300 KB of data through SRAM plus
+    the M7 processing time completely eclipses the sub-millisecond execution time
+    of the convolutions on the NPU.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

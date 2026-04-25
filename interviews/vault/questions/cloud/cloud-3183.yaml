@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3183
+track: cloud
+level: L5
+zone: optimization
+topic: speculative-decoding
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Speculative Decoding for Batched Multi-Turn Chat
+scenario: In a multi-turn chat system on 4x H100 (70B model, 7B draft), requests arrive
+  with conversation history averaging 8K tokens. The draft model's KV cache for the
+  history adds 320MB per request per GPU. With 100 concurrent sessions, analyze whether
+  speculation's memory overhead for the draft model's KV cache limits the system's
+  capacity.
+question: Does the 7B draft KV cache for 8K-token histories limit capacity for 100
+  concurrent chat sessions on 4x H100?
+details:
+  realistic_solution: 'Target KV per request per GPU (70B, 8 GQA KV heads, 80 layers,
+    8K tokens): 80 x 2 x 8 x 128 x 8192 x 2B / 4 = 2.56GB. Draft KV per request per
+    GPU (7B, 8 KV heads, 32 layers, 8K tokens): 32 x 2 x 8 x 128 x 8192 x 2B / 4 =
+    1.024GB. Total KV: 3.584GB/request/GPU. Model weights: target 35GB + draft 3.5GB
+    = 38.5GB/GPU. Budget: 80 - 38.5 = 41.5GB for KV. Max concurrent: 41.5/3.584 =
+    11.6 requests/GPU = 46 total. Without speculation: 41.5/2.56 = 16.2/GPU = 65 total.
+    Speculation reduces capacity by 29%. At 100 concurrent requirement: neither works.
+    Solution: use FP8 KV quantization: target KV halves to 1.28GB, draft to 0.512GB.
+    Total: 1.792GB. Max concurrent: 41.5/1.792 = 23/GPU = 92. Still under 100. Add
+    draft KV eviction: keep draft KV only for active speculation, regenerate from
+    target KV when needed. Draft prefill for 8K context: 2 x 7B x 8K / 989T = 114ms
+    — too slow to regenerate every round. Compromise: keep draft KV for top-50 most
+    recent sessions, regenerate for others.'
+  common_mistake: Only accounting for the target model's KV cache. The draft model
+    also needs its own KV cache for the conversation history, effectively doubling
+    KV memory requirements if the draft has the same architecture depth.
+  napkin_math: 'Target KV: 2.56GB. Draft KV: 1.024GB. Total: 3.58GB. Without spec:
+    65 concurrent. With spec: 46. Spec costs 29% capacity. FP8 KV: 92 concurrent.
+    Need 100: add draft KV eviction policy.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

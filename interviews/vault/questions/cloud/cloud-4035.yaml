@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-4035
+track: cloud
+level: L4
+zone: analyze
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Ring vs Tree AllReduce Latency Tradeoff
+scenario: NCCL supports both ring and tree AllReduce algorithms. Ring achieves optimal
+  bandwidth but has O(N) latency (N-1 steps). Tree has O(log N) latency but lower
+  bandwidth utilization. For a 1024-MI300X cluster synchronizing a 50MB gradient tensor,
+  analyze which algorithm is faster and identify the crossover point where one becomes
+  preferable over the other.
+question: For 1024 MI300X GPUs synchronizing a 50MB tensor, which NCCL AllReduce algorithm
+  is faster, and where is the crossover point?
+details:
+  realistic_solution: 'Ring AllReduce time: T_ring = 2(N-1)α + 2(N-1)/N × D/B. Tree
+    AllReduce time: T_tree = 2log₂(N)α + 2log₂(N)/N × D × k/B, where k is the overhead
+    factor (~2× for binary tree due to reduced bandwidth utilization). With N=1024,
+    α=10μs (RoCE latency), B=50GB/s (400Gbps), D=50MB: T_ring = 2×1023×10μs + 2×1023/1024×50MB/50GB/s
+    = 20.46ms + 1.997ms = 22.46ms. T_tree = 2×10×10μs + 2×10/1024×50MB×2/50GB/s =
+    0.2ms + 0.039ms = 0.239ms. Tree wins decisively for 50MB at 1024 GPUs because
+    the per-step latency (20.46ms for ring vs 0.2ms for tree) dominates. Crossover
+    point: ring wins when D is large enough that bandwidth term dominates. Setting
+    T_ring = T_tree and solving: D_crossover ≈ 2(N-1-log₂N) × α × B × N / (2(N-1)
+    - 2k×log₂N) ≈ for N=1024: D ≈ 200GB. For practical gradient sizes (<10GB), tree
+    is almost always faster at 1024 GPUs.'
+  common_mistake: Only comparing bandwidth terms and ignoring the per-step latency
+    overhead. Each AllReduce step incurs a fixed cost (α) for kernel launch, synchronization,
+    and network RTT, independent of message size. For small messages, this α term
+    dominates, making tree's O(log N) steps superior.
+  napkin_math: 'N=1024: Ring latency overhead = 2 × 1023 × 10μs = 20.46ms. Tree latency
+    overhead = 2 × 10 × 10μs = 0.2ms. The 100× latency advantage of tree easily compensates
+    for its ~2× bandwidth penalty for any message < 200GB. At N=8: Ring overhead =
+    140μs, Tree overhead = 60μs — ring''s bandwidth advantage matters for messages
+    > 10MB.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

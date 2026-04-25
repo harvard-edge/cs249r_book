@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4255
+track: cloud
+level: L5
+zone: design
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Gradient accumulation correctness with DDP and autograd on MI300X
+scenario: You are using PyTorch DDP across 8 MI300X GPUs with gradient accumulation
+  over 4 micro-batches. Effective batch size should be 8 GPUs × 4 micro-batches ×
+  64 samples = 2048. But validation loss is worse than the 8-GPU baseline without
+  accumulation, suggesting gradients are not being averaged correctly.
+question: If each of 8 MI300X GPUs has a 2 GB gradient, how much total network traffic
+  does one ring AllReduce move?
+details:
+  realistic_solution: 8 GPUs × 2GB gradient each = 16GB total gradient data transferred
+    (not 8GB). Total network bytes in ring AllReduce = 2×(N-1)/N×D per GPU × N GPUs
+    = 2×7×2GB = 28GB network traffic.
+  common_mistake: Not using ddp_model.no_sync() context manager during micro-batch
+    accumulation steps. Without no_sync(), DDP triggers an AllReduce after every backward()
+    call, including the intermediate micro-batch steps. This averages gradients over
+    the wrong effective batch size (64 instead of 256 per GPU), and the gradient averaging
+    is applied 4 times instead of once.
+  napkin_math: 'AllReduce data volume: each GPU sends its gradient shard. For 8-GPU
+    AllReduce, each GPU sends data to all others. Total data transferred per GPU:
+    (N-1)/N × data × 2 (ring). Total across all GPUs: N × (N-1)/N × data × 2 = 2(N-1)
+    × data. For N=8, data=2GB: 2×7×2GB = 28GB... but the question asks total bytes
+    transferred across the network: each of 8 GPUs sends 2GB: 8 GPUs × 2GB = 16GB
+    transferred (not 8GB which would be if each GPU only sends once — ring AllReduce
+    requires each GPU to send 2×(N-1)/N × D = 1.75 × 2GB = 3.5GB, × 8 GPUs = 28GB
+    total network traffic, but unique data = 16GB).'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Mangled math: ''8 GPUs x gradient size (1B params x 2 bytes = 2GB) = 8GB transferred''.
+  8 GPUs x 2GB is 16GB, not 8GB.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

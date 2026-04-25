@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-4215
+track: cloud
+level: L3
+zone: analyze
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Parquet vs TFRecord for Training Throughput
+scenario: Your team must choose between Parquet and TFRecord for storing a 5 TB image
+  classification dataset (10M images, 500 KB average). Training runs on 8× A100 GPUs.
+  The data pipeline must sustain 10 GB/s aggregate read throughput to avoid GPU starvation.
+  Compare the two formats for this workload.
+question: Which format, Parquet or TFRecord, should you use for the 5 TB image dataset
+  to sustain 10 GB/s on 8× A100s, and why?
+details:
+  realistic_solution: 'TFRecord wins for this workload. Parquet''s columnar layout
+    means reading a full image record requires seeking across column chunks — for
+    wide binary blobs (images), this creates random I/O. TFRecord stores records sequentially
+    as length-prefixed protobufs, enabling pure sequential reads. However, the real
+    differentiator is the I/O pattern: (1) TFRecord files are pre-sharded (e.g., 1,000
+    shards × 5 GB each), enabling embarrassingly parallel reads across 8 GPUs. (2)
+    Parquet supports predicate pushdown and column pruning — irrelevant for image
+    training where you read every pixel. (3) TFRecord with tf.data.TFRecordDataset
+    supports deterministic shuffling via interleaved shards, while Parquet requires
+    a shuffle buffer or pre-shuffle step. For tabular data, the analysis reverses
+    — Parquet''s column pruning (read 10 of 500 columns) gives 50× I/O reduction.'
+  common_mistake: Choosing Parquet because it's 'industry standard.' Parquet is columnar
+    and excels at analytical queries (SELECT columns, filter rows), but for ML training
+    you read entire records sequentially — a row-oriented format like TFRecord is
+    more natural.
+  napkin_math: 'TFRecord sequential read: NVMe SSD at 7 GB/s per drive, 2 drives =
+    14 GB/s > 10 GB/s target. Parquet full-record read (binary blob): ~5 GB/s due
+    to column reassembly overhead (30% penalty). From S3: TFRecord parallel shards
+    (1,000 shards × 10 MB/s each) = 10 GB/s. Parquet from S3: similar with row group
+    parallelism. Compression: Parquet Snappy on images ≈ 0.95× (images already compressed)
+    — negligible benefit, 5% CPU overhead for decompression.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

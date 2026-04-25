@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-4051
+track: cloud
+level: L4
+zone: optimization
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: Mixed-Precision Gradient Synchronization Pipeline
+scenario: 'Your 128-MI300X training job computes gradients in BF16 but the optimizer
+  (Adam) requires FP32 master weights, momentum, and variance. Currently, the pipeline
+  is: compute BF16 gradients → cast to FP32 → AllReduce FP32 → optimizer step. This
+  AllReduces 4GB instead of 2GB. Redesign the pipeline to minimize communication while
+  maintaining optimizer precision.'
+question: How would you redesign the BF16-gradient Adam pipeline to minimize AllReduce
+  communication while preserving FP32 optimizer precision?
+details:
+  realistic_solution: 'Redesigned pipeline: (1) Compute BF16 gradients (2GB). (2)
+    AllReduce in BF16 (2GB instead of 4GB) — saves 50% communication. (3) Cast reduced
+    gradients to FP32 locally on each GPU. (4) Optimizer step in FP32. The precision
+    risk: summing 128 BF16 values can lose up to log₂(128) = 7 bits of mantissa, but
+    BF16 has 8 mantissa bits (7 stored + 1 implicit). With block-wise summation in
+    the ring (each GPU adds one BF16 value at a time, accumulating into the ring buffer),
+    the maximum intermediate sum is 128 × max_gradient. As long as the ratio of largest
+    to smallest gradient is < 2^7 = 128 (which is typical), BF16 AllReduce introduces
+    < 1% relative error. For MI300X with native BF16 support at 1.3 PFLOPS: the BF16
+    AllReduce also benefits from faster NIC processing (some NICs have BF16 reduction
+    engines). Communication savings: 2GB vs 4GB over 400Gbps: 40ms vs 80ms = 40ms
+    saved per iteration. Over a 300ms iteration, this is a 13.3% speedup.'
+  common_mistake: Casting gradients to FP32 before AllReduce. The AllReduce reduction
+    (summation) can be done in BF16 with minimal precision loss — the critical requirement
+    is that the optimizer accumulation happens in FP32, not the collective communication.
+  napkin_math: 'FP32 AllReduce: 4GB × 2 × 127/128 / 50GB/s = 158ms. BF16 AllReduce:
+    2GB × 2 × 127/128 / 50GB/s = 79ms. Savings: 79ms per iteration. With 8 MI300X
+    rails (400GB/s aggregate): FP32 = 158/8 = 19.75ms, BF16 = 79/8 = 9.9ms. BF16 precision
+    loss: < 1% relative error on gradients, absorbed by Adam''s momentum averaging.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

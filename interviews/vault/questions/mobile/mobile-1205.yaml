@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: mobile-1205
+track: mobile
+level: L3
+zone: analyze
+topic: model-format-conversion
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: CoreML ANE Fallback Latency Analysis
+scenario: A vision transformer model converted to CoreML for the Apple A17 Pro runs
+  slower than expected. The A17 Pro features a 16-core Neural Engine with 35 TOPS
+  at ~5W, sharing 8 GB unified memory with the CPU and GPU. Profiling shows that an
+  unsupported dynamic reshape operator causes CoreML to delegate the reshaping to
+  the CPU, while the surrounding layers run on the ANE. Explain why this specific
+  operator gap causes a massive latency degradation despite the fast unified memory.
+question: Why this specific operator gap causes a massive latency degradation despite
+  the fast unified memory?
+details:
+  realistic_solution: The primary issue is the synchronization and memory transfer
+    overhead caused by context switching. When the execution pipeline breaks due to
+    the fallback, the ANE must flush its intermediate activations to the 8 GB shared
+    unified memory. The CPU then reads these activations, performs the reshape, and
+    writes them back out so the ANE can resume execution. This constant shuttling
+    of data breaks ANE pipeline parallelism and introduces memory bandwidth bottlenecks
+    that heavily negate the 35 TOPS theoretical throughput.
+  common_mistake: Candidates often focus only on the CPU's compute performance for
+    the reshape operation itself, failing to account for the memory bandwidth penalty,
+    synchronization costs, and loss of pipeline parallelism when transferring intermediate
+    activations between the ANE and CPU.
+  napkin_math: The A17 Pro ANE provides 35 TOPS. For a model needing 70 GOPS per inference,
+    the purely compute-bound ANE time is 70 / 35,000 = 2ms. If the operator fallback
+    requires transferring a 20MB intermediate activation tensor between the ANE and
+    CPU, and the effective unified memory bandwidth for this transfer is 40 GB/s,
+    the read and write process takes (20MB / 40GB/s) * 2 = 1ms per fallback. If this
+    unsupported reshape occurs 4 times per inference, the memory transfer alone adds
+    4ms. This pushes the total inference time from 2ms to 6ms, representing a 3x latency
+    increase purely from operator coverage gaps.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

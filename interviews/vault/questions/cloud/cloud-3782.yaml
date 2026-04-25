@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3782
+track: cloud
+level: L4
+zone: design
+topic: flash-attention
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'FlashDecoding: Parallelizing Attention During Inference'
+scenario: During autoregressive decoding, each new token attends to all previous tokens.
+  For a single query token with a 32K context on an H100, standard FlashAttention
+  iterates over KV blocks sequentially within one thread block, under-utilizing the
+  GPU's 132 SMs. FlashDecoding parallelizes across KV blocks. Explain the mechanism
+  and the throughput improvement.
+question: How does FlashDecoding parallelize a single-token decode over KV blocks
+  for a 32K context, and what throughput improvement does it provide?
+details:
+  realistic_solution: 'In standard FlashAttention during decode (batch=1, query_len=1),
+    the single query token must attend to N KV tokens. The computation is: for each
+    KV block, compute QK^T, softmax, and weighted sum. With one thread block per attention
+    head, only num_heads thread blocks are active (e.g., 64 for a 70B model). On an
+    H100 with 132 SMs, this leaves half the SMs idle. FlashDecoding splits the KV
+    cache into P partitions (e.g., P=16) and assigns each partition to a separate
+    thread block. Each block computes a partial softmax and weighted sum over its
+    partition. A final reduction kernel combines partial results using the logsumexp
+    trick (numerically stable online softmax). This increases parallelism from num_heads
+    to num_heads × P thread blocks. With 64 heads × 16 partitions = 1024 thread blocks,
+    all 132 SMs are fully utilized. Speedup for decode: 4-8× for long contexts (32K+).
+    For short contexts (≤2K), the overhead of the reduction kernel exceeds the benefit.'
+  common_mistake: Confusing FlashDecoding with speculative decoding. FlashDecoding
+    is about parallelizing the attention computation across KV cache blocks during
+    single-token generation, not about predicting future tokens.
+  napkin_math: 'Standard decode: 64 heads → 64 thread blocks on 132 SMs = 48% utilization.
+    FlashDecoding P=16: 64 × 16 = 1024 blocks → 100% utilization. For 32K context:
+    standard = 2ms, FlashDecoding = 0.35ms. Speedup: ~5.7×. Reduction overhead: ~0.05ms.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

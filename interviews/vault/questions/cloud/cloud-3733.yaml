@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3733
+track: cloud
+level: L4
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Gradient Checkpointing Break-Even Analysis for 70B Model on A100
+scenario: Training a 70B model on 16×A100 80GB with tensor parallelism-8. Each A100
+  holds 70B/8 = 8.75B param shard. Without gradient checkpointing, activation memory
+  = 6GB/GPU at batch=8, seq=2048. With checkpointing, activation = 0.5GB but requires
+  33% recomputation overhead. Determine if checkpointing is needed.
+question: Does this 16×A100 tensor-parallel 70B training setup need activation checkpointing
+  at batch=8, given the 6GB activation footprint?
+details:
+  realistic_solution: 'Memory breakdown per GPU: Weights (8.75B, BF16) = 17.5GB. Gradients
+    (BF16) = 17.5GB. Optimizer states (Adam, FP32) = 8.75B × 12B = 105GB — but with
+    ZeRO-1 across 8 DP groups = 105/8 = 13.1GB per DP rank. Total fixed: 17.5+17.5+13.1
+    = 48.1GB. Activations without checkpointing: 6GB. Total: 54.1GB < 80GB — checkpointing
+    NOT needed for this config. With per-GPU total 54GB, 26GB headroom. Checkpointing
+    would save 5.5GB but add 33% compute overhead → don''t use it here. If batch doubles
+    to 16: activations = 12GB, total = 60.1GB — still fits. Batch = 32: activations
+    = 24GB, total = 72.1GB — fits. Batch = 48: activations = 36GB, total = 84.1GB
+    > 80GB — checkpointing required.'
+  common_mistake: Forgetting to account for optimizer states and gradients alongside
+    activations when evaluating if gradient checkpointing is needed.
+  napkin_math: 'Fixed memory: weights 17.5GB + grads 17.5GB + ZeRO-1 optimizer 13.1GB
+    = 48.1GB. Activations at batch=8: 6GB. Total: 54.1GB < 80GB. Checkpointing not
+    needed at batch ≤ 32 (72.1GB). At batch=48 (84GB > 80GB): enable checkpointing,
+    save 31.5GB activations, pay 33% compute overhead.'
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+deletion_reason: Math error unfixable
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: ERROR
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- ZeRO-1 optimizer state of 13.1GB per GPU for an 8.75B parameter shard is mathematically
+  impossible (1.5 bytes/param). Partitioned optimizer states (FP32 master/momentum/variance)
+  would be ~52.5GB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

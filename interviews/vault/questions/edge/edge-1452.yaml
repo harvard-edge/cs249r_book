@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: edge-1452
+track: edge
+level: L3
+zone: analyze
+topic: streaming-ingestion
+competency_area: data
+bloom_level: apply
+phase: both
+title: Unified Memory Contention in High-Frequency Edge Ingestion
+scenario: You have a real-time sensor ingestion pipeline running on an NVIDIA Jetson
+  Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP, Ampere GPU + DLA accelerator). The system
+  ingests uncompressed LiDAR point clouds at 20Hz. When you increase the ingestion
+  rate to 60Hz, the pipeline experiences unpredictable latency spikes and frame drops.
+  However, telemetry shows the Ampere GPU and DLA are at only 30% utilization, and
+  the system is drawing 40W (well below the 60W TDP limit). Explain why these latency
+  spikes occur despite having plenty of compute and thermal headroom.
+question: Why do latency spikes and frame drops appear at 60Hz LiDAR ingestion despite
+  30% accelerator utilization and 40W power draw?
+details:
+  realistic_solution: The bottleneck is memory bandwidth contention on the unified
+    32 GB LPDDR5 memory. The Jetson Orin shares a single memory pool across the CPU,
+    GPU, DLA, and I/O controllers. High-frequency uncompressed data ingestion forces
+    the memory controller to constantly service I/O writes and CPU preprocessing reads,
+    which competes directly with the GPU/DLA trying to fetch weights and activations.
+    This contention causes memory queuing delays, leading to latency spikes even when
+    the 275 TOPS compute capacity is mostly idle.
+  common_mistake: Candidates often assume the compute units are thermal throttling
+    or suggest optimizing the model to use INT8 on the DLA. They ignore the explicitly
+    stated 40W power draw and low utilization, failing to consider the memory architecture
+    of the device.
+  napkin_math: Assume one uncompressed LiDAR frame is 30 MB. At 60Hz, raw ingestion
+    is 30 MB * 60 = 1.8 GB/s of writes. If the CPU normalizes the data (1.8 GB/s read
+    + 1.8 GB/s write) and the GPU/DLA reads it for inference (1.8 GB/s read), that
+    is 7.2 GB/s of continuous memory traffic just for the data payload. Add in the
+    OS, driver overhead, and the 275 TOPS INT8 compute engines constantly fetching
+    model weights and intermediate activations from the same 32 GB LPDDR5 pool, and
+    the bursty nature of the traffic saturates the memory controller queues, causing
+    stalling.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

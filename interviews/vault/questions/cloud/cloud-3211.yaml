@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3211
+track: cloud
+level: L5
+zone: design
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Dynamic Expert Loading from SSD
+scenario: 'You want to serve a 1024-expert MoE model where each expert is 1B parameters
+  (2 GB BF16). Total model: 2 TB. Your single server has 8×H100 (640 GB HBM) and 8×NVMe
+  SSDs (7 GB/s each, 56 GB/s aggregate). Design a tiered expert caching system.'
+question: How would you design a tiered cache for 1024 two-GB experts on an 8×H100
+  server with CPU memory and NVMe?
+details:
+  realistic_solution: 'Three-tier caching: Tier 1 (GPU HBM): Keep the top-64 hottest
+    experts in HBM (64 × 2 GB = 128 GB, leaving 512 GB for shared layers + KV-cache).
+    Tier 2 (CPU DRAM): Keep the next 256 experts in pinned CPU memory (512 GB). Transfer
+    to GPU via PCIe Gen5 at 64 GB/s: 2 GB / 64 GB/s = 31ms. Tier 3 (NVMe SSD): Remaining
+    704 experts on SSD. Transfer: 2 GB / 7 GB/s = 286ms per expert (too slow for real-time).
+    Pipeline: (1) Router predicts top-8 experts. (2) If expert is in Tier 1: immediate
+    compute (~0ms load). (3) If in Tier 2: PCIe transfer (31ms) — overlap with computation
+    of Tier 1 experts. (4) If in Tier 3: initiate async NVMe→CPU→GPU transfer and
+    queue the request. Prefetching: use the router output from layer L to prefetch
+    experts for layer L+1 (speculative). With 90% Tier 1 hit rate and 9% Tier 2: average
+    load latency = 0.9×0 + 0.09×31 + 0.01×286 = 5.7ms per layer.'
+  common_mistake: Treating expert loading as a simple LRU cache without considering
+    that NVMe-to-GPU transfer goes through CPU memory and PCIe, adding latency and
+    requiring careful prefetching.
+  napkin_math: 'Tier 1: 64 experts × 2 GB = 128 GB in HBM. Tier 2: 256 experts × 2
+    GB = 512 GB in CPU DRAM. Tier 3: 704 experts × 2 GB = 1.41 TB on NVMe. Hit rates
+    (Zipf-distributed): Tier 1 ~90%, Tier 2 ~9%, Tier 3 ~1%. Average latency: 5.7ms/layer.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

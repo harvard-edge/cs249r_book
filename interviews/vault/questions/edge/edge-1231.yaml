@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: edge-1231
+track: edge
+level: L3
+zone: analyze
+topic: load-balancing
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: Dataflow Accelerator Round-Robin Degradation
+scenario: We are deploying a real-time computer vision system on an edge gateway equipped
+  with 4 Hailo-8 dataflow accelerators (each providing 26 TOPS INT8 at 2.5W). The
+  Hailo-8 has no local DRAM and streams data directly from host memory. We initially
+  route incoming 1080p video frames (2MB per frame) from 8 concurrent camera streams
+  using a dynamic round-robin load balancer across the 4 accelerators. We observe
+  that our 99th percentile inference latency spikes by 40% compared to a static routing
+  policy where each camera stream is permanently pinned to a specific accelerator.
+  Why does dynamic round-robin routing cause this performance degradation on this
+  specific hardware?
+question: Why does dynamic round-robin routing cause this performance degradation
+  on this specific hardware?
+details:
+  realistic_solution: The performance degradation is caused by host memory access
+    patterns and PCIe contention. Because the Hailo-8 lacks local DRAM, it streams
+    weights and activations from the host. Round-robin routing scatters sequential
+    frames from the same camera across different host memory buffers and PCIe endpoints,
+    destroying host CPU cache locality and forcing continuous, unoptimized PCIe DMA
+    setup. Pinned routing (or consistent hashing by stream ID) maintains cache locality
+    in host memory and allows continuous dataflow streaming without tearing down and
+    rebuilding DMA descriptors.
+  common_mistake: Candidates often blame the software overhead of the load balancer
+    itself or assume the Hailo-8 compute (TOPS) limits are being exceeded. They fail
+    to analyze the memory architecture, missing that the Hailo-8 relies entirely on
+    streaming from host memory over PCIe.
+  napkin_math: 8 cameras at 30 FPS = 240 FPS total. Each 1080p frame is 2MB, requiring
+    480 MB/s of bandwidth. A single Hailo-8 (26 TOPS) can process ~1000 FPS for standard
+    models, so compute is not the bottleneck (240 FPS requires < 10 TOPS). With round-robin,
+    the host CPU must manage 240 distinct DMA transfer setups per second across 4
+    different PCIe endpoints, adding ~15us of interrupt/setup overhead per frame (240
+    * 15us = 3.6ms overhead per second), while destroying host L3 cache hits for the
+    decoded video buffers.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- reasoning_competency and reasoning_mode are not specified.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

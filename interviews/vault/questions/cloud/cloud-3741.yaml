@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-3741
+track: cloud
+level: L5
+zone: mastery
+topic: attention-scaling
+competency_area: compute
+bloom_level: create
+phase: both
+title: Dynamic Sparse Attention Pattern Implementation on H100 for Code LLM
+scenario: 'A code generation LLM (Deepseek-Coder-33B) uses dynamic sparse attention:
+  each token attends to its 256 nearest tokens + 32 global tokens (code symbols).
+  At 8K context, this reduces attention FLOPs from O(n²) to O(n×k). On H100, evaluate
+  whether sparse attention provides wall-clock speedup over FlashAttention for this
+  sparsity pattern.'
+question: Will dynamic sparse attention with 288 attended positions per token at 8K
+  context be faster than FlashAttention on H100, and why?
+details:
+  realistic_solution: 'Full attention at 8K: FLOPs = 2×8192²×128×32 heads = 551B.
+    FlashAttention time: 551B/TFLOPS_effective + BW_bound. At H100, FlashAttention
+    is BW-limited: 3×8192×128×32×2B (QKV) = 201MB at 3.35 TB/s = 60μs. Sparse attention
+    (288 active positions per token): FLOPs = 2×8192×288×128×32 = 19.3B FLOPs = 96.5%
+    reduction. But: sparse gather requires indirect memory access. GPU sparse attention
+    kernels (BigBird, LongFormer style): effective bandwidth = ~200 GB/s (vs 3.35
+    TB/s for dense due to gather inefficiency). Sparse attention time: 8192×288×2B×32
+    (load K,V per token) = 154MB at 200 GB/s = 770μs. FlashAttention at 8K: 60μs.
+    Sparse is 12.8× SLOWER than FlashAttention due to gather overhead. Conclusion:
+    sparse attention is only faster for context > 32K+ where O(n²) FlashAttention
+    memory becomes prohibitive.'
+  common_mistake: Assuming that reducing attention FLOPs proportionally reduces wall-clock
+    time; sparse attention requires irregular memory access patterns that are cache-unfriendly
+    and hard to vectorize on GPUs.
+  napkin_math: 'FlashAttention 8K: QKV = 201MB at 3.35 TB/s = 60μs. Sparse (288/8K
+    = 3.5% density): indirect gather at ~200 GB/s effective = 154MB / 200 GB/s = 770μs.
+    Sparse 12.8× slower. Crossover point: dense = BW × n²; sparse = BW_gather × n×k.
+    Equal at n = BW/BW_gather × k × (3.35T/200G) = 16.75 × k. With k=288: n = 4,824
+    — below 8K. Dense wins below n~5K.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

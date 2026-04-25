@@ -189,4 +189,22 @@ test.describe("Practice page — filters and deep-links", () => {
     // Default question pool is still shown below
     await expect(page.locator("h2.text-2xl, h2.lg\\:text-3xl").first()).toBeVisible();
   });
+
+  test("?q=<legacy-cohort-id> resolves through the redirect map", async ({ page }) => {
+    // cloud-cell-10000 was renamed to cloud-2878 on 2026-04-25. The
+    // redirect map preserves the old shareable link without showing the
+    // not-found banner. (Picking a redirect whose target is published —
+    // some redirects point at drafts, which legitimately fall back to
+    // the not-found state.)
+    await page.goto("/practice?q=cloud-cell-10000");
+    await page.waitForTimeout(2000);
+
+    // No not-found banner — the redirect resolved.
+    const banner = page.getByRole("alert").filter({ hasText: /isn.t in the published bundle/i });
+    await expect(banner).toHaveCount(0);
+
+    // A real question rendered (don't pin specific title across releases).
+    await expect(page.locator("h2.text-2xl, h2.lg\\:text-3xl").first())
+      .toBeVisible({ timeout: 5000 });
+  });
 });

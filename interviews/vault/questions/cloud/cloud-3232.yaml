@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3232
+track: cloud
+level: L5
+zone: design
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: KV-Cache Sharing for Parallel Sampling
+scenario: 'Your code generation service runs best-of-N sampling (N=16) for each request:
+  generate 16 completions from the same 2048-token prompt and return the best. Naively,
+  this requires 16× KV-cache. Design a KV-cache sharing strategy for Llama 3 70B on
+  H100 GPUs.'
+question: How can best-of-16 sampling share KV-cache for the common 2048-token prompt,
+  and how much memory does it save?
+details:
+  realistic_solution: 'Use copy-on-write (CoW) KV-cache sharing, analogous to OS fork():
+    (1) Compute KV-cache for the 2048-token prompt once: 2048 × 320 KB = 655 MB. (2)
+    Create 16 logical KV-cache references pointing to the same physical blocks (prefix
+    sharing). (3) As each sample generates different tokens, allocate new blocks only
+    for the diverging suffix. Average completion: 512 tokens × 320 KB = 164 MB per
+    sample. Memory: Naive: 16 × (655 + 164) MB = 13.1 GB. CoW: 655 MB (shared) + 16
+    × 164 MB = 3.28 GB. Savings: 9.82 GB (75% reduction). Implementation with PagedAttention:
+    the prompt''s KV blocks have refcount=16. When all 16 samples finish, refcount
+    drops to 0 and blocks are freed. During generation, each sample''s new blocks
+    are appended to its own page table while sharing the prompt blocks. This is exactly
+    how vLLM implements parallel sampling. At N=64 (used for code generation benchmarks),
+    savings are even more dramatic: 655 MB shared vs 64 × 655 MB = 41 GB duplicated.'
+  common_mistake: Allocating 16 independent KV-caches including the shared prompt
+    prefix. The prompt KV-cache is identical across all 16 samples — only the diverging
+    completions need separate KV storage.
+  napkin_math: 'Prompt KV: 655 MB (shared once). Per-sample suffix: 164 MB × 16 =
+    2.62 GB. Total CoW: 3.28 GB. Total naive: 13.1 GB. Savings: 75%. At N=64: CoW
+    = 655 MB + 64×164 MB = 11.1 GB vs naive 52.4 GB (79% savings).'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

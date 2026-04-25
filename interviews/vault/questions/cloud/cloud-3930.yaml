@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-3930
+track: cloud
+level: L5
+zone: diagnosis
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: 'Overlap Efficiency Degradation at Scale: 8 GPUs vs 256 GPUs'
+scenario: Your DDP training achieves 92% overlap efficiency at 8 H100 GPUs (single
+  node, NVLink) but only 68% at 256 H100 GPUs (32 nodes, InfiniBand). AllReduce time
+  grows faster than expected. Diagnose why overlap degrades at scale.
+question: Why does AllReduce overlap efficiency fall from 92% at 8 H100s to 68% at
+  256 H100s, and how would you fix it?
+details:
+  realistic_solution: 'Three factors degrade overlap at 256 GPUs: (1) AllReduce latency
+    increases: intra-node NVLink ring at 900 GB/s vs inter-node IB at 50 GB/s per
+    link. For 5.2GB gradients: NVLink AllReduce ~6ms, IB AllReduce ~104ms. The 104ms
+    AllReduce exceeds the backward pass time, making overlap impossible. (2) Network
+    congestion: 32 nodes doing simultaneous AllReduce creates IB fabric contention,
+    adding 10-30% overhead. (3) Bucket synchronization: 256 processes must synchronize
+    bucket readiness, adding coordination latency. Fix: use hierarchical AllReduce
+    (intra-node reduce first via NVLink, then inter-node AllReduce of reduced results).
+    This cuts inter-node traffic by 8x.'
+  common_mistake: Assuming AllReduce time scales linearly with node count. Ring AllReduce
+    time is 2(n-1)/n x M/B (nearly constant for large n), but in practice, cross-node
+    AllReduce has much higher latency than intra-node NVLink AllReduce.
+  napkin_math: 'Hierarchical AR: Step 1: 8-GPU reduce-scatter on NVLink, 5.2GB / 8
+    = 650MB per GPU. Step 2: inter-node AllReduce of 650MB at 50 GB/s = 13ms. Step
+    3: intra-node all-gather, ~1ms. Total: ~14ms vs flat AllReduce 104ms. Overlap
+    at 14ms becomes feasible against a 200ms backward pass.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

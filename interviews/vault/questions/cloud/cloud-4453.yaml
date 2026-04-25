@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-4453
+track: cloud
+level: L4
+zone: diagnosis
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: KV Cache Eviction Policy for Decode Pool Memory Management
+scenario: A decode pool running vLLM shows increasing preemptions when long-context
+  requests arrive (>4K tokens). KV cache utilization is at 95% when preemptions begin.
+  GPU memory is 80GB H100. Analyze the eviction cascade and propose a fix.
+question: Why do >4K-token arrivals trigger vLLM preemption cascades at 95% KV utilization,
+  and how would you fix it?
+details:
+  realistic_solution: 'vLLM KV cache preemption analysis: KV cache is paged (PagedAttention).
+    Each page = 16 tokens. At 95% utilization with 4K token requests arriving: the
+    new request needs 4K/16 = 256 pages for prefill KV. Plus existing requests are
+    generating tokens and consuming more pages. The preemption cascade: (1) New long
+    request pre-allocated 256 pages; (2) Existing decode requests'' page tables overflow;
+    (3) vLLM preempts lowest-priority decode request, swaps KV pages to CPU DRAM.
+    Preemption cost: swap 70B model KV for a 2K-token request = 2*80*64*128*2K*2B
+    = 6.7GB. At PCIe 32 GB/s: 0.21 seconds of disruption per preemption. Fix: (1)
+    Implement admission control: reject new requests when GPU memory is above 85%
+    to prevent cascade. (2) Reserve 10% of KV pages for existing request growth: only
+    admit new request if remaining_pages > request_max_output_tokens * pages_per_token.
+    (3) Use KV cache compression (INT8) to effectively double cache size.'
+  common_mistake: 'Reducing the maximum context length to avoid preemptions. This
+    limits the product''s capabilities and does not address the root cause: the KV
+    cache allocator does not account for the growth of existing requests'' KV caches
+    as they generate more tokens.'
+  napkin_math: 'H100 80GB: 70B model at BF16 = 140GB — needs TP=2. Wait, for decode
+    with KV: if using FP8 weights: 70GB weights + 10GB KV headroom. Or: run smaller
+    model. Assume 8B model: 16GB BF16. KV cache available: 80 - 16 - 4 (overhead)
+    = 60GB. KV per token (8B, 32 layers, 32 heads, 128 head_dim): 2*32*32*128*1*2B
+    = 524KB/token. 60GB / 524KB = 114,503 tokens of KV capacity. At batch=128 requests
+    with avg 2K context: 128*2K = 262K tokens needed. Exceeds capacity — need to run
+    TP=2 or use INT8 KV (2x capacity) or limit batch size to 57 requests.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,64 @@
+schema_version: '1.0'
+id: edge-1236
+track: edge
+level: L3
+zone: analyze
+topic: mlops-lifecycle
+competency_area: deployment
+bloom_level: analyze
+phase: both
+title: CI/CD Latency Skew on Hailo-8 Dataflow Accelerator
+scenario: In your MLOps CI/CD pipeline, a model update is automatically approved for
+  deployment because its theoretical compute requirement is 5 TOPS, which is well
+  within the Hailo-8 edge accelerator's capacity of 26 TOPS INT8 operating at 2.5W.
+  However, upon canary deployment, the inference latency spikes to over 7 milliseconds
+  per frame instead of the expected 1 millisecond, and the host system's memory bandwidth
+  is entirely saturated. Given that the Hailo-8 is a dataflow accelerator with no
+  local DRAM that relies entirely on streaming from host memory, analyze why the CI/CD
+  pipeline's latency estimation failed and what system behavior is causing this performance
+  skew.
+question: Why did the TOPS-based CI/CD estimate miss the Hailo-8 canary latency spike
+  and host memory saturation?
+details:
+  realistic_solution: The CI/CD pipeline's profiling step evaluated compute bound
+    (TOPS) but failed to account for the memory-bound nature of the Hailo-8's architecture.
+    Because there is no local DRAM, when the model's intermediate activations exceed
+    the accelerator's internal SRAM, the dataflow compiler must spill these activations
+    back to host memory and stream them in for the next layer. The solution is to
+    integrate the Hailo compiler's hardware-aware profiler into the CI/CD pipeline
+    to reject models that trigger excessive host memory streaming.
+  common_mistake: Candidates often incorrectly attribute the latency spike to INT8
+    quantization overhead, CPU pre-processing bottlenecks, or thermal throttling,
+    ignoring the low 2.5W power draw. They fail to realize that without local DRAM,
+    operations that exceed on-chip memory capacity force expensive round-trips to
+    the host memory, which naive TOPS-based CI/CD estimations completely miss.
+  napkin_math: 'Estimated compute latency: 5 GOPS required / 26 TOPS capacity = 5e9
+    / 26e12 = ~0.192 ms theoretical, realistically around 1 ms with typical utilization.
+    If a large layer forces a 10 MB intermediate activation to spill to host memory,
+    the chip must write 10 MB and read 10 MB (20 MB total I/O per inference). Using
+    a typical edge PCIe Gen3 x2 or x4 connection with an effective bandwidth of ~3
+    GB/s (3000 MB/s): Transfer time = 20 MB / 3000 MB/s = 0.0066 seconds, or 6.6 ms.
+    Total latency = 1 ms compute + 6.6 ms I/O = 7.6 ms, explaining the severe discrepancy
+    between the CI/CD estimate and production reality.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- reasoning_competency and reasoning_mode are not specified.
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Unit error: 5 TOPS / 26 TOPS = 0.192 seconds (192 ms), not 0.2 ms. To get 0.2 ms,
+  the requirement should be 5 GOPS, not 5 TOPS.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

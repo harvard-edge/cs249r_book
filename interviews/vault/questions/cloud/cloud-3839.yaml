@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: cloud-3839
+track: cloud
+level: L3
+zone: analyze
+topic: graceful-degradation
+competency_area: reliability
+bloom_level: analyze
+phase: both
+title: Throughput Collapse in Fallback Model Degradation
+scenario: 'An NLP inference service runs on a cloud node with a single A100 GPU (80
+  GB HBM2e, 2.0 TB/s memory bandwidth, 312 TFLOPS FP16, ridge point ~156 FLOPs/Byte).
+  Under heavy load, the system triggers a quality-of-service degradation ladder to
+  shed load: it switches from its primary 30-billion parameter model running at a
+  batch size of 16, to a much smaller 7-billion parameter fallback model. To minimize
+  response latency for the fallback model, the system processes requests immediately
+  at a batch size of 1. However, during a production incident, this degradation strategy
+  actually reduced the total cluster throughput (tokens/second) by nearly 4x, exacerbating
+  the queue buildup and causing a complete outage. Why does this specific degradation
+  strategy cause throughput to collapse instead of shedding load?'
+question: Why does switching from a batched 30B model to a batch-1 7B fallback reduce
+  total tokens/second instead of shedding load?
+details:
+  realistic_solution: The system's throughput collapses because both scenarios are
+    severely memory-bandwidth bound, meaning the limiting factor is the time it takes
+    to read model weights from HBM. The arithmetic intensity of both models at small
+    batch sizes is far below the A100's ridge point of 156 FLOPs/Byte. While the 7B
+    model is smaller and faster to load per forward pass, serving it at batch size
+    1 means the memory bandwidth cost is paid for a single token. In contrast, the
+    30B model amortizes its weight loading over 16 tokens per pass. To properly shed
+    load, the degradation ladder must maintain batching on the fallback model to ensure
+    actual throughput improvements.
+  common_mistake: Candidates often assume that because the 7B model is roughly 4x
+    smaller and requires fewer FLOPs than the 30B model, it will inherently have higher
+    throughput and alleviate the overload. They fail to identify that autoregressive
+    inference is memory-bandwidth bound, and thus dropping the batch size to 1 destroys
+    the efficiency of weight loading.
+  napkin_math: 'For the 30B model (FP16): Weight size = 30B * 2 bytes = 60 GB. Memory
+    load time per pass = 60 GB / 2000 GB/s = 30 ms. Throughput = 16 tokens / 30 ms
+    = 533 tokens/sec. For the 7B model (FP16): Weight size = 7B * 2 bytes = 14 GB.
+    Memory load time per pass = 14 GB / 2000 GB/s = 7 ms. Throughput = 1 token / 7
+    ms = 142 tokens/sec. Throughput drops from 533 to 142 tokens/sec (a ~3.75x decrease)
+    due to the lost batching efficiency.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

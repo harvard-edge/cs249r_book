@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-4195
+track: cloud
+level: L4
+zone: design
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: apply
+phase: both
+title: L2 Cache Partitioning for Multi-Model Serving
+scenario: 'Your H100 (50 MB L2 cache) serves 3 models concurrently using CUDA MPS.
+  Model A (7B, latency-critical) needs 12 MB of L2 for hot weights. Model B (13B,
+  throughput-oriented) streams 25 MB through L2. Model C (3B, background) uses 8 MB.
+  Total demand: 45 MB. How do you partition the L2 cache to prioritize Model A''s
+  latency?'
+question: How would you partition H100's 50 MB L2 cache across Models A, B, and C
+  to protect Model A's P99 latency?
+details:
+  realistic_solution: 'H100 supports L2 cache partitioning via CUDA''s `cudaDeviceSetLimit(cudaLimitPersistingL2CacheSize,
+    bytes)` and access policy windows. Strategy: (1) Assign Model A a persistent L2
+    region of 15 MB (12 MB hot weights + 3 MB activation buffer). Use `cudaAccessPolicyWindow`
+    with `hitProp=PERSISTING` for Model A''s weight tensor addresses. (2) Model B
+    gets streaming access to remaining 35 MB with `hitProp=STREAMING` — data flows
+    through L2 without persisting, minimizing eviction pressure. (3) Model C gets
+    `hitProp=NORMAL` for the 35 MB shared region. Result: Model A''s hot weights stay
+    in L2 persistently — L2 hit rate for weights goes from 60% (contended) to 99%+
+    (partitioned). Model A P99 drops from 15ms to 8ms. Model B throughput unchanged
+    (it was streaming anyway). Model C sees minor L2 hit rate drop but is not latency-sensitive.'
+  common_mistake: Letting all three models compete for L2 cache equally. Without partitioning,
+    Model B's streaming access pattern evicts Model A's hot weights, causing unpredictable
+    latency spikes for the latency-critical workload.
+  napkin_math: 'Without partitioning: Model A L2 hit rate ≈ 12/45 = 27% (proportional
+    sharing is worse due to B''s streaming). Weight load from HBM: 73% × 12 MB × 100
+    calls/inference = 876 MB from HBM at 3.35 TB/s = 0.26ms overhead. With partitioning:
+    hit rate 99%, HBM load = 1% × 12 MB × 100 = 12 MB → 0.004ms. Latency savings:
+    0.256ms per inference. At 1000 req/s: saves 256ms of cumulative HBM time.'
+status: deleted
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+deletion_reason: Math error unfixable
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: ERROR
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- The total cache demand (45 MB) is less than the H100's L2 cache capacity (50 MB),
+  so all models should fit with a near 100% hit rate without partitioning. Equating
+  hit rate directly to the demand ratio (12/45 = 27%) is mathematically unfounded.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

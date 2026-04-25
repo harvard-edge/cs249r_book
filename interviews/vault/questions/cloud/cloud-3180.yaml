@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3180
+track: cloud
+level: L4
+zone: diagnosis
+topic: speculative-decoding
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Speculative Decoding Impact on Time-to-First-Token
+scenario: After enabling speculative decoding for a 70B model on H100, users report
+  that TTFT (time to first token) increased from 200ms to 350ms. Tokens per second
+  after the first token improved 2.5x. Diagnose why TTFT degraded and propose a fix.
+question: Why did speculative decoding increase TTFT from 200 ms to 350 ms, and how
+  would you fix the first-token delay?
+details:
+  realistic_solution: 'Without speculation, TTFT = target prefill time for prompt
+    (2048 tokens at 70B): 2 x 70B x 2048 / 989 TFLOPS = 290ms. Measured 200ms suggests
+    some optimization (e.g., FP8 prefill or shorter prompt). With speculation: draft
+    must also prefill the prompt to generate its first draft tokens. Draft prefill:
+    2 x 7B x 2048 / 989T = 29ms. But draft and target run sequentially on same GPU:
+    TTFT = target_prefill (200ms) + draft_prefill (29ms) + draft_generate_K (10ms)
+    + target_verify (42ms) = 281ms. Wait, the first token is emitted after target
+    verification, not after target prefill alone. Without spec: first token after
+    prefill = 200ms. With spec: prefill(200ms) + draft_K_tokens(10ms) + verify(42ms)
+    = 252ms, but draft needs its own prefill first = 29ms. Total: 229ms if parallelized,
+    281ms if sequential. Actual 350ms suggests draft prefill is not overlapped and
+    there''s additional KV cache setup. Fix: skip speculation for the first decode
+    step — emit first token immediately after target prefill (200ms TTFT), then start
+    speculation from token 2 onwards.'
+  common_mistake: Thinking TTFT degradation is caused by draft model initialization.
+    The real cause is that the draft model also needs to prefill the prompt, adding
+    its own prefill latency to the critical path.
+  napkin_math: 'Target prefill: 200ms. Draft prefill: 29ms. Draft generate: 10ms.
+    Verify: 42ms. Sequential TTFT: 281ms. Fix: skip first speculation round. TTFT:
+    200ms + 42ms (first auto-regressive step) = 242ms. Then spec from token 2.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

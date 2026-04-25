@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3954
+track: cloud
+level: L3
+zone: implement
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: Overlapping Gradient Norm Computation with AllReduce
+scenario: Gradient clipping requires computing the global gradient norm (L2 norm across
+  all parameters on all GPUs) before the optimizer step. This requires a separate
+  AllReduce of per-GPU squared norms. Typically this is done AFTER the gradient AllReduce,
+  adding latency. Can it be overlapped?
+question: Can it be overlapped?
+details:
+  realistic_solution: 'Overlap strategy: (1) As each gradient bucket finishes its
+    AllReduce, immediately compute the L2 norm of that bucket on the local GPU (sum
+    of squares). (2) Accumulate per-bucket norms into a running sum. This norm computation
+    overlaps with subsequent buckets'' AllReduce. (3) After all buckets are reduced
+    and all local norms computed, do one tiny AllReduce of a single float (the local
+    squared norm sum) to get the global norm. (4) This tiny AllReduce (<1us) replaces
+    a sequential norm computation that would take 2-5ms. Implementation in PyTorch
+    DDP: use register_comm_hook to insert norm computation after each bucket''s AllReduce.
+    Result: gradient clipping adds near-zero overhead instead of 2-5ms.'
+  common_mistake: 'Computing gradient norms only after all gradients are fully reduced.
+    This serializes: backward -> AllReduce -> norm computation -> norm AllReduce ->
+    clip -> optimizer.'
+  napkin_math: 'Standard approach: AllReduce finish + norm compute (2ms for 1.3B params)
+    + norm AllReduce (0.1ms) = 2.1ms extra. Overlapped: norm compute runs during bucket
+    AllReduce (hidden) + tiny AllReduce (0.001ms) = 0.001ms extra. Savings: 2.1ms/step.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

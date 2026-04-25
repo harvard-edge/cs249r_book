@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3715
+track: cloud
+level: L5
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: ReduceScatter vs AllReduce for Pipeline Parallelism on H100 Cluster
+scenario: 'A 16-GPU H100 cluster uses pipeline parallelism (8 pipeline stages) plus
+  data parallelism (2-way DP). Micro-batch size is 4. Compare the communication pattern
+  for ZeRO-1 (shard optimizer states) vs ZeRO-3 (shard all: optimizer, gradients,
+  parameters) for a 70B model in this hybrid parallelism setup.'
+question: How do ZeRO-1 and ZeRO-3 communication patterns compare within the 2-way
+  DP groups of the 8-stage pipeline?
+details:
+  realistic_solution: 'Hybrid setup: 8-stage PP × 2-way DP = 16 GPUs. Each PP stage
+    holds ~70B/8 = 8.75B params. ZeRO-1 within DP groups (2 GPUs): optimizer state
+    sharded 2×. FP32 optimizer: 8.75B × 12B = 105GB per stage → sharded = 52.5GB per
+    GPU. AllGather at update: 52.5GB at 450 GB/s = 116ms. ZeRO-3 within DP groups:
+    params also sharded. Each PP stage needs AllGather before forward, ReduceScatter
+    after backward = 2 collectives per stage per micro-batch. With 8 pipeline stages
+    and 4 micro-batches: 8×4×2 = 64 collectives. Each: 8.75B×2B/2 = 8.75GB at 450
+    GB/s = 19.4ms. Total: 64 × 19.4ms = 1.24s additional communication per batch vs
+    ZeRO-1 adding ~232ms.'
+  common_mistake: Applying ZeRO sharding across all 16 GPUs when pipeline parallelism
+    requires adjacent pipeline stages to share full parameter copies; ZeRO should
+    shard only within the DP dimension.
+  napkin_math: 'ZeRO-1 DP all-reduce: 8.75B×4B/2 = 17.5GB at 450 GB/s = 39ms × 2 GPUs
+    = 78ms/step. ZeRO-3 AllGather+RS per micro-batch per stage: 64 × 8.75GB/450 GB/s
+    = 1.24s. ZeRO-1 much better for pipeline parallelism.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

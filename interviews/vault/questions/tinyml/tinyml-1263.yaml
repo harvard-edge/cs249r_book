@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: tinyml-1263
+track: tinyml
+level: L5
+zone: realization
+topic: real-time-deadlines
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Keyword Spotting Deadlines on ESP32-S3
+scenario: We are deploying a continuous keyword spotting (KWS) model on an ESP32-S3
+  for a smart home device. The system captures audio at 16kHz and we must run inference
+  every 20ms to meet our UX latency budget. The KWS model is quantized to INT8, requires
+  2.5 million MACs per inference, and has 350 KB of weights. The ESP32-S3 features
+  a 240 MHz dual-core Xtensa processor with INT8 vector extensions, 512 KB of internal
+  SRAM, and 8 MB of external PSRAM. The system also runs a BLE stack requiring 100
+  KB of SRAM and frequent high-priority interrupts. How do you partition the memory
+  and schedule the inference to guarantee the 20ms deadline without dropping audio
+  frames or breaking the BLE connection?
+question: How do you partition the memory and schedule the inference to guarantee
+  the 20ms deadline without dropping audio frames or breaking the BLE connection?
+details:
+  realistic_solution: The candidate must pin the BLE stack to Core 0 and the KWS inference
+    to Core 1 to completely isolate interrupt latency. Because the ESP32-S3's PSRAM
+    latency is slow (cache misses take ~40 cycles), the 350 KB INT8 weights must be
+    locked directly into the 512 KB internal SRAM. This leaves 162 KB of SRAM, which
+    is safely partitioned between the 100 KB BLE stack and 62 KB for audio DMA double-buffering,
+    while pushing non-critical RTOS tasks out to the 8 MB PSRAM.
+  common_mistake: Candidates typically place the 350 KB model into the spacious 8
+    MB PSRAM, ignoring the massive cache miss penalty that destroys real-time execution.
+    They also often fail to pin the BLE stack and the KWS inference to separate cores,
+    leading to BLE interrupts preempting the neural network and causing Worst-Case
+    Execution Time (WCET) spikes that miss the 20ms budget.
+  napkin_math: 'In SRAM at 240 MHz (assuming ~1 cycle/MAC with INT8 vector extensions):
+    2.5M MACs / 240 MHz = 10.4 ms execution time, safely within the 20 ms budget.
+    In PSRAM: Assuming a 20% cache miss rate and 40-cycle penalty per miss, the average
+    cycles per MAC jumps to 9 (1 + 0.2*40). Execution time in PSRAM becomes (2.5M
+    * 9) / 240 MHz = 93.75 ms, which drastically misses the 20 ms deadline and guarantees
+    dropped audio frames.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

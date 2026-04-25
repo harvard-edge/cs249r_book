@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-4095
+track: cloud
+level: L5
+zone: evaluation
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: TP vs Expert Parallelism for MoE Models
+scenario: 'You are training a Mixture-of-Experts model with 8 experts per layer, each
+  expert having hidden_dim=4096. You have 8 H100 GPUs in a node. Compare two strategies:
+  (A) TP=8 applied to each expert, or (B) Expert Parallelism where each GPU holds
+  one complete expert. Which is superior and why?'
+question: Which is superior and why?
+details:
+  realistic_solution: 'Strategy A (TP=8 per expert): Each expert''s FFN weights are
+    split across all 8 GPUs. Every token requires 2 AllReduces per expert layer, regardless
+    of which expert it is routed to. All 8 GPUs participate in every token''s computation.
+    Strategy B (Expert Parallelism): Each GPU holds one complete expert. Tokens are
+    routed via All-to-All dispatch to the owning GPU, processed locally, then All-to-All
+    collected back. Communication volume is comparable to TP''s AllReduce (~2 × batch
+    × hidden × 2B), but there is no synchronization barrier during compute — each
+    GPU works independently. Strategy B wins because: (1) experts are embarrassingly
+    parallel, (2) each GPU does a full GEMM (better utilization than tiny TP shards),
+    (3) no barrier stall during compute. Expert parallelism is the standard for MoE
+    (GShard, Switch Transformer, Mixtral).'
+  common_mistake: Assuming TP is always better because it is more established. For
+    MoE, expert parallelism is almost always preferred because experts are independent
+    — there is no mathematical reason to split a single expert across GPUs.
+  napkin_math: 'With top-2 routing, each expert sees 2/8 = 25% of tokens. EP All-to-All:
+    dispatches 2 × batch × hidden × 2B — equivalent in volume to TP''s AllReduce (both
+    are ~2 × batch × hidden × 2B). The advantage of EP is not reduced communication
+    volume but elimination of synchronization barriers: experts compute independently
+    after the All-to-All.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- EP All-to-All volume for top-2 routing is 2 * batch * hidden * 2B. TP AllReduce
+  volume is also roughly 2 * batch * hidden * 2B. They are equivalent in volume, not
+  25%.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

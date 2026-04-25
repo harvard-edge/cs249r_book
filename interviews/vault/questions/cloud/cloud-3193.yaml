@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3193
+track: cloud
+level: L6+
+zone: realization
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Serving with Offloaded Experts
+scenario: You need to serve a 256-expert MoE model (each expert 2B params, 671B total)
+  on a single 8×H100 node with 640 GB total HBM. The model does not fit entirely in
+  GPU memory. Design an expert offloading strategy and calculate the latency impact.
+question: How can you offload experts for a 671B, 256-expert MoE on one 8x H100 node,
+  and what latency does PCIe fetching add?
+details:
+  realistic_solution: 'Total weight memory: 671B × 2B (BF16) = 1.34 TB, far exceeding
+    640 GB HBM. Strategy: keep the shared attention layers + top-16 most frequently
+    accessed experts in GPU HBM (~96 GB), offload the remaining 240 experts to CPU
+    DRAM (host has 2TB). On each token, if a routed expert is not GPU-resident, fetch
+    it via PCIe Gen5 (64 GB/s per GPU, ~128 GB/s aggregate with 2 root complexes).
+    Each expert: 2B × 2B = 4 GB. Fetch time: 4 GB / 64 GB/s = 62.5ms — far too slow
+    for real-time. Mitigation: (1) Predict expert routing for the next batch and prefetch
+    experts asynchronously. (2) Use expert caching with LRU eviction — popular experts
+    stay resident. (3) Quantize offloaded experts to INT4 (1 GB each, fetch in 15.6ms).
+    (4) For batch serving, accumulate tokens for the same expert and amortize fetch
+    cost. This is viable for offline batch inference but challenging for real-time
+    serving under 100ms SLA.'
+  common_mistake: Assuming all experts must be GPU-resident. With 256 experts and
+    top-2 routing, only 2 experts are active per token — the vast majority are idle
+    at any given time and can reside in CPU DRAM or NVMe.
+  napkin_math: 'Total weights: 671B × 2B = 1.34 TB. HBM capacity: 640 GB (48% fit).
+    Expert size: 4 GB BF16, 1 GB INT4. PCIe fetch: 4 GB/64 GB/s = 62.5ms (BF16), 15.6ms
+    (INT4). With LRU cache hit rate of 90%: avg latency = 0.1 × 15.6ms = 1.56ms amortized.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
