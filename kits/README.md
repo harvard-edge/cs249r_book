@@ -237,7 +237,7 @@ We welcome contributions to the hardware labs! To contribute:
       <td>Project overview and ecosystem</td>
     </tr>
     <tr>
-      <td width="25%" align="center"><b><a href="../book/">Textbook</a></b></td>
+      <td width="25%" align="center"><b><a href="https://mlsysbook.ai">Textbook</a></b></td>
       <td>ML Systems concepts and theory</td>
     </tr>
     <tr>

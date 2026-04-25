@@ -24,8 +24,8 @@ The widget is gated behind a `socratiq=true` cookie or URL parameter so it can b
 ### Installation
 
 ```bash
-git clone <repository-url>
-cd socratiq
+git clone https://github.com/harvard-edge/cs249r_book.git
+cd cs249r_book/socratiq
 npm install
 ```
 

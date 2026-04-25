@@ -26,8 +26,8 @@ MLPerf EDU brings industry-standard ML benchmarking to the classroom. Every mode
 
 ```bash
 # Clone and install
-git clone https://github.com/your-org/mlperf-edu.git
-cd mlperf-edu
+git clone https://github.com/harvard-edge/cs249r_book.git
+cd cs249r_book/mlperf-edu
 pip install -e .
 
 # Train a single workload (25 epochs, ~89 seconds)

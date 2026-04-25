@@ -32,12 +32,12 @@
 </p>
 
 <p align="center">
-  <b><a href="https://mlsysbook.ai">📘 Textbook (current edition)</a></b> •
-  <b>📙 Vol I + Vol II <i>(Summer 2026)</i></b> •
+  <b><a href="https://mlsysbook.ai">📘 Textbook</a></b> •
+  <b><a href="https://mlsysbook.ai/vol1/">📗 Vol I</a> + <a href="https://mlsysbook.ai/vol2/">📘 Vol II</a></b> •
   <b><a href="https://mlsysbook.ai/tinytorch/">🔥 TinyTorch</a></b> •
-  <b><a href="mlsysim/README.md">🔮 MLSys·im <i>(dev)</i></a></b> •
-  <b><a href="interviews/README.md">💼 StaffML <i>(dev)</i></a></b> •
-  <b><a href="https://mlsysbook.org">🌐 Ecosystem</a></b>
+  <b><a href="https://mlsysbook.ai/labs/">🔬 Labs</a></b> •
+  <b><a href="https://mlsysbook.ai/mlsysim/">🔮 MLSys·im</a></b> •
+  <b><a href="https://mlsysbook.ai/staffml/">💼 StaffML</a></b>
 </p>
 
 <p align="center">📚 <b>Hardcopy edition coming 2026 with MIT Press.</b></p>
@@ -78,10 +78,10 @@ A growing community of contributors helps improve every part of it: fixing error
 
 ## The Curriculum
 
-Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
+Every component connects. The textbook gives you the mental models. The labs let you reason through trade-offs interactively, powered by MLSys·im — a modeling engine for infrastructure you can't physically access, and a standalone tool in its own right. TinyTorch makes you build the machinery yourself. The hardware kits put you face-to-face with real deployment constraints. StaffML tests whether you actually understand it. Socratiq adds AI-guided reading, contextual quizzes, and spaced repetition inside the learning experience. And the instructor hub, slides, and newsletter give educators everything they need to bring this into a classroom.
 
 <p align="center">
-  <img src="README/curriculum-map.svg?v=4" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys im, and StaffML connect" width="760">
+  <img src="README/curriculum-map.svg?v=4" alt="Curriculum map showing how the textbook, labs, TinyTorch, hardware kits, MLSys·im, and StaffML connect" width="760">
 </p>
 
 ### For Students
@@ -100,13 +100,13 @@ Every component connects. The textbook gives you the mental models. The labs let
       <td align="center">📖</td>
       <td><b>Textbook</b></td>
       <td>Two-volume MIT Press textbook. The theory, the mental models, and the quantitative reasoning that everything else builds on.</td>
-      <td><a href="https://mlsysbook.ai">Current edition</a> · Vol I + II <i>(Summer 2026)</i></td>
+      <td><a href="https://mlsysbook.ai/vol1/">Vol I</a> · <a href="https://mlsysbook.ai/vol2/">Vol II</a></td>
     </tr>
     <tr>
       <td align="center">🔬</td>
       <td><b>Labs</b></td>
       <td>Interactive Marimo notebooks where you explore trade-offs from the textbook: change a parameter, see what breaks, build intuition. Powered by MLSys·im under the hood.</td>
-      <td><a href="labs/README.md">Read more</a> <i>(dev)</i></td>
+      <td><a href="https://mlsysbook.ai/labs/">Launch labs</a> · <a href="labs/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">🔥</td>
@@ -117,20 +117,20 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">🛠️</td>
       <td><b>Hardware Kits</b></td>
-      <td>Deploy ML to Arduino, Raspberry Pi, and Jetson. Real memory limits, real power budgets, real latency.</td>
+      <td>Deploy ML to Arduino, Seeed, Grove, and Raspberry Pi devices. Real memory limits, real power budgets, real latency.</td>
       <td><a href="https://mlsysbook.ai/kits">Browse labs</a></td>
     </tr>
     <tr>
       <td align="center">🔮</td>
       <td><b>MLSys·im</b></td>
       <td>Calculate memory bottlenecks, network saturation, and scheduling limits at infrastructure scales you can't physically access.</td>
-      <td><a href="mlsysim/README.md">Read more</a> <i>(dev)</i></td>
+      <td><a href="https://mlsysbook.ai/mlsysim/">Use simulator</a> · <a href="mlsysim/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">💼</td>
       <td><b>StaffML</b></td>
       <td>Physics-grounded interview questions for ML systems roles. Vault, practice drills, mock interviews, and progress tracking.</td>
-      <td><a href="interviews/staffml/">Coming soon</a> <i>(dev)</i></td>
+      <td><a href="https://mlsysbook.ai/staffml/">Practice</a> · <a href="interviews/README.md">Repo guide</a></td>
     </tr>
   </tbody>
 </table>
@@ -150,14 +150,14 @@ Every component connects. The textbook gives you the mental models. The labs let
     <tr>
       <td align="center">🎓</td>
       <td><b>Instructor Hub</b></td>
-      <td>The AI Engineering Blueprint: two 12-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
-      <td><a href="instructors/index.qmd">View hub</a></td>
+      <td>The AI Engineering Blueprint: two 16-week syllabi, pedagogy guide, assessment rubrics, and a TA handbook.</td>
+      <td><a href="https://mlsysbook.ai/instructors/">View hub</a> · <a href="instructors/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">🎬</td>
       <td><b>Lecture Slides</b></td>
       <td>Beamer slide decks for every chapter, with four theme variants. Drop into your course and teach.</td>
-      <td><a href="slides/README.md">Browse decks</a> <i>(dev)</i></td>
+      <td><a href="https://mlsysbook.ai/slides/">Browse decks</a> · <a href="slides/README.md">Repo guide</a></td>
     </tr>
     <tr>
       <td align="center">📬</td>
@@ -167,6 +167,28 @@ Every component connects. The textbook gives you the mental models. The labs let
     </tr>
   </tbody>
 </table>
+
+---
+
+## Choose Your Path
+
+The pieces are designed to work together, but you do not need to adopt everything at once.
+
+| If you are... | Start here | Then go deeper |
+|---|---|---|
+| **A student or self-learner** | [Read Volume I](https://mlsysbook.ai/vol1/) and try [Lab 00](https://mlsysbook.ai/labs/vol1/lab_00_introduction/) | Build [TinyTorch](https://mlsysbook.ai/tinytorch/), use [MLSys·im](https://mlsysbook.ai/mlsysim/), and practice with [StaffML](https://mlsysbook.ai/staffml/) |
+| **An instructor** | Open [The AI Engineering Blueprint](https://mlsysbook.ai/instructors/) | Use the [course map](https://mlsysbook.ai/instructors/course-map.html), [slides](https://mlsysbook.ai/slides/), rubrics, and TA guide |
+| **A contributor** | Pick the component you use most | Improve chapters, labs, tests, examples, hardware notes, simulator models, or assessment content |
+
+The learning loop is: **Read → Explore → Build → Model → Deploy → Practice → Teach**.
+
+### Adjacent and Experimental Work
+
+Some projects are intentionally earlier-stage than the main curriculum:
+
+- [Socratiq](socratiq/README.md) explores AI-guided reading, contextual quizzes, and spaced repetition for static learning sites.
+- [MLPerf EDU](mlperf-edu/README.md) is an under-construction pedagogical benchmark suite aligned with MLCommons MLPerf.
+- [Periodic Table of ML Systems](periodic-table/README.md) is a compact concept map for organizing recurring systems ideas.
 
 ---
 
@@ -248,19 +270,19 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
   <tbody>
     <tr>
       <td width="7%" align="center"><h3>①</h3></td>
-      <td width="93%"><b>Read the textbook.</b> Start with the <a href="https://mlsysbook.ai">current edition</a>. It's the foundation for everything else.</td>
+      <td width="93%"><b>Read the textbook.</b> Start with <a href="https://mlsysbook.ai/vol1/">Volume I</a> or continue to <a href="https://mlsysbook.ai/vol2/">Volume II</a>. It's the foundation for everything else.</td>
     </tr>
     <tr>
       <td align="center"><h3>②</h3></td>
-      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="labs/README.md">explore trade-offs</a> (Labs), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
+      <td><b>Pick a hands-on path.</b> <a href="https://mlsysbook.ai/tinytorch/">Build a framework</a> (TinyTorch), <a href="https://mlsysbook.ai/labs/">explore trade-offs</a> (Labs), <a href="https://mlsysbook.ai/mlsysim/">model constraints</a> (MLSys·im), or <a href="https://mlsysbook.ai/kits">deploy to real hardware</a> (Kits).</td>
     </tr>
     <tr>
       <td align="center"><h3>③</h3></td>
-      <td><b>Test yourself.</b> Drill <a href="interviews/README.md">StaffML</a>: physics-grounded systems design questions across cloud, edge, mobile, and TinyML.</td>
+      <td><b>Test yourself.</b> Drill <a href="https://mlsysbook.ai/staffml/">StaffML</a>: physics-grounded systems design questions across cloud, edge, mobile, and TinyML.</td>
     </tr>
     <tr>
       <td align="center"><h3>④</h3></td>
-      <td><b>Teach it.</b> Adopt the curriculum with the <a href="instructors/index.qmd">AI Engineering Blueprint</a> and <a href="slides/README.md">lecture slides</a>.</td>
+      <td><b>Teach it.</b> Adopt the curriculum with the <a href="https://mlsysbook.ai/instructors/">AI Engineering Blueprint</a> and <a href="https://mlsysbook.ai/slides/">lecture slides</a>.</td>
     </tr>
   </tbody>
 </table>
@@ -298,7 +320,7 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
       </td>
       <td>
         TinyTorch and Hardware Kits are live.<br>
-        MLSys·im, Labs, and StaffML are in development.
+        MLSys·im, Labs, and StaffML are early-release and actively iterated.
       </td>
     </tr>
   </tbody>
@@ -363,6 +385,21 @@ The textbook follows the Hennessy & Patterson pedagogical model across two volum
       <td align="center">🛠️</td>
       <td><b>Improve hardware labs</b></td>
       <td><a href="kits/README.md">Hardware kits guide</a></td>
+    </tr>
+    <tr>
+      <td align="center">🔬</td>
+      <td><b>Improve interactive labs or simulator models</b></td>
+      <td><a href="labs/README.md">Labs guide</a> · <a href="mlsysim/README.md">MLSys·im guide</a></td>
+    </tr>
+    <tr>
+      <td align="center">💼</td>
+      <td><b>Improve assessment or career-readiness content</b></td>
+      <td><a href="interviews/README.md">StaffML guide</a> · <a href="book/tools/scripts/genai/quiz_refresh/README.md">quiz refresh guide</a></td>
+    </tr>
+    <tr>
+      <td align="center">🧠</td>
+      <td><b>Improve AI learning tools</b></td>
+      <td><a href="socratiq/README.md">Socratiq guide</a></td>
     </tr>
     <tr>
       <td align="center">🐛</td>
@@ -727,7 +764,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
 <!-- PERIODICTABLE-CONTRIBUTORS-START -->
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable -->
-<p><em>Coming soon!</em></p>
+<p><em>No contributors listed yet — be the first!</em></p>
 
 <!-- markdownlint-restore -->
 <!-- prettier-ignore-end -->
