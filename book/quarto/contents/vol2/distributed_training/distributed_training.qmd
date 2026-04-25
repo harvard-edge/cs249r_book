@@ -156,7 +156,7 @@ Third, **dataset scale** exceeds single-machine storage when training data reach
 
 Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
 
-1.  **Communication Overhead**\index{Communication Overhead}: The cost of synchronizing gradients. For a model with $N$ parameters distributed across $D$ devices, all-reduce operations must transfer approximately $2N(D-1)/D$ bytes per step. On commodity networks, this can dominate computation time.
+1.  **Communication Overhead**\index{Communication Overhead}: The cost of synchronizing gradients. For a model with $P$ parameters distributed across $N_{\text{dev}}$ devices, all-reduce operations must transfer approximately $2P(N_{\text{dev}}-1)/N_{\text{dev}}$ gradient values per step, multiplied by the bytes per gradient element. On commodity networks, this can dominate computation time.
 2.  **Fault Tolerance**\index{Fault Tolerance}: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9 percent per-node reliability experiences failures every few hours.
 3.  **Algorithmic Stability**\index{Algorithmic Stability}: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
@@ -513,14 +513,14 @@ Data parallelism is most effective when the dataset size is large but the model 
 
 The effectiveness of data parallelism stems from a property of stochastic gradient descent. Gradients computed on different minibatches can be averaged while preserving mathematical equivalence to single-device training. This property enables parallel computation across devices, with the mathematical foundation following directly from the linearity of expectation.
 
-Consider a model with parameters $θ$ training on a dataset $D$. The loss function for a single data point $x_i$ is $L(θ, x_i)$. In standard SGD with batch size $B$, the gradient update for a minibatch is:
+Consider a model with parameters $\theta$ training on a dataset $D$. The loss function for a single data point $x_i$ is $\mathcal{L}(\theta, x_i)$. In standard SGD with batch size $B$, the gradient update for a minibatch is:
 $$
-g = \frac{1}{B} \sum_{i=1}^B \nabla_θ L(θ, x_i)
+g = \frac{1}{B} \sum_{i=1}^B \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
 In data parallelism with $N$ devices, each device $k$ computes gradients on its own minibatch $B_k$:
 $$
-g_k = \frac{1}{|B_k|} \sum_{x_i \in B_k} \nabla_θ L(θ, x_i)
+g_k = \frac{1}{|B_k|} \sum_{x_i \in B_k} \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
 The global update averages these local gradients:
@@ -530,7 +530,7 @@ $$
 
 The averaging is mathematically equivalent to computing the gradient on the combined batch $B_{\text{total}} = \bigcup_{k=1}^N B_k$:
 $$
-g_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}} \nabla_θ L(θ, x_i)
+g_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}} \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
 The equivalence shows *why* data parallelism maintains the statistical properties of SGD training: distributing distinct data subsets across devices, computing local gradients independently, and averaging them approximates the full-batch gradient.
@@ -1198,21 +1198,21 @@ Hardware efficiency metrics govern throughput, but convergence theory determines
 
 ### Convergence rate for synchronous data parallel SGD {#sec-distributed-training-systems-systems-convergence-rate-synchronous-data-parallel-sgd-2ed5}
 
-The fundamental convergence result for distributed SGD provides the theoretical basis for understanding parallel training. For a loss function $L(\theta)$ with $L$-Lipschitz gradients (smoothness condition) and variance-bounded stochastic gradients $\mathbb{E}[\|g_i - \nabla L(\theta)\|^2] \leq \sigma^2$, synchronous data parallel SGD with $N$ workers achieves the following convergence rate.
+The fundamental convergence result for distributed SGD provides the theoretical basis for understanding parallel training. For a loss function $\mathcal{L}(\theta)$ with $L_s$-Lipschitz gradients (smoothness condition) and variance-bounded stochastic gradients $\mathbb{E}[\|g_i - \nabla \mathcal{L}(\theta)\|^2] \leq \sigma^2$, synchronous data parallel SGD with $N$ workers achieves the following convergence rate.
 
 ::: {.callout-theorem title="Convergence Rate for Distributed SGD"}
 
 For synchronous data parallel SGD with $N$ workers, each computing gradients on a local batch of size $b$, after $M$ total iterations the expected optimization error satisfies:
 
 $$
-\mathbb{E}[L(\theta_M)] - L \leq \underbrace{\frac{L \|\theta_0 - \theta\|^2}{2M}}_{\text{optimization error}} + \underbrace{\frac{\eta L \sigma^2}{2Nb}}_{\text{variance floor}}
+\mathbb{E}[\mathcal{L}(\theta_M)] - \mathcal{L}^{\star} \leq \underbrace{\frac{L_s \|\theta_0 - \theta^{\star}\|^2}{2M}}_{\text{optimization error}} + \underbrace{\frac{\eta L_s \sigma^2}{2Nb}}_{\text{variance floor}}
 $$
 
-where $\eta$ is the learning rate, $L$ is the optimal loss, and $\sigma^2$ is the gradient variance. The effective convergence rate is $O(1/\sqrt{NbM})$ when the learning rate is tuned optimally as $\eta = O(\sqrt{Nb/M})$.
+where $\eta$ is the learning rate, $L_s$ is the smoothness constant, $\mathcal{L}^{\star}$ is the optimal loss value, $\theta^{\star}$ is an optimal parameter vector, and $\sigma^2$ is the gradient variance. The effective convergence rate is $O(1/\sqrt{NbM})$ when the learning rate is tuned optimally as $\eta = O(\sqrt{Nb/M})$.
 
 :::
 
-The theorem reveals several important insights. First, the variance floor decreases linearly with the number of workers $N$, explaining why distributed training can achieve the same final loss with fewer iterations. The effective batch size is $B = Nb$, so $N$ workers with batch size $b$ each behave equivalently to a single worker with batch size $Nb$. Second, the convergence rate $O(1/\sqrt{NM})$ shows that $N$ workers can achieve the same error as a single worker in $1/N$ the iterations, assuming infinite bandwidth. This is the **statistical efficiency** of distributed training, distinct from hardware efficiency.
+The theorem reveals several important insights. First, the variance floor decreases linearly with the number of workers $N$, explaining why distributed training can achieve the same final loss with fewer iterations. The effective batch size is $B = Nb$, so $N$ workers with batch size $b$ each behave equivalently to a single worker with batch size $Nb$. Second, the convergence rate $O(1/\sqrt{NbM})$ shows that workers, local batch size, and iteration count jointly determine statistical progress, assuming infinite bandwidth. This is the **statistical efficiency** of distributed training, distinct from hardware efficiency.
 
 However, the theorem assumes perfect synchronization (BSP). When workers proceed at different rates or use stale gradients, convergence guarantees degrade, as we examine next.
 
@@ -1224,7 +1224,7 @@ Synchronization models fundamentally affect convergence behavior. The staleness 
 
 ***Gradient Staleness ($\tau$)***\index{Gradient!staleness, definition} is the number of parameter updates that occur between the time a gradient is computed and the time it is applied to the global model state.
 
-1.  **Significance (Quantitative):** It represents the **Synchronization Error** in distributed optimization. Increasing $\tau$ can improve **Throughput ($\eta$)** by reducing barrier waits ($L_{\text{lat}}$), but it typically degrades the **Rate of Convergence**, requiring more operations ($O$) to reach the same accuracy.
+1.  **Significance (Quantitative):** It represents the **Synchronization Error** in distributed optimization. Increasing $\tau$ can improve throughput by reducing barrier waits ($L_{\text{lat}}$), but it typically degrades the **Rate of Convergence**, requiring more operations ($O$) to reach the same accuracy.
 2.  **Distinction (Durable):** Unlike **Network Latency**, which is a physical delay, Staleness is an **Algorithmic Offset** that arises from the choice of synchronization protocol (e.g., ASP, SSP).
 3.  **Common Pitfall:** A frequent misconception is that Staleness is "always bad." In reality, it is a **Throughput-Convergence Trade-off**: for some large-scale workloads, allowing bounded staleness is the only way to keep thousands of GPUs in use.
 
@@ -1237,7 +1237,7 @@ In Bulk Synchronous Parallel (BSP, $\tau = 0$), all workers compute gradients on
 Stale Synchronous Parallel (SSP, $\tau \leq s$) relaxes the barrier by allowing workers to proceed up to $s$ iterations ahead of the slowest worker. The convergence rate degrades to:
 
 $$
-\mathbb{E}[L(\theta_M)] - L \leq O\left(\frac{1}{\sqrt{NbM}}\right) + O\left(\frac{s^2 \eta^2 L^2}{Nb}\right)
+\mathbb{E}[\mathcal{L}(\theta_M)] - \mathcal{L}^{\star} \leq O\left(\frac{1}{\sqrt{NbM}}\right) + O\left(\frac{s^2 \eta^2 L_s^2}{Nb}\right)
 $$
 
 The second term represents the **staleness penalty**. For bounded staleness $s$, this penalty can be controlled by reducing the learning rate: $\eta' = \eta / \sqrt{1 + s}$. Typical production systems use $s \in \{2, 4, 8\}$, accepting 5--15 percent convergence degradation for 20--40 percent throughput improvement on heterogeneous clusters.
@@ -1245,7 +1245,7 @@ The second term represents the **staleness penalty**. For bounded staleness $s$,
 Asynchronous SGD (ASP, $\tau = \infty$) eliminates waiting entirely: workers update parameters immediately. While this maximizes throughput, convergence degrades:
 
 $$
-\mathbb{E}[L(\theta_M)] - L \leq O\left(\frac{1}{\sqrt{M}}\right) + O\left(\frac{\bar{\tau}^2 \eta^2 L^2}{1}\right)
+\mathbb{E}[\mathcal{L}(\theta_M)] - \mathcal{L}^{\star} \leq O\left(\frac{1}{\sqrt{M}}\right) + O\left(\bar{\tau}^2 \eta^2 L_s^2\right)
 $$
 
 where $\bar{\tau}$ is the average staleness. The staleness penalty now scales with the square of average delay, and critically, the variance reduction from $N$ workers disappears in the dominant term. Compensation techniques include:
@@ -1259,8 +1259,8 @@ where $\bar{\tau}$ is the average staleness. The staleness penalty now scales wi
 | **Model** | **Staleness**   |                    **Convergence Rate** | **Variance Reduction** | **Best For**                          |
 |:----------|:----------------|----------------------------------------:|:-----------------------|:--------------------------------------|
 | **BSP**   | $\tau = 0$      |                       $O(1/\sqrt{NbM})$ | Full ($1/N$)           | Final training, reproducibility       |
-| **SSP**   | $\tau \leq s$   |        $O(1/\sqrt{NbM}) + O(s^2\eta^2)$ | Partial                | Heterogeneous clusters                |
-| **ASP**   | $\tau = \infty$ | $O(1/\sqrt{M}) + O(\bar{\tau}^2\eta^2)$ | None                   | Maximum throughput, early exploration |
+| **SSP**   | $\tau \leq s$   |        $O(1/\sqrt{NbM}) + O(s^2\eta^2 L_s^2 / Nb)$ | Partial                | Heterogeneous clusters                |
+| **ASP**   | $\tau = \infty$ | $O(1/\sqrt{M}) + O(\bar{\tau}^2\eta^2 L_s^2)$ | None                   | Maximum throughput, early exploration |
 
 : **Convergence Properties by Synchronization Model**. BSP provides optimal convergence guarantees at the cost of synchronization overhead. SSP offers a tunable trade-off between throughput and convergence. ASP maximizes throughput but loses the variance reduction benefit of parallelism. {#tbl-convergence-comparison}
 
@@ -1306,57 +1306,57 @@ Layer-wise scaling prevents layers with small weights from receiving disproporti
 
 ### Critical batch size: When does parallelism hurt? {#sec-distributed-training-systems-systems-critical-batch-size-parallelism-hurt-4961}
 
-A fundamental question in distributed training is: when does adding more workers stop helping? The **critical batch size** $B*$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
+A fundamental question in distributed training is: when does adding more workers stop helping? The **critical batch size** $B^{*}$ marks the transition point beyond which increasing batch size yields diminishing returns in convergence per sample seen.
 
 ::: {.callout-definition title="Critical Batch Size"}
 
-***Critical Batch Size***\index{Critical Batch Size!definition} ($B^*$) is the batch size at which the **Gradient Noise Scale** equals the **Gradient Signal Scale**.
+***Critical Batch Size***\index{Critical Batch Size!definition} ($B^{*}$) is the batch size at which the **Gradient Noise Scale** equals the **Gradient Signal Scale**.
 
-1.  **Significance (Quantitative):** It marks the transition point for **Parallel Scaling Efficiency**. Below $B*$, increasing the batch size linearly improves the convergence per step. Above $B*$, larger batches yield diminishing returns, requiring proportionally more samples ($D_{\text{vol}}$) to reach the same loss.
-2.  **Distinction (Durable):** Unlike the **Memory-Limited Batch Size** (determined by $BW$ and capacity), the Critical Batch Size is an **Algorithmic Property** of the model and dataset.
-3.  **Common Pitfall:** A frequent misconception is that training can be speeded up indefinitely by adding GPUs. In reality, $B*$ defines the **Physical Ceiling for Data Parallelism**: adding workers beyond this point wastes energy and compute ($O$) without reducing total training time ($T$).
+1.  **Significance (Quantitative):** It marks the transition point for **Parallel Scaling Efficiency**. Below $B^{*}$, increasing the batch size linearly improves the convergence per step. Above $B^{*}$, larger batches yield diminishing returns, requiring proportionally more samples ($D$) to reach the same loss.
+2.  **Distinction (Durable):** Unlike the **Memory-Limited Batch Size** (determined by $\text{BW}$ and capacity), the Critical Batch Size is an **Algorithmic Property** of the model and dataset.
+3.  **Common Pitfall:** A frequent misconception is that training can be speeded up indefinitely by adding GPUs. In reality, $B^{*}$ defines the **Physical Ceiling for Data Parallelism**: adding workers beyond this point wastes energy and compute ($O$) without reducing total training time ($T$).
 
 :::
 
 The critical batch size can be estimated as:
 
 $$
-B* \approx \frac{\text{tr}(\Sigma)}{\|\nabla L(\theta)\|^2}
+B^{*} \approx \frac{\text{tr}(\Sigma)}{\|\nabla \mathcal{L}(\theta)\|^2}
 $$
 
-where $\text{tr}(\Sigma)$ is the trace of the gradient covariance matrix (total gradient variance) and $\|\nabla L(\theta)\|^2$ is the squared gradient norm (signal strength). Intuitively, $B*$ is the batch size at which averaging reduces gradient variance to the level of the true gradient magnitude.
+where $\text{tr}(\Sigma)$ is the trace of the gradient covariance matrix (total gradient variance) and $\|\nabla \mathcal{L}(\theta)\|^2$ is the squared gradient norm (signal strength). Intuitively, $B^{*}$ is the batch size at which averaging reduces gradient variance to the level of the true gradient magnitude.
 
 Empirical critical batch sizes vary by task and scale over three orders of magnitude:
 
-- **ImageNet ResNet-50**: $B* \approx 8,000 - 16,000$
-- **BERT-Large pretraining**: $B* \approx 32,000 - 65,000$
-- **GPT-3 scale models**: $B* \approx 1,000,000 - 4,000,000$
+- **ImageNet ResNet-50**: $B^{*} \approx 8,000 - 16,000$
+- **BERT-Large pretraining**: $B^{*} \approx 32,000 - 65,000$
+- **GPT-3 scale models**: $B^{*} \approx 1,000,000 - 4,000,000$
 
 The scaling law regime exhibits three distinct behaviors:
 
-1. **Below critical ($B < B*$)**: Linear scaling holds. Doubling batch size halves iterations to reach target loss. Hardware efficiency determines throughput.
+1. **Below critical ($B < B^{*}$)**: Linear scaling holds. Doubling batch size halves iterations to reach target loss. Hardware efficiency determines throughput.
 
-2. **At critical ($B \approx B*$)**: Optimal trade-off point. Maximum samples-per-second efficiency.
+2. **At critical ($B \approx B^{*}$)**: Optimal trade-off point. Maximum samples-per-second efficiency.
 
-3. **Above critical ($B > B*$)**: Diminishing returns. Doubling batch size requires $>2\times$ more samples total. Additional workers provide throughput but not sample efficiency.
+3. **Above critical ($B > B^{*}$)**: Diminishing returns. Doubling batch size requires $>2 \times$ more samples total. Additional workers provide throughput but not sample efficiency.
 
 @fig-critical-batch-size illustrates this relationship between batch size and training efficiency.
 
-::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical Batch Size and Scaling Regimes**. Below the critical batch size $B*$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B*$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency versus batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
+::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical Batch Size and Scaling Regimes**. Below the critical batch size $B^{*}$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B^{*}$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency versus batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
 ![](images/svg/critical-batch-size.svg){width=100%}
 :::
 
 The critical batch size has important implications for distributed training system design:
 
-1. **Worker count selection**: Adding workers beyond $B*/b$ (where $b$ is per-worker batch size) improves throughput but not sample efficiency. For cost optimization, this may still be worthwhile if the marginal cost of additional workers is low.
+1. **Worker count selection**: Adding workers beyond $B^{*}/b$ (where $b$ is per-worker batch size) improves throughput but not sample efficiency. For cost optimization, this may still be worthwhile if the marginal cost of additional workers is low.
 
-2. **Learning rate schedule**: Above $B*$, aggressive learning rate warmup becomes essential. The loss landscape near initialization may not support the large updates that linear scaling would produce.
+2. **Learning rate schedule**: Above $B^{*}$, aggressive learning rate warmup becomes essential. The loss landscape near initialization may not support the large updates that linear scaling would produce.
 
-3. **Communication trade-offs**: Above $B*$, the reduced benefit of larger batches makes communication overhead relatively more costly. This strengthens the case for gradient compression or asynchronous methods.
+3. **Communication trade-offs**: Above $B^{*}$, the reduced benefit of larger batches makes communication overhead relatively more costly. This strengthens the case for gradient compression or asynchronous methods.
 
 ::: {.callout-checkpoint title="Scaling Decisions"}
 
-Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM each), what is the maximum useful batch size? To answer this, you must calculate the **Critical Batch Size** ($B_{crit}$)—the point where the gradient noise scale equals the batch size. Beyond this point, doubling the batch size yields diminishing returns in convergence speed (perfect scaling stops). Using the Gradient Noise Scale metric ($\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$), determine if your proposed batch size keeps scaling efficiency above 80 percent, or if you are simply wasting compute cycles for marginal gains.
+Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB HBM each), what is the maximum useful batch size? To answer this, you must calculate the **Critical Batch Size** ($B_{\text{crit}}$)—the point where the gradient noise scale equals the batch size. Beyond this point, doubling the batch size yields diminishing returns in convergence speed (perfect scaling stops). Using the Gradient Noise Scale metric ($\mathcal{B} \approx \frac{\text{tr}(\Sigma)}{\|\mu\|^2}$), determine if your proposed batch size keeps scaling efficiency above 80 percent, or if you are simply wasting compute cycles for marginal gains.
 
 :::
 
@@ -1787,7 +1787,7 @@ The transfer of hidden states between devices occurs continuously rather than in
 
 The classic problem with pipeline parallelism is the **pipeline bubble**: GPUs at the beginning of the pipeline are idle while waiting for gradients to flow back from the end, and vice versa. These bubbles represent wasted compute. The **1F1B** (one forward, one backward) schedule reduces the bubble by interleaving forward and backward microbatches. Once the pipeline is filled, each GPU alternates between executing one forward microbatch and one backward microbatch, keeping SMs busy most of the time.
 
-**Zero-bubble pipeline schedules**\index{Zero-Bubble Pipeline Parallelism} further reduce idle time by overlapping weight gradient computation with activation gradient communication. In a standard backward pass, the GPU computes $\partial L / \partial W$ (weight gradient) and $\partial L / \partial X$ (activation gradient, sent to the previous stage) together. Zero-bubble scheduling splits these into separate kernels: a **B** kernel that computes only the activation gradient $\partial L / \partial X$ and sends it to the previous stage, and a **W** kernel that computes the weight gradient $\partial L / \partial W$ locally. The B kernel must execute promptly (it is on the critical path), but the W kernel can be scheduled opportunistically to fill bubbles.
+**Zero-bubble pipeline schedules**\index{Zero-Bubble Pipeline Parallelism} further reduce idle time by overlapping weight gradient computation with activation gradient communication. In a standard backward pass, the GPU computes $\partial \mathcal{L} / \partial W$ (weight gradient) and $\partial \mathcal{L} / \partial X$ (activation gradient, sent to the previous stage) together. Zero-bubble scheduling splits these into separate kernels: a **B** kernel that computes only the activation gradient $\partial \mathcal{L} / \partial X$ and sends it to the previous stage, and a **W** kernel that computes the weight gradient $\partial \mathcal{L} / \partial W$ locally. The B kernel must execute promptly (it is on the critical path), but the W kernel can be scheduled opportunistically to fill bubbles.
 
 The scheduling freedom provided by this B/W split is substantial. In a 4-stage pipeline with 8 microbatches, the standard 1F1B schedule has a bubble fraction of approximately $(p-1)/(m+p-1)$ where $p$ is the number of stages and $m$ is the number of microbatches. For $p=4, m=8$, this is $3/11 \approx 27\%$ idle time. Zero-bubble scheduling can reduce this to near zero by filling the startup and teardown bubbles with W computations.
 
