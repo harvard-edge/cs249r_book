@@ -13,17 +13,17 @@ graph TB
         ShadowDOM[Shadow DOM Container]
         WidgetRoot[Widget Root Element]
     end
-    
+
     subgraph "Spaced Repetition Core"
         Modal[SpacedRepetitionModal<br/>Main Orchestrator]
-        
+
         subgraph "Storage Layer"
             style Storage Layer fill:#f9f9f9,stroke:#333,stroke-width:2px
             SQLiteHandler[SpacedRepetitionSQLiteHandler<br/>✅ PRIMARY]
             IndexDBHandler[SpacedRepetitionIndexDBHandler<br/>FALLBACK]
             BaseHandler[SpacedRepetitionStorageHandler<br/>Base Abstract Class]
         end
-        
+
         subgraph "UI Handlers"
             EventHandler[SpacedRepetitionEventHandler]
             UIHandler[SpacedRepetitionUIHandler]
@@ -31,63 +31,63 @@ graph TB
             FloatingControls[FloatingControlsHandler]
             DeckCreation[DeckCreationHandler]
         end
-        
+
         subgraph "Data Models"
             FlashCard[FlashCard Class<br/>Core Data Model]
             Chapter[Chapter Management]
             Tags[Tag System]
         end
-        
+
         subgraph "Visualization"
             Stats[SpacedRepetitionStats<br/>Chart.js Analytics]
             Viz[SpacedRepetitionVisualization<br/>D3.js Visualizations]
         end
     end
-    
+
     subgraph "Storage Backends"
         SQLite[(SQLite<br/>SQLocal)]
         IndexedDB[(IndexedDB<br/>SocratiqDB)]
     end
-    
+
     subgraph "External Services"
         DuckAI[DuckAI Agent<br/>AI Card Generation]
         Cloudflare[Cloudflare Proxy]
     end
-    
+
     %% Connections
     HostPage --> ShadowDOM
     ShadowDOM --> WidgetRoot
     WidgetRoot --> Modal
-    
+
     Modal --> BaseHandler
     BaseHandler <|-- SQLiteHandler
     BaseHandler <|-- IndexDBHandler
-    
+
     SQLiteHandler --> SQLite
     IndexDBHandler --> IndexedDB
-    
+
     Modal --> EventHandler
     Modal --> UIHandler
     Modal --> InteractionHandler
     Modal --> FloatingControls
     Modal --> DeckCreation
-    
+
     Modal --> FlashCard
     Modal --> Chapter
     Modal --> Tags
-    
+
     Modal --> Stats
     Modal --> Viz
-    
+
     InteractionHandler --> DuckAI
     DuckAI --> Cloudflare
-    
+
     %% Styling
     classDef primary fill:#90EE90,stroke:#333,stroke-width:2px
     classDef fallback fill:#FFB6C1,stroke:#333,stroke-width:2px
     classDef storage fill:#87CEEB,stroke:#333,stroke-width:2px
     classDef external fill:#FFE4B5,stroke:#333,stroke-width:2px
-    
+
     class SQLiteHandler,SQLite primary
     class IndexDBHandler,IndexedDB fallback
     class BaseHandler storage
@@ -223,7 +223,7 @@ sequenceDiagram
     participant Modal as SpacedRepetitionModal
     participant Storage as Active Storage Handler
     participant DB as Database (SQLite/IndexedDB)
-    
+
     User->>Modal: Clicks "New Card" and fills form
     Modal->>Storage: saveNewCard(data)
     Storage->>DB: Insert new card data

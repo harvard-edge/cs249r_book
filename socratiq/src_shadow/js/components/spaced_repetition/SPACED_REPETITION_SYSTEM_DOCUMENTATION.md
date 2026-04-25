@@ -182,52 +182,52 @@ graph TB
             EventHandler[SpacedRepetitionEventHandler]
             UIHandler[SpacedRepetitionUIHandler]
             InteractionHandler[SpacedRepetitionInteractionHandler]
-            
+
             subgraph "Storage Layer"
                 IndexDBHandler[SpacedRepetitionIndexDBHandler<br/>✅ ACTIVE]
                 SQLiteHandler[SpacedRepetitionSQLiteHandler<br/>❌ DISABLED]
                 BaseHandler[SpacedRepetitionStorageHandler<br/>Base Class]
             end
-            
+
             subgraph "Data Flow"
                 SocratiqDB[(SocratiqDB<br/>IndexedDB)]
                 LocalStorage[(localStorage<br/>Fallback)]
             end
         end
-        
+
         subgraph "External Dependencies"
             SQLiteWorker[sqlite3-worker1-bundler-friendly<br/>❌ FAILING]
             WASM[WebAssembly Module<br/>❌ FAILING]
         end
     end
-    
+
     subgraph "Current Issues"
         Issue1[❌ SQLite Worker WASM Loading Fails<br/>'both async and sync fetching failed']
         Issue2[❌ Notification Handler Undefined<br/>'Cannot read properties of undefined']
         Issue3[❌ SQLite Module Exception<br/>'Aborted(both async and sync fetching failed)']
     end
-    
+
     %% Current Flow (Working)
     Modal --> IndexDBHandler
     IndexDBHandler --> SocratiqDB
     IndexDBHandler --> BaseHandler
-    
+
     %% Disabled Flow (Broken)
     Modal -.-> SQLiteHandler
     SQLiteHandler -.-> SQLiteWorker
     SQLiteWorker -.-> WASM
-    
+
     %% Error Connections
     SQLiteWorker --> Issue1
     SQLiteWorker --> Issue3
     InteractionHandler --> Issue2
-    
+
     %% Styling
     classDef active fill:#90EE90,stroke:#333,stroke-width:2px
     classDef disabled fill:#FFB6C1,stroke:#333,stroke-width:2px
     classDef error fill:#FF6B6B,stroke:#333,stroke-width:2px
     classDef storage fill:#87CEEB,stroke:#333,stroke-width:2px
-    
+
     class IndexDBHandler,SocratiqDB active
     class SQLiteHandler,SQLiteWorker,WASM disabled
     class Issue1,Issue2,Issue3 error

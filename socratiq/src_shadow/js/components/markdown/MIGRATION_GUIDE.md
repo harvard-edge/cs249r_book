@@ -7,7 +7,7 @@ This guide helps you migrate from the old `markdown.js` to the new `streamdown_m
 
 ### ✅ What STREAMDOWN Now Handles (Using Real STREAMDOWN Libraries):
 - **Mermaid diagrams** - Using STREAMDOWN's mermaid library with proper rendering
-- **Code blocks** - Using STREAMDOWN's shiki highlighter for syntax highlighting  
+- **Code blocks** - Using STREAMDOWN's shiki highlighter for syntax highlighting
 - **Math expressions** - Using STREAMDOWN's katex integration for LaTeX rendering
 - **Incomplete markdown parsing** - Using STREAMDOWN's parseIncompleteMarkdown algorithm
 - **Markdown parsing** - Using STREAMDOWN's marked library with GFM support
@@ -34,8 +34,8 @@ This guide helps you migrate from the old `markdown.js` to the new `streamdown_m
 **Before:**
 ```javascript
 import { updateMarkdownPreview } from "./components/markdown/markdown";
-import { 
-  initiateMarkdown, 
+import {
+  initiateMarkdown,
   initializeSpoilerEditing,
   reinitializeEditableInputs,
 } from "./components/markdown/markdown";
@@ -44,8 +44,8 @@ import {
 **After:**
 ```javascript
 import { updateMarkdownPreview } from "./components/markdown/streamdown_markdown";
-import { 
-  initiateMarkdown, 
+import {
+  initiateMarkdown,
   initializeSpoilerEditing,
   reinitializeEditableInputs,
   StreamdownMarkdownRenderer
@@ -65,10 +65,10 @@ Update them to use `streamdown_markdown` instead.
 
 Use the enhanced test file to verify STREAMDOWN features work:
 ```javascript
-import { 
-  testStreamdownIntegration, 
-  testStreamingRenderer, 
-  testStreamdownFeatures 
+import {
+  testStreamdownIntegration,
+  testStreamingRenderer,
+  testStreamdownFeatures
 } from './test_streamdown_integration.js';
 
 // Test basic STREAMDOWN functionality
@@ -269,7 +269,7 @@ If you need to rollback:
 ## Next Steps
 
 1. ✅ Update imports
-2. ✅ Test STREAMDOWN functionality  
+2. ✅ Test STREAMDOWN functionality
 3. ✅ Test custom containers
 4. ✅ Test editable inputs
 5. ✅ Test question processing
