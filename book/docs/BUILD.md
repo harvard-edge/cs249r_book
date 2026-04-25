@@ -652,7 +652,7 @@ Once everything is set up, you'll be able to:
 The `tools/scripts/` directory contains various utilities:
 - **`content/`** - Content management tools
 - **`cross_refs/`** - Cross-reference management
-- **`genai/`** - AI-assisted content tools
+- **`quizzes/`** - Quiz generation, audit, and validation pipeline
 - **`glossary/`** - Glossary management
 - **`maintenance/`** - System maintenance scripts
 - **`publish/`** - Publishing and deployment tools

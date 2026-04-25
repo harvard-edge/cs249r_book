@@ -376,7 +376,7 @@ tools/scripts/
 ├── testing/         # Test and validation scripts
 ├── utilities/       # General utility scripts
 ├── docs/            # Script documentation
-├── genai/           # AI and generation tools
+├── quizzes/         # Quiz generation pipeline
 ├── cross_refs/      # Cross-reference management
 ├── quarto_publish/  # Publishing workflows
 └── ai_menu/         # AI menu tools
