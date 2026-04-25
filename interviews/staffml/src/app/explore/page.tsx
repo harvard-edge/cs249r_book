@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import clsx from "clsx";
 import {
   ArrowLeft,
   ArrowRight,
+  BookOpen,
   Layers,
   LocateFixed,
-  Network,
+  Route,
   Search,
   Sparkles,
   X,
@@ -17,643 +17,273 @@ import { getQuestions, getTracks, type Question } from "@/lib/corpus";
 import { getAreas, getAreaStyle } from "@/lib/taxonomy";
 import { LEVELS } from "@/lib/levels";
 
-const WORLD_WIDTH = 1800;
-const WORLD_HEIGHT = 1120;
-const CENTER_X = WORLD_WIDTH / 2;
-const CENTER_Y = WORLD_HEIGHT / 2;
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 4;
-const HIT_RADIUS = 10;
+const SIZE = 620;
+const CX = SIZE / 2;
+const CY = SIZE / 2;
+const TAU = Math.PI * 2;
 
-type Point = { x: number; y: number };
+type Focus =
+  | { kind: "root" }
+  | { kind: "track"; track: string }
+  | { kind: "area"; track: string; area: string }
+  | { kind: "topic"; track: string; area: string; topic: string };
 
-interface AtlasNode {
-  question: Question;
-  x: number;
-  y: number;
-  lon: number;
-  lat: number;
-  r: number;
-  color: string;
-  areaName: string;
-  levelIndex: number;
-  chainCount: number;
-}
-
-interface AreaAnchor {
+interface Segment {
   id: string;
-  name: string;
-  x: number;
-  y: number;
-  lon: number;
-  lat: number;
+  label: string;
+  subtitle: string;
+  count: number;
   color: string;
+  focus: Focus;
 }
 
-interface GlobeProjection {
-  x: number;
-  y: number;
-  scale: number;
-  depth: number;
-}
-
-function hashString(input: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function hashUnit(input: string, salt: string): number {
-  return (hashString(`${salt}:${input}`) % 10000) / 10000;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function screenToWorld(point: Point, pan: Point, zoom: number): Point {
-  return {
-    x: (point.x - pan.x) / zoom,
-    y: (point.y - pan.y) / zoom,
-  };
-}
-
-function projectGlobe(lon: number, lat: number, rotation: number, radius: number): GlobeProjection {
-  const rotatedLon = lon + rotation;
-  const cosLat = Math.cos(lat);
-  const x3 = cosLat * Math.cos(rotatedLon);
-  const z3 = cosLat * Math.sin(rotatedLon);
-  const y3 = Math.sin(lat);
-  const front = (z3 + 1) / 2;
-  return {
-    x: CENTER_X + x3 * radius,
-    y: CENTER_Y - y3 * radius * 0.9,
-    scale: 0.62 + front * 0.58,
-    depth: z3,
-  };
-}
-
-function questionMatches(q: Question, query: string): boolean {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return true;
-  const haystack = [
-    q.title,
-    q.question,
-    q.topic,
-    q.zone,
-    q.competency_area,
-    q.track,
-    q.level,
-  ].join(" ").toLowerCase();
-  return normalized.split(/\s+/).every((term) => haystack.includes(term));
+interface LevelBucket {
+  level: string;
+  count: number;
+  questions: Question[];
 }
 
 function formatTrack(track: string) {
   return track === "tinyml" ? "TinyML" : track.charAt(0).toUpperCase() + track.slice(1);
 }
 
-export default function ExplorePage() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const asideRef = useRef<HTMLElement>(null);
-  const dragRef = useRef<{ active: boolean; moved: boolean; last: Point }>({
-    active: false,
-    moved: false,
-    last: { x: 0, y: 0 },
-  });
+function titleCase(value: string) {
+  return value
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
-  const [canvasSize, setCanvasSize] = useState({ width: 960, height: 620 });
-  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(0.55);
-  const [rotation, setRotation] = useState(0);
-  const [selectedTrack, setSelectedTrack] = useState<string>("all");
-  const [selectedLevel, setSelectedLevel] = useState<string>("all");
-  const [selectedArea, setSelectedArea] = useState<string>("all");
+function questionMatches(question: Question, query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  const haystack = [
+    question.title,
+    question.question,
+    question.topic,
+    question.zone,
+    question.competency_area,
+    question.track,
+    question.level,
+  ].join(" ").toLowerCase();
+  return normalized.split(/\s+/).every((term) => haystack.includes(term));
+}
+
+function polar(cx: number, cy: number, radius: number, angle: number) {
+  return {
+    x: cx + radius * Math.cos(angle - Math.PI / 2),
+    y: cy + radius * Math.sin(angle - Math.PI / 2),
+  };
+}
+
+function ringPath(inner: number, outer: number, start: number, end: number) {
+  const gap = Math.min(0.012, Math.max(0, (end - start) / 8));
+  const a0 = start + gap;
+  const a1 = end - gap;
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  const outerStart = polar(CX, CY, outer, a0);
+  const outerEnd = polar(CX, CY, outer, a1);
+  const innerEnd = polar(CX, CY, inner, a1);
+  const innerStart = polar(CX, CY, inner, a0);
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${outer} ${outer} 0 ${large} 1 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerEnd.x} ${innerEnd.y}`,
+    `A ${inner} ${inner} 0 ${large} 0 ${innerStart.x} ${innerStart.y}`,
+    "Z",
+  ].join(" ");
+}
+
+function midpoint(inner: number, outer: number, start: number, end: number) {
+  return polar(CX, CY, (inner + outer) / 2, (start + end) / 2);
+}
+
+function byCountThenName(a: Segment, b: Segment) {
+  return b.count - a.count || a.label.localeCompare(b.label);
+}
+
+function levelIndex(level: string) {
+  const idx = LEVELS.findIndex((item) => item.id === level);
+  return idx === -1 ? 99 : idx;
+}
+
+function buildLevelBuckets(questions: Question[]): LevelBucket[] {
+  const buckets = new Map<string, Question[]>();
+  for (const question of questions) {
+    const bucket = buckets.get(question.level) ?? [];
+    bucket.push(question);
+    buckets.set(question.level, bucket);
+  }
+  return Array.from(buckets.entries())
+    .map(([level, qs]) => ({
+      level,
+      count: qs.length,
+      questions: qs.sort((a, b) => a.title.localeCompare(b.title)),
+    }))
+    .sort((a, b) => levelIndex(a.level) - levelIndex(b.level));
+}
+
+function focusLabel(focus: Focus) {
+  if (focus.kind === "root") return "StaffML Vault";
+  if (focus.kind === "track") return formatTrack(focus.track);
+  if (focus.kind === "area") return titleCase(focus.area);
+  return titleCase(focus.topic);
+}
+
+function focusParent(focus: Focus): Focus | null {
+  if (focus.kind === "root") return null;
+  if (focus.kind === "track") return { kind: "root" };
+  if (focus.kind === "area") return { kind: "track", track: focus.track };
+  return { kind: "area", track: focus.track, area: focus.area };
+}
+
+function focusBreadcrumb(focus: Focus) {
+  const items: Array<{ label: string; focus: Focus }> = [{ label: "Vault", focus: { kind: "root" } }];
+  if (focus.kind === "track") {
+    items.push({ label: formatTrack(focus.track), focus });
+  } else if (focus.kind === "area") {
+    items.push({ label: formatTrack(focus.track), focus: { kind: "track", track: focus.track } });
+    items.push({ label: titleCase(focus.area), focus });
+  } else if (focus.kind === "topic") {
+    items.push({ label: formatTrack(focus.track), focus: { kind: "track", track: focus.track } });
+    items.push({ label: titleCase(focus.area), focus: { kind: "area", track: focus.track, area: focus.area } });
+    items.push({ label: titleCase(focus.topic), focus });
+  }
+  return items;
+}
+
+export default function ExplorePage() {
+  const [focus, setFocus] = useState<Focus>({ kind: "root" });
   const [query, setQuery] = useState("");
+  const [selectedLevel, setSelectedLevel] = useState("all");
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const questions = useMemo(() => getQuestions(), []);
   const tracks = useMemo(() => getTracks(), []);
-  const levels = LEVELS.map((level) => level.id);
   const areas = useMemo(() => getAreas(), []);
   const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
 
-  const areaAnchors = useMemo<AreaAnchor[]>(() => {
-    return areas.map((area, index) => {
-      const angle = (index / areas.length) * Math.PI * 2 - Math.PI / 2;
-      const style = getAreaStyle(area.id);
-      const lat = (hashUnit(area.id, "area-lat") - 0.5) * 1.05;
-      const projection = projectGlobe(angle, lat, 0, 390);
-      return {
-        id: area.id,
-        name: area.name,
-        x: projection.x,
-        y: projection.y,
-        lon: angle,
-        lat,
-        color: style.primary,
-      };
-    });
-  }, [areas]);
-
-  const anchorByArea = useMemo(
-    () => new Map(areaAnchors.map((anchor) => [anchor.id, anchor])),
-    [areaAnchors],
-  );
-
-  const nodes = useMemo<AtlasNode[]>(() => {
-    return questions.map((question) => {
-      const anchor = anchorByArea.get(question.competency_area) ?? {
-        x: CENTER_X,
-        y: CENTER_Y,
-        color: "#6b7280",
-        name: question.competency_area,
-        lon: 0,
-        lat: 0,
-      };
-      const levelIndex = Math.max(0, levels.indexOf(question.level));
-      const topicAngle = hashUnit(question.topic, "topic-angle") * Math.PI * 2;
-      const zoneAngle = hashUnit(question.zone, "zone-angle") * Math.PI * 2;
-      const topicRadius = 58 + hashUnit(question.topic, "topic-radius") * 118;
-      const levelOffset = (levelIndex - 2.5) * 16;
-      const jitter = 28 + hashUnit(question.id, "jitter-radius") * 38;
-      const jitterAngle = hashUnit(question.id, "jitter-angle") * Math.PI * 2;
-      const chainCount = question.chain_ids?.length ?? 0;
-      const lon = anchor.lon + (hashUnit(question.topic, "topic-lon") - 0.5) * 0.7 + (hashUnit(question.id, "node-lon") - 0.5) * 0.12;
-      const lat = clamp(
-        anchor.lat + (hashUnit(question.zone, "zone-lat") - 0.5) * 0.55 + (levelIndex - 2.5) * 0.045 + (hashUnit(question.id, "node-lat") - 0.5) * 0.1,
-        -1.08,
-        1.08,
-      );
-
-      return {
-        question,
-        x:
-          anchor.x +
-          Math.cos(topicAngle) * topicRadius +
-          Math.cos(zoneAngle) * levelOffset +
-          Math.cos(jitterAngle) * jitter,
-        y:
-          anchor.y +
-          Math.sin(topicAngle) * topicRadius * 0.7 +
-          Math.sin(zoneAngle) * levelOffset +
-          Math.sin(jitterAngle) * jitter,
-        lon,
-        lat,
-        r: chainCount > 0 ? 3.4 : 2.6,
-        color: anchor.color,
-        areaName: areaById.get(question.competency_area)?.name ?? question.competency_area,
-        levelIndex,
-        chainCount,
-      };
-    });
-  }, [anchorByArea, areaById, levels, questions]);
-
-  const filteredNodes = useMemo(() => {
-    return nodes.filter(({ question }) => {
-      if (selectedTrack !== "all" && question.track !== selectedTrack) return false;
+  const filteredQuestions = useMemo(() => {
+    return questions.filter((question) => {
       if (selectedLevel !== "all" && question.level !== selectedLevel) return false;
-      if (selectedArea !== "all" && question.competency_area !== selectedArea) return false;
-      return questionMatches(question, query);
+      if (!questionMatches(question, query)) return false;
+      return true;
     });
-  }, [nodes, query, selectedArea, selectedLevel, selectedTrack]);
+  }, [questions, query, selectedLevel]);
 
-  const nodeById = useMemo(
-    () => new Map(nodes.map((node) => [node.question.id, node])),
-    [nodes],
-  );
-  const hoveredNode = hoveredId ? nodeById.get(hoveredId) ?? null : null;
-  const selectedNode = selectedId ? nodeById.get(selectedId) ?? null : null;
-  const hasActiveFilters =
-    query.trim().length > 0 ||
-    selectedTrack !== "all" ||
-    selectedLevel !== "all" ||
-    selectedArea !== "all";
+  const focusQuestions = useMemo(() => {
+    return filteredQuestions.filter((question) => {
+      if (focus.kind === "root") return true;
+      if (question.track !== focus.track) return false;
+      if (focus.kind === "track") return true;
+      if (question.competency_area !== focus.area) return false;
+      if (focus.kind === "area") return true;
+      return question.topic === focus.topic;
+    });
+  }, [filteredQuestions, focus]);
 
-  const relatedNodes = useMemo(() => {
-    if (!selectedNode) return [];
-    const selected = selectedNode.question;
-    return nodes
-      .filter(({ question }) => {
-        if (question.id === selected.id) return false;
-        const sharesChain = selected.chain_ids?.some((id) => question.chain_ids?.includes(id));
-        return sharesChain || question.topic === selected.topic;
+  const segments = useMemo<Segment[]>(() => {
+    if (focus.kind === "root") {
+      return tracks
+        .map((track) => {
+          const count = filteredQuestions.filter((question) => question.track === track).length;
+          return {
+            id: track,
+            label: formatTrack(track),
+            subtitle: "track",
+            count,
+            color: trackColor(track),
+            focus: { kind: "track", track } as Focus,
+          };
+        })
+        .filter((segment) => segment.count > 0)
+        .sort(byCountThenName);
+    }
+
+    if (focus.kind === "track") {
+      const areaIds = new Set(
+        filteredQuestions
+          .filter((question) => question.track === focus.track)
+          .map((question) => question.competency_area),
+      );
+      return Array.from(areaIds)
+        .map((areaId) => {
+          const count = filteredQuestions.filter(
+            (question) => question.track === focus.track && question.competency_area === areaId,
+          ).length;
+          const style = getAreaStyle(areaId);
+          return {
+            id: areaId,
+            label: areaById.get(areaId)?.name ?? titleCase(areaId),
+            subtitle: "area",
+            count,
+            color: style.primary,
+            focus: { kind: "area", track: focus.track, area: areaId } as Focus,
+          };
+        })
+        .filter((segment) => segment.count > 0)
+        .sort(byCountThenName);
+    }
+
+    const track = focus.track;
+    const area = focus.area;
+    const topicIds = new Set(
+      filteredQuestions
+        .filter((question) => question.track === track && question.competency_area === area)
+        .map((question) => question.topic),
+    );
+    const areaColor = getAreaStyle(area).primary;
+    return Array.from(topicIds)
+      .map((topic) => {
+        const count = filteredQuestions.filter(
+          (question) =>
+            question.track === track &&
+            question.competency_area === area &&
+            question.topic === topic,
+        ).length;
+        return {
+          id: topic,
+          label: titleCase(topic),
+          subtitle: "topic",
+          count,
+          color: areaColor,
+          focus: { kind: "topic", track, area, topic } as Focus,
+        };
       })
-      .slice(0, 12);
-  }, [nodes, selectedNode]);
+      .filter((segment) => segment.count > 0)
+      .sort(byCountThenName)
+      .slice(0, 36);
+  }, [areaById, filteredQuestions, focus, tracks]);
 
-  const panelMatches = useMemo(() => {
-    return [...filteredNodes]
+  const levelBuckets = useMemo(() => buildLevelBuckets(focusQuestions), [focusQuestions]);
+  const selectedQuestion = selectedQuestionId
+    ? questions.find((question) => question.id === selectedQuestionId) ?? null
+    : null;
+  const visibleQuestions = useMemo(() => {
+    return [...focusQuestions]
       .sort((a, b) => {
-        if (!hasActiveFilters) {
-          const levelDelta = b.levelIndex - a.levelIndex;
-          if (levelDelta !== 0) return levelDelta;
-        }
-        const chainDelta = b.chainCount - a.chainCount;
+        const chainDelta = (b.chain_ids?.length ?? 0) - (a.chain_ids?.length ?? 0);
         if (chainDelta !== 0) return chainDelta;
-        const areaDelta = a.areaName.localeCompare(b.areaName);
-        if (areaDelta !== 0) return areaDelta;
-        return a.question.title.localeCompare(b.question.title);
+        const levelDelta = levelIndex(b.level) - levelIndex(a.level);
+        if (levelDelta !== 0) return levelDelta;
+        return a.title.localeCompare(b.title);
       })
-      .slice(0, 10);
-  }, [filteredNodes, hasActiveFilters]);
+      .slice(0, 14);
+  }, [focusQuestions]);
 
-  const globeRadius = Math.min(WORLD_WIDTH, WORLD_HEIGHT) * 0.47;
+  const total = Math.max(1, segments.reduce((sum, segment) => sum + segment.count, 0));
+  let cursor = 0;
 
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-
-    const fit = () => {
-      const rect = el.getBoundingClientRect();
-      const width = Math.max(320, Math.floor(rect.width));
-      const height = Math.max(360, Math.floor(rect.height));
-      const nextZoom = clamp(Math.min(width / WORLD_WIDTH, height / WORLD_HEIGHT) * 0.94, MIN_ZOOM, 1.1);
-      setCanvasSize({ width, height });
-      setZoom(nextZoom);
-      setPan({
-        x: (width - WORLD_WIDTH * nextZoom) / 2,
-        y: (height - WORLD_HEIGHT * nextZoom) / 2,
-      });
-    };
-
-    fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    let frame = 0;
-    let lastTick = 0;
-    const tick = (time: number) => {
-      if (time - lastTick > 70) {
-        setRotation((value) => (value + 0.01) % (Math.PI * 2));
-        lastTick = time;
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.floor(canvasSize.width * dpr);
-    canvas.height = Math.floor(canvasSize.height * dpr);
-    canvas.style.width = `${canvasSize.width}px`;
-    canvas.style.height = `${canvasSize.height}px`;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
-
-    ctx.save();
-    ctx.translate(pan.x, pan.y);
-    ctx.scale(zoom, zoom);
-
-    const globeGradient = ctx.createRadialGradient(
-      CENTER_X - globeRadius * 0.25,
-      CENTER_Y - globeRadius * 0.22,
-      globeRadius * 0.08,
-      CENTER_X,
-      CENTER_Y,
-      globeRadius,
-    );
-    globeGradient.addColorStop(0, "rgba(59,130,246,0.09)");
-    globeGradient.addColorStop(0.62, "rgba(15,23,42,0.015)");
-    globeGradient.addColorStop(1, "rgba(15,23,42,0.055)");
-
-    ctx.beginPath();
-    ctx.ellipse(CENTER_X, CENTER_Y, globeRadius, globeRadius * 0.9, 0, 0, Math.PI * 2);
-    ctx.fillStyle = globeGradient;
-    ctx.fill();
-    ctx.strokeStyle = "rgba(100,116,139,0.18)";
-    ctx.lineWidth = 1.2 / zoom;
-    ctx.stroke();
-
-    // Longitudes/latitudes make the map read as a planet instead of a Venn diagram.
-    ctx.strokeStyle = "rgba(100,116,139,0.10)";
-    ctx.lineWidth = 0.8 / zoom;
-    for (const lat of [-0.9, -0.45, 0, 0.45, 0.9]) {
-      ctx.beginPath();
-      ctx.ellipse(
-        CENTER_X,
-        CENTER_Y - Math.sin(lat) * globeRadius * 0.9,
-        Math.cos(lat) * globeRadius,
-        Math.cos(lat) * globeRadius * 0.13,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.stroke();
-    }
-    for (let i = 0; i < 8; i++) {
-      const phase = (i / 8) * Math.PI;
-      ctx.beginPath();
-      ctx.ellipse(CENTER_X, CENTER_Y, Math.abs(Math.cos(phase + rotation)) * globeRadius, globeRadius * 0.9, 0, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    const projectedAnchors = areaAnchors.map((anchor) => ({
-      anchor,
-      projection: projectGlobe(anchor.lon, anchor.lat, rotation, globeRadius),
-    }));
-
-    ctx.lineWidth = 0.8 / zoom;
-    for (let i = 0; i < projectedAnchors.length; i++) {
-      const a = projectedAnchors[i];
-      const b = projectedAnchors[(i + 1) % projectedAnchors.length];
-      const c = projectedAnchors[(i + 4) % projectedAnchors.length];
-      for (const target of [b, c]) {
-        const alpha = Math.max(0.05, Math.min(0.18, (a.projection.depth + target.projection.depth + 2) / 18));
-        ctx.beginPath();
-        ctx.moveTo(a.projection.x, a.projection.y);
-        ctx.lineTo(target.projection.x, target.projection.y);
-        ctx.strokeStyle = `rgba(100,116,139,${alpha})`;
-        ctx.stroke();
-      }
-    }
-
-    const drawFlightRoute = (
-      source: AtlasNode,
-      target: AtlasNode,
-      {
-        alpha = 0.18,
-        color = "59,130,246",
-        width = 1,
-        dashed = false,
-      }: { alpha?: number; color?: string; width?: number; dashed?: boolean } = {},
-    ) => {
-      const a = projectGlobe(source.lon, source.lat, rotation, globeRadius);
-      const b = projectGlobe(target.lon, target.lat, rotation, globeRadius);
-      if (a.depth < -0.78 && b.depth < -0.78) return;
-
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const distance = Math.max(1, Math.hypot(dx, dy));
-      const lift = clamp(distance * 0.24, 18, 96);
-      const side = Math.sign(Math.sin(target.lon - source.lon)) || 1;
-      const cx = (a.x + b.x) / 2 + (-dy / distance) * lift * side;
-      const cy = (a.y + b.y) / 2 + (dx / distance) * lift * side;
-      const visibility = Math.max(0.2, (a.scale + b.scale) / 2);
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.quadraticCurveTo(cx, cy, b.x, b.y);
-      ctx.strokeStyle = `rgba(${color},${alpha * visibility})`;
-      ctx.lineWidth = width / zoom;
-      if (dashed) ctx.setLineDash([5 / zoom, 5 / zoom]);
-      ctx.stroke();
-      ctx.restore();
-    };
-
-    const routeNodes = filteredNodes.length <= 220 ? filteredNodes : panelMatches;
-    const drawChainRoutes = (candidates: AtlasNode[]) => {
-      const byChain = new Map<string, AtlasNode[]>();
-      for (const node of candidates) {
-        for (const chainId of node.question.chain_ids ?? []) {
-          const group = byChain.get(chainId) ?? [];
-          group.push(node);
-          byChain.set(chainId, group);
-        }
-      }
-
-      for (const [chainId, group] of Array.from(byChain.entries())) {
-        const ordered = [...group]
-          .sort((a, b) =>
-            (a.question.chain_positions?.[chainId] ?? 0) -
-            (b.question.chain_positions?.[chainId] ?? 0),
-          )
-          .slice(0, 8);
-        for (let i = 1; i < ordered.length; i++) {
-          drawFlightRoute(ordered[i - 1], ordered[i], {
-            alpha: 0.58,
-            color: "245,158,11",
-            width: 2,
-          });
-        }
-      }
-    };
-
-    if (selectedNode) {
-      for (const node of relatedNodes) {
-        const sharesChain = selectedNode.question.chain_ids?.some((id) => node.question.chain_ids?.includes(id));
-        drawFlightRoute(selectedNode, node, {
-          alpha: sharesChain ? 0.46 : 0.20,
-          color: sharesChain ? "245,158,11" : "59,130,246",
-          width: sharesChain ? 2 : 1.3,
-          dashed: !sharesChain,
-        });
-      }
-    } else if (filteredNodes.length <= 160) {
-      drawChainRoutes(routeNodes);
-      const ordered = [...filteredNodes].sort((a, b) =>
-        a.question.topic.localeCompare(b.question.topic) || a.lon - b.lon || a.lat - b.lat,
-      );
-      for (let i = 1; i < ordered.length; i++) {
-        drawFlightRoute(ordered[i - 1], ordered[i], {
-          alpha: 0.22,
-          color: "59,130,246",
-          width: 1.2,
-          dashed: true,
-        });
-      }
-
-      const byTopic = new Map<string, AtlasNode[]>();
-      for (const node of filteredNodes) {
-        const group = byTopic.get(node.question.topic) ?? [];
-        if (group.length < 6) group.push(node);
-        byTopic.set(node.question.topic, group);
-      }
-      for (const group of Array.from(byTopic.values())) {
-        for (let i = 1; i < group.length; i++) {
-          drawFlightRoute(group[i - 1], group[i], {
-            alpha: 0.30,
-            color: "59,130,246",
-            width: 1.25,
-            dashed: true,
-          });
-        }
-      }
-    } else {
-      drawChainRoutes(routeNodes);
-      for (let i = 1; i < panelMatches.length; i++) {
-        drawFlightRoute(panelMatches[i - 1], panelMatches[i], {
-          alpha: 0.18,
-          color: "59,130,246",
-          width: 1,
-          dashed: true,
-        });
-      }
-    }
-
-    for (const { anchor, projection } of projectedAnchors) {
-      const isActive = selectedArea === "all" || selectedArea === anchor.id;
-      if (projection.depth < -0.7) continue;
-      ctx.beginPath();
-      ctx.arc(projection.x, projection.y, 4.5 * projection.scale, 0, Math.PI * 2);
-      ctx.fillStyle = isActive ? anchor.color : "rgba(148,163,184,0.45)";
-      ctx.globalAlpha = isActive ? 0.7 : 0.35;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-
-    for (const node of filteredNodes) {
-      const projection = projectGlobe(node.lon, node.lat, rotation, globeRadius);
-      const screenX = projection.x * zoom + pan.x;
-      const screenY = projection.y * zoom + pan.y;
-      if (
-        screenX < -20 ||
-        screenY < -20 ||
-        screenX > canvasSize.width + 20 ||
-        screenY > canvasSize.height + 20
-      ) {
-        continue;
-      }
-      const isSelected = node.question.id === selectedId;
-      const isHovered = node.question.id === hoveredId;
-      const dim = selectedNode && !isSelected && !relatedNodes.some((r) => r.question.id === node.question.id);
-      const radius = (isSelected ? 7.5 : isHovered ? 6.2 : node.r + node.levelIndex * 0.18) * projection.scale;
-      const depthAlpha = projection.depth < -0.45 ? 0.22 : projection.depth < 0 ? 0.45 : 0.9;
-
-      ctx.beginPath();
-      ctx.arc(projection.x, projection.y, radius, 0, Math.PI * 2);
-      ctx.fillStyle = dim ? `${node.color}45` : node.color;
-      ctx.globalAlpha = dim ? Math.min(0.35, depthAlpha) : depthAlpha;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-
-      if (node.chainCount > 0 || isHovered || isSelected) {
-        ctx.strokeStyle = isSelected ? "#ffffff" : "rgba(255,255,255,0.65)";
-        ctx.lineWidth = isSelected ? 2.5 / zoom : 1.25 / zoom;
-        ctx.stroke();
-      }
-    }
-
-    ctx.restore();
-  }, [
-    areaAnchors,
-    canvasSize,
-    filteredNodes,
-    globeRadius,
-    hoveredId,
-    pan,
-    panelMatches,
-    relatedNodes,
-    rotation,
-    selectedArea,
-    selectedId,
-    selectedNode,
-    zoom,
-  ]);
-
-  const resetView = () => {
-    const nextZoom = clamp(
-      Math.min(canvasSize.width / WORLD_WIDTH, canvasSize.height / WORLD_HEIGHT) * 0.94,
-      MIN_ZOOM,
-      1.1,
-    );
-    setZoom(nextZoom);
-    setPan({
-      x: (canvasSize.width - WORLD_WIDTH * nextZoom) / 2,
-      y: (canvasSize.height - WORLD_HEIGHT * nextZoom) / 2,
-    });
+  const reset = () => {
+    setFocus({ kind: "root" });
+    setQuery("");
+    setSelectedLevel("all");
+    setSelectedQuestionId(null);
   };
 
-  const findNodeAt = (point: Point) => {
-    const world = screenToWorld(point, pan, zoom);
-    let best: AtlasNode | null = null;
-    let bestDistance = Infinity;
-
-    for (const node of filteredNodes) {
-      const projection = projectGlobe(node.lon, node.lat, rotation, globeRadius);
-      const dx = projection.x - world.x;
-      const dy = projection.y - world.y;
-      const distance = dx * dx + dy * dy;
-      const relaxedHitRadius = filteredNodes.length <= 80 ? 26 : HIT_RADIUS;
-      const threshold = Math.pow((relaxedHitRadius + node.r * projection.scale) / zoom, 2);
-      if (distance < threshold && distance < bestDistance) {
-        best = node;
-        bestDistance = distance;
-      }
-    }
-
-    return best;
-  };
-
-  const zoomAt = (point: Point, deltaY: number) => {
-    const worldBefore = screenToWorld(point, pan, zoom);
-    const nextZoom = clamp(zoom * (deltaY > 0 ? 0.88 : 1.14), MIN_ZOOM, MAX_ZOOM);
-    setZoom(nextZoom);
-    setPan({
-      x: point.x - worldBefore.x * nextZoom,
-      y: point.y - worldBefore.y * nextZoom,
-    });
-  };
-
-  const eventPoint = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const handleWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      zoomAt({ x: event.clientX - rect.left, y: event.clientY - rect.top }, event.deltaY);
-    };
-    canvas.addEventListener("wheel", handleWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [pan, zoom]);
-
-  useEffect(() => {
-    asideRef.current?.scrollTo({ top: 0 });
-  }, [selectedId]);
-
-  const onPointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const point = eventPoint(event);
-    dragRef.current = { active: true, moved: false, last: point };
-  };
-
-  const onPointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const point = eventPoint(event);
-    const drag = dragRef.current;
-
-    if (drag.active) {
-      const dx = point.x - drag.last.x;
-      const dy = point.y - drag.last.y;
-      if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
-      if (drag.moved) {
-        setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
-      }
-      drag.last = point;
-      return;
-    }
-
-    setHoveredId(findNodeAt(point)?.question.id ?? null);
-  };
-
-  const onPointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    const drag = dragRef.current;
-    const point = eventPoint(event);
-    const hit = findNodeAt(point);
-    if (!drag.moved && hit) {
-      setSelectedId(hit.question.id);
-      setHoveredId(hit.question.id);
-    }
-    dragRef.current = { active: false, moved: false, last: point };
+  const goToFocus = (next: Focus) => {
+    setFocus(next);
+    setSelectedQuestionId(null);
   };
 
   return (
@@ -671,19 +301,18 @@ export default function ExplorePage() {
               <div>
                 <div className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.16em] font-semibold text-accentBlue px-2.5 py-1 rounded-full border border-accentBlue/30 bg-accentBlue/5 mb-2">
                   <Sparkles className="w-3 h-3" />
-                  Question planet preview
+                  Progressive explorer preview
                 </div>
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-textPrimary tracking-tight">
                   Explore the StaffML Vault
                 </h1>
                 <p className="text-sm text-textSecondary mt-1 max-w-2xl leading-relaxed">
-                  Use this as a discovery planet: search for a concept, narrow by track or level,
-                  then follow connected question routes into practice. Orange flight paths show
-                  question chains; blue routes show nearby topic neighborhoods.
+                  Drill from track to area to topic, then choose a question path. The radial view
+                  shows where the corpus is dense; the side panel keeps the exact questions readable.
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center shrink-0">
-                <Metric label="showing" value={filteredNodes.length.toLocaleString()} />
+                <Metric label="showing" value={focusQuestions.length.toLocaleString()} />
                 <Metric label="total" value={questions.length.toLocaleString()} />
                 <Metric label="chains" value={questions.filter((q) => q.chain_ids?.length).length.toLocaleString()} />
               </div>
@@ -697,8 +326,11 @@ export default function ExplorePage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-textMuted" />
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search the planet: kv cache, quantization, drift, tensor parallel..."
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setSelectedQuestionId(null);
+                }}
+                placeholder="Search: kv cache, quantization, drift, tensor parallel..."
                 className="w-full pl-9 pr-9 py-2 rounded-lg border border-border bg-background text-sm text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight"
               />
               {query && (
@@ -713,30 +345,16 @@ export default function ExplorePage() {
               )}
             </div>
 
-            <FilterSelect label="Track" value={selectedTrack} onChange={setSelectedTrack}>
-              <option value="all">All tracks</option>
-              {tracks.map((track) => (
-                <option key={track} value={track}>{formatTrack(track)}</option>
-              ))}
-            </FilterSelect>
-
             <FilterSelect label="Level" value={selectedLevel} onChange={setSelectedLevel}>
               <option value="all">All levels</option>
-              {levels.map((level) => (
-                <option key={level} value={level}>{level}</option>
-              ))}
-            </FilterSelect>
-
-            <FilterSelect label="Area" value={selectedArea} onChange={setSelectedArea}>
-              <option value="all">All areas</option>
-              {areas.map((area) => (
-                <option key={area.id} value={area.id}>{area.name}</option>
+              {LEVELS.map((level) => (
+                <option key={level.id} value={level.id}>{level.id}</option>
               ))}
             </FilterSelect>
 
             <button
               type="button"
-              onClick={resetView}
+              onClick={reset}
               className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-background text-sm text-textSecondary hover:text-textPrimary hover:bg-surface transition-colors"
             >
               <LocateFixed className="w-4 h-4" />
@@ -746,65 +364,219 @@ export default function ExplorePage() {
         </section>
 
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
-          <div ref={wrapRef} className="relative flex-1 min-h-[420px] lg:min-h-0 overflow-hidden">
-            <canvas
-              ref={canvasRef}
-              onPointerDown={onPointerDown}
-              onPointerMove={onPointerMove}
-              onPointerLeave={() => {
-                dragRef.current.active = false;
-                setHoveredId(null);
-              }}
-              onPointerUp={onPointerUp}
-              className={clsx(
-                "block w-full h-full touch-none cursor-grab bg-[radial-gradient(circle_at_center,var(--surface)_0,transparent_64%)]",
-                dragRef.current.active && "cursor-grabbing",
-              )}
-              aria-label="Interactive question planet of StaffML Vault questions"
-            />
-            <div className="pointer-events-none absolute left-4 bottom-4 rounded-lg border border-borderSubtle bg-background/85 backdrop-blur px-3 py-2 text-[11px] text-textTertiary">
-              Drag to pan - scroll to zoom - click a dot to inspect a question
-            </div>
-            {hoveredNode && (
-              <div className="pointer-events-none absolute right-4 top-4 max-w-xs rounded-xl border border-border bg-background/95 shadow-xl p-3">
-                <div className="flex items-center gap-1.5 mb-1">
-                  <span className="text-[10px] font-mono text-textTertiary uppercase">{hoveredNode.question.level}</span>
-                  <span className="text-[10px] font-mono text-textTertiary uppercase">{hoveredNode.question.track}</span>
-                </div>
-                <p className="text-sm font-semibold text-textPrimary leading-snug">{hoveredNode.question.title}</p>
-                <p className="text-[11px] text-textTertiary mt-1">{hoveredNode.areaName} - {hoveredNode.question.topic}</p>
-              </div>
-            )}
-          </div>
+          <main className="relative flex-1 min-h-[560px] lg:min-h-0 overflow-auto lg:overflow-hidden p-4 sm:p-6">
+            <div className="max-w-5xl mx-auto h-full flex flex-col">
+              <Breadcrumb items={focusBreadcrumb(focus)} active={focus} onSelect={goToFocus} />
 
-          <aside
-            ref={asideRef}
-            className="lg:w-[380px] min-h-0 border-t lg:border-t-0 lg:border-l border-border bg-background overflow-auto"
-          >
-            {selectedNode ? (
+              <div className="flex-1 min-h-[420px] grid place-items-center">
+                <svg
+                  viewBox={`0 0 ${SIZE} ${SIZE}`}
+                  className="w-full max-w-[540px] aspect-square overflow-visible"
+                  role="img"
+                  aria-label="Progressive radial explorer for StaffML questions"
+                >
+                  <defs>
+                    <filter id="segmentGlow" x="-20%" y="-20%" width="140%" height="140%">
+                      <feGaussianBlur stdDeviation="3" result="blur" />
+                      <feMerge>
+                        <feMergeNode in="blur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                  </defs>
+
+                  <circle cx={CX} cy={CY} r="108" className="fill-surface stroke-border" strokeWidth="1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const parent = focusParent(focus);
+                      if (parent) goToFocus(parent);
+                    }}
+                    className="cursor-pointer"
+                  >
+                    <circle cx={CX} cy={CY} r="92" className="fill-background stroke-borderSubtle hover:stroke-accentBlue transition-colors" strokeWidth="1" />
+                  </button>
+                  <text x={CX} y={CY - 8} textAnchor="middle" className="fill-textPrimary text-[18px] font-bold">
+                    {focusLabel(focus)}
+                  </text>
+                  <text x={CX} y={CY + 16} textAnchor="middle" className="fill-textTertiary text-[11px] font-mono uppercase tracking-wide">
+                    {focus.kind === "topic" ? "questions by level" : "click a segment to zoom"}
+                  </text>
+
+                  {focus.kind === "topic" ? (
+                    <LevelRing
+                      buckets={levelBuckets}
+                      color={getAreaStyle(focus.area).primary}
+                      onPick={(question) => setSelectedQuestionId(question.id)}
+                    />
+                  ) : (
+                    segments.map((segment) => {
+                      const start = cursor / total * TAU;
+                      cursor += segment.count;
+                      const end = cursor / total * TAU;
+                      const labelPoint = midpoint(142, 262, start, end);
+                      const showLabel = end - start > 0.16;
+                      const hovered = hoveredId === segment.id;
+                      return (
+                        <g key={segment.id}>
+                          <path
+                            d={ringPath(132, 268, start, end)}
+                            fill={segment.color}
+                            opacity={hovered ? 0.9 : 0.72}
+                            stroke="var(--background)"
+                            strokeWidth="3"
+                            filter={hovered ? "url(#segmentGlow)" : undefined}
+                            className="cursor-pointer transition-opacity"
+                            onMouseEnter={() => setHoveredId(segment.id)}
+                            onMouseLeave={() => setHoveredId(null)}
+                            onClick={() => goToFocus(segment.focus)}
+                          />
+                          {showLabel && (
+                            <>
+                              <text x={labelPoint.x} y={labelPoint.y - 3} textAnchor="middle" className="fill-white text-[10px] font-bold pointer-events-none">
+                                {segment.label.length > 18 ? `${segment.label.slice(0, 17)}...` : segment.label}
+                              </text>
+                              <text x={labelPoint.x} y={labelPoint.y + 12} textAnchor="middle" className="fill-white/80 text-[9px] font-mono pointer-events-none">
+                                {segment.count}
+                              </text>
+                            </>
+                          )}
+                        </g>
+                      );
+                    })
+                  )}
+                </svg>
+              </div>
+            </div>
+          </main>
+
+          <aside className="lg:w-[390px] min-h-0 border-t lg:border-t-0 lg:border-l border-border bg-background overflow-auto">
+            {selectedQuestion ? (
               <QuestionPanel
-                node={selectedNode}
-                related={relatedNodes}
-                onSelect={setSelectedId}
-                onClose={() => setSelectedId(null)}
+                question={selectedQuestion}
+                areaName={areaById.get(selectedQuestion.competency_area)?.name ?? titleCase(selectedQuestion.competency_area)}
+                related={relatedQuestions(selectedQuestion, questions)}
+                onSelect={(id) => setSelectedQuestionId(id)}
+                onClose={() => setSelectedQuestionId(null)}
               />
             ) : (
-              <EmptyPanel
-                areaAnchors={areaAnchors}
-                matches={panelMatches}
-                hasActiveFilters={hasActiveFilters}
-                onSelect={setSelectedId}
-                onReset={() => {
-                  setQuery("");
-                  setSelectedTrack("all");
-                  setSelectedLevel("all");
-                  setSelectedArea("all");
-                }}
+              <ExplorerPanel
+                focus={focus}
+                questions={focusQuestions}
+                visibleQuestions={visibleQuestions}
+                segments={segments}
+                levelBuckets={levelBuckets}
+                onFocus={goToFocus}
+                onSelectQuestion={(id) => setSelectedQuestionId(id)}
+                onReset={reset}
               />
             )}
           </aside>
         </div>
       </div>
+    </div>
+  );
+}
+
+function trackColor(track: string) {
+  const colors: Record<string, string> = {
+    cloud: "#60a5fa",
+    edge: "#34d399",
+    mobile: "#c084fc",
+    tinyml: "#fbbf24",
+    global: "#94a3b8",
+  };
+  return colors[track] ?? "#818cf8";
+}
+
+function relatedQuestions(question: Question, all: Question[]) {
+  return all
+    .filter((candidate) => {
+      if (candidate.id === question.id) return false;
+      const sharesChain = question.chain_ids?.some((id) => candidate.chain_ids?.includes(id));
+      return sharesChain || candidate.topic === question.topic;
+    })
+    .slice(0, 10);
+}
+
+function LevelRing({
+  buckets,
+  color,
+  onPick,
+}: {
+  buckets: LevelBucket[];
+  color: string;
+  onPick: (question: Question) => void;
+}) {
+  const total = Math.max(1, buckets.reduce((sum, bucket) => sum + bucket.count, 0));
+  let cursor = 0;
+  return (
+    <>
+      {buckets.map((bucket) => {
+        const start = cursor / total * TAU;
+        cursor += bucket.count;
+        const end = cursor / total * TAU;
+        const point = midpoint(132, 268, start, end);
+        return (
+          <g key={bucket.level}>
+            <path
+              d={ringPath(132, 268, start, end)}
+              fill={color}
+              opacity={0.45 + Math.min(0.35, bucket.count / total)}
+              stroke="var(--background)"
+              strokeWidth="3"
+              className="cursor-pointer"
+              onClick={() => onPick(bucket.questions[0])}
+            />
+            <text x={point.x} y={point.y - 3} textAnchor="middle" className="fill-white text-[12px] font-bold pointer-events-none">
+              {bucket.level}
+            </text>
+            <text x={point.x} y={point.y + 13} textAnchor="middle" className="fill-white/80 text-[9px] font-mono pointer-events-none">
+              {bucket.count}
+            </text>
+          </g>
+        );
+      })}
+    </>
+  );
+}
+
+function Breadcrumb({
+  items,
+  active,
+  onSelect,
+}: {
+  items: Array<{ label: string; focus: Focus }>;
+  active: Focus;
+  onSelect: (focus: Focus) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-[12px] mb-4">
+      {items.map((item, index) => {
+        const isLast = index === items.length - 1;
+        return (
+          <span key={`${item.label}-${index}`} className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => !isLast && onSelect(item.focus)}
+              disabled={isLast}
+              className={isLast ? "text-textPrimary font-semibold" : "text-accentBlue hover:underline"}
+            >
+              {item.label}
+            </button>
+            {!isLast && <span className="text-textMuted">/</span>}
+          </span>
+        );
+      })}
+      {active.kind !== "root" && (
+        <button
+          type="button"
+          onClick={() => onSelect({ kind: "root" })}
+          className="ml-2 text-[11px] text-textTertiary hover:text-textPrimary"
+        >
+          reset
+        </button>
+      )}
     </div>
   );
 }
@@ -827,7 +599,7 @@ function FilterSelect({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <label className="flex items-center gap-2 text-[11px] font-mono uppercase tracking-wide text-textTertiary">
@@ -843,114 +615,149 @@ function FilterSelect({
   );
 }
 
-function EmptyPanel({
-  areaAnchors,
-  matches,
-  hasActiveFilters,
-  onSelect,
+function ExplorerPanel({
+  focus,
+  questions,
+  visibleQuestions,
+  segments,
+  levelBuckets,
+  onFocus,
+  onSelectQuestion,
   onReset,
 }: {
-  areaAnchors: AreaAnchor[];
-  matches: AtlasNode[];
-  hasActiveFilters: boolean;
-  onSelect: (id: string) => void;
+  focus: Focus;
+  questions: Question[];
+  visibleQuestions: Question[];
+  segments: Segment[];
+  levelBuckets: LevelBucket[];
+  onFocus: (focus: Focus) => void;
+  onSelectQuestion: (id: string) => void;
   onReset: () => void;
 }) {
   return (
     <div className="p-5">
       <div className="w-10 h-10 rounded-xl border border-accentBlue/30 bg-accentBlue/10 flex items-center justify-center mb-4">
-        <Network className="w-5 h-5 text-accentBlue" />
+        <Layers className="w-5 h-5 text-accentBlue" />
       </div>
-      <h2 className="text-lg font-bold text-textPrimary mb-2">Question planet</h2>
+      <h2 className="text-lg font-bold text-textPrimary mb-2">Radial question explorer</h2>
       <p className="text-sm text-textSecondary leading-relaxed mb-5">
-        Each dot is a Vault question. Orange flight paths connect chain steps;
-        blue routes connect local topic neighborhoods. Use the planet to choose
-        a path, then use the cards for the exact question title.
+        Click a ring segment to zoom in. Start with a deployment track, drill into an area,
+        then choose a topic and question level.
       </p>
 
-      {!hasActiveFilters && (
-        <section className="mb-6 rounded-xl border border-accentBlue/20 bg-accentBlue/5 p-4">
-          <h3 className="text-sm font-bold text-textPrimary mb-3">How to use this</h3>
-          <div className="space-y-3">
-            <HowToStep
-              step="1"
-              title="Search for a concept"
-              text="Try kv cache, quantization, drift, batching, memory, or tensor parallel."
-            />
-            <HowToStep
-              step="2"
-              title="Narrow the interview context"
-              text="Use track and level filters to turn the full Vault into a small candidate set."
-            />
-            <HowToStep
-              step="3"
-              title="Pick a path"
-              text="Click a card or dot, practice it, then use connected questions to move easier, harder, or sideways."
-            />
-          </div>
-        </section>
-      )}
-
-      {matches.length > 0 ? (
+      {segments.length > 0 && focus.kind !== "topic" && (
         <section className="mb-6">
           <h3 className="text-[11px] font-mono uppercase tracking-wide text-textTertiary mb-2">
-            {hasActiveFilters ? "Matching questions" : "Suggested starting points"}
+            Next zoom level
           </h3>
           <div className="space-y-2">
-            {matches.map((node) => (
+            {segments.slice(0, 10).map((segment) => (
               <button
-                key={node.question.id}
+                key={segment.id}
                 type="button"
-                onClick={() => onSelect(node.question.id)}
+                onClick={() => onFocus(segment.focus)}
                 className="w-full text-left p-3 rounded-lg border border-borderSubtle bg-surface/50 hover:bg-surface hover:border-borderHighlight transition-colors"
               >
-                <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono uppercase text-textTertiary">
-                  <span>{node.question.level}</span>
-                  <span>{node.question.track}</span>
-                  <span>{node.areaName}</span>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: segment.color }} />
+                      <span className="text-sm font-semibold text-textPrimary">{segment.label}</span>
+                    </div>
+                    <div className="text-[10px] font-mono uppercase text-textTertiary mt-1">{segment.subtitle}</div>
+                  </div>
+                  <span className="text-xs font-mono text-textTertiary">{segment.count}</span>
                 </div>
-                <p className="text-sm font-semibold text-textPrimary leading-snug">{node.question.title}</p>
               </button>
             ))}
           </div>
         </section>
-      ) : (
-        <section className="mb-6 rounded-xl border border-borderSubtle bg-surface/60 p-4">
-          <h3 className="text-sm font-bold text-textPrimary mb-1">No matching questions</h3>
-          <p className="text-sm text-textSecondary leading-relaxed mb-3">
-            Try a broader phrase, clear a track or level filter, or return to the full planet.
-          </p>
-          <button
-            type="button"
-            onClick={onReset}
-            className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-background text-sm text-textSecondary hover:text-textPrimary hover:bg-surface transition-colors"
-          >
-            <LocateFixed className="w-4 h-4" />
-            Reset filters
-          </button>
+      )}
+
+      {focus.kind === "topic" && (
+        <section className="mb-6">
+          <h3 className="text-[11px] font-mono uppercase tracking-wide text-textTertiary mb-2">
+            Question levels
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            {levelBuckets.map((bucket) => (
+              <button
+                key={bucket.level}
+                type="button"
+                onClick={() => onSelectQuestion(bucket.questions[0].id)}
+                className="p-3 rounded-lg border border-borderSubtle bg-surface/50 text-left hover:bg-surface hover:border-borderHighlight"
+              >
+                <div className="text-sm font-bold text-textPrimary">{bucket.level}</div>
+                <div className="text-[11px] text-textTertiary">{bucket.count} questions</div>
+              </button>
+            ))}
+          </div>
         </section>
       )}
 
-      <section>
+      <section className="mb-6">
         <h3 className="text-[11px] font-mono uppercase tracking-wide text-textTertiary mb-2">
-          Area legend
+          Questions in view
         </h3>
-        <div className="space-y-2">
-          {areaAnchors.map((anchor) => (
-            <div key={anchor.id} className="flex items-center gap-2 text-sm text-textSecondary">
-              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: anchor.color }} />
-              {anchor.name}
-            </div>
-          ))}
-        </div>
+        {visibleQuestions.length > 0 ? (
+          <div className="space-y-2">
+            {visibleQuestions.map((question) => (
+              <QuestionButton
+                key={question.id}
+                question={question}
+                onClick={() => onSelectQuestion(question.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-borderSubtle bg-surface/60 p-4">
+            <h3 className="text-sm font-bold text-textPrimary mb-1">No matching questions</h3>
+            <p className="text-sm text-textSecondary leading-relaxed mb-3">
+              Try a broader phrase, clear the level filter, or return to the full Vault.
+            </p>
+            <button
+              type="button"
+              onClick={onReset}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-border bg-background text-sm text-textSecondary hover:text-textPrimary hover:bg-surface transition-colors"
+            >
+              <LocateFixed className="w-4 h-4" />
+              Reset filters
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-accentBlue/20 bg-accentBlue/5 p-4">
+        <h3 className="text-sm font-bold text-textPrimary mb-3">How to use this</h3>
+        <HowToStep step="1" title="Pick a track" text="Cloud, Edge, Mobile, TinyML, and Global are the highest-level slices." />
+        <HowToStep step="2" title="Zoom into an area" text="The next ring shows the skills inside that track: memory, deployment, latency, and more." />
+        <HowToStep step="3" title="Choose a topic path" text="Topic and level views lead to concrete questions you can practice immediately." />
       </section>
     </div>
   );
 }
 
+function QuestionButton({ question, onClick }: { question: Question; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full text-left p-3 rounded-lg border border-borderSubtle bg-surface/50 hover:bg-surface hover:border-borderHighlight transition-colors"
+    >
+      <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono uppercase text-textTertiary">
+        <span>{question.level}</span>
+        <span>{question.track}</span>
+        <span>{titleCase(question.competency_area)}</span>
+        {(question.chain_ids?.length ?? 0) > 0 && <span className="text-accentAmber">chain</span>}
+      </div>
+      <p className="text-sm font-semibold text-textPrimary leading-snug">{question.title}</p>
+    </button>
+  );
+}
+
 function HowToStep({ step, title, text }: { step: string; title: string; text: string }) {
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-3 mb-3 last:mb-0">
       <div className="w-6 h-6 rounded-full bg-accentBlue text-white flex items-center justify-center text-[11px] font-bold shrink-0">
         {step}
       </div>
@@ -963,25 +770,26 @@ function HowToStep({ step, title, text }: { step: string; title: string; text: s
 }
 
 function QuestionPanel({
-  node,
+  question,
+  areaName,
   related,
   onSelect,
   onClose,
 }: {
-  node: AtlasNode;
-  related: AtlasNode[];
+  question: Question;
+  areaName: string;
+  related: Question[];
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  const q = node.question;
   return (
     <div className="p-5">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="inline-flex items-center gap-2 text-[10px] font-mono uppercase tracking-wide text-textTertiary">
-          <span className="px-2 py-1 rounded border border-border bg-surface">{q.level}</span>
-          <span className="px-2 py-1 rounded border border-border bg-surface">{q.track}</span>
-          {node.chainCount > 0 && (
-            <span className="px-2 py-1 rounded border border-accentGreen/30 bg-accentGreen/10 text-accentGreen">
+          <span className="px-2 py-1 rounded border border-border bg-surface">{question.level}</span>
+          <span className="px-2 py-1 rounded border border-border bg-surface">{question.track}</span>
+          {(question.chain_ids?.length ?? 0) > 0 && (
+            <span className="px-2 py-1 rounded border border-accentAmber/30 bg-accentAmber/10 text-accentAmber">
               chain
             </span>
           )}
@@ -997,21 +805,21 @@ function QuestionPanel({
       </div>
 
       <h2 className="text-xl font-extrabold text-textPrimary tracking-tight leading-tight mb-3">
-        {q.title}
+        {question.title}
       </h2>
       <p className="text-sm text-textSecondary leading-relaxed mb-4">
-        {q.question || "Open the practice view to see the full scenario and solution."}
+        {question.question || "Open the practice view to see the full scenario and solution."}
       </p>
 
       <div className="grid grid-cols-2 gap-2 mb-5">
-        <InfoTile icon={<Layers className="w-3.5 h-3.5" />} label="Area" value={node.areaName} />
-        <InfoTile icon={<Network className="w-3.5 h-3.5" />} label="Topic" value={q.topic} />
-        <InfoTile icon={<Sparkles className="w-3.5 h-3.5" />} label="Zone" value={q.zone} />
-        <InfoTile icon={<LocateFixed className="w-3.5 h-3.5" />} label="Phase" value={q.phase ?? "mixed"} />
+        <InfoTile icon={<Layers className="w-3.5 h-3.5" />} label="Area" value={areaName} />
+        <InfoTile icon={<Route className="w-3.5 h-3.5" />} label="Topic" value={titleCase(question.topic)} />
+        <InfoTile icon={<Sparkles className="w-3.5 h-3.5" />} label="Zone" value={titleCase(question.zone)} />
+        <InfoTile icon={<BookOpen className="w-3.5 h-3.5" />} label="Phase" value={question.phase ?? "mixed"} />
       </div>
 
       <Link
-        href={`/practice?q=${q.id}`}
+        href={`/practice?q=${question.id}`}
         className="inline-flex items-center justify-center gap-1.5 w-full px-4 py-2.5 rounded-lg bg-accentBlue text-white text-sm font-bold hover:opacity-90 transition-opacity mb-6"
       >
         Practice this question
@@ -1025,18 +833,7 @@ function QuestionPanel({
         {related.length > 0 ? (
           <div className="space-y-2">
             {related.map((item) => (
-              <button
-                key={item.question.id}
-                type="button"
-                onClick={() => onSelect(item.question.id)}
-                className="w-full text-left p-3 rounded-lg border border-borderSubtle bg-surface/50 hover:bg-surface hover:border-borderHighlight transition-colors"
-              >
-                <div className="flex items-center gap-1.5 mb-1 text-[10px] font-mono uppercase text-textTertiary">
-                  <span>{item.question.level}</span>
-                  <span>{item.question.track}</span>
-                </div>
-                <p className="text-sm font-semibold text-textPrimary leading-snug">{item.question.title}</p>
-              </button>
+              <QuestionButton key={item.id} question={item} onClick={() => onSelect(item.id)} />
             ))}
           </div>
         ) : (
@@ -1049,14 +846,14 @@ function QuestionPanel({
   );
 }
 
-function InfoTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function InfoTile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
     <div className="rounded-lg border border-borderSubtle bg-surface/50 p-3">
       <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-wide text-textTertiary mb-1">
         {icon}
         {label}
       </div>
-      <div className="text-sm font-semibold text-textPrimary capitalize leading-snug">{value}</div>
+      <div className="text-sm font-semibold text-textPrimary leading-snug">{value}</div>
     </div>
   );
 }
