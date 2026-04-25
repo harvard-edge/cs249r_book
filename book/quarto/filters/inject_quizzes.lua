@@ -340,7 +340,7 @@ local function insert_quizzes(doc)
     return b.t == "Header" and b.level == 1
   end
 
-  -- akumulators
+  -- accumulators
   local new_blocks      = {}
   local chapter_blocks  = {}
   local chapter_answers = {}
