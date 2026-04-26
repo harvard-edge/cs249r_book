@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, burst, flash, shake } from "./runtime.mjs";
+import { mountPixiOnCanvas, burst, flash, shake, mountReadyOverlay } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
 export async function mountPipeline(canvas, opts = {}) {
@@ -7,14 +7,19 @@ export async function mountPipeline(canvas, opts = {}) {
   let score = 0;
   let activeBlocks = [];
   let over = false;
+  let started = false;             // pre-game READY gate
   let timeLeft = 30000;
   const MAX_MEMORY = 8;
   let nextBlockId = 0;
 
-  const stageWidth = 82;
+  // Wider stages so the GPUs fill more of the canvas — was 82px, leaving ~175px
+  // of dead space on the right. Now 116px so the four GPUs span ~464px and the
+  // right-side gap drops to ~50px (matching the left margin).
+  const stageWidth = 116;
   const stageHeight = 124;
   const startX = W / 2 - 2 * stageWidth;
   const startY = 132;
+  const TURN_MS = 600;             // smooth blue→brown turnaround duration
 
   const bgLayer = new PIXI.Container();
   const blockLayer = new PIXI.Container();
@@ -85,8 +90,27 @@ export async function mountPipeline(canvas, opts = {}) {
 
   hudLayer.addChild(title, scoreText, timeText, memText, memFrame, memFill, hintText);
 
+  // Pre-game READY overlay — every game now starts paused so the player can read.
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "PIPELINE PACER",
+    goal: "Keep the GPUs fed. Hide bubbles, but don't OOM.",
+    controls: "SPACE  admit a microbatch · TAP  same",
+    onLaunch: () => { started = true; }
+  });
+
+  // Smooth color crossfade for the U-turn at the last GPU. Blends RGB so the
+  // sprite fades from compute-blue into routing-orange instead of snapping.
+  function lerpColor(c1, c2, t) {
+    const r1 = (c1 >> 16) & 0xff, g1 = (c1 >> 8) & 0xff, b1 = c1 & 0xff;
+    const r2 = (c2 >> 16) & 0xff, g2 = (c2 >> 8) & 0xff, b2 = c2 & 0xff;
+    return ((Math.round(r1 + (r2 - r1) * t) << 16) |
+            (Math.round(g1 + (g2 - g1) * t) << 8)  |
+             Math.round(b1 + (b2 - b1) * t));
+  }
+
   function spawn() {
-    if (over) return;
+    if (!started || over) return;
     if (activeBlocks.length >= MAX_MEMORY) {
       over = true;
       flash(stage, colors.mem, 400);
@@ -99,6 +123,8 @@ export async function mountPipeline(canvas, opts = {}) {
       isFwd: true,
       stageIndex: 0,
       progress: 0,
+      turning: false,        // U-turn animation state (the "fade blue → brown" moment)
+      turnT: 0,
       sprite: new PIXI.Graphics()
     };
     block.sprite.roundRect(-13, -13, 26, 26, 6).fill(colors.fwd).stroke({ color: 0x2f6e9d, width: 1 });
@@ -113,8 +139,9 @@ export async function mountPipeline(canvas, opts = {}) {
 
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!started) return;
     if (over) return;
-    
+
     timeLeft -= dt;
     if (timeLeft <= 0) {
       timeLeft = 0;
@@ -127,17 +154,43 @@ export async function mountPipeline(canvas, opts = {}) {
     const SPEED = 0.0015; // Time per stage
     for (let i = activeBlocks.length - 1; i >= 0; i--) {
       const b = activeBlocks[i];
+
+      // Turn-around animation: hold under GPU 3, fade blue → brown, U-curve down.
+      if (b.turning) {
+        b.turnT += dt / TURN_MS;
+        const t = Math.min(1, b.turnT);
+        const eased = 1 - Math.pow(1 - t, 3);
+        const blended = lerpColor(colors.fwd, colors.bwd, eased);
+        // Vertical U-curve: down then back up to the lower (backward) rail.
+        const cx = startX + 3 * stageWidth + stageWidth / 2;
+        const baseY = startY + stageHeight / 2;
+        const dipY  = baseY + 26 + Math.sin(t * Math.PI) * 18;     // dip in the middle of the turn
+        b.sprite.clear()
+          .roundRect(-13, -13, 26, 26, 6)
+          .fill({ color: blended })
+          .stroke({ color: lerpColor(0x2f6e9d, 0x9a6620, eased), width: 1 });
+        b.sprite.position.set(cx, baseY - 26 + (dipY - (baseY - 26)) * eased);
+        if (t >= 1) {
+          b.turning = false;
+          b.isFwd = false;
+          b.stageIndex = 3;
+          b.progress = 0;
+          burst(blockLayer, b.sprite.x, b.sprite.y, colors.bwd, 4, { speed: 1.5, lifeMs: 300 });
+        }
+        continue;
+      }
+
       b.progress += dt * SPEED;
-      
+
       if (b.progress >= 1) {
         b.progress = 0;
         if (b.isFwd) {
           b.stageIndex++;
           if (b.stageIndex >= 4) {
-            b.isFwd = false;
-            b.stageIndex = 3;
-            b.sprite.clear().roundRect(-13, -13, 26, 26, 6).fill(colors.bwd).stroke({ color: 0x9a6620, width: 1 });
-            burst(blockLayer, b.sprite.x, b.sprite.y, colors.bwd, 4, { speed: 1.5, lifeMs: 300 });
+            // Enter U-turn instead of instant color swap. Smooth blue → brown.
+            b.turning = true;
+            b.turnT = 0;
+            continue;
           }
         } else {
           b.stageIndex--;
