@@ -366,7 +366,7 @@ MLSP.games.quantization = function(canvas, opts) {
     ctx.textAlign = "center";
     ctx.fillText("hits: " + state.hits + " / " + WIN_HITS + " to ship", TARGET_AREA.x + TARGET_AREA.w / 2, H - 28);
     ctx.textAlign = "right";
-    ctx.fillText("alltime best " + alltimeBest, TARGET_AREA.x + TARGET_AREA.w, H - 28);
+    ctx.fillText("all-time best " + alltimeBest, TARGET_AREA.x + TARGET_AREA.w, H - 28);
     ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999"; ctx.textAlign = "left";
     ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · arrows / mouse aim · 1-6 cycles a layer · R retry", TARGET_AREA.x, H - 10);
 
