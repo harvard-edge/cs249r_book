@@ -12,6 +12,7 @@ are rebuilt from the plural `chains: [{id, position}]` YAML list.
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -243,7 +244,7 @@ def emit_manifest(
     bundle, so it can never drift.
     """
     from collections import Counter
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     track_dist = Counter(lq.question.track for lq in loaded
                          if lq.question.status == "published")
@@ -252,7 +253,7 @@ def emit_manifest(
 
     manifest = {
         "version": schema_version,
-        "buildDate": datetime.now(timezone.utc).strftime(
+        "buildDate": datetime.now(UTC).strftime(
             "%Y-%m-%dT%H:%M:%SZ"),
         "contentHash": release_hash[:12],
         "questionCount": published_count,

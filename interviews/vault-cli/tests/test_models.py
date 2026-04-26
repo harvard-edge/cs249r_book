@@ -22,8 +22,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve()
 sys.path.insert(0, str(HERE.parents[1] / "src"))
 
-from vault_cli.models import Question, Visual, Details  # noqa: E402
-
+from vault_cli.models import Question, Visual  # noqa: E402
 
 # ─── Visual.kind ─────────────────────────────────────────────────────────────
 
