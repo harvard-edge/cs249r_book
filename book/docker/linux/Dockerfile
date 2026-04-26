@@ -14,7 +14,8 @@ ENV QUARTO_LOG_LEVEL=INFO
 ENV PYTHONIOENCODING=utf-8
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
-ENV PATH=/usr/local/texlive/bin/x86_64-linux:$PATH
+# Prepend TeX; keep a full system PATH (BuildKit can expand $PATH in RUN to nothing).
+ENV PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # === PHASE 0: COPY DEPENDENCY FILES EARLY (for better cache efficiency) ===
 # Copy dependency files early for better cache efficiency
@@ -249,14 +250,14 @@ RUN chmod 0755 /opt/install-texlive-base.sh && /opt/install-texlive-base.sh ${TE
 
 # Step 5.4: Configure TeX Live PATH
 RUN echo "🔧 Setting up TeX Live PATH..." && \
-    echo 'export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH' >> /etc/bash.bashrc && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
+    echo 'export PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$$PATH"' >> /etc/bash.bashrc && \
+    export PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" && \
     echo "🔧 TeX Live PATH configured" && \
     \
     echo "📍 Checking if tlmgr is available..." && \
     if command -v tlmgr >/dev/null 2>&1; then \
         echo "📦 tlmgr available"; \
-        tlmgr --version | head -1; \
+        tlmgr --version; \
     else \
         echo "❌ tlmgr not found or not working"; \
         exit 1; \
@@ -269,7 +270,7 @@ RUN echo "📊 Analyzing tl_packages file..." && \
     echo "📦 Found $collection_count TeX Live collections to install" && \
     \
     echo "🔄 Installing TeX Live collections with retry logic..." && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
+    export PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" && \
     TLMGR_REPO=$$(tr -d '\n' < /opt/mlsysbook-texlive-tlnet-url) && \
     tlmgr option repository "$$TLMGR_REPO" && \
     i=1 && \
@@ -319,14 +320,14 @@ RUN echo "🧹 Cleaning up TeX Live installer..." && \
 
 # Verify TeX Live installation (with error handling)
 RUN echo "🔄 Verifying TeX Live installation..." && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
+    export PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" && \
     echo "📍 PATH: $$PATH" && \
     echo "📍 Checking TeX Live directory:" && \
     ls -la /usr/local/texlive/ || echo "❌ TeX Live directory not found" && \
     ls -la /usr/local/texlive/bin/ || echo "❌ TeX Live bin directory not found" && \
     if [ -f /usr/local/texlive/bin/x86_64-linux/lualatex ]; then \
         echo "✅ lualatex found"; \
-        /usr/local/texlive/bin/x86_64-linux/lualatex --version | head -1; \
+        /usr/local/texlive/bin/x86_64-linux/lualatex --version; \
     else \
         echo "❌ lualatex not found, checking for alternative locations"; \
         find /usr/local/texlive -name "lualatex" -type f 2>/dev/null || echo "No lualatex found anywhere"; \
@@ -603,7 +604,6 @@ WORKDIR /workspace
 
 # === PHASE 13: FINAL VERIFICATION ===
 RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
     echo "📊 Checking Quarto..." && \
     if command -v quarto >/dev/null 2>&1; then \
         quarto --version && \
@@ -643,8 +643,7 @@ RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
     echo "✅ Final verification complete"
 
 # Health check
-RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
-    echo "✅ Container build completed successfully" && \
+RUN echo "✅ Container build completed successfully" && \
     echo "📊 Quarto version: $$(quarto --version)" && \
     echo "📊 Python version: $$(python3 --version)" && \
     echo "📊 R version: $$(R --version | head -1)" && \
