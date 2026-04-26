@@ -8,7 +8,8 @@ window.MLSP.games.checkpoint = async function(canvas, callbacks) {
   
   const state = {
     score: 0,
-    gameOver: false
+    gameOver: false,
+    started: false
   };
   
   const container = new PIXI.Container();
@@ -46,7 +47,7 @@ window.MLSP.games.checkpoint = async function(canvas, callbacks) {
   
   const checkpoints = [];
   
-  const downHandler = (e) => { if (e.code === 'Space') { e.preventDefault(); spaceHeld = true; } };
+  const downHandler = (e) => { if (state.started && e.code === 'Space') { e.preventDefault(); spaceHeld = true; } };
   const upHandler = (e) => { 
     if (e.code === 'Space') {
       e.preventDefault();
@@ -75,9 +76,19 @@ window.MLSP.games.checkpoint = async function(canvas, callbacks) {
   bgWarning.alpha = 0;
   stage.addChildAt(bgWarning, 0);
 
+  // Pre-game READY overlay
+  runtime.mountReadyOverlay(stage, {
+    width: width, height: height,
+    title: "CHECKPOINT ROULETTE",
+    goal: "Train fast. Checkpoint before a node failure strikes.",
+    controls: "HOLD SPACE  train · RELEASE  write a checkpoint",
+    onLaunch: () => { state.started = true; }
+  });
+
   onTick((dt) => {
+    if (!state.started) return;
     if (state.gameOver) return;
-    
+
     if (spaceHeld) {
       progress += dt * 0.04; // 0.04 px per ms
       if (progress >= width - 100) {

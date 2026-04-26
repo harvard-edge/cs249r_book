@@ -10,7 +10,8 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
     score: 0,
     health: 100,
     hunger: 100,
-    gameOver: false
+    gameOver: false,
+    started: false
   };
   
   const container = new PIXI.Container();
@@ -103,7 +104,7 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
   }
   
   const handleKey = (e) => {
-    if (state.gameOver) return;
+    if (!state.started || state.gameOver) return;
     const key = e.key.toUpperCase();
     if (letters.includes(key)) {
       // Find oldest unprocessed block in zone
@@ -120,9 +121,19 @@ window.MLSP.games.loader = async function(canvas, callbacks) {
   };
   window.addEventListener('keydown', handleKey);
   
+  // Pre-game READY overlay
+  runtime.mountReadyOverlay(stage, {
+    width: width, height: height,
+    title: "DATA LOADER DASH",
+    goal: "Type each letter as it enters the zone — feed the GPU.",
+    controls: "TYPE letters (J · C · A · T) as they appear",
+    onLaunch: () => { state.started = true; }
+  });
+
   onTick((dt) => {
+    if (!state.started) return;
     if (state.gameOver) return;
-    
+
     // Drain hunger
     state.hunger -= dt * 0.01;
     if (state.hunger <= 0) {

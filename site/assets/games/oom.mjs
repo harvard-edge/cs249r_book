@@ -29,7 +29,8 @@
 
 import {
   mountPixiOnCanvas, dailySeed, dayNumber, bestScore,
-  pop, flash, burst, floatText, shake, tween, getFilters
+  pop, flash, burst, floatText, shake, tween, getFilters,
+  mountReadyOverlay
 } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
@@ -96,6 +97,7 @@ export async function mountOom(canvas, opts = {}) {
     fallInterval: 800,
     score: 0,
     over: false,
+    started: false,
     timeLeft: TIME_LIMIT_MS,
     stepProgress: 0,
     backwardProgress: 0,
@@ -423,6 +425,7 @@ export async function mountOom(canvas, opts = {}) {
   /* --- Input --- */
   const handleKeydown = (e) => {
     if (!isInViewport(canvas)) return;
+    if (!state.started) return;
     if (state.over) {
       if (e.key === "r" || e.key === "R") { e.preventDefault(); if (opts.onRetry) opts.onRetry(); }
       return;
@@ -435,6 +438,7 @@ export async function mountOom(canvas, opts = {}) {
   };
   const handlePointerdown = (e) => {
     e.preventDefault();
+    if (!state.started) return;
     if (state.over) { if (opts.onRetry) opts.onRetry(); return; }
     if (!state.current) return;
     const rect = canvas.getBoundingClientRect();
@@ -491,9 +495,18 @@ export async function mountOom(canvas, opts = {}) {
     PIXI.Ticker.shared.add(handler);
   }
 
+  /* --- Pre-game READY overlay --- */
+  mountReadyOverlay(stage, {
+    title: "TENSOR TETRIS",
+    goal: "Pack tensors into HBM. Activations dominate — that's why you'll OOM.",
+    controls: "← →  move · SPACE  drop · R  retry",
+    onLaunch: () => { state.started = true; }
+  });
+
   /* --- Frame loop --- */
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!state.started) return;
     if (!state.over) {
       state.timeLeft -= dt;
       if (state.timeLeft <= 0) { state.timeLeft = 0; state.over = true; flash(stage, 0x3d9e5a, 360); endGame(); }

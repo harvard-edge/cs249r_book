@@ -28,7 +28,8 @@
 
 import {
   mountPixiOnCanvas, dailySeed, dayNumber, bestScore,
-  pop, flash, burst, floatText, shake, tween, getFilters
+  pop, flash, burst, floatText, shake, tween, getFilters,
+  mountReadyOverlay
 } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
@@ -120,6 +121,7 @@ export async function mountSharpShot(canvas, opts = {}) {
     perShotZones: [],            // 0/1/2/3 per shot for emoji grid
     over:        false,
     won:         false,
+    started:     false,
     lastShot:    null,           // { x, y, hit, zone, ms }
     shotFlashMs: 0,
     revealMs:    0,
@@ -487,7 +489,7 @@ export async function mountSharpShot(canvas, opts = {}) {
   }
 
   function cycleLayer(idx) {
-    if (state.over) return;
+    if (!state.started || state.over) return;
     const layer = state.layers[idx];
     layer.precisionIdx = (layer.precisionIdx + 1) % PRECISIONS.length;
     recomputeEffects();
@@ -500,7 +502,7 @@ export async function mountSharpShot(canvas, opts = {}) {
   }
 
   function fireShot() {
-    if (state.over || state.shotsLeft <= 0) return;
+    if (!state.started || state.over || state.shotsLeft <= 0) return;
     if (bitsUsed() > MAX_BUDGET) {
       floatText(overlayLayer, state.crosshairX, state.crosshairY - 24, "over budget — reduce bits", COL.missRed, { size: 11, lifeMs: 1200 });
       shake(overlayLayer, 5, 200);
@@ -649,8 +651,17 @@ export async function mountSharpShot(canvas, opts = {}) {
 
   recomputeEffects();
 
+  /* --- Pre-game READY overlay --- */
+  mountReadyOverlay(stage, {
+    title: "QUANTIZATION SHARP SHOT",
+    goal: "Drop weights below the bit budget. Hit the red center 7+ of 10.",
+    controls: "CLICK precision dials · CLICK target to fire · R  retry",
+    onLaunch: () => { state.started = true; }
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!state.started) return;
 
     state.targetPhase += dt * 0.0008;
 
