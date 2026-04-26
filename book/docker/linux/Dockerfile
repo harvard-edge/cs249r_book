@@ -469,15 +469,6 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "🧹 Installer cleaned up" && \
     echo "✅ === QUARTO INSTALLATION COMPLETE ==="
 
-# Create R library directory
-RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
-    echo "📁 Creating R library directory..." && \
-    mkdir -p $R_LIBS_USER && \
-    echo "✅ R library directory created: $R_LIBS_USER" && \
-    echo "✅ R library setup complete"
-
-
-
 # === PHASE 10: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
@@ -505,69 +496,9 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "📊 Total packages: $$(pip3 list | wc -l)" && \
     echo "✅ === PYTHON PACKAGES COMPLETE ==="
 
-# === PHASE 9: R PACKAGES ===
-# Step 9.1: Set up R environment and install remotes
-RUN echo "🚀 === STEP 9.1: SETTING UP R ENVIRONMENT ===" && \
-    R --slave -e " \
-    options(repos = c(CRAN = 'https://cran.rstudio.com')); \
-    cat('🔄 Setting up R environment...\n'); \
-    cat(paste('R library path:', Sys.getenv('R_LIBS_USER'), '\n')); \
-    lib_path <- Sys.getenv('R_LIBS_USER'); \
-    dir.create(lib_path, showWarnings = FALSE, recursive = TRUE); \
-    .libPaths(lib_path); \
-    cat('📦 Installing remotes package...\n'); \
-    install.packages('remotes'); \
-    cat('✅ R environment setup complete\n'); \
-    " && \
-    if [ $$? -ne 0 ]; then \
-        echo "❌ Failed to set up R environment"; \
-        exit 1; \
-    fi && \
-    echo "✅ R environment setup successful"
+# R CRAN packages: Phase 7 only (install_packages.R + verify_r_packages.R; /tmp copies removed after verify).
 
-# Step 9.2: Install R packages from install_packages.R or fallback
-RUN echo "🚀 === STEP 9.2: INSTALLING R PACKAGES ===" && \
-    R --slave -e " \
-    options(repos = c(CRAN = 'https://cran.rstudio.com')); \
-    lib_path <- Sys.getenv('R_LIBS_USER'); \
-    .libPaths(lib_path); \
-    if (file.exists('/tmp/install_packages.R')) { \
-      cat('📦 Installing packages from tools/dependencies/install_packages.R...\n'); \
-      source('/tmp/install_packages.R'); \
-    } else { \
-      cat('⚠️ No tools/dependencies/install_packages.R found, installing common packages\n'); \
-      pkgs <- c('rmarkdown', 'knitr', 'tidyverse', 'ggplot2', 'bookdown'); \
-      cat(paste('📦 Installing packages:', paste(pkgs, collapse=', '), '\n')); \
-      install.packages(pkgs); \
-    }; \
-    cat('✅ R package installation complete\n'); \
-    " && \
-    if [ $$? -ne 0 ]; then \
-        echo "❌ Failed to install R packages"; \
-        exit 1; \
-    fi && \
-    echo "✅ R packages installed successfully"
-
-# Step 9.3: Verify R package installation
-RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
-    R --slave -e " \
-    lib_path <- Sys.getenv('R_LIBS_USER'); \
-    .libPaths(lib_path); \
-    cat('📊 Installed packages:\n'); \
-    ip <- installed.packages()[, 'Package']; \
-    print(head(ip, 10)); \
-    cat(paste('Total packages installed:', nrow(ip), '\n')); \
-    " && \
-    if [ $$? -ne 0 ]; then \
-        echo "❌ Failed to verify R packages"; \
-        exit 1; \
-    fi && \
-    echo "✅ R package verification successful"
-
-# === PHASE 11: R PACKAGE VERIFICATION ===
-# Note: R package verification is now done immediately after R package installation (Phase 6.5)
-
-# === PHASE 12: COMPREHENSIVE CLEANUP ===
+# === PHASE 11: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     echo "📊 Disk space before cleanup: $$(df -h / | tail -1 | awk '{print $$4}')" && \
     echo "🧹 Removing temporary files..." && \
@@ -603,7 +534,7 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
 # Set working directory
 WORKDIR /workspace
 
-# === PHASE 13: FINAL VERIFICATION ===
+# === PHASE 12: FINAL VERIFICATION ===
 RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
     echo "📊 Checking Quarto..." && \
     if command -v quarto >/dev/null 2>&1; then \
