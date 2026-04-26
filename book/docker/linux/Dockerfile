@@ -56,8 +56,8 @@ RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
 # === PHASE 2: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "⏰ Estimated time: 2-3 minutes" && \
-    echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')" && \
-    start_time=$(date +%s) && \
+    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    start_time=$$(date +%s) && \
     \
     echo "🔄 Updating package lists..." && \
     apt-get update && \
@@ -150,15 +150,15 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === SYSTEM DEPENDENCIES COMPLETE === (${duration}s)" && \
-    echo "📊 Free disk space: $(df -h / | tail -1 | awk '{print $4}')"
+    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $4}')"
 
 # === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "🔄 Adding Inkscape PPA repository..." && \
     apt-get update && \
@@ -177,8 +177,8 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === INKSCAPE INSTALLATION COMPLETE === (${duration}s)"
 
 # Install font dependencies (note: fonts-freefont-ttf already installed above)
@@ -218,7 +218,7 @@ RUN echo "🚀 === STARTING INKSCAPE TEST ===" && \
 # === PHASE 4: GHOSTSCRIPT INSTALLATION ===
 RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "⏰ Estimated time: 30 seconds" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "📦 Installing Ghostscript..." && \
     apt-get update && apt-get install -y ghostscript && \
@@ -229,15 +229,15 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (${duration}s)"
 
 # === PHASE 5: TEX LIVE INSTALLATION ===
 # Step 5.1: Install TeX Live prerequisites
 RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
-    echo "📊 Free disk space before: $(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 Free disk space before: $$(df -h / | tail -1 | awk '{print $4}')" && \
     \
     echo "📦 Installing TeX Live prerequisites..." && \
     echo "📋 Prerequisites:" && \
@@ -303,7 +303,7 @@ RUN echo "🔧 Setting up TeX Live PATH..." && \
 
 # Step 5.5: Install TeX Live packages with improved error handling
 RUN echo "📊 Analyzing tl_packages file..." && \
-    collection_count=$(grep -c '^collection-' /tmp/tl_packages) && \
+    collection_count=$$(grep -c '^collection-' /tmp/tl_packages) && \
     echo "📦 Found $collection_count TeX Live collections to install" && \
     \
     echo "🔄 Installing TeX Live collections with retry logic..." && \
@@ -338,7 +338,7 @@ RUN echo "📊 Analyzing tl_packages file..." && \
                 else \
                     echo "⚠️ tlmgr not available, skipping $collection"; \
                 fi; \
-                i=$((i+1)); \
+                i=$$((i+1)); \
                 ;; \
         esac; \
     done < /tmp/tl_packages && \
@@ -352,8 +352,8 @@ RUN echo "📊 Analyzing tl_packages file..." && \
 RUN echo "🧹 Cleaning up TeX Live installer..." && \
     rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz && \
     echo "✅ === TEX LIVE INSTALLATION COMPLETE ===" && \
-    echo "📊 Free disk space after: $(df -h / | tail -1 | awk '{print $4}')" && \
-    echo "📊 TeX Live disk usage: $(du -sh /usr/local/texlive 2>/dev/null || echo 'N/A')"
+    echo "📊 Free disk space after: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 TeX Live disk usage: $$(du -sh /usr/local/texlive 2>/dev/null || echo 'N/A')"
 
 # Verify TeX Live installation (with error handling)
 RUN echo "🔄 Verifying TeX Live installation..." && \
@@ -374,7 +374,7 @@ RUN echo "🔄 Verifying TeX Live installation..." && \
 # === PHASE 6: R INSTALLATION (R 4.5 from CRAN) ===
 RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "📦 Adding CRAN repository for R 4.5..." && \
     apt-get update && apt-get install -y --no-install-recommends software-properties-common dirmngr && \
@@ -400,14 +400,14 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
-    echo "📊 R version: $(R --version | head -1)" && \
+    echo "📊 R version: $$(R --version | head -1)" && \
     if [ $? -ne 0 ]; then \
         echo "❌ Failed to verify R installation"; \
         exit 1; \
     fi && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === R INSTALLATION COMPLETE === (${duration}s)"
 
 # R may omit R_LIBS_USER from .libPaths() if the directory is missing, so install and verify
@@ -425,7 +425,7 @@ RUN echo "🔎 Pre-flight: R build toolchain (cmake, pkg-config)…" && \
 # === PHASE 7: R PACKAGE INSTALLATION ===
 RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "⏰ Cold build: this step compiles many CRAN packages; expect 20–60+ min (cache shortens reruns)" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "Running R setup script with the following files:" && \
     echo "  - /tmp/install_packages.R (from book/tools/dependencies/install_packages.R)" && \
@@ -450,14 +450,14 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "🧹 Cleaning up R installation files..." && \
     rm -f /tmp/install_packages.R /tmp/verify_r_packages.R && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === R PACKAGE INSTALLATION COMPLETE === (${duration}s)"
 
 # === PHASE 8: PYTHON INSTALLATION ===
 RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "📦 Installing Python 3 and development packages..." && \
     echo "📋 Python packages:" && \
@@ -477,25 +477,25 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     \
-    echo "📊 Python version: $(python3 --version)" && \
+    echo "📊 Python version: $$(python3 --version)" && \
     if [ $? -ne 0 ]; then \
         echo "❌ Failed to verify Python installation"; \
         exit 1; \
     fi && \
-    echo "📊 Pip version: $(pip3 --version)" && \
+    echo "📊 Pip version: $$(pip3 --version)" && \
     if [ $? -ne 0 ]; then \
         echo "❌ Failed to verify pip installation"; \
         exit 1; \
     fi && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === PYTHON INSTALLATION COMPLETE === (${duration}s)"
 
 # === PHASE 9: QUARTO INSTALLATION ===
 RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "📦 Downloading Quarto 1.9.27..." && \
     wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-amd64.deb && \
@@ -519,8 +519,8 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     rm quarto-1.9.27-linux-amd64.deb && \
     echo "🧹 Installer cleaned up" && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === QUARTO INSTALLATION COMPLETE === (${duration}s)"
 
 # Create R library directory
@@ -535,13 +535,13 @@ RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
 # === PHASE 10: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
-    start_time=$(date +%s) && \
+    start_time=$$(date +%s) && \
     \
     echo "🔄 Upgrading pip..." && \
     pip3 install --upgrade pip && \
     \
     echo "📊 Analyzing requirements.txt..." && \
-    package_count=$(grep -v '^#' /tmp/requirements.txt | grep -v '^$' | wc -l) && \
+    package_count=$$(grep -v '^#' /tmp/requirements.txt | grep -v '^$' | wc -l) && \
     echo "📦 Found $package_count Python packages to install" && \
     \
     echo "🔄 Installing Python packages with space optimization..." && \
@@ -558,10 +558,10 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     \
     echo "📊 Installed Python packages:" && \
     pip3 list | head -10 && \
-    echo "📊 Total packages: $(pip3 list | wc -l)" && \
+    echo "📊 Total packages: $$(pip3 list | wc -l)" && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === PYTHON PACKAGES COMPLETE === (${duration}s)"
 
 # === PHASE 9: R PACKAGES ===
@@ -628,8 +628,8 @@ RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
 
 # === PHASE 12: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
-    echo "📊 Disk space before cleanup: $(df -h / | tail -1 | awk '{print $4}')" && \
-    start_time=$(date +%s) && \
+    echo "📊 Disk space before cleanup: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    start_time=$$(date +%s) && \
     \
     echo "🧹 Removing temporary files..." && \
     rm -rf /tmp/* && \
@@ -659,10 +659,10 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     rm -rf /usr/share/info/* && \
     rm -rf /var/log/* && \
     \
-    end_time=$(date +%s) && \
-    duration=$((end_time - start_time)) && \
+    end_time=$$(date +%s) && \
+    duration=$$((end_time - start_time)) && \
     echo "✅ === COMPREHENSIVE CLEANUP COMPLETE === (${duration}s)" && \
-    echo "📊 Final disk space: $(df -h / | tail -1 | awk '{print $4}')"
+    echo "📊 Final disk space: $$(df -h / | tail -1 | awk '{print $4}')"
 
 # Set working directory
 WORKDIR /workspace
@@ -711,7 +711,7 @@ RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
 # Health check
 RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
     echo "✅ Container build completed successfully" && \
-    echo "📊 Quarto version: $(quarto --version)" && \
-    echo "📊 Python version: $(python3 --version)" && \
-    echo "📊 R version: $(R --version | head -1)" && \
-    echo "📊 TeX Live: $(lualatex --version | head -1)"
+    echo "📊 Quarto version: $$(quarto --version)" && \
+    echo "📊 Python version: $$(python3 --version)" && \
+    echo "📊 R version: $$(R --version | head -1)" && \
+    echo "📊 TeX Live: $$(lualatex --version | head -1)"
