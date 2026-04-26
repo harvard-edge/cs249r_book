@@ -1,6 +1,7 @@
 # MLSysBook Quarto Build Container
 # Based on Ubuntu 22.04 with all dependencies pre-installed
 # This container eliminates the 30-45 minute setup time for Linux builds
+# RUN uses /bin/sh: inside double quotes, $$ is the shell PID, so $${VAR} and backticks, not $().
 
 FROM ubuntu:22.04
 
@@ -200,7 +201,7 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
 # Step 5.1: Install TeX Live prerequisites
 RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
-    echo "📊 Free disk space before: $$(df -h / | tail -1 | awk '{print $$4}')" && \
+    echo "📊 Free disk space before: `df -h / | tail -1 | awk '{print $$4}'`" && \
     \
     echo "📦 Installing TeX Live prerequisites..." && \
     echo "📋 Prerequisites:" && \
@@ -273,13 +274,13 @@ RUN chmod 0755 /opt/install-tl-collections.sh && /opt/install-tl-collections.sh
 RUN echo "🧹 Cleaning up TeX Live installer..." && \
     rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz && \
     echo "✅ === TEX LIVE INSTALLATION COMPLETE ===" && \
-    echo "📊 Free disk space after: $$(df -h / | tail -1 | awk '{print $$4}')" && \
-    echo "📊 TeX Live disk usage: $$(du -sh /usr/local/texlive 2>/dev/null || echo 'N/A')"
+    echo "📊 Free disk space after: `df -h / | tail -1 | awk '{print $$4}'`" && \
+    echo "📊 TeX Live disk usage: `du -sh /usr/local/texlive 2>/dev/null || echo 'N/A'`"
 
 # Verify TeX Live installation (with error handling)
 RUN echo "🔄 Verifying TeX Live installation..." && \
     export PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" && \
-    echo "📍 PATH: $$PATH" && \
+    echo "📍 PATH: $${PATH}" && \
     echo "📍 Checking TeX Live directory:" && \
     ls -la /usr/local/texlive/ || echo "❌ TeX Live directory not found" && \
     ls -la /usr/local/texlive/bin/ || echo "❌ TeX Live bin directory not found" && \
@@ -322,7 +323,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
     \
-    echo "📊 R version: $$(R --version | head -1)" && \
+    echo "📊 R version: `R --version 2>&1 | head -1`" && \
     if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify R installation"; \
         exit 1; \
@@ -392,12 +393,12 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
     \
-    echo "📊 Python version: $$(python3 --version)" && \
+    echo "📊 Python version: `python3 --version 2>&1`" && \
     if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify Python installation"; \
         exit 1; \
     fi && \
-    echo "📊 Pip version: $$(pip3 --version)" && \
+    echo "📊 Pip version: `pip3 --version 2>&1`" && \
     if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify pip installation"; \
         exit 1; \
@@ -437,8 +438,8 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     pip3 install --upgrade pip && \
     \
     echo "📊 Analyzing requirements.txt..." && \
-    package_count=$$(grep -v '^#' /tmp/requirements.txt | grep -v '^$' | wc -l) && \
-    echo "📦 Found $$package_count Python packages to install" && \
+    package_count=`grep -v '^#' /tmp/requirements.txt | grep -v '^$' | wc -l` && \
+    echo "📦 Found $${package_count} Python packages to install" && \
     \
     echo "🔄 Installing Python packages with space optimization..." && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt && \
@@ -454,14 +455,14 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     \
     echo "📊 Installed Python packages:" && \
     pip3 list | head -10 && \
-    echo "📊 Total packages: $$(pip3 list | wc -l)" && \
+    echo "📊 Total packages: `pip3 list | wc -l`" && \
     echo "✅ === PYTHON PACKAGES COMPLETE ==="
 
 # R CRAN packages: Phase 7 only (install_packages.R + verify_r_packages.R; /tmp copies removed after verify).
 
 # === PHASE 11: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
-    echo "📊 Disk space before cleanup: $$(df -h / | tail -1 | awk '{print $$4}')" && \
+    echo "📊 Disk space before cleanup: `df -h / | tail -1 | awk '{print $$4}'`" && \
     echo "🧹 Removing temporary files..." && \
     rm -rf /tmp/* && \
     rm -rf /var/tmp/* && \
@@ -490,7 +491,7 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     rm -rf /usr/share/info/* && \
     rm -rf /var/log/* && \
     echo "✅ === COMPREHENSIVE CLEANUP COMPLETE ===" && \
-    echo "📊 Final disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
+    echo "📊 Final disk space: `df -h / | tail -1 | awk '{print $$4}'`"
 
 # Set working directory
 WORKDIR /workspace
@@ -537,7 +538,7 @@ RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
 
 # Health check
 RUN echo "✅ Container build completed successfully" && \
-    echo "📊 Quarto version: $$(quarto --version)" && \
-    echo "📊 Python version: $$(python3 --version)" && \
-    echo "📊 R version: $$(R --version | head -1)" && \
-    echo "📊 TeX Live: $$(lualatex --version | head -1)"
+    echo "📊 Quarto version: `quarto --version 2>&1`" && \
+    echo "📊 Python version: `python3 --version 2>&1`" && \
+    echo "📊 R version: `R --version 2>&1 | head -1`" && \
+    echo "📊 TeX Live: `lualatex --version 2>&1 | head -1`"

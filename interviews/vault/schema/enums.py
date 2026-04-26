@@ -118,7 +118,7 @@ VALID_TOPICS: frozenset[str] = frozenset({
     # cross-cutting (5)
     "federated-learning", "differential-privacy", "fairness-evaluation",
     "responsible-ai", "tco-cost-modeling",
-    # v1.0 additions (8)
+    # additions (8)
     "autograd-computational-graphs", "chiplet-architecture",
     "communication-computation-overlap", "disaggregated-serving",
     "model-adaptation-systems", "recommendation-systems-engineering",
