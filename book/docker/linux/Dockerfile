@@ -302,14 +302,16 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     apt-get update && \
     \
     echo "📦 Installing R and development packages..." && \
-    echo "📋 R packages:" && \
+    echo "📋 R packages (system) + build deps for CRAN (e.g. R package fs → libuv1-dev):" && \
     echo "  - r-base" && \
     echo "  - r-base-dev" && \
     echo "  - r-recommended" && \
+    echo "  - libuv1-dev" && \
     apt-get install -y --no-install-recommends \
     r-base \
     r-base-dev \
-    r-recommended && \
+    r-recommended \
+    libuv1-dev && \
     if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install R packages"; \
         exit 1; \
@@ -331,12 +333,13 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
 # can disagree on where packages were written. Create it before any Rscript package step.
 RUN mkdir -p $R_LIBS_USER
 
-# Fail fast: building CRAN source packages (e.g. fs → libuv) needs cmake. Without it,
-# the R step runs 30–60+ minutes then dies at verify. See e12d7dc4a8.
-RUN echo "🔎 Pre-flight: R build toolchain (cmake, pkg-config)…" && \
+# Fail fast: CRAN source build of rmarkdown deps (e.g. fs) needs libuv (libuv1-dev) + cmake.
+# See e12d7dc4a8; log 24964853614: fs "Package libuv was not found in the pkg-config search path".
+RUN echo "🔎 Pre-flight: R build toolchain (cmake, pkg-config, libuv)…" && \
     test -d "$R_LIBS_USER" || { echo "❌ R_LIBS_USER dir missing: $R_LIBS_USER"; exit 1; } && \
     command -v cmake >/dev/null 2>&1 || { echo "❌ cmake not in PATH (required for R package fs, needed by rmarkdown/tidyverse)"; exit 1; } && \
     command -v pkg-config >/dev/null 2>&1 || { echo "❌ pkg-config not in PATH"; exit 1; } && \
+    pkg-config --print-errors --exists libuv || { echo "❌ libuv not found (install libuv1-dev for R package fs)"; exit 1; } && \
     echo "✅ Pre-flight OK"
 
 # === PHASE 7: R PACKAGE INSTALLATION ===
