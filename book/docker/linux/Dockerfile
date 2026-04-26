@@ -51,46 +51,16 @@ RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
     echo "🔧 System locale updated" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     echo "✅ Locale configuration complete"
 
 # === PHASE 2: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "⏰ Estimated time: 2-3 minutes" && \
-    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $$4}')" && \
-    start_time=$$(date +%s) && \
-    \
     echo "🔄 Updating package lists..." && \
     apt-get update && \
     \
-    echo "📦 Installing core system packages (25 packages)..." && \
-    echo "📋 Package list:" && \
-    echo "  - fonts-dejavu" && \
-    echo "  - fonts-freefont-ttf" && \
-    echo "  - gdk-pixbuf2.0-bin" && \
-    echo "  - libcairo2" && \
-    echo "  - libfontconfig1" && \
-    echo "  - libfontconfig1-dev" && \
-    echo "  - libfreetype6" && \
-    echo "  - libfreetype6-dev" && \
-    echo "  - libpango-1.0-0" && \
-    echo "  - libpangocairo-1.0-0" && \
-    echo "  - libpangoft2-1.0-0" && \
-    echo "  - libxml2-dev" && \
-    echo "  - libcurl4-openssl-dev" && \
-    echo "  - libjpeg-dev" && \
-    echo "  - libtiff5-dev" && \
-    echo "  - libpng-dev" && \
-    echo "  - libharfbuzz-dev" && \
-    echo "  - libfribidi-dev" && \
-    echo "  - librsvg2-dev" && \
-    echo "  - librsvg2-bin" && \
-    echo "  - libgdal-dev" && \
-    echo "  - libudunits2-dev" && \
-    echo "  - wget" && \
-    echo "  - curl" && \
-    echo "  - git" && \
-    echo "  - cmake" && \
-    echo "  - pkg-config" && \
+    echo "📦 Installing core system packages (fonts, Cairo, RSVG, XML, image libs, build tools)..." && \
     apt-get install -y \
     fonts-dejavu \
     fonts-freefont-ttf \
@@ -149,11 +119,8 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === SYSTEM DEPENDENCIES COMPLETE === ($${duration}s)" && \
-    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
+    apt-get clean && \
+    echo "✅ === SYSTEM DEPENDENCIES COMPLETE ==="
 
 # === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
@@ -176,6 +143,7 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     \
     end_time=$$(date +%s) && \
     duration=$$$((end_time - start_time)) && \
@@ -193,6 +161,7 @@ RUN echo "🚀 === STARTING FONT INSTALLATION ===" && \
     echo "📄 Font cache updated" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     echo "✅ Font installation complete"
 
 # Test Inkscape SVG to PDF conversion (same as your workflow)
@@ -228,6 +197,7 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     \
     end_time=$$(date +%s) && \
     duration=$$$((end_time - start_time)) && \
@@ -270,7 +240,9 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
         exit 1; \
     fi && \
     \
+    echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     echo "✅ TeX Live prerequisites installed"
 
 # Step 5.2+5.3: install-tl download + base install in ONE layer.
@@ -399,6 +371,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     \
     echo "📊 R version: $$(R --version | head -1)" && \
     if [ $$? -ne 0 ]; then \
@@ -476,6 +449,7 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
+    apt-get clean && \
     \
     echo "📊 Python version: $$(python3 --version)" && \
     if [ $$? -ne 0 ]; then \
