@@ -151,7 +151,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === SYSTEM DEPENDENCIES COMPLETE === ($${duration}s)" && \
     echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
 
@@ -178,7 +178,7 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === INKSCAPE INSTALLATION COMPLETE === ($${duration}s)"
 
 # Install font dependencies (note: fonts-freefont-ttf already installed above)
@@ -230,7 +230,7 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === ($${duration}s)"
 
 # === PHASE 5: TEX LIVE INSTALLATION ===
@@ -338,7 +338,7 @@ RUN echo "📊 Analyzing tl_packages file..." && \
                 else \
                     echo "⚠️ tlmgr not available, skipping $collection"; \
                 fi; \
-                i=$$((i+1)); \
+                i=$$$((i+1)); \
                 ;; \
         esac; \
     done < /tmp/tl_packages && \
@@ -407,7 +407,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     fi && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === R INSTALLATION COMPLETE === ($${duration}s)"
 
 # R may omit R_LIBS_USER from .libPaths() if the directory is missing, so install and verify
@@ -451,7 +451,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     rm -f /tmp/install_packages.R /tmp/verify_r_packages.R && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === R PACKAGE INSTALLATION COMPLETE === ($${duration}s)"
 
 # === PHASE 8: PYTHON INSTALLATION ===
@@ -489,7 +489,7 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     fi && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === PYTHON INSTALLATION COMPLETE === ($${duration}s)"
 
 # === PHASE 9: QUARTO INSTALLATION ===
@@ -520,7 +520,7 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "🧹 Installer cleaned up" && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === QUARTO INSTALLATION COMPLETE === ($${duration}s)"
 
 # Create R library directory
@@ -561,7 +561,7 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "📊 Total packages: $$(pip3 list | wc -l)" && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === PYTHON PACKAGES COMPLETE === ($${duration}s)"
 
 # === PHASE 9: R PACKAGES ===
@@ -660,7 +660,7 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     rm -rf /var/log/* && \
     \
     end_time=$$(date +%s) && \
-    duration=$$((end_time - start_time)) && \
+    duration=$$$((end_time - start_time)) && \
     echo "✅ === COMPREHENSIVE CLEANUP COMPLETE === ($${duration}s)" && \
     echo "📊 Final disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
 
