@@ -320,7 +320,15 @@ def register(app: typer.Typer) -> None:
             },
         }
         paper_dir.mkdir(parents=True, exist_ok=True)
-        (paper_dir / "corpus_stats.json").write_text(
+        # v0.1.0: write export-schema stats to a SIDECAR file, not the
+        # canonical corpus_stats.json. The canonical file is owned by
+        # analyze_corpus.py (legacy schema with summary/track_level_matrix/
+        # competency_areas/format_by_level) and is what generate_figures.py
+        # consumes. Overwriting corpus_stats.json here breaks `make all`.
+        # The sidecar is purely for downstream consumers that want the
+        # release-stamped flat stats; nothing in the Makefile pipeline
+        # reads it as of this commit.
+        (paper_dir / "corpus_stats_export.json").write_text(
             json.dumps(stats, indent=2, sort_keys=True), encoding="utf-8"
         )
 
@@ -385,6 +393,37 @@ def register(app: typer.Typer) -> None:
             f"\\newcommand{{\\numchainsQuestions}}{{{fmt(questions_in_chains)}}}",
             "\\newcommand{\\numchainsCoveragePct}{" + f"{chain_coverage_pct:.1f}" + "\\%}",
             "",
+            "% Per-zone counts (added v0.1.0 release tooling, 2026-04-25).",
+            "% Replaces hand-typed counts in the Zone Distribution prose.",
+        ])
+        for zone in sorted(by_zone.keys()):
+            n = by_zone[zone]
+            cap = "".join(p.capitalize() for p in zone.split("-"))
+            macros.append(
+                f"\\newcommand{{\\zone{cap}Count}}{{{fmt(n)}}}"
+            )
+        # Below-floor zone names + count for prose that says "only X are below 500".
+        below_500 = sorted(z for z, n in by_zone.items() if n < 500)
+        macros.append(
+            f"\\newcommand{{\\zonesBelowFloor}}{{{', '.join(below_500) or 'none'}}}"
+        )
+        macros.append(
+            f"\\newcommand{{\\zonesBelowFloorCount}}{{{len(below_500)}}}"
+        )
+        # Top-three zones by count — prose references by rank.
+        rank_tags = ["One", "Two", "Three"]
+        for rank, (zone, n) in enumerate(
+            sorted(by_zone.items(), key=lambda x: -x[1])[:3]
+        ):
+            macros.append(
+                f"\\newcommand{{\\zoneRank{rank_tags[rank]}Name}}{{{zone}}}"
+            )
+            macros.append(
+                f"\\newcommand{{\\zoneRank{rank_tags[rank]}Count}}{{{fmt(n)}}}"
+            )
+
+        macros.extend([
+            "",
             "% Bloom-taxonomy rollup (derived from zone distribution)",
         ])
         bloom_total = sum(bloom_dist.values())
@@ -397,7 +436,7 @@ def register(app: typer.Typer) -> None:
         macros.append("")
 
         (paper_dir / "macros.tex").write_text("\n".join(macros) + "\n", encoding="utf-8")
-        console.print(f"[green]exported[/green] macros.tex + corpus_stats.json to {paper_dir}")
+        console.print(f"[green]exported[/green] macros.tex + corpus_stats_export.json to {paper_dir}")
         console.print(
             f"  questions={total}, topics={topics_count}, chains={chains_total}, "
             f"chain_coverage={chain_coverage_pct:.1f}%"
