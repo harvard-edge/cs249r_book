@@ -307,11 +307,13 @@ RUN echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." &
     echo "✅ TeX Live installer ready"
 
 # Step 5.3: Create TeX Live profile and install base system with retry logic
-# After the annual CTAN switch, main tlnet is the new TeX Live year; the install-tl
-# script in install-tl-unx.tar.gz can still be the previous year (e.g. 2025 vs 2026 repo),
-# which fails fast with "local" / "repository" not compatible. Pin the TL2025 final net tree.
-# TODO (yearly): bump installer + this URL when moving the image to a new TeX Live release.
-ENV TEXLIVE_TLNET_REPO=https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final
+# The install-tl script (from install-tl-unx.tar.gz, step 5.2) must use the *same* tlnet
+# as its release year. Default is CTAN "current" tlnet; if that and the script disagree
+# (e.g. after the yearly rollover, or with a stale build cache on one layer), the
+# install errors immediately with "local" / "repository" not compatible. Pin both to
+# the main net tree so the script and tlpdb always match.
+# TODO: after a TeX Live year bump, re-pull install-tl-unx.tar.gz if builds still mismatch.
+ENV TEXLIVE_TLNET_REPO=https://mirror.ctan.org/systems/texlive/tlnet
 RUN echo "🔧 Creating TeX Live installation profile..." && \
     echo "selected_scheme scheme-medium" > /tmp/texlive.profile && \
     echo "tlpdbopt_install_docfiles 0" >> /tmp/texlive.profile && \
