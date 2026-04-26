@@ -87,15 +87,43 @@ export async function mountLander(canvas, opts = {}) {
   }
 
   function createTerrain() {
-    const globalX = rand(W * 0.42, W * 0.58);
-    const leftX = rand(W * 0.17, W * 0.32);
-    const rightX = rand(W * 0.68, W * 0.83);
+    // Implicit level system: difficulty scales gently with day number.
+    // Day 1 → level 0 (mild). Day 11+ → level 8 (max). Caps so it never gets impossible.
+    const level = Math.min(8, Math.max(0, day - 1));
+
+    // Global pad now spawns anywhere across the playable width (was always near center).
+    // Forces the player to actually steer instead of drop-and-tap.
+    const globalX = rand(W * 0.18, W * 0.82);
+
+    // Local pads always flank global with a minimum gap so wells don't bleed together.
+    // If only one half has room, both locals go there, separated within that half.
+    const minGap = 110;        // center-to-center gap from global pad
+    const edge   = 60;         // canvas-edge margin for any pad
+    const leftHalf  = [edge, globalX - minGap];
+    const rightHalf = [globalX + minGap, W - edge];
+    const leftHasRoom  = leftHalf[1]  - leftHalf[0]  > 60;
+    const rightHasRoom = rightHalf[1] - rightHalf[0] > 60;
+    let leftX, rightX;
+    if (leftHasRoom && rightHasRoom) {
+      leftX  = rand(leftHalf[0],  leftHalf[1]);
+      rightX = rand(rightHalf[0], rightHalf[1]);
+    } else if (rightHasRoom) {
+      const w = rightHalf[1] - rightHalf[0];
+      leftX  = rand(rightHalf[0], rightHalf[0] + w * 0.4);
+      rightX = rand(rightHalf[1] - w * 0.4, rightHalf[1]);
+    } else {
+      const w = leftHalf[1] - leftHalf[0];
+      leftX  = rand(leftHalf[0], leftHalf[0] + w * 0.4);
+      rightX = rand(leftHalf[1] - w * 0.4, leftHalf[1]);
+    }
+
     return {
       phase: rand(0, Math.PI * 2),
       slope: rand(-4, 4),  // tuned down from rand(-8, 8) — caps random unfairness from extreme tilts
+      level,
       global: { x: globalX, width: rand(86, 112), wellWidth: rand(72, 92), depth: rand(50, 66) },
       locals: [
-        { x: leftX, width: rand(70, 92), wellWidth: rand(54, 70), depth: rand(24, 36) },
+        { x: leftX,  width: rand(70, 92), wellWidth: rand(54, 70), depth: rand(24, 36) },
         { x: rightX, width: rand(70, 92), wellWidth: rand(54, 70), depth: rand(24, 36) }
       ]
     };
@@ -108,10 +136,16 @@ export async function mountLander(canvas, opts = {}) {
 
   function lossY(x) {
     const normalized = x / W;
+    // Difficulty-scaled curvature: amplitudes grow with level so higher levels feel
+    // more rugged. Third harmonic adds finer ripples that weren't in the original.
+    const a1 = 13 + terrain.level * 1.6;
+    const a2 = 7  + terrain.level * 1.2;
+    const a3 = 4  + terrain.level * 0.9;   // new third harmonic — adds finer surface texture
     const base = H - 96
       + terrain.slope * (normalized - 0.5)
-      + 13 * Math.sin(normalized * Math.PI * 2.1 + terrain.phase)
-      + 7 * Math.sin(normalized * Math.PI * 4.7 + terrain.phase * 0.53);
+      + a1 * Math.sin(normalized * Math.PI * 2.1 + terrain.phase)
+      + a2 * Math.sin(normalized * Math.PI * 4.7 + terrain.phase * 0.53)
+      + a3 * Math.sin(normalized * Math.PI * 7.3 + terrain.phase * 1.31);
     return base
       + well(x, terrain.global.x, terrain.global.wellWidth, terrain.global.depth)
       + well(x, terrain.locals[0].x, terrain.locals[0].wellWidth, terrain.locals[0].depth)
@@ -225,10 +259,11 @@ export async function mountLander(canvas, opts = {}) {
 
   function bestSoftText() {
     const bestRaw = bestScore.get("lander-soft");
-    if (!bestRaw) return `Day #${day} · land softer than yesterday`;
+    const lvl = `LVL ${1 + terrain.level}`;
+    if (!bestRaw) return `Day #${day} · ${lvl} · land softer than yesterday`;
     // Stored as impact-speed × 100 (screen-velocity, dimensionless). Show as v=X.XX.
     const v = (bestRaw / 100).toFixed(2);
-    return `Day #${day} · your softest landing: v=${v}`;
+    return `Day #${day} · ${lvl} · your softest landing: v=${v}`;
   }
 
   // ── In-canvas HUD ── glanceable bars so the player never has to look away from the ship.
