@@ -21,6 +21,7 @@ ENV PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/us
 # Copy dependency files early for better cache efficiency
 COPY book/tools/dependencies/requirements.txt /tmp/requirements.txt
 COPY book/tools/dependencies/install_packages.R /tmp/install_packages.R
+COPY book/tools/dependencies/required_r_packages.R /tmp/required_r_packages.R
 COPY book/tools/dependencies/tl_packages /tmp/tl_packages
 COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
 COPY book/docker/linux/install-texlive-base.sh /opt/install-texlive-base.sh
@@ -343,6 +344,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "⏰ Cold build: this step compiles many CRAN packages; expect 20–60+ min (cache shortens reruns)" && \
     echo "Running R setup script with the following files:" && \
     echo "  - /tmp/install_packages.R (from book/tools/dependencies/install_packages.R)" && \
+    echo "  - /tmp/required_r_packages.R (from book/tools/dependencies/required_r_packages.R)" && \
     echo "  - /tmp/verify_r_packages.R (from book/docker/linux/verify_r_packages.R)" && \
     \
     echo "📦 Installing R packages..." && \
@@ -362,7 +364,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "✅ R packages verified successfully" && \
     \
     echo "🧹 Cleaning up R installation files..." && \
-    rm -f /tmp/install_packages.R /tmp/verify_r_packages.R && \
+    rm -f /tmp/install_packages.R /tmp/required_r_packages.R /tmp/verify_r_packages.R && \
     echo "✅ === R PACKAGE INSTALLATION COMPLETE ==="
 
 # === PHASE 8: PYTHON INSTALLATION ===
