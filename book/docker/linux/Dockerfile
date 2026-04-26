@@ -277,8 +277,7 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
 # a later layer passes -repository for year N+1 — install-tl fails in seconds.
 # Bump TEXLIVE_INSTALLER_REVISION when the annual CTAN rollover requires a fresh
 # install-tl-unx.tar.gz for this image.
-ARG TEXLIVE_INSTALLER_REVISION=2
-ENV TEXLIVE_TLNET_REPO=https://mirror.ctan.org/systems/texlive/tlnet
+ARG TEXLIVE_INSTALLER_REVISION=3
 RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base install" && \
     echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." && \
     SUCCESS=false && \
@@ -312,6 +311,21 @@ RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base
     echo "📊 Extracted files:" && \
     ls -la /tmp/install-tl-* && \
     echo "✅ TeX Live installer ready" && \
+    set -- /tmp/install-tl-*/ && \
+    if [ ! -d "$$1" ]; then \
+        echo "❌ No /tmp/install-tl-* after extract" && \
+        exit 1; \
+    fi && \
+    TLVER=$$(basename "$$1") && \
+    TLYY=$$(echo "$$TLVER" | sed 's/^install-tl-\(....\).*/\1/') && \
+    case "$$TLYY" in \
+        2025) TLNET="https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final" ;; \
+        2026|2027) TLNET="https://mirror.ctan.org/systems/texlive/tlnet" ;; \
+        *) echo "❌ Unsupported TeX install-tl id ($$TLVER, year=$$TLYY)" && exit 1 ;; \
+    esac && \
+    echo "📍 TeX tlpdb repository (matches $$TLVER): $$TLNET" && \
+    mkdir -p /opt && \
+    printf '%s\n' "$$TLNET" > /opt/mlsysbook-texlive-tlnet-url && \
     \
     echo "🔧 Creating TeX Live installation profile..." && \
     echo "selected_scheme scheme-medium" > /tmp/texlive.profile && \
@@ -332,7 +346,7 @@ RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base
     INSTALL_SUCCESS=false && \
     for attempt in 1 2 3; do \
         echo "🔄 Installation attempt $attempt/3..." && \
-        if /tmp/install-tl-*/install-tl -repository "$TEXLIVE_TLNET_REPO" --profile=/tmp/texlive.profile; then \
+        if /tmp/install-tl-*/install-tl -repository "$$TLNET" --profile=/tmp/texlive.profile; then \
             echo "✅ TeX Live installation successful on attempt $attempt" && \
             INSTALL_SUCCESS=true && \
             break; \
@@ -375,7 +389,8 @@ RUN echo "📊 Analyzing tl_packages file..." && \
     \
     echo "🔄 Installing TeX Live collections with retry logic..." && \
     export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
-    tlmgr option repository "$TEXLIVE_TLNET_REPO" && \
+    TLMGR_REPO=$$(tr -d '\n' < /opt/mlsysbook-texlive-tlnet-url) && \
+    tlmgr option repository "$$TLMGR_REPO" && \
     i=1 && \
     failed_packages="" && \
     while IFS= read -r collection; do \
