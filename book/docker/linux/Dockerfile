@@ -272,8 +272,15 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     echo "✅ TeX Live prerequisites installed"
 
-# Step 5.2: Download and extract TeX Live installer with mirror fallbacks
-RUN echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." && \
+# Step 5.2+5.3: install-tl download + base install in ONE layer.
+# GHA buildx cache can otherwise reuse an old "download only" layer (TL year N) while
+# a later layer passes -repository for year N+1 — install-tl fails in seconds.
+# Bump TEXLIVE_INSTALLER_REVISION when the annual CTAN rollover requires a fresh
+# install-tl-unx.tar.gz for this image.
+ARG TEXLIVE_INSTALLER_REVISION=2
+ENV TEXLIVE_TLNET_REPO=https://mirror.ctan.org/systems/texlive/tlnet
+RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base install" && \
+    echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." && \
     SUCCESS=false && \
     for mirror in \
         "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" \
@@ -304,17 +311,9 @@ RUN echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." &
     echo "📦 Extraction completed" && \
     echo "📊 Extracted files:" && \
     ls -la /tmp/install-tl-* && \
-    echo "✅ TeX Live installer ready"
-
-# Step 5.3: Create TeX Live profile and install base system with retry logic
-# The install-tl script (from install-tl-unx.tar.gz, step 5.2) must use the *same* tlnet
-# as its release year. Default is CTAN "current" tlnet; if that and the script disagree
-# (e.g. after the yearly rollover, or with a stale build cache on one layer), the
-# install errors immediately with "local" / "repository" not compatible. Pin both to
-# the main net tree so the script and tlpdb always match.
-# TODO: after a TeX Live year bump, re-pull install-tl-unx.tar.gz if builds still mismatch.
-ENV TEXLIVE_TLNET_REPO=https://mirror.ctan.org/systems/texlive/tlnet
-RUN echo "🔧 Creating TeX Live installation profile..." && \
+    echo "✅ TeX Live installer ready" && \
+    \
+    echo "🔧 Creating TeX Live installation profile..." && \
     echo "selected_scheme scheme-medium" > /tmp/texlive.profile && \
     echo "tlpdbopt_install_docfiles 0" >> /tmp/texlive.profile && \
     echo "tlpdbopt_install_srcfiles 0" >> /tmp/texlive.profile && \
