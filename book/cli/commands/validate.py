@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from rich.console import Console
+from rich.markup import escape as _rich_escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -1327,6 +1328,10 @@ class ValidateCommand:
         fn_pat = re.compile(r"\[\^fn-[\w-]+\]")
         inline_fn_pat = re.compile(r"\^\[[^\]]+\]")
         table_sep_pat = re.compile(r"^\|[\s\-:+]+\|")
+        # Citation-then-footnote adjacency: visually anchors the footnote
+        # to the bibliographic reference instead of the concept term.
+        # See book-prose.md §5 ("Footnote Marker Placement").
+        cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])(\[\^fn-[\w-]+\])")
 
         for file in files:
             lines = self._read_text(file).splitlines()
@@ -1357,6 +1362,31 @@ class ValidateCommand:
                             message=f"Inline footnote syntax; use [^fn-name] reference format",
                             severity="error",
                             context=m.group(0)[:80],
+                        )
+                    )
+
+                # Citation immediately followed by footnote marker
+                # ([@cite][^fn-...]) — the marker should anchor to the
+                # concept term, not the bibliographic reference.
+                # rich-escape the bracketed tokens so [@key] doesn't get
+                # eaten by Rich's variable-interpolation markup.
+                for m in cite_then_fn_pat.finditer(line):
+                    cite, fn = m.group(1), m.group(2)
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="footnote_after_citation",
+                            message=(
+                                f"Footnote {_rich_escape(fn)} placed immediately "
+                                f"after citation {_rich_escape(cite)}; the marker "
+                                f"should anchor to the concept term it "
+                                f"elaborates, not the bibliographic reference. "
+                                f"Move the marker leftward onto the term (see "
+                                f"book-prose.md §5)."
+                            ),
+                            severity="error",
+                            context=_rich_escape(m.group(0)[:80]),
                         )
                     )
 
@@ -1439,7 +1469,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="footnote-placement",
-            description="Check footnotes in forbidden locations",
+            description="Check footnotes in forbidden locations and citation-adjacent placements",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
