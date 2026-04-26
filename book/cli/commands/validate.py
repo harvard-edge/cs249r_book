@@ -1328,10 +1328,13 @@ class ValidateCommand:
         fn_pat = re.compile(r"\[\^fn-[\w-]+\]")
         inline_fn_pat = re.compile(r"\^\[[^\]]+\]")
         table_sep_pat = re.compile(r"^\|[\s\-:+]+\|")
-        # Citation-then-footnote adjacency: visually anchors the footnote
-        # to the bibliographic reference instead of the concept term.
+        # Citation-then-footnote: visually anchors the footnote to the
+        # bibliographic reference instead of the concept term. \s*
+        # tolerates any whitespace between the two tokens (zero, single
+        # space, multiple spaces) — the misanchoring is the same
+        # regardless of how they are spaced.
         # See book-prose.md §5 ("Footnote Marker Placement").
-        cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])(\[\^fn-[\w-]+\])")
+        cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])\s*(\[\^fn-[\w-]+\])")
 
         for file in files:
             lines = self._read_text(file).splitlines()
