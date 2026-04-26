@@ -34,9 +34,11 @@ Architecture: see interviews/vault/visuals/ARCHITECTURE.md.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,7 @@ import yaml
 VAULT_DIR = Path(__file__).resolve().parent.parent
 QUESTIONS_DIR = VAULT_DIR / "questions"
 VISUALS_DIR = VAULT_DIR / "visuals"
+DEFAULT_FAILURE_LOG = VAULT_DIR / "_validation_results" / "render_failures.json"
 
 VALID_KINDS = {"svg"}                          # what the website renders
 # Source format is inferred from the filesystem: a `<basename>.dot` next
@@ -203,6 +206,14 @@ def main() -> int:
                         help="Re-render even if output is fresh.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--id", help="Render only this question id.")
+    parser.add_argument("--fail-fast", action="store_true",
+                        help="Abort on first per-item failure instead of "
+                             "continuing through the batch.")
+    parser.add_argument("--failure-log", type=Path, default=DEFAULT_FAILURE_LOG,
+                        help=f"Path for structured per-ID failure log "
+                             f"(default: {DEFAULT_FAILURE_LOG}). Always "
+                             "written on completion; empty array if no "
+                             "failures.")
     args = parser.parse_args()
 
     recs = discover_visuals()
@@ -214,6 +225,7 @@ def main() -> int:
 
     print(f"Discovered {len(recs)} visual(s).")
     counts = {"rendered": 0, "skipped": 0, "error": 0}
+    failures: list[dict[str, Any]] = []
     for rec in recs:
         try:
             status = render_one(rec, force=args.force, dry_run=args.dry_run)
@@ -222,12 +234,39 @@ def main() -> int:
         if status.startswith("error"):
             print(f"  ✗ {status}")
             counts["error"] += 1
+            # Parse "error:<qid>:<message>" into structured record
+            parts = status.split(":", 2)
+            qid = parts[1] if len(parts) > 1 else rec["id"]
+            err_msg = parts[2] if len(parts) > 2 else status
+            failures.append({
+                "id": qid,
+                "track": rec["track"],
+                "source_format": rec["source_format"],
+                "source_path": str(rec["source_path"]) if rec["source_path"] else None,
+                "asset_path": str(rec["asset_path"]),
+                "error": err_msg.strip(),
+            })
+            if args.fail_fast:
+                print("  ! --fail-fast set; aborting batch", file=sys.stderr)
+                break
         else:
             print(f"  {'✓' if status == 'rendered' else '·'} {rec['id']:30s} "
                   f"[{rec['source_format']:11s}] {status}")
             counts[status] += 1
 
-    print(f"\nSummary: rendered={counts['rendered']} "
+    # Always write the failure log so downstream consumers (CI, judge step,
+    # release_gate.sh) can read a stable path. Empty array if no failures.
+    args.failure_log.parent.mkdir(parents=True, exist_ok=True)
+    args.failure_log.write_text(json.dumps({
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_visuals": len(recs),
+        "rendered": counts["rendered"],
+        "skipped": counts["skipped"],
+        "errors": counts["error"],
+        "failures": failures,
+    }, indent=2), encoding="utf-8")
+    print(f"\nFailure log: {args.failure_log}")
+    print(f"Summary: rendered={counts['rendered']} "
           f"skipped={counts['skipped']} errors={counts['error']}")
     return 1 if counts["error"] else 0
 

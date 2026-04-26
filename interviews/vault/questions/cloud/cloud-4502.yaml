@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4502
+track: cloud
+level: L2
+zone: fluency
+topic: kv-cache-management
+competency_area: architecture
+bloom_level: understand
+phase: both
+title: Paged Attention for OOM Mitigation
+scenario: Serving Llama-2-70B on 4x H100 SXM GPUs with PagedAttention. The fleet
+  also runs prefix caching for a customer-support workload where 60% of requests
+  share a 2k-token system prompt, plus 8 LoRA adapters multiplexed onto the same
+  base weights for per-tenant fine-tunes.
+question: Explain how the PagedAttention block table interacts with prefix caching
+  (shared logical pages across requests) and multi-LoRA adapter routing, and identify
+  the new failure mode that emerges when shared prefix blocks must be evicted.
+visual:
+  kind: svg
+  path: cloud-4502.svg
+  alt: Diagram comparing contiguous memory slots vs disjoint physical blocks connected
+    by a mapping table.
+  caption: Logical to Physical Page Mapping
+details:
+  realistic_solution: PagedAttention's block table lets multiple requests' logical
+    page entries point at the same physical block, so the 2k shared prefix occupies
+    one copy in HBM with reference counts tracked per block. LoRA adapters are routed
+    by tag at the kernel-launch level (the base weights and KV layout are unchanged;
+    only the adapter weights are swapped per request via grouped GEMM). The new failure
+    mode is reference-counted eviction starvation - a hot shared prefix block can be
+    pinned by hundreds of in-flight requests, blocking the allocator from reclaiming
+    pages and causing OOM even though most logical KV state is shareable.
+  common_mistake: Treating prefix caching as a separate cache layer instead of recognizing
+    it as block-table sharing, or assuming LoRA multiplexing requires distinct KV
+    pages per adapter (it does not - only the adapter weight delta is per-tenant).
+  napkin_math: 'Shared 2k-prefix at 16 tokens/block = 125 blocks; with 60% sharing
+    over 1000 requests, naive copy = 125000 blocks but PagedAttention shares to ~125
+    blocks, saving ~99% of prefix HBM.'
+status: draft
+provenance: llm-draft
+expected_time_minutes: 7
+requires_explanation: true
+validated: false
+math_verified: false
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-realization-L2
+created_at: '2026-04-25'

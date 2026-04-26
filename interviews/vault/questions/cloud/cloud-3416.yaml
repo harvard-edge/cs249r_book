@@ -1,0 +1,90 @@
+schema_version: '1.0'
+id: cloud-3416
+track: cloud
+level: L4
+zone: analyze
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Analyzing Data Parallelism Bottlenecks on Google TPU v5e
+scenario: You are tasked with training a large vision model, ResNet-200, with 500
+  million BF16 parameters on an ensemble of Google TPU v5e devices using data parallelism.
+  Each TPU v5e device has 16 GB HBM, delivers 197 TFLOPS (BF16), and the inter-chip
+  interconnect bandwidth is 1.6 TB/s. You've scaled your training from 16 to 128 TPU
+  v5e devices, replicating the model on each device and performing gradient averaging.
+  Despite using FSDP (Fully Sharded Data Parallel) for optimizer state and gradient
+  sharding, you observe that beyond 64 devices, the training throughput per device
+  significantly degrades, and the overall job speedup is much less than linear. Analyze
+  the most likely reasons for this performance degradation, specifically considering
+  the provided TPU v5e specifications and the nature of data parallel training with
+  FSDP.
+question: Why does FSDP data-parallel ResNet-200 training on TPU v5e degrade beyond
+  64 devices, and how would you improve scaling?
+details:
+  realistic_solution: 'A realistic solution involves a multi-pronged approach:
+
+    1.  **Profiling and Benchmarking:** Deeply analyze communication patterns and
+    compute utilization using profiling tools (e.g., `tf.data` profiler, TPU profiling
+    tools) to pinpoint bottlenecks. Look for idle times, high communication volume,
+    or suboptimal collective operations.
+
+    2.  **Batch Size Optimization:** Adjust the global and per-device batch size.
+    Larger per-device batch sizes increase the compute-to-communication ratio, effectively
+    amortizing communication overheads over more computation.
+
+    3.  **Communication Optimization:** Explore advanced collective communication
+    algorithms or topologies. For FSDP, optimize sharding strategies, reduce the frequency
+    of full parameter materialization, and ensure efficient `all-gather` operations.
+    Consider gradient compression techniques if applicable.
+
+    4.  **Hybrid Parallelism:** If communication remains a bottleneck, consider combining
+    data parallelism with other forms of parallelism, such as pipeline parallelism
+    or expert parallelism, to reduce the number of devices participating in a single
+    all-reduce or to distribute the model across devices.'
+  common_mistake: A common mistake is to assume that simply adding more compute devices
+    will lead to linear scaling of training throughput. Candidates often overlook
+    the increasing overheads of communication (gradient synchronization, optimizer
+    state sharding, FSDP metadata exchange) and synchronization as the number of devices
+    grows, especially when the communication fabric becomes saturated or collective
+    communication patterns become inefficient.
+  napkin_math: 'For a model with 500 million BF16 parameters:
+
+    -   Gradient size: 500 * 10^6 parameters * 2 bytes/parameter = 1 GB.
+
+    -   During an all-reduce operation for gradients, each device logically contributes
+    and receives 1 GB of data. The total communication volume per device is approximately
+    2 GB.
+
+    -   Given the inter-chip interconnect bandwidth of 1.6 TB/s (1600 GB/s) for a
+    TPU v5e chip, the theoretical minimum time for this 2 GB communication *on a single
+    chip, without network contention* would be 2 GB / 1600 GB/s = 0.00125 seconds
+    (1.25 ms).
+
+    -   However, in a collective operation across 64 or 128 devices connected in a
+    mesh or torus topology, the effective bandwidth per device is significantly reduced
+    due to network hops, contention, and the overhead of the collective algorithm.
+    As the number of devices scales, this communication time grows, potentially non-linearly,
+    quickly dominating the total step time if not managed efficiently. For example,
+    if compute takes 50ms, and communication grows from 5ms to 20ms, the communication
+    becomes a significant portion of the total step time.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Napkin math mixes GB and TB/s units without showing explicit conversion for the
+  final communication time calculation.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

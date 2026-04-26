@@ -13,7 +13,7 @@ corpus_stats.json: ../vault/corpus.json ../vault/chains.json scripts/analyze_cor
 macros: macros.tex
 
 macros.tex: corpus_stats.json ../vault/corpus.json scripts/generate_macros.py
-	python3 scripts/generate_macros.py
+	PYTHONPATH=../vault-cli/src python3 scripts/generate_macros.py
 
 # ── Step 2: Generate data figures from stats ─────────────────
 # Only PDFs referenced by paper.tex via \\includegraphics.

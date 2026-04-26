@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4426
+track: cloud
+level: L5
+zone: realization
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Multi-Adapter Hot-Swap Serving with S-LoRA
+scenario: A serving system hosts 500 LoRA adapters over a single Llama-3 8B base model
+  on 4xH100. Average request rate is 200 QPS with a Zipf distribution (20% of adapters
+  handle 80% of traffic). Design the adapter loading strategy to meet P99 TTFT < 100ms.
+question: How would you load and cache 500 LoRA adapters for the 4xH100 serving system
+  to keep P99 TTFT below 100 ms at 200 QPS?
+details:
+  realistic_solution: 'S-LoRA paged adapter system: maintain a hot-adapter pool in
+    GPU memory (top 100 adapters by request rate = 2GB) and a warm pool on CPU memory
+    (next 200 adapters = 4GB, NVLink-accessible). Cold adapters (remaining 200) stay
+    on NVMe. Serving: for hot adapters, LoRA weights are fused into the compute path
+    with no loading overhead. For warm adapters, NVLink transfer at 900 GB/s: 4MB
+    at 900 GB/s = 4.4us, negligible. For cold adapters: NVMe read at 7 GB/s = 571us
+    + PCIe transfer 64 GB/s = 62us = ~633us total. Prefill for typical prompt (512
+    tokens) on 8B model: ~50ms. Cold load: 0.6ms, total ~51ms, within 100ms budget.'
+  common_mistake: Loading all 500 adapters into GPU memory simultaneously. At r=16,
+    each adapter is ~4MB. 500 adapters = 2GB, but the per-adapter KV cache context
+    and batching overhead means serving 500 adapters simultaneously fragments GPU
+    memory and increases scheduling latency.
+  napkin_math: 'Zipf: top 20% adapters (100) handle 80% of 200 QPS = 160 QPS. Bottom
+    80% (400 adapters) handle 40 QPS. Hot pool hit rate: 80%. Miss rate 20% = 40 QPS
+    need loading. Each cold load: 4MB NVMe. NVMe 7 GB/s handles 7000/4 = 1750 loads/sec.
+    Bandwidth not a bottleneck. TTFT budget: 100ms. Prefill 512 tokens on 8B model:
+    ~10ms on H100. Cold load: 0.6ms. Total: 10.6ms, well within 100ms. At 3x traffic
+    spike: 120 cold loads/sec, still fine at 1750 capacity.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

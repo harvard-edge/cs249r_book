@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3200
+track: cloud
+level: L5
+zone: specification
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Fine-Grained Expert Parallelism Communication
+scenario: You are scaling a 256-expert MoE model across 32 nodes (256 H100 GPUs total,
+  1 expert per GPU). Within a node, GPUs communicate via NVLink (900 GB/s). Between
+  nodes, InfiniBand NDR (400 Gb/s = 50 GB/s). Specify the communication constraints
+  for the all-to-all expert dispatch.
+question: What communication constraints and placement rules should the all-to-all
+  expert dispatch use across 32 H100 nodes with NVLink and NDR?
+details:
+  realistic_solution: 'With 1 expert per GPU across 32 nodes, a token routed to a
+    remote expert must traverse InfiniBand at 50 GB/s vs NVLink at 900 GB/s (18× slower).
+    For a 7168-dim BF16 hidden state (14.3 KB per token), intra-node transfer: 14.3
+    KB / 900 GB/s = 16 ns. Inter-node transfer: 14.3 KB / 50 GB/s = 286 ns + ~1μs
+    network latency = ~1.3 μs per token. For a batch of 4096 tokens with top-8 routing,
+    each token sends to 8 experts. In the worst case, all 8 are remote: 4096 × 8 ×
+    14.3 KB = 469 MB per direction, taking 469 MB / 50 GB/s = 9.4ms per direction
+    over IB. Specification: (1) Place co-activated experts (identified by routing
+    correlation analysis) on the same node. (2) Implement hierarchical all-to-all:
+    resolve intra-node routing first (NVLink), then inter-node (IB). (3) Overlap inter-node
+    all-to-all with local expert computation. (4) Target <20% of routing being cross-node.'
+  common_mistake: Treating all-to-all as if all links have uniform bandwidth. The
+    18× bandwidth gap between intra-node NVLink and inter-node InfiniBand fundamentally
+    changes how you must place experts.
+  napkin_math: 'Hidden state: 7168 × 2B = 14.3 KB. NVLink: 14.3 KB / 900 GB/s = 16
+    ns. IB: 14.3 KB / 50 GB/s + 1μs = ~1.3 μs. Ratio: 81×. Batch all-to-all (worst
+    case): 469 MB / 50 GB/s = 9.4 ms. Target: <2ms by keeping 80% routing intra-node.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

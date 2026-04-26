@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2889
+track: cloud
+level: L4
+zone: specification
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Specifying Activation Memory Budget for a Multi-Tenant Training Cluster on
+  H100
+scenario: You are writing memory budget specifications for a shared H100 training
+  cluster that will run jobs from multiple teams with models ranging from 1B to 70B
+  parameters. Each H100 GPU has 80 GB HBM3. You need to define a per-job activation
+  memory allocation policy that accounts for model size, sequence length, batch size,
+  and gradient checkpointing configuration, and that can be enforced by the cluster
+  scheduler before job launch.
+question: What activation memory allocation policy should the scheduler enforce for
+  H100 jobs across model size, sequence length, batch, and checkpointing?
+details:
+  realistic_solution: 'Define activation memory spec as: M_act = N_layers_stored ×
+    (M_residual + M_attention + M_mlp) × safety_factor, where N_layers_stored = ceil(N_layers
+    / checkpoint_interval), M_residual = 2×B×S×H×dtype_bytes, M_attention = 0 if FlashAttention
+    else num_heads×B×S²×dtype_bytes, M_mlp = 8×B×S×H×dtype_bytes, safety_factor =
+    1.2 for fragmentation. Add peak_gradient_buffer = M_largest_parameter_tensor ×
+    2 for backward workspace. Enforce via CUDA memory fraction limit: `torch.cuda.set_per_process_memory_fraction(M_act_budget
+    / 80e9)` in the job launch wrapper.'
+  common_mistake: Specifying only peak theoretical activation memory without accounting
+    for memory fragmentation overhead (typically 10-20% of reserved vs. allocated),
+    intermediate workspace buffers for fused kernels (e.g., FlashAttention tiles),
+    and gradient buffers that temporarily co-exist with activations at the backward-pass
+    peak.
+  napkin_math: '7B model spec: N_stored=8 (checkpoint every 4 of 32 layers), M_residual=2×4×2048×4096×2=128
+    MB/layer, M_mlp=8×4×2048×4096×2=512 MB/layer. Total: 8 layers × 640 MB × 1.2 =
+    6.1 GB. 70B model (80 layers, H=8192, checkpoint every 8): N_stored=10, M_residual+M_mlp=(256+1024)
+    MB/layer × 10 × 1.2 = 15.4 GB. Both fit alongside model weights in 80 GB.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: edge-1660
+track: edge
+level: L6+
+zone: mastery
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: create
+phase: inference
+title: Zero-Copy Model Switching via Mmap
+scenario: You are deploying a dynamic 15-model computer vision pipeline onto an edge
+  server with a Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W).
+  Each specialized model is 4 GB (INT8), totaling 60 GB, which cannot fit simultaneously
+  in the accelerator's 32 GB memory or the limited host RAM. You must design an inference
+  architecture that handles unpredictable request spikes for any of the 15 models
+  across 8 parallel worker processes without causing OOM errors or unacceptable cold-start
+  latency.
+question: How would you serve 15 unpredictable 4 GB models across 8 workers on one
+  Cloud AI 100 without OOMs or long cold starts?
+details:
+  realistic_solution: The optimal architecture uses `mmap` with `MAP_SHARED` on the
+    host to map all 60 GB of model weights into a single shared virtual address space,
+    preventing memory duplication across the 8 worker processes. Rather than copying
+    entire models, the system leverages the Qualcomm Cloud AI 100's PCIe host-mapped
+    memory capabilities to fetch only the actively executing layers directly from
+    the host page cache. Tensors must be pre-aligned to page boundaries to ensure
+    PCIe burst transfers efficiently page in the required INT8 weights just-in-time.
+  common_mistake: Candidates often propose a naive LRU caching strategy where models
+    are fully copied into the 32GB LPDDR4x on demand, which incurs massive I/O latency
+    on cache misses. They also frequently overlook process-level memory duplication,
+    failing to realize 8 workers loading a single 4GB model independently will instantly
+    exhaust the accelerator's memory.
+  napkin_math: Total model size is 15 * 4 GB = 60 GB. Naively loading a 4 GB model
+    via PCIe Gen4 (assuming ~16 GB/s bandwidth) takes 4 GB / 16 GB/s = 250 ms of blocking
+    cold-start latency. By using mmap and streaming layers on-demand, the first layer's
+    execution can begin immediately after fetching its specific weight pages. If the
+    first layer is 50 MB, the critical path latency drops to 50 MB / 16 GB/s = ~3
+    ms. The 32 GB LPDDR4x easily accommodates the active pages of up to 5 concurrently
+    executing models (5 * 4 GB = 20 GB) plus 12 GB reserved for activations and intermediate
+    buffers.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

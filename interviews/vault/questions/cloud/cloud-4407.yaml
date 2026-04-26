@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: cloud-4407
+track: cloud
+level: L5
+zone: diagnosis
+topic: rdma-transport
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: RDMA Queue Pair Limits and Scalability in Large H100 Pods
+scenario: You are scaling a distributed training cluster from 128 to 1,024 H100 nodes,
+  each with one 400 Gbps InfiniBand HCA (Host Channel Adapter). Each NCCL AllReduce
+  creates one RDMA Queue Pair (QP) per participating GPU pair. Your HCA supports a
+  maximum of 32,768 QPs. After scaling to 512 nodes, training initialization hangs
+  for 10 minutes. Analyze the QP exhaustion problem, calculate the scaling limits,
+  and propose architectural solutions.
+question: At 512–1,024 H100 nodes, why does NCCL initialization hang from RDMA QP
+  exhaustion, and what scaling limits and architectural fixes would you propose?
+details:
+  realistic_solution: 'NCCL default: for N GPUs in a single communicator, each GPU
+    opens QPs to all other GPUs it communicates with in the ring or tree. In ring-AllReduce,
+    each rank connects to 2 neighbors = 2N QPs total across the ring. But NCCL also
+    creates point-to-point QPs for send/recv operations: O(N) per GPU, O(N²) total.
+    At 512 nodes × 8 GPUs = 4,096 GPUs: QPs per GPU = min(N-1, max_peers) ≈ 4,095.
+    Total QPs per HCA: 4,096 (for all rank communications). But with multiple communicators
+    (data parallel + tensor parallel + pipeline parallel), multiply by communicator
+    count. At 4,096 GPUs × 3D parallelism = 3 communicators, per-GPU QPs = 3 × (DP_size
+    - 1 + TP_size - 1) + PP_size - 1. Fix: enable NCCL_IB_QPS_PER_CONNECTION=1 (already
+    default), use SHARP for reduction offload, or use hierarchical AllReduce to limit
+    QP fan-out per node.'
+  common_mistake: Assuming NCCL's QP count scales linearly with N nodes. In fact,
+    NCCL creates a QP for each participating rank-to-rank pair in the collective operation.
+    For N ranks in a fully-connected AllReduce, QPs scale as O(N²), not O(N). This
+    causes catastrophic QP exhaustion at scale.
+  napkin_math: 'HCA QP limit: 32,768. 512 nodes × 8 GPUs = 4,096 GPUs. NCCL ring-AllReduce
+    QPs per GPU: 2 (left + right neighbor). But initialization phase creates QPs to
+    all ranks: 4,096 - 1 = 4,095 QPs per GPU × 8 GPUs/node × 1 HCA = 4,095 × 8 / (number_of_HCAs).
+    If 1 HCA per node: 4,095 × 8 = 32,760 QPs per HCA → exactly at limit of 32,768!
+    Any additional communicator (pipeline parallel) pushes over. At 1,024 nodes (8,192
+    GPUs): 8,192 × 8 = 65,536 QPs → 2× over limit, hang on initialization. Fix: NCCL_IB_QPS_PER_CONNECTION=1
+    + set NCCL_MAX_NCHANNELS=4 to reduce QP count. Or deploy 2 HCAs per node: QPs
+    split 50/50 via NIC bonding. Or use SHARP: reduces fan-out to logarithmic tree.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Text is truncated at the end
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

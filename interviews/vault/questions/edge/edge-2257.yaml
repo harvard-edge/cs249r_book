@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: edge-2257
+track: edge
+level: L4
+zone: optimization
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: On-Device LoRA Inference with INT4 Weight Quantization
+scenario: An edge device runs a 7B base model quantized to INT4 (AWQ) with a BF16
+  LoRA adapter. Inference shows the LoRA dequantize-compute-requantize pattern adds
+  35% latency overhead per layer. Optimize the adapter computation.
+question: How would you optimize BF16 LoRA adapter computation to eliminate the 35%
+  latency overhead on the INT4 base model?
+details:
+  realistic_solution: 'Three optimization approaches: (1) Merge and requantize: merge
+    the LoRA adapter into the base weight matrix offline (W_merged = W_base + B*A),
+    then requantize the merged matrix to INT4. Zero inference overhead. Downside:
+    cannot hot-swap adapters without full requantization. (2) Separate INT8 LoRA:
+    quantize the LoRA matrices to INT8. LoRA matrices are small (r × d = 8 × 4096
+    = 32K values per matrix), INT8 quantization error is negligible at this scale.
+    Perform LoRA computation in INT8, accumulate in INT32, cast to BF16 for output.
+    (3) Fused kernel: write a custom kernel that fuses dequantize + base matmul +
+    LoRA addition into a single pass, avoiding materialization of the dequantized
+    matrix. This approach is used in llama.cpp GGML kernels for LoRA with quantized
+    base.'
+  common_mistake: Keeping the LoRA computation in BF16 while the base model runs in
+    INT4. The type mismatch requires dequantizing the base weight matrix to BF16 for
+    the LoRA addition, then performing the combined computation, tripling memory bandwidth
+    requirement for the base weights.
+  napkin_math: 'Per-layer base matmul: d_in * d_out = 4096 * 4096 = 16.8M values.
+    INT4: 8.4MB per weight matrix. BF16: 33.6MB. Dequantizing to BF16: 4× memory bandwidth
+    increase for base weights. LoRA add: r * d = 8 * 4096 = 32K values × 2 bytes =
+    64KB BF16 (two matrices: A is [r, d_in] = 32K values, B is [d_out, r] = 32K values,
+    total 64K values = 128KB per layer). LoRA compute overhead vs base: 2 * seq_len
+    * d * r / (2 * seq_len * d * d) = r/d = 8/4096 = 0.2%. The 35% overhead is entirely
+    from dequantization. Fused kernel eliminates dequantize: base matmul bandwidth
+    returns to INT4 rates (4× reduction), latency overhead drops from 35% to ~2%.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 32K BF16 values is 64KB, not 256KB
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

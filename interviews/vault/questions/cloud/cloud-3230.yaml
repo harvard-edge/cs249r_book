@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-3230
+track: cloud
+level: L5
+zone: optimization
+topic: kv-cache-management
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: KV-Cache and Speculative Decoding Interaction
+scenario: You use speculative decoding with a 1B draft model and a 70B verifier for
+  serving. The draft model generates 8 candidate tokens, then the verifier checks
+  them in a single forward pass. If 5 of 8 are accepted, how does this affect KV-cache
+  management for both models?
+question: How should speculative decoding manage draft and verifier KV-caches when
+  5 of 8 candidate tokens are accepted?
+details:
+  realistic_solution: 'KV-cache management for speculative decoding: (1) Draft model:
+    maintains its own lightweight KV-cache (1B model, ~8 KB per token). After verification,
+    the draft KV-cache is irrelevant — it is overwritten for the next speculation
+    round. Cost: negligible. (2) Verifier model: processes all 8 speculative tokens
+    in one forward pass, generating KV entries for all 8. If 5 are accepted and 3
+    rejected: the KV-cache must be truncated — remove entries for positions 6, 7,
+    8 (the rejected tokens). With PagedAttention, this means freeing the blocks containing
+    rejected tokens'' KV entries. If those blocks also contain accepted tokens (block_size=16
+    means tokens 6-8 share a block with accepted tokens), the block cannot be freed
+    — only the logical length is updated. (3) Memory overhead: the verifier must allocate
+    KV-cache for all 8 speculative tokens upfront, even though 3 may be rejected.
+    Peak KV memory = position + 8 speculation tokens. At 70B scale: 8 extra tokens
+    × 320 KB = 2.56 MB overhead per request — negligible. (4) Throughput benefit:
+    5 accepted tokens in one forward pass means 5× decode throughput (amortizing the
+    140 GB weight load over 5 tokens instead of 1).'
+  common_mistake: Forgetting that rejected speculative tokens create orphaned KV-cache
+    entries that must be rolled back. The verifier's KV-cache must be managed transactionally
+    — either all speculative KV entries are committed or the rejected ones are pruned.
+  napkin_math: 'Speculative KV overhead: 8 tokens × 320 KB = 2.56 MB per request.
+    Rollback cost: free 3 tokens'' KV = 960 KB → fast pointer update. Throughput gain:
+    5 tokens per verification pass / 1 token per standard decode = 5× improvement.
+    Net: 2.56 MB extra memory for 5× throughput.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

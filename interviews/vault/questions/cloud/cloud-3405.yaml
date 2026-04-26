@@ -1,0 +1,76 @@
+schema_version: '1.0'
+id: cloud-3405
+track: cloud
+level: L4
+zone: analyze
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Optimizing IO-Aware Attention on AMD MI300X for Large Sequence Models
+scenario: You are tasked with deploying a large language model with extremely long
+  sequence lengths on an AMD MI300X GPU, which boasts 192 GB of HBM3 memory and a
+  5.3 TB/s memory bandwidth, alongside 1,307 TFLOPS of FP16 sparse compute. Standard
+  attention mechanisms are quickly bottlenecked by memory I/O and on-chip SRAM capacity.
+  Explain, in detail, how you would adapt FlashAttention-style IO-aware tiling and
+  online softmax to this specific hardware to maximize throughput. Analyze *why* these
+  design choices are critical given the MI300X's specific memory hierarchy and bandwidth
+  characteristics, and how you would design the algorithm to effectively utilize the
+  5.3 TB/s HBM3 bandwidth to minimize data movement between HBM and SRAM.
+question: How would you adapt FlashAttention-style tiling and online softmax to MI300X
+  for long-sequence LLM inference?
+details:
+  realistic_solution: 'The solution involves a multi-pronged approach: (1) **IO-Aware
+    Tiling:** Break the attention computation into smaller blocks (tiles) that fit
+    within the fast on-chip SRAM. This minimizes costly transfers between HBM3 and
+    SRAM. Specifically, the query (Q) matrix can be tiled, and for each Q-tile, the
+    key (K) and value (V) matrices are streamed from HBM3, performing computation
+    incrementally. (2) **Online Softmax:** Instead of computing the entire attention
+    matrix and then applying softmax (which can be memory-prohibitive for large sequences),
+    the softmax normalization factors (max and sum) are updated incrementally ''online''.
+    This avoids materializing the full attention matrix in HBM3 and allows for efficient
+    computation on tiles. (3) **Hardware-Specific Optimization:** On the AMD MI300X,
+    the massive 192 GB HBM3 allows for very large models or batch sizes, but the 5.3
+    TB/s bandwidth is the key enabler for IO-aware algorithms. The tiling strategy
+    must be tuned to the SRAM size and HBM3 bandwidth to ensure that data fetches
+    are efficiently pipelined and that the compute units are continuously fed, maximizing
+    the use of the 5.3 TB/s.'
+  common_mistake: A common mistake is to primarily focus on the 1,307 TFLOPS FP16
+    compute capacity without adequately addressing the memory bandwidth (5.3 TB/s)
+    and on-chip memory constraints. Naive attention implementations become memory-bound
+    long before compute-bound, especially with large sequence lengths, leading to
+    significant underutilization of the GPU's potential. Overlooking the need for
+    online softmax can also lead to out-of-memory errors for intermediate attention
+    scores or numerical instability.
+  napkin_math: Consider an attention block operating on sequence length N and hidden
+    dimension D. The intermediate attention scores (Q*K^T) have size N x N. For FP16,
+    this is 2 * N^2 bytes. If D=2048 and we aim for a sequence length of N=65536 (common
+    for long-context models), a full attention matrix (N x N) would be 2 * (65536)^2
+    bytes = 8 GB. This fits in HBM3 but moving it to SRAM for softmax is prohibitive.
+    With FlashAttention, if we process Q-tiles of size B (e.g., 128) and K/V-tiles
+    of size C (e.g., 256), the on-chip memory requirement for Q_block, K_block, V_block,
+    and the partial attention sum and max is significantly reduced to roughly O(B*D
+    + C*D + B*C). This allows the entire operation to be memory-efficient. The 5.3
+    TB/s HBM3 bandwidth supports streaming K/V tiles very rapidly, e.g., streaming
+    256 * 2048 FP16 K-vectors (1MB) takes about (1MB / 5.3 TB/s) ~ 0.18 microseconds,
+    making it feasible to keep the compute pipeline busy. The MI300X's 1,307 TFLOPS
+    FP16 sparse ensures the tiled compute steps are not the bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- MI300X TFLOPS should be 1307, found 1300
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

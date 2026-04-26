@@ -2,12 +2,12 @@
 # ═══════════════════════════════════════════════════════════════
 # Launch parallel Gemini math reviews on all 63 chunks
 # Usage: ./run_reviews.sh [model] [parallel]
-# Default: gemini-2.5-flash, 8 parallel
+# Default: gemini-3.1-pro-preview, 8 parallel
 # For Pro: GEMINI_MODEL=gemini-3.1-pro-preview ./run_reviews.sh
 # ═══════════════════════════════════════════════════════════════
 set -uo pipefail
 
-MODEL="${GEMINI_MODEL:-gemini-2.5-flash}"
+MODEL="${GEMINI_MODEL:-gemini-3.1-pro-preview}"
 MAX_PARALLEL="${MAX_PARALLEL:-8}"
 CHUNKS_DIR="/tmp/staffml-review-chunks"
 REVIEWS_DIR="$(cd "$(dirname "$0")" && pwd)/_reviews"

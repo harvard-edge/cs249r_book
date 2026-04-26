@@ -27,10 +27,10 @@ type EnrichedVaultQuestion = VaultQuestion & {
   phase?: string;
   question?: string;
   visual?: {
-    kind: "svg" | "mermaid";
+    kind: "svg";              // closed enum as of v0.1.2 (mermaid retired)
     path: string;
-    alt: string;
-    caption?: string;
+    alt: string;              // ≥10 chars (a11y)
+    caption: string;          // required as of v0.1.2, ≥5 chars
   };
   chains?: Array<{ id: string; position: number }>;
   validated?: boolean;
@@ -56,10 +56,10 @@ export interface Question {
   scenario: string;
   question?: string;
   visual?: {
-    kind: "svg" | "mermaid";
+    kind: "svg";              // closed enum as of v0.1.2 (mermaid retired)
     path: string;
-    alt: string;
-    caption?: string;
+    alt: string;              // ≥10 chars (a11y)
+    caption: string;          // required as of v0.1.2, ≥5 chars
   };
   chain_ids?: string[];
   chain_positions?: Record<string, number>;

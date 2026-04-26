@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: cloud-4191
+track: cloud
+level: L5
+zone: optimization
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Shared Memory Bank Conflicts in Reduction Kernels
+scenario: Your LayerNorm kernel on H100 computes a parallel reduction over 4096 elements
+  using shared memory. Each warp reduces 128 elements, but profiling shows 8-way bank
+  conflicts during the reduction phase. The shared memory has 32 banks, each 4 bytes
+  wide. Diagnose the conflict pattern and fix it.
+question: What shared-memory bank conflict pattern causes the 8-way slowdown in the
+  LayerNorm reduction, and how would you fix it?
+details:
+  realistic_solution: 'Shared memory: 32 banks, 4 bytes wide. Address maps to bank:
+    (address / 4) % 32. During tree reduction, thread i accesses element i and element
+    i + stride. At stride = 4: threads 0,4,8,12,16,20,24,28 all read from banks 0,4,8,12,16,20,24,28
+    (no conflict). But threads 0,4,8,12,16,20,24,28 reading i+stride=4,8,12,16,20,24,28,32:
+    bank pattern 4,8,12,16,20,24,28,0 — still no conflict. The 8-way conflict occurs
+    at stride = 32: thread 0 reads index 0 (bank 0) and index 32 (bank 0). Threads
+    0-31 all read from bank (i % 32) for the first operand AND bank ((i+32) % 32)
+    = same bank for the second. Fix: (1) Add a 1-element padding per row: declare
+    shared mem as float smem[128+1]. Now bank(i) = (i + i/32) % 32, breaking the conflict
+    pattern. (2) Use warp shuffle (__shfl_down_sync) instead of shared memory for
+    intra-warp reduction — zero bank conflicts, ~2× faster.'
+  common_mistake: Using a stride of 32 (the number of banks) for reduction, thinking
+    it avoids conflicts. A stride of 32 means every thread accesses the same bank
+    — maximum conflict. The correct approach uses stride 1 (sequential) for initial
+    loading, then tree reduction with proper indexing.
+  napkin_math: 'Without conflicts: 32 threads × 1 cycle = 1 cycle per step, 7 steps
+    for 128→1 = 7 cycles. With 8-way bank conflict at stride 32: 8 serial accesses
+    per cycle = 8 cycles per step × 7 steps = 56 cycles. Warp shuffle: 0 shared memory
+    accesses, 5 cycles for 32→1 reduction. 128 elements: shared mem load (1 cycle)
+    + shuffle (5 cycles) = 6 cycles. Speedup over conflicted: 56/6 = 9.3×.'
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+deletion_reason: Math error unfixable
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: ERROR
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- A 32-thread warp takes 2 cycles for the first step (64 operations) of a 128-element
+  reduction, so it is not 1 cycle per step. Also, the bank conflict degree decreases
+  at each reduction step, so multiplying 8 cycles by 7 steps is incorrect.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

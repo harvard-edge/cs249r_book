@@ -1,0 +1,80 @@
+schema_version: '1.0'
+id: tinyml-1681
+track: tinyml
+level: L6+
+zone: design
+topic: compute-cost-estimation
+competency_area: compute
+bloom_level: create
+phase: both
+title: Cycle-Accurate Execution Cost Model for 1D Convolutions
+scenario: An engineer is designing an ultra-low-power fall-detection algorithm using
+  a single-axis accelerometer feeding a bare-metal Cortex-M4 at 80 MHz. The first
+  layer is a 1D convolution with output length L_out=100, kernel K=3, input channels
+  C_in=16, single output channel. Inputs are INT16 (Q15). The Cortex-M4 supports SMLAD
+  (signed dual MAC, 1 cycle, 2 INT16 MACs per cycle), LDM (multi-register load, 1
+  + n cycles for n words), and has 13 general-purpose registers (R0-R12) of which
+  3 are reserved for kernel-pointer, output-pointer, and loop counter, leaving 10
+  GPRs for live values.
+question: Design an explicit cycle-accurate cost model T_total = T_load(C_in) + T_MAC(K,
+  C_in) + T_spill(C_in, R_avail) + T_pad(K) + T_store, applied per-output element,
+  with separate accounting for interior outputs (98 of them) and the 2 boundary outputs
+  that must perform zero-pad checks. Validate the model by computing total cycles
+  for the stated shape, and quantify the gap between this cycle-accurate result and
+  a naive "1.2x MAC" heuristic.
+details:
+  realistic_solution: 'Cost model per output, accounting for inputs, weights, spill,
+    MAC, and store. Per-output operand counts: input window = K * C_in = 3 * 16 =
+    48 INT16 halfwords = 24 32-bit words; kernel weights = K * C_in = 48 halfwords
+    = 24 words (the kernel is reloaded per output because the full kernel does not
+    fit in the 10 available GPRs). T_load_input = 4 LDM bursts of 6 words = 4 * (1
+    + 5) = 24 cycles. T_load_weights = same shape = 24 cycles. SMLAD performs 2 INT16
+    MACs per cycle; per-output MAC count = K * C_in = 48; T_MAC = 48 / 2 = 24 cycles.
+    Register spill: at any moment 12 packed-pair registers'' worth of operands (6
+    input pairs + 6 weight pairs covering one tap) compete for the 10 available GPRs,
+    plus 2 more for accumulator and address scratch, so we must spill 2 packed- register
+    pairs to the stack. With STM/LDM bursts on Cortex-M4 (1 + n cycles for n words),
+    spilling 2 words via STM = 1 + 2 = 3 cycles and reloading via LDM = 1 + 2 = 3
+    cycles, but with the address-update penalty we round T_spill to 4 cycles per output.
+    T_store = 1 STR = 1 cycle. T_padding = 0 for interior outputs. T_interior = 24
+    + 24 + 24 + 4 + 1 = 77 cycles per output. Boundary outputs (positions 0 and L_out-1,
+    2 outputs total) add a 6-cycle padding-check sequence (CMP + B + zero-load) ->
+    T_boundary = 77 + 6 = 83 cycles. Total = 98 * 77 + 2 * 83 = 7546 + 166 = 7712
+    cycles. Outer-loop and function-prologue overhead adds ~200 cycles -> T_total
+    ~= 7912 cycles. At 80 MHz this layer executes in 99.0 us. The naive 1.2x heuristic
+    predicts 4800 * 1.2 = 5760 cycles - a 27% under-estimate vs the cycle-accurate
+    7912 - because the heuristic silently absorbs the weight-load cost (24 cycles/output,
+    ~30% of the real budget) into a single fudge factor that is calibrated for kernel-
+    resident shapes. The model and the heuristic agree only when C_in is small enough
+    to fit kernel + inputs in registers; for C_in >= 16 the heuristic must be re-tuned
+    per shape.'
+  common_mistake: 'Treating cycles_per_MAC as a fixed scalar (e.g., 1.2) without decomposing
+    into load, spill, MAC, and pad terms - this hides two regimes where the model
+    breaks: (1) kernels too large to fit in registers force per-output weight reloads
+    that the heuristic does not see; (2) any K * C_in beyond ~10 packed pairs forces
+    a different spill strategy and the heuristic under-counts by 25-35%. A separate
+    slip is omitting the weight-load cost entirely - the kernel is data, not magic;
+    if it does not fit in registers the cost is borne every output.'
+  napkin_math: 'Per-output operands: K*C_in = 48 halfwords = 24 words inputs + 24
+    words weights. T_load_input 24 + T_load_weights 24 + T_MAC 24 + T_spill 4 + T_store
+    1 = 77 cyc interior, 83 cyc boundary. Total = 98*77 + 2*83 + 200 loop = 7912 cyc.
+    Naive 4800 * 1.2 = 5760 cyc (27% under). At 80 MHz: 99.0 us.'
+status: archived
+provenance: llm-draft
+expected_time_minutes: 15
+requires_explanation: true
+validated: false
+math_verified: false
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-recall-L6+
+created_at: '2026-04-25'
+deletion_reason: 'Archived after 3 independent fix-agent passes (Phase C, F.2, F.4)
+  failed to satisfy the judge. Final verdict: DROP. The (track, topic, zone, level)
+  cell may be structurally awkward for this question''s framing; preserving the item
+  for audit but removing from the bundle.'

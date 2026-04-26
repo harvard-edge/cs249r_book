@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: cloud-4079
+track: cloud
+level: L5
+zone: specification
+topic: rdma-transport
+competency_area: networking
+bloom_level: create
+phase: both
+title: RDMA Error Recovery in Long-Running Training Jobs
+scenario: 'A 90-day training run on 1024 H100s will inevitably experience RDMA transport
+  errors: QP failures, path migration events, HCA resets, and cable disconnections.
+  Specify the error recovery architecture that allows training to continue with minimal
+  interruption, including error detection, automatic QP re-establishment, and checkpoint-based
+  rollback criteria.'
+question: What RDMA error recovery architecture would keep a 90-day, 1024-H100 training
+  run going through QP failures, path changes, and node loss?
+details:
+  realistic_solution: 'Multi-tier error recovery specification: Tier 1 — Transient
+    errors (QP error, retransmission timeout, ~10/day): Detection: CQE with error
+    status from ibv_poll_cq(). Recovery: (1) Reset the affected QP (RESET→INIT→RTR→RTS
+    transition, ~1ms). (2) Re-register memory regions if MR was invalidated. (3) Retry
+    the failed AllReduce from the current chunk. (4) Time budget: <100ms. No checkpoint
+    rollback. NCCL handles this transparently via NCCL_IB_RETRY_CNT=7. Tier 2 — Path
+    failures (cable disconnect, switch port failure, ~1/day): Detection: multiple
+    QP timeouts on the same rail. Recovery: (1) Detect via IB subnet manager trap
+    notifications. (2) Activate alternate path via APM (Automatic Path Migration)
+    on InfiniBand — pre-configured during QP setup. (3) If no alternate path: redistribute
+    traffic across remaining 7 rails (12.5% throughput loss). (4) Time budget: <5
+    seconds. (5) Alert ops team for cable replacement. Tier 3 — Node failure (GPU
+    crash, HCA reset, ~1/week): Detection: NCCL timeout (NCCL_TIMEOUT=1800 seconds).
+    Recovery: (1) Exclude failed node. (2) Load checkpoint on a spare node. (3) Re-establish
+    all QP connections for the replacement node. (4) Resume training from last checkpoint.
+    Time budget: <10 minutes. Checkpoint frequency: every 30 minutes (2GB checkpoint
+    save takes ~40ms with GPUDirect Storage). Monitoring: per-QP error counters (ibv_query_qp),
+    per-port symbol_error and link_downed counters, MTBF tracking per node.'
+  common_mistake: Treating RDMA errors as fatal and restarting the entire job. At
+    1024 GPUs running for 90 days, the mean time between any RDMA error is ~4 hours
+    (based on production data). Restarting from checkpoint on every error would spend
+    more time restarting than training.
+  napkin_math: '90 days × 1024 GPUs: Tier 1 events: ~900. Recovery: 900 × 100ms =
+    90 seconds total. Tier 2 events: ~90. Recovery: 90 × 5s = 450 seconds = 7.5 minutes
+    total. Tier 3 events: ~13. Recovery: 13 × 10min = 130 minutes. Total downtime:
+    138 minutes / 129,600 minutes = 0.11% — 99.89% uptime. Without tiered recovery
+    (restart on every error): ~1003 restarts × 10 minutes = 167 hours of downtime
+    = 7.7% — 8× worse.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 1.5 min + 7.5 min + 130 min = 139 min, not 138 min
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

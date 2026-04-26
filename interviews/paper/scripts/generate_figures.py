@@ -51,20 +51,21 @@ TRACK_COLORS = {
 }
 
 FORMAT_COLORS = {
-    "calculation": "#cfe2f3",
-    "design": "#d4edda",
-    "conceptual": "#fdebd0",
-    "optimization": "#e8f5e9",
-    "diagnosis": "#f9d6d5",
-    "tradeoff": "#f7f7f7",
+    "calculation": "#cfe2f3",  # blue   — compute / processing
+    "design":      "#d4edda",  # green  — architecture / data flow
+    "conceptual":  "#fdebd0",  # orange — routing / scheduling
+    "optimization":"#e7d8ed",  # purple — improvement (distinct hue from green so the
+                               #          stacked-bar reading is unambiguous)
+    "diagnosis":   "#f9d6d5",  # red    — failure / cost
+    "tradeoff":    "#f7f7f7",  # gray   — neutral
 }
 FORMAT_EDGES = {
     "calculation": "#4a90c4",
-    "design": "#3d9e5a",
-    "conceptual": "#c87b2a",
-    "optimization": "#2d7a2d",
-    "diagnosis": "#c44",
-    "tradeoff": "#bbb",
+    "design":      "#3d9e5a",
+    "conceptual":  "#c87b2a",
+    "optimization":"#7d4f96",
+    "diagnosis":   "#c44",
+    "tradeoff":    "#bbb",
 }
 
 # Matplotlib defaults for paper — Helvetica to match SVG figures

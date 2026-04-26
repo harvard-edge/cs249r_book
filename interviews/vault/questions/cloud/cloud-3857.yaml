@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3857
+track: cloud
+level: L5
+zone: design
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: MoE Network Placement and Parallelism Strategy
+scenario: You are architecting the parallelism strategy for training a 1.2 Trillion
+  parameter Mixture-of-Experts (MoE) model. The cluster consists of nodes with 8x
+  H100 GPUs (80GB HBM3). Intra-node communication uses NVLink 4.0 (900 GB/s per GPU),
+  and inter-node communication uses InfiniBand NDR (50 GB/s per GPU). Architect the
+  placement of Tensor, Pipeline, Data, and Expert parallelism to prevent the all-to-all
+  routing phase from becoming a network bottleneck.
+question: How would you place TP, PP, DP, and EP for the 1.2T MoE model to keep token
+  all-to-all off the slow InfiniBand fabric?
+details:
+  realistic_solution: The optimal design confines Expert Parallelism (EP) and Tensor
+    Parallelism (TP) to the intra-node domain (e.g., EP=8 or EP=4/TP=2) to leverage
+    the massive 900 GB/s NVLink bandwidth for all-to-all routing and all-reduce operations.
+    Inter-node bandwidth (50 GB/s) is strictly reserved for Data Parallelism (gradient
+    synchronization) and Pipeline Parallelism (point-to-point activations), which
+    are less bandwidth-intensive and easier to overlap with computation.
+  common_mistake: Candidates often propose distributing experts across multiple nodes
+    (Expert Parallelism > 8) to increase the number of experts. This forces the heavily
+    bandwidth-bound all-to-all token routing to cross the slower InfiniBand network,
+    severely degrading the communication-computation ratio and stalling the GPUs.
+  napkin_math: Assume hidden dimension H=8192 (16KB/token in FP16) and 4096 tokens
+    per GPU. Payload per GPU per MoE layer is 4096 * 16KB = 65.5 MB. Expert compute
+    is roughly 2 * 4096 * 8192^2 = 550 GFLOPs. At 989 TFLOPS, compute takes ~0.55
+    ms. If routed across nodes (IB at 50 GB/s), sending half the tokens (32.7 MB)
+    takes ~0.65 ms, bottlenecking the GPU (Comm > Comp). If routed intra-node (NVLink
+    at 900 GB/s), sending 65.5 MB takes ~0.07 ms, easily overlapping with the 0.55
+    ms compute.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

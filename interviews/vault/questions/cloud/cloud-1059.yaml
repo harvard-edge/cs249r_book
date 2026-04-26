@@ -7,27 +7,31 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: apply
 phase: training
-title: Overlapping Data Transfers with CUDA Streams
-scenario: You are deploying an inference pipeline on a T4 GPU (PCIe Gen3 x16, 12 GB/s). For each batch,
-  the host-to-device (H2D) transfer takes 5 ms, the inference kernel takes 10 ms, and the device-to-host
-  (D2H) transfer takes 3 ms. You need to process 100 consecutive batches. Calculate the total execution
-  time if you process batches synchronously in the default stream versus pipelining them across 3 concurrent
-  CUDA streams.
-question: "What is the total execution time for 100 batches synchronously versus pipelined across 3 CUDA streams?"
+title: NCCL AllReduce vs Backward Compute Overlap on a 4-GPU T4 Box
+scenario: You are training a small classification model on 4x T4 GPUs (PCIe Gen3 x16, ~12 GB/s per
+  link, no NVLink, NCCL over PCIe). Per-step backward compute = 90 ms; the gradient AllReduce moves
+  a 2 GB FP32 gradient over a logical PCIe ring. You can either run AllReduce in a separate NCCL stream
+  with bucketed overlap (bucket size 64 MB, AllReduce kicked off as each bucket completes during backward)
+  or run a single AllReduce after backward finishes. Compute total step time under each approach and
+  identify the point at which doubling the bucket size stops helping.
+question: "On 4x T4s with no NVLink and a 2 GB FP32 gradient over PCIe, what does bucketed AllReduce overlap save versus a post-backward single AllReduce, and where do bucket-size returns diminish?"
 details:
-  realistic_solution: 'In synchronous mode, each batch takes 5 + 10 + 3 = 13 ms sequentially, totaling
-    1800 ms for 100 batches. With CUDA streams overlapping H2D, compute, and D2H, the steady-state throughput
-    is bottlenecked by the 10 ms compute kernel. The total time is the latency of the first batch plus
-    the bottleneck time for the remaining 99 batches: 18 ms + (99 * 10 ms) = 1008 ms.'
-  common_mistake: Candidates often assume total execution time with streams is simply divided by the number
-    of pipeline stages, ignoring that the longest pipeline stage (compute at 10 ms) strictly dictates
-    the maximum overall throughput.
-  napkin_math: 'Synchronous = 100 batches * (5 ms H2D + 10 ms Compute + 3 ms D2H) = 1800 ms.
-
-    Pipelined (Streams) = T_first_batch + (N-1) * max(T_stages) = (5 + 10 + 3) + 99 * 10 = 18 + 990 =
-    1008 ms.
-
-    Speedup = 1800 / 1008 ≈ 1.78x.'
+  realistic_solution: 'Single post-backward AllReduce: bus traffic = 2*(3/4) * 2 GB = 3 GB on a logical
+    PCIe ring at ~12 GB/s → 250 ms. Step time = 90 ms backward + 250 ms comm = 340 ms (no overlap).
+    Bucketed AllReduce (64 MB buckets): backward completes one bucket every ~3 ms, AllReduce of one
+    64 MB bucket = 2*(3/4) * 64 MB / 12 GB/s ≈ 8 ms. The first ~25 buckets'' AllReduces overlap with
+    the rest of backward; only the last bucket''s 8 ms is fully exposed. Step time ≈ 90 ms + ~30-50
+    ms exposed tail ≈ ~125-140 ms (a 2.4-2.7x speedup over no-overlap). Doubling bucket size beyond
+    256 MB stops helping because each AllReduce launch latency (~50 µs) is amortized at 64-256 MB; past
+    256 MB the bucket *fills* slower than its AllReduce runs, so the exposed tail grows again.'
+  common_mistake: Computing AllReduce time as `payload / bandwidth = 2 GB / 12 GB/s = 167 ms` and forgetting
+    the 2*(N-1)/N ring factor (under-counts bus traffic by ~50% for N=4). Or treating bucket size as
+    monotonically beneficial — past the optimum, the last bucket''s exposed time grows because backward
+    finishes before the bucket fills.
+  napkin_math: 'Gradient = 2 GB FP32. Ring AllReduce traffic = 2*(3/4) * 2 GB = 3 GB. PCIe ring effective
+    bandwidth ≈ 12 GB/s. Single AllReduce = 3 / 12 = 250 ms. Bucketed (64 MB): per-bucket AllReduce
+    = 2*(3/4) * 64 MB / 12 GB/s ≈ 8 ms; backward fills one bucket every ~3 ms; only the last AllReduce''s
+    ~8 ms is exposed. Step ≈ 90 + ~30-50 ms ≈ 125-140 ms.'
 status: published
 provenance: imported
 requires_explanation: false

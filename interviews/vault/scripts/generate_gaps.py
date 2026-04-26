@@ -302,7 +302,7 @@ IMPORTANT:
 # LLM backends
 # ---------------------------------------------------------------------------
 
-def call_gemini(prompt: str, model: str = "gemini-2.5-flash") -> str:
+def call_gemini(prompt: str, model: str = "gemini-3.1-pro-preview") -> str:
     """Call Gemini via the locally-authenticated CLI."""
     result = subprocess.run(
         ["gemini", "--model", model, "-"],
@@ -521,8 +521,8 @@ def main():
     parser.add_argument("--workers", type=int, default=8, help="Parallel workers (default: 8)")
     parser.add_argument("--model", choices=["flash", "opus"], default="flash",
                         help="LLM backend: flash=Gemini 2.5 Flash, opus=Claude Opus 4.6")
-    parser.add_argument("--gemini-model", default="gemini-2.5-flash",
-                        help="Specific Gemini model name (default: gemini-2.5-flash)")
+    parser.add_argument("--gemini-model", default="gemini-3.1-pro-preview",
+                        help="Specific Gemini model name (default: gemini-3.1-pro-preview)")
     parser.add_argument("--target", type=int, default=TARGET_PER_CELL,
                         help="Target questions per cell (default: 3)")
     args = parser.parse_args()

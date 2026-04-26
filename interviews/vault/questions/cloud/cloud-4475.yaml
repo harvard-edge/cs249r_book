@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: cloud-4475
+track: cloud
+level: L5
+zone: optimization
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: All-to-All Communication Optimization for Distributed DLRM
+scenario: A distributed DLRM training system runs on 128 GPUs. Each GPU processes
+  a batch shard and looks up embeddings from tables sharded across all GPUs. The all-to-all
+  communication for embedding lookups takes 40% of training time. Reduce this to under
+  10%.
+question: How would you reduce embedding all-to-all communication on 128 GPUs from
+  40% of DLRM training time to under 10%?
+details:
+  realistic_solution: 'All-to-all optimization strategies: (1) Message size analysis:
+    128 GPUs, batch=4K samples, avg 10 embedding lookups per sample, 50 embedding
+    tables sharded across GPUs. Message per GPU-pair: 4K×10/128 lookups × 256B = 78KB
+    per GPU pair. With 128 pairs: 78KB × 127 = 9.9MB per GPU. At 400 Gbps: 0.2ms.
+    Not bandwidth-limited. (2) Latency reduction: fuse all 50 embedding table lookups
+    into a single all-to-all operation (FBGEMM TBE). Reduces 50 NCCL launches to 1:
+    saves 49 × 100µs = 4.9ms of launch overhead (provided this overhead was a significant
+    part of the 4ms). (3) Overlap communication with computation: while all-to-all
+    for embedding tables is in flight, compute dense MLP for previous batch. (4) Reduce
+    all-to-all message size: use FP16 embeddings (2B) instead of FP32 (4B): 2× communication
+    reduction. Combined: TBE fusion + FP16 + overlap → from 40% to <5% overhead.'
+  common_mistake: 'Increasing network bandwidth as the primary solution. The all-to-all
+    communication is often not bandwidth-limited but latency-limited: 128-GPU all-to-all
+    requires 127 communication operations, and with small message sizes (each GPU
+    sends to each other GPU), the latency overhead per message dominates.'
+  napkin_math: 'Current: 40% of 10ms training step = all-to-all = 4ms. TBE fusion:
+    50 all-to-alls → 1 all-to-all. NCCL launch overhead per all-to-all: 100µs. Saved
+    overhead: 49 × 100µs = 4.9ms — but this exceeds the 4ms total, revealing a contradiction:
+    if overhead alone is 4.9ms, the actual data transfer must be near zero, which
+    is impossible. Correct framing: each of 50 small all-to-alls has ~80µs overhead
+    + data. With TBE fusion: 1 all-to-all with same data = 0.1ms overhead. Net reduction:
+    49 × overhead + data packing improvement. FP16 encoding: reduces data 2×. Overlap:
+    hide behind 10ms step compute.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Contradictory time calculations: if initial all-to-all is 4ms, the launch overhead
+  for 50 launches (50 * 0.1ms = 5ms) would already exceed the total time. Additionally,
+  4ms / 50 is 0.08ms, not 0.18ms.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

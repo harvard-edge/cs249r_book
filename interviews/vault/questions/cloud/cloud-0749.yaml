@@ -2,46 +2,53 @@ schema_version: '1.0'
 id: cloud-0749
 track: cloud
 level: L6+
-zone: evaluation
+zone: design
 topic: collective-communication
 competency_area: networking
 bloom_level: create
 phase: both
 title: The Network Topology Tax
-scenario: 'We''re building a new 2,048-GPU H100 training cluster. The network team proposes two topologies:
-  a traditional fat-tree (Clos) network and NVIDIA''s rail-optimized topology. The fat-tree costs $12M
-  for switches and optics; the rail-optimized design costs $8M. The network team says ''rail-optimized
-  saves 33% and NVIDIA recommends it.'' Should we trust this recommendation, or is the fat-tree worth
-  the premium?'
-question: "Should we trust this recommendation, or is the fat-tree worth the premium?"
+scenario: 'We''re building a new 2,048-GPU H100 training cluster. The network team
+  proposes two topologies: a traditional fat-tree (Clos) network and NVIDIA''s rail-optimized
+  topology. The fat-tree costs $12M for switches and optics; the rail-optimized design
+  costs $8M. The network team says ''rail-optimized saves 33% and NVIDIA recommends
+  it.'' Should we trust this recommendation, or is the fat-tree worth the premium?'
+question: Should we trust this recommendation, or is the fat-tree worth the premium?
 details:
-  realistic_solution: 'The two topologies optimize for different communication patterns. **Fat-tree (Clos):**
-    Provides full bisection bandwidth — any GPU can communicate with any other GPU at line rate simultaneously.
-    This is ideal for workloads with unpredictable or all-to-all communication patterns (e.g., expert
-    parallelism in MoE models, where the router sends tokens to arbitrary GPUs). Cost: requires $O(N)$
-    spine switches, each with full-bandwidth uplinks. **Rail-optimized:** Groups GPUs into "rails" — GPU
-    0 from every node is on rail 0, GPU 1 on rail 1, etc. Each rail is a separate, smaller network. This
-    is optimal for data-parallel training where AllReduce happens independently within each rail (GPU
-    $i$ only communicates with GPU $i$ on other nodes). Cost: fewer switches, simpler cabling, 30-40%
-    cheaper. The trade-off: rail-optimized has **zero cross-rail bandwidth**. If your parallelism strategy
-    ever requires GPU 0 on node A to talk to GPU 3 on node B (e.g., pipeline parallelism, tensor parallelism
-    across nodes, or MoE expert routing), traffic must hairpin through the node''s internal NVSwitch,
-    halving effective bandwidth and adding latency.'
-  common_mistake: '"NVIDIA recommends rail-optimized, so it must be better for all workloads" or "Fat-tree
-    has full bisection bandwidth, so it''s always superior." Both ignore that the optimal topology depends
-    on the traffic pattern, which depends on the parallelism strategy.'
-  napkin_math: '**2,048 GPUs = 256 nodes × 8 GPUs/node.** **Fat-tree:** 256 leaf switches (1 per node)
-    + 128 spine switches. Each leaf: 8 × 400G downlinks (to GPUs) + 8 × 400G uplinks (to spines). Bisection
-    bandwidth: $256 \times 8 \times 400\text{ Gbps} / 2 = $ **409.6 Tbps**. Cost: 384 switches × ~$25K
-    + optics ≈ **$12M**. **Rail-optimized:** 8 independent rail networks, each connecting 256 GPUs (one
-    per node). Each rail: 16 leaf switches + 8 spine switches = 24 switches per rail × 8 rails = 192 switches.
-    Per-rail bisection bandwidth: $256 \times 400\text{ Gbps} / 2 = $ **51.2 Tbps** per rail. Cost: 192
-    switches × ~$25K + optics ≈ **$8M**. **The tax:** With pure data parallelism (DP=2048), rail-optimized
-    is perfect — each GPU only talks to its rail peers. But with 3D parallelism (TP=8, PP=4, DP=64): TP
-    is intra-node (NVLink, no network needed). PP requires node-to-node communication between *different*
-    GPU indices (GPU 7 on node A → GPU 0 on node B) — this is **cross-rail** traffic. On fat-tree: direct
-    path at 400 Gbps. On rail-optimized: must traverse NVSwitch within node A (GPU 7 → GPU 0) then rail
-    0''s network — effective bandwidth drops to ~200 Gbps and adds ~2 μs latency per hop. For pipeline-parallel
+  realistic_solution: 'The two topologies optimize for different communication patterns.
+    **Fat-tree (Clos):** Provides full bisection bandwidth — any GPU can communicate
+    with any other GPU at line rate simultaneously. This is ideal for workloads with
+    unpredictable or all-to-all communication patterns (e.g., expert parallelism in
+    MoE models, where the router sends tokens to arbitrary GPUs). Cost: requires $O(N)$
+    spine switches, each with full-bandwidth uplinks. **Rail-optimized:** Groups GPUs
+    into "rails" — GPU 0 from every node is on rail 0, GPU 1 on rail 1, etc. Each
+    rail is a separate, smaller network. This is optimal for data-parallel training
+    where AllReduce happens independently within each rail (GPU $i$ only communicates
+    with GPU $i$ on other nodes). Cost: fewer switches, simpler cabling, 30-40% cheaper.
+    The trade-off: rail-optimized has **zero cross-rail bandwidth**. If your parallelism
+    strategy ever requires GPU 0 on node A to talk to GPU 3 on node B (e.g., pipeline
+    parallelism, tensor parallelism across nodes, or MoE expert routing), traffic
+    must hairpin through the node''s internal NVSwitch, halving effective bandwidth
+    and adding latency.'
+  common_mistake: '"NVIDIA recommends rail-optimized, so it must be better for all
+    workloads" or "Fat-tree has full bisection bandwidth, so it''s always superior."
+    Both ignore that the optimal topology depends on the traffic pattern, which depends
+    on the parallelism strategy.'
+  napkin_math: '**2,048 GPUs = 256 nodes × 8 GPUs/node.** **Fat-tree:** 256 leaf switches
+    (1 per node) + 128 spine switches. Each leaf: 8 × 400G downlinks (to GPUs) + 8
+    × 400G uplinks (to spines). Bisection bandwidth: $256 \times 8 \times 400\text{
+    Gbps} / 2 = $ **409.6 Tbps**. Cost: 384 switches × ~$25K + optics ≈ **$12M**.
+    **Rail-optimized:** 8 independent rail networks, each connecting 256 GPUs (one
+    per node). Each rail: 16 leaf switches + 8 spine switches = 24 switches per rail
+    × 8 rails = 192 switches. Per-rail bisection bandwidth: $256 \times 400\text{
+    Gbps} / 2 = $ **51.2 Tbps** per rail. Cost: 192 switches × ~$25K + optics ≈ **$8M**.
+    **The tax:** With pure data parallelism (DP=2048), rail-optimized is perfect —
+    each GPU only talks to its rail peers. But with 3D parallelism (TP=8, PP=4, DP=64):
+    TP is intra-node (NVLink, no network needed). PP requires node-to-node communication
+    between *different* GPU indices (GPU 7 on node A → GPU 0 on node B) — this is
+    **cross-rail** traffic. On fat-tree: direct path at 400 Gbps. On rail-optimized:
+    must traverse NVSwitch within node A (GPU 7 → GPU 0) then rail 0''s network —
+    effective bandwidth drops to ~200 Gbps and adds ~2 μs latency per hop. For pipeline-parallel
     bubble overhead of 5%, this cross-rail penalty can push it to 8-12%.'
 status: published
 provenance: imported

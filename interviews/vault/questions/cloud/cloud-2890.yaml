@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-2890
+track: cloud
+level: L4
+zone: specification
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Specifying Gradient Checkpointing Requirements in a Model Training SLA
+scenario: 'You are writing the training infrastructure specification for a new 30B
+  production model to be trained on A100 80GB GPUs. The training SLA requires: (1)
+  memory utilization ≤ 90% of HBM capacity, (2) training throughput ≥ 350 tokens/sec/GPU,
+  (3) training must complete 1T tokens within 60 days on 256 GPUs. Specify the gradient
+  checkpointing configuration that satisfies all three constraints simultaneously,
+  and verify arithmetic consistency.'
+question: What checkpointing and sharding configuration satisfies the 90% HBM, 350
+  tokens/sec/GPU, and 1T-token-in-60-days constraints?
+details:
+  realistic_solution: 'Memory constraint: 30B model fp16 = 60 GB; Adam fp32 = 120
+    GB / dp_degree. With dp=8 (ZeRO-2), optimizer states ≈ 15 GB/GPU. HBM budget for
+    activations = 0.9×80 - 60 - 15 = -3 GB — infeasible without ZeRO-3 or further
+    optimization. Use ZeRO-3 (parameter sharding): param memory = 60/256 ≈ 0.23 GB/GPU;
+    optimizer ≈ 120/256 = 0.47 GB/GPU. Activation budget = 0.9×80 - 0.7 = 71.3 GB.
+    At S=2048, B=8: activation per layer without checkpointing ≈ 1.5 GB (including
+    MLP). 71.3/1.5 = 47 layers storable. With 96 total layers, checkpoint every 2
+    layers → stored = 48 ≈ 47. Overhead ≈ 33%. Throughput: baseline ~520 tok/s × (1
+    - 0.25) = 390 tok/s > 350. Check 60-day: 256 GPUs × 390 tok/s × 60×86400 s = 518T
+    tokens >> 1T. All constraints satisfied.'
+  common_mistake: Specifying checkpointing granularity without verifying that the
+    resulting recompute overhead satisfies the throughput SLA. A common error is to
+    over-checkpoint (every layer) to maximize memory headroom, inadvertently pushing
+    throughput below the SLA floor.
+  napkin_math: 'ZeRO-3 param: 60 GB / 256 = 234 MB. ZeRO-3 optimizer: 120 GB / 256
+    = 469 MB. Activation per layer: S=2048, B=8, H=7168: residual 2×8×2048×7168×2=470
+    MB, MLP 8×8×2048×7168×2=1.88 GB. With checkpoint every 2 layers, stored layers=48,
+    peak activation = 48 × 470 MB = 22.6 GB (checkpoint boundary), plus one active
+    window 2×2.35 GB = 4.7 GB. Total ≈ 27.3 GB < 71.3 GB budget.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- ZeRO-3 optimizer states are typically 12 bytes/param, which would be 360 GB. The
+  math assumes 4 bytes/param (120 GB).
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

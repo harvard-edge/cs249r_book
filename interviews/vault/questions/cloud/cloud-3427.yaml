@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3427
+track: cloud
+level: L3
+zone: analyze
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Choosing Micro-Batch Count for an 8-Stage A100 Pipeline
+scenario: A 100B-parameter transformer is split into 8 pipeline stages on 8 A100 80 GB GPUs (312 TFLOPS
+  FP16, 2.0 TB/s HBM, NVLink 600 GB/s bidirectional / 300 GB/s unidirectional). Per-stage forward+backward
+  for one micro-batch is ~200 ms. Stage-to-stage activation transfer per micro-batch is 240 MB at NVLink
+  speeds. The team's compute budget is 1 hour per global step at most. Choose the micro-batch count m
+  that brings bubble fraction below 10% while keeping the activation memory footprint of 1F1B inside
+  the 80 GB HBM budget (weights + gradients + optimizer shard already consume 60 GB per stage).
+question: For an 8-stage A100 1F1B pipeline with 200 ms stages and 60 GB of non-activation state per stage, what micro-batch count m brings bubble fraction below 10% without OOMing on activations?
+details:
+  realistic_solution: 'Under 1F1B, peak activation memory is O(k) — at most k = 8 in-flight micro-batches
+    of activations per stage. With 80 GB HBM and 60 GB consumed by weights+gradients+optimizer, the activation
+    budget per stage is 20 GB, so per-micro-batch activation must stay under 20/8 = 2.5 GB. Sizing the
+    micro-batch to hit ~2.5 GB of activations sets the per-stage compute time. To drive bubble below
+    10%, solve (k-1)/(m + k-1) ≤ 0.1 → m ≥ 9*(k-1) = 63. Choose m = 64 (round to power of 2). Bubble
+    fraction = 7/71 ≈ 9.86%. Activation transfer time per micro-batch on NVLink: 240 MB / 300 GB/s ≈
+    0.8 ms — negligible vs the 200 ms per-stage compute. Total step time = (m + k - 1) * 200 ms = 71
+    * 200 ms = 14.2 s, well inside the 1 h budget.'
+  common_mistake: Choosing m to maximize throughput without accounting for the O(k) activation memory
+    in 1F1B (or worse, switching to GPipe whose O(m) activation memory OOMs at m=64). Another error
+    is treating activation transfer as the bottleneck — at NVLink speeds 240 MB transfers in <1 ms,
+    far below the 200 ms compute per stage.
+  napkin_math: 'Bubble target: (k-1)/(m + k-1) ≤ 0.1 → m ≥ 63 → choose m = 64. Activation budget per
+    stage = 80 - 60 = 20 GB; under 1F1B at most k = 8 in-flight activation tensors → per-micro-batch
+    activation ≤ 2.5 GB. Step time = 71 * 200 ms = 14.2 s; bubble fraction = 9.86%; activation transfer
+    cost = 0.8 ms / micro-batch on NVLink (negligible).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

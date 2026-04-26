@@ -7,22 +7,33 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Cloud New 0014
-scenario: Architect a privacy-preserving federated training system for a 1B language model across thousands
-  of Cortex-M4 (168MHz, 256KB RAM) edge devices. Design the aggregation and training architecture.
-question: "How would you design federated training for a 1B language model across Cortex-M4 devices with 256KB RAM?"
+title: Privacy-Preserving Cross-Tenant Data-Parallel Aggregation
+scenario: Architect a privacy-preserving cross-tenant data-parallel training system for a 70B language
+  model across three cloud regions, each with a pod of 64 H100 GPUs (NVLink intra-node 900 GB/s bidirectional,
+  InfiniBand NDR 400 Gbps inter-node, 200 Gbps inter-region WAN). Tenants will not share raw gradients
+  in plaintext. Design the per-step aggregation architecture so that (a) intra-pod ring AllReduce stays
+  on the high-bandwidth fabric, (b) cross-region aggregation runs over secure multi-party-computation
+  averaging without stalling the next step's forward pass, and (c) the cross-region step's communication
+  cost is bounded so that it can be hidden behind the per-step backward pass.
+question: "How would you architect privacy-preserving 3-region data-parallel aggregation for a 70B model on 192 H100s with secure cross-region averaging?"
 details:
-  realistic_solution: Architect a LoRA (Low-Rank Adaptation) based federated learning topology. The 1B
-    base model is frozen and resides on a central cloud. The edge devices only receive and train ultra-small
-    LoRA adapters (rank 4). Since 256KB RAM is extremely constrained, implement heavily quantized 8-bit
-    gradients and gradient accumulation. Devices stream micro-updates asynchronously to a cloud aggregator,
-    which uses secure multi-party computation to average the adapters before applying them to the global
-    model.
-  common_mistake: Attempting full parameter fine-tuning or sending full gradients over the edge network,
-    instantly OOMing the 256KB RAM Cortex-M4 devices.
-  napkin_math: 1B model = 2GB FP16 (impossible on 256KB). Rank 4 LoRA adapter for a single layer = 32KB.
-    Cortex-M4 at 168MHz takes seconds for a single forward/backward pass of just the adapter layer. Async
-    aggregation is mandatory to mask this.
+  realistic_solution: Use hierarchical AllReduce with a secure-aggregation outer step. Inside each pod,
+    run a standard NCCL ring AllReduce on the FP16 gradient over NVLink/IB; this produces one 140 GB
+    FP16 tensor per region. Compress the per-region tensor with PowerSGD (rank-8) to roughly 14 GB before
+    cross-region transmission, then run a Bonawitz-style secret-shared additive aggregation across the
+    three regional aggregators over the 200 Gbps WAN. Pipeline the cross-region step by issuing the secure-aggregation
+    AllReduce immediately when the local pod finishes reduce-scatter, so the cross-region 14 GB / 25 GB/s ≈
+    0.56 s overlaps with the next step's ~0.7 s backward pass. Use bounded staleness of 1 step for the
+    cross-region average so any straggler region does not block intra-pod progress.
+  common_mistake: Treating this as edge federated learning and reaching for LoRA + quantized adapters.
+    The bottleneck here is cross-region WAN bandwidth and the unidirectional ring AllReduce factor on
+    a bandwidth-tapered fabric, not device-RAM constraints. Another common error is running secure aggregation
+    on the *full* 140 GB gradient over the 200 Gbps WAN — that takes 5.6 s per step and starves compute.
+  napkin_math: '70B FP16 gradient = 140 GB per region. Intra-pod ring AllReduce over 64 H100s on IB
+    NDR (effective ~40 GB/s unidirectional) transfers 2*(63/64)*140 GB ≈ 275 GB → ~6.9 s naive, ~0.9
+    s with NVLink-aware hierarchical reduce. Cross-region step — PowerSGD rank-8 compresses 140 GB to
+    ~14 GB; secure aggregate over 200 Gbps (25 GB/s) WAN moves 2*(2/3)*14 GB = 18.6 GB → ~0.75 s. Backward
+    pass for 70B on 64 H100s ≈ 0.7-0.8 s, so the cross-region step is hideable with one-step staleness.'
 status: published
 provenance: imported
 requires_explanation: true

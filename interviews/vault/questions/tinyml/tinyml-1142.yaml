@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: tinyml-1142
+track: tinyml
+level: L5
+zone: evaluation
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Ethos-U55 vs CPU Tensor Placement Tradeoffs
+scenario: 'You are deploying a MobileNetV2-based wake-word detector on a Corstone-300
+  subsystem with an ARM Cortex-M7 (480 MHz) and an Ethos-U55 NPU. The system has exactly
+  512 KB of shared SRAM. Your model contains an early non-linear operator (e.g., a
+  custom Swish variant) that the U55 compiler falls back to running on the M7 CPU.
+  You have two options for the intermediate activation tensors surrounding this fallback:
+  (A) pin them to a dedicated ''CPU-accessible'' region of the 512 KB SRAM, forcing
+  the U55 to copy data in/out, or (B) use a unified flat tensor arena managed by the
+  U55 driver, which might cause CPU cache trashing when the M7 takes over. Which memory
+  planning approach do you choose and how does it impact your SRAM peak usage?'
+question: Which memory planning approach do you choose and how does it impact your
+  SRAM peak usage?
+details:
+  realistic_solution: Option B (unified flat tensor arena) is generally superior for
+    peak SRAM reduction, despite the coherency overhead. By allowing the compiler
+    to overlay the U55's input/output tensors with the M7's working memory in a single
+    arena, you minimize peak SRAM usage. To mitigate the cache trashing, you must
+    explicitly issue D-cache clean/invalidate commands only at the boundary of the
+    CPU fallback operator, ensuring the U55 reads the M7's output correctly and vice
+    versa, without sacrificing the space benefits of offline memory planning.
+  common_mistake: Candidates often assume that because both the M7 and U55 share the
+    512 KB SRAM, any data placement is equally fast and memory-efficient. They forget
+    that the M7 uses a D-cache while the U55 accesses SRAM directly via AXI, leading
+    to cache coherency overheads (cache clean/invalidate operations) that stall the
+    pipeline if not carefully managed in a unified arena.
+  napkin_math: Assume the activation tensor size before the M7 fallback is 64 KB (e.g.,
+    64x64x16 INT8) and the output is 32 KB. If using Option A (split arenas), you
+    might need a dedicated 64+32=96 KB region just for handoffs, reducing available
+    U55 fast-memory from 512 KB to 416 KB. In Option B (unified), the U55 compiler
+    can reuse that 96 KB for earlier/later layers. If the U55 processes 128 MACs/cycle
+    at 480 MHz, an extra DMA copy of 96 KB would waste thousands of cycles, but the
+    cache maintenance (clean 32 KB, invalidate 64 KB) on the M7 takes only a few hundred
+    cycles, making the unified arena better for both memory (saves 96 KB peak) and
+    latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

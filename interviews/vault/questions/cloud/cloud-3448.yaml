@@ -1,0 +1,77 @@
+schema_version: '1.0'
+id: cloud-3448
+track: cloud
+level: L4
+zone: optimization
+topic: scheduling-resource-management
+competency_area: parallelism
+bloom_level: analyze
+phase: inference
+title: H100 Multi-Tenant p99 Spike — MIG vs MPS Choice
+scenario: 'A shared H100 (80 GB HBM3, 989 TFLOPS FP16, 3.35 TB/s HBM) hosts two co-located
+  workloads: a latency-critical LLM inference service (steady 60 GB/s HBM read traffic
+  for KV cache, 280 GB/s during prefill bursts), and a noisy-neighbor batch job that
+  issues bursty 200 GB/s streamed I/O of training shards. Profiler traces show: inference
+  p50 = 220 ms, inference p99 = 460 ms when the batch job is active, dropping to p99
+  = 250 ms when the batch job is paused. The 240 ms p99 tail decomposes into 150 ms
+  attributable to HBM bandwidth contention (inference attention reads stalled by batch
+  streamer) and 50 ms from kernel-launch serialization under the default CUDA context.'
+question: Given a 240 ms p99 tail with 150 ms HBM-contention + 50 ms launch-serialization,
+  which of MIG slicing or MPS yields the cleaner fix, and what is the resulting p99?
+details:
+  realistic_solution: 'The most realistic solution involves a two-pronged approach:
+    diagnosis and targeted intervention. For diagnosis, leverage `nvidia-smi` with
+    `--query-gpu=utilization.gpu,utilization.memory,pstate,memory.used,memory.total
+    --format=csv` to monitor overall GPU health. Utilize CUDA profiling tools like
+    Nsight Systems and Nsight Compute to gather fine-grained per-kernel performance
+    metrics, identifying specific kernels (e.g., attention, MLP) that are compute-bound
+    or memory-bound. System-level monitoring (e.g., Prometheus/Grafana) should track
+    per-tenant GPU utilization, memory bandwidth, and inference request queues. Once
+    bottlenecks are identified, implement NVIDIA MIG (Multi-Instance GPU) to partition
+    the H100 into dedicated 1/7 or 1/3 slices, ensuring guaranteed compute and memory
+    resources (e.g., a 1/7 slice provides ~11.4GB HBM3 and ~478 GB/s bandwidth) for
+    latency-sensitive LLMs. For interdependent inference requests from a single tenant,
+    employ gang scheduling to ensure all necessary processes run concurrently, minimizing
+    context switching overhead and ensuring fairness. For less critical workloads,
+    utilize MPS (Multi-Process Service) for shared GPU access with better resource
+    management than traditional CUDA multi-process execution.'
+  common_mistake: A common mistake is to immediately scale out the cluster without
+    properly identifying the root cause of contention. This can lead to increased
+    operational costs without solving the core 'noisy neighbor' problem, or to implementing
+    naive FIFO scheduling policies that don't account for preemption or fair resource
+    sharing in multi-tenant environments, worsening tail latencies for critical services.
+  napkin_math: Assume the current p99 inference latency is 500ms. The goal is to reduce
+    it by 20%, targeting 400ms. Through profiling, you discover that 150ms of the
+    p99 latency is due to intermittent memory bandwidth contention caused by another
+    tenant's data loading (bursts of 200GB/s I/O, hitting the H100's 3.35 TB/s limit
+    when combined with the LLM workload). Another 50ms is attributable to overheads
+    from non-gang-scheduled, parallel inference sub-tasks within the LLM, leading
+    to inefficient resource utilization and context switching. By configuring MIG
+    to allocate a dedicated 1/7 H100 instance (providing ~478 GB/s guaranteed memory
+    bandwidth) for the critical LLM tenant, the 150ms memory contention is eliminated.
+    Implementing gang scheduling for the LLM's parallel components reduces context
+    switching, saving the 50ms overhead. The total potential reduction is 150ms +
+    50ms = 200ms. The new p99 latency would be 500ms - 200ms = 300ms. This represents
+    a (200/500)*100% = 40% reduction, significantly exceeding the 20% target. The
+    quantifiable fix is a 40% improvement in p99 latency by isolating critical workloads'
+    memory bandwidth and optimizing parallel task execution.
+status: archived
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+deletion_reason: Archived after G.H cleanup rewrite still failed Phase D's strict
+  judge bar (G.L re-judge). Pre-Phase-D legacy item that doesn't meet today's parallelism
+  prompt standards.

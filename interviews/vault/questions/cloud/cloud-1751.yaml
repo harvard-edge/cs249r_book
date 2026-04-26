@@ -7,29 +7,29 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: apply
 phase: training
-title: Calculate 3D Parallelism Process Groups
-scenario: You are deploying a 175B parameter LLM on a 512 GPU cluster (A100, 8 GPUs per node) using 3D
-  parallelism. You configure the environment with a Tensor Parallelism (TP) size of 8, Pipeline Parallelism
-  (PP) size of 8, and Data Parallelism (DP) size of 8. Calculate the total number of specialized NCCL
-  process groups created for TP, PP, and DP communication, and determine the number of GPUs in each group.
-question: "How many TP, PP, and DP NCCL process groups are created for TP=8, PP=8, DP=8 on 512 GPUs, and how large is each group?"
+title: Counting Data-Parallel Process Groups in a 3D Layout
+scenario: A 175B-parameter LLM trains on 512 A100 GPUs (64 nodes, 8 GPUs per node) under 3D parallelism
+  with TP=8, PP=8, DP=8. The team needs to know exactly how many *DP* NCCL process groups must be initialized
+  and which 8 ranks belong to each, so that the per-step gradient AllReduce runs only over the correct
+  ranks and does not default to the world group. Walk through the calculation and identify which IB
+  links each DP group's ring traffic actually traverses.
+question: "Under TP=8, PP=8, DP=8 on 512 GPUs, how many DP process groups must be initialized, and which 8 ranks belong to each — and which links does the DP AllReduce traverse?"
 details:
-  realistic_solution: In a 3D parallel setup, the GPUs form a DP x PP x TP grid. The number of process
-    groups for any one dimension is the product of the sizes of the other two dimensions. Thus, there
-    are 64 TP groups, 64 PP groups, and 64 DP groups, each containing 8 GPUs, resulting in 192 total specialized
-    process groups.
-  common_mistake: Assuming there are only 3 process groups in total (one for TP, one for PP, one for DP),
-    rather than recognizing the Cartesian grid structure where multiple orthogonal groups exist across
-    the cluster.
-  napkin_math: 'Total GPUs = DP(8) × PP(8) × TP(8) = 512
-
-    TP Groups = DP × PP = 8 × 8 = 64 (Size 8)
-
-    PP Groups = DP × TP = 8 × 8 = 64 (Size 8)
-
-    DP Groups = PP × TP = 8 × 8 = 64 (Size 8)
-
-    Total groups = 64 + 64 + 64 = 192'
+  realistic_solution: 'There are TP * PP = 64 DP process groups, one per (TP coord, PP coord) pair. Each
+    DP group contains 8 ranks — exactly the 8 ranks that share the same (TP coord, PP coord) and differ
+    only in their DP coord. Concretely, a DP group is the set of ranks at positions (dp_i, pp_j, tp_k)
+    for fixed (j, k) and dp_i ∈ {0..7}. Because DP varies across nodes (TP fits inside one node''s NVLink
+    island, PP varies across nodes, DP also crosses node boundaries), the DP AllReduce traverses 7 IB
+    HDR (200 Gbps) inter-node hops per ring, not the NVLink intra-node fabric. The gradient AllReduce
+    is therefore bottlenecked by the IB ring''s ~25 GB/s unidirectional link, not by NVLink.'
+  common_mistake: 'Computing the *total* number of process groups (192 = 64+64+64) when the question
+    asked for DP groups only. Or — worse — initializing only one global DP group and relying on `dist.group.WORLD`,
+    which silently routes the 8-way DP collective over all 512 ranks and stalls every step.'
+  napkin_math: 'Total GPUs = DP(8) * PP(8) * TP(8) = 512. Number of DP groups = TP * PP = 8 * 8 = 64.
+    Each DP group: 8 ranks, one per DP coordinate, all sharing the same (TP coord, PP coord). DP gradient
+    shard size = 175B / (TP*PP) = 2.73B params * 2 bytes (BF16) = 5.47 GB. Ring AllReduce traffic on
+    each 8-rank DP group = 2*(7/8) * 5.47 GB = 9.57 GB per rank. At IB HDR ~25 GB/s unidirectional:
+    AllReduce ≈ 0.38 s.'
 status: published
 provenance: imported
 requires_explanation: false

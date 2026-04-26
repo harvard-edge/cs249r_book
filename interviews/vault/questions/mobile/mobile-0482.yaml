@@ -8,59 +8,63 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The On-Device Assistant Stutter
-scenario: You are the lead ML engineer for a new AI assistant feature on a flagship smartphone (using
-  an Apple A17 Pro). The feature transcribes a user's voice and generates a response in real-time. Users
-  complain that the assistant feels slow to start talking (high TTFT) and the app's animations stutter
-  during generation (violating the 16ms frame budget). Your profiler shows that to generate one output
-  token, the 1B parameter INT8 model must read ~1GB of weights from main memory. The current implementation
-  waits for the entire user utterance to be transcribed before starting the generation (a monolithic 'pre-fill'
-  step). How do you solve both the high TTFT and the UI jank?
-question: "How do you solve both the high TTFT and the UI jank?"
+scenario: You are the lead ML engineer for a new AI assistant feature on a flagship
+  smartphone (using an Apple A17 Pro). The feature transcribes a user's voice and
+  generates a response in real-time. Users complain that the assistant feels slow
+  to start talking (high TTFT) and the app's animations stutter during generation
+  (violating the 16ms frame budget). Your profiler shows that to generate one output
+  token, the 1B parameter INT8 model must read ~1GB of weights from main memory. The
+  current implementation waits for the entire user utterance to be transcribed before
+  starting the generation (a monolithic 'pre-fill' step). How do you solve both the
+  high TTFT and the UI jank?
+question: How do you solve both the high TTFT and the UI jank?
 details:
-  realistic_solution: 'The correct approach is to re-architect the inference pipeline to be incremental
-    and priority-aware.
+  realistic_solution: 'The correct approach is to re-architect the inference pipeline
+    to be incremental and priority-aware.
 
-    1. **Solve TTFT:** Implement ''chunked pre-fill''. Instead of waiting for the full transcription,
-    begin the pre-fill phase on the first few transcribed words. This overlaps prompt ingestion with generation,
-    drastically cutting down the perceived time-to-first-token.
+    1. **Solve TTFT:** Implement ''chunked pre-fill''. Instead of waiting for the
+    full transcription, begin the pre-fill phase on the first few transcribed words.
+    This overlaps prompt ingestion with generation, drastically cutting down the perceived
+    time-to-first-token.
 
-    2. **Solve Jank/TPOT:** Use a priority queue for NPU tasks. The short, latency-critical ''decode''
-    steps (generating one output token) must be given higher priority than the longer, less critical ''pre-fill''
-    steps (ingesting the next chunk of the user''s prompt). This ensures that once the assistant starts
-    talking, its output stream is smooth and isn''t interrupted by a heavy background task, thus preventing
+    2. **Solve Jank/TPOT:** Use a priority queue for NPU tasks. The short, latency-critical
+    ''decode'' steps (generating one output token) must be given higher priority than
+    the longer, less critical ''pre-fill'' steps (ingesting the next chunk of the
+    user''s prompt). This ensures that once the assistant starts talking, its output
+    stream is smooth and isn''t interrupted by a heavy background task, thus preventing
     contention for the memory bus that starves the UI rendering thread.'
-  common_mistake: 'Engineers often focus on only one part of the problem. They might suggest simply running
-    inference on a background thread, but this doesn''t fix the high TTFT caused by the long initial pre-fill.
-    Others might suggest aggressive model compression (e.g., INT4), which hurts model quality and is a
-    brute-force solution that doesn''t fix the underlying scheduling problem: contention between ingesting
-    the prompt and generating the response.'
-  napkin_math: The SoC shares 50 GB/s memory bandwidth between CPU, GPU, and NPU. The ASR (transcription)
-    model processes audio chunks, streaming activations to DRAM. Simultaneously, the LLM starts its prefill
-    phase, aggressively loading its 3GB of weights. 3GB / 50GB/s = 60ms minimum just for weights. The
-    ASR and LLM are contending for the exact same 50 GB/s memory bus, causing huge queueing delays and
-    latency.
+  common_mistake: 'Engineers often focus on only one part of the problem. They might
+    suggest simply running inference on a background thread, but this doesn''t fix
+    the high TTFT caused by the long initial pre-fill. Others might suggest aggressive
+    model compression (e.g., INT4), which hurts model quality and is a brute-force
+    solution that doesn''t fix the underlying scheduling problem: contention between
+    ingesting the prompt and generating the response.'
+  napkin_math: The SoC shares 50 GB/s memory bandwidth between CPU, GPU, and NPU.
+    The ASR (transcription) model processes audio chunks, streaming activations to
+    DRAM. Simultaneously, the LLM starts its prefill phase, aggressively loading its
+    3GB of weights. 3GB / 50GB/s = 60ms minimum just for weights. The ASR and LLM
+    are contending for the exact same 50 GB/s memory bus, causing huge queueing delays
+    and latency.
   options:
-  - Move the audio transcription to the CPU's efficiency cores and dedicate the NPU entirely to the LLM
-    generation.
+  - Move the audio transcription to the CPU's efficiency cores and dedicate the NPU
+    entirely to the LLM generation.
   - Re-quantize the model to INT4 and apply pruning to reduce the weight size by 50%.
-  - Implement chunked prompt ingestion and prioritize decode steps over pre-fill steps in the NPU command
-    queue.
-  - Increase the static batch size to process more user input at once, improving NPU utilization.
+  - Implement chunked prompt ingestion and prioritize decode steps over pre-fill steps
+    in the NPU command queue.
+  - Increase the static batch size to process more user input at once, improving NPU
+    utilization.
   correct_index: 2
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 4
-chains:
-- id: mobile-chain-049
-  position: 1
 validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The memory bandwidth for the A17 Pro is stated as 50 GB/s in the Napkin Math, but generally noted as
-  51.2 GB/s in other questions, which is a minor inconsistency.
+- The memory bandwidth for the A17 Pro is stated as 50 GB/s in the Napkin Math, but
+  generally noted as 51.2 GB/s in other questions, which is a minor inconsistency.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -1,0 +1,63 @@
+schema_version: '1.0'
+id: edge-2357
+track: edge
+level: L5
+zone: evaluation
+topic: kv-cache-management
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: PagedAttention Block Size Fragmentation
+scenario: An edge deployment of Llama-2-7B on a Jetson AGX Orin (iGPU MMU has ~512
+  TLB entries, no large-page support for the unified-memory carveout) uses PagedAttention.
+  With 32 concurrent sessions averaging 1024 tokens each, the architect compares 16-token
+  vs 256-token blocks. Naive analysis from the reference figure favours small blocks
+  because internal fragmentation drops from about 12% to under 1% (a 256-token block
+  holding only 17 live tokens wastes 239 slots).
+question: Starting from the fragmentation comparison shown, explain why the fragmentation
+  argument inverts on this iGPU once you account for block-table entries dereferenced
+  per attention kernel launch. Quantify the TLB pressure for both choices and recommend
+  a block size with justification.
+visual:
+  kind: svg
+  path: edge-2357.svg
+  alt: Bar chart showing high internal fragmentation for 256-token blocks compared
+    to 16-token blocks.
+  caption: KV Cache Internal Fragmentation Ratio.
+details:
+  realistic_solution: '16-token blocks generate 16x more block-table entries per sequence.
+    For a 32-session, 1024-token workload: 16-block needs 32 * 64 = 2048 block-table
+    entries that the attention kernel must dereference per launch; 256-block needs
+    only 32 * 4 = 128 entries. The Orin iGPU MMU has a smaller TLB than discrete GPUs
+    (~512 entries vs 8K+ on H100), so 16-block KV thrashes the TLB and adds ~5-15%
+    kernel-launch overhead. Memory access granularity also matters: HBM-style burst-aligned
+    access wants 256-byte minimum, and 16-token blocks (each ~8 KB on Llama-2-7B)
+    still align well, but the page-walk cost per attention head multiplies. Choose
+    64-128 tokens as a tinyML-edge sweet spot.'
+  common_mistake: Focusing only on internal fragmentation and missing that on iGPUs
+    the TLB capacity and page-walk overhead bound the practical lower limit on block
+    size.
+  napkin_math: '16-block: 32 sessions * 64 entries = 2048 page table entries / launch
+    (TLB-thrash). 256-block: 32 * 4 = 128 entries (TLB-friendly). Sweet spot = 64-128
+    tokens.'
+status: published
+provenance: llm-draft
+expected_time_minutes: 9
+requires_explanation: true
+validated: true
+math_verified: true
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-recall-L5
+created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

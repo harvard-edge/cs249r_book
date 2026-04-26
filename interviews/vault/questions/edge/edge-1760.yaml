@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: edge-1760
+track: edge
+level: L5
+zone: realization
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Optimizing ViT Attention Dataflow on Jetson Orin DLA
+scenario: You are deploying a Vision Transformer (ViT) model on an NVIDIA Jetson Orin
+  (32 GB LPDDR5, 275 TOPS INT8, 60W TDP). The model's latency is severely bottlenecked
+  during the self-attention phase when running on the Deep Learning Accelerator (DLA),
+  which uses a fixed systolic array architecture. You need to evaluate weight-stationary
+  versus output-stationary dataflows for the matrix multiplications (QxK^T and Attention_WeightsxV)
+  and design a tiling strategy that minimizes off-chip memory access to the LPDDR5
+  while staying within the 60W power envelope.
+question: Should QxK^T use weight-stationary or output-stationary dataflow, and how
+  would you tile it to minimize LPDDR5 access on Orin?
+details:
+  realistic_solution: For the QxK^T operation, an output-stationary dataflow is optimal
+    to accumulate the partial sums of the attention scores locally within the systolic
+    array's accumulators, minimizing expensive write-backs to memory. We must tile
+    the sequence length dimension so the active blocks of Q, K, and the partial output
+    fit entirely within the DLA's local SRAM buffer. Utilizing INT8 precision allows
+    us to leverage the Orin's 275 TOPS and significantly reduces the SRAM footprint.
+  common_mistake: Candidates often blindly apply weight-stationary dataflows, assuming
+    one of the operands can be pinned to the systolic array. However, in self-attention
+    (QxK^T), both operands are dynamically generated activations, meaning a purely
+    weight-stationary approach leads to massive systolic array thrashing and underutilization.
+  napkin_math: For sequence length N=1024 and dimension D=768, QxK^T requires N^2
+    * D = 805M MACs (1.6 GOPS). At INT8, Q and K consume 2 * 1024 * 768 bytes = 1.5
+    MB, fitting within SRAM. The N^2 output is 1 MB. At 275 TOPS INT8 compute capability,
+    compute time is 1.6 / 275,000 = ~5.8 microseconds. LPDDR5 provides ~204 GB/s bandwidth,
+    so fetching the 1.5MB takes ~7.3 microseconds. Output-stationary dataflow prevents
+    writing the 1MB partial sums back to LPDDR5, saving ~5 microseconds of memory
+    latency per head and heavily reducing memory transfer power to stay well below
+    the 60W TDP limit.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The 'Napkin Math' calculates QxK^T as N^2 * D = 805M MACs (1.6 GOPS), where MACs
+  are usually 2 OPs (multiply and accumulate), suggesting 1.6 GOPS should be 1.6 GMACs
+  if 1 MAC = 2 OPs, or the 1.6 GOPS already accounts for the 2 OPs/MAC.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Gemini false positive: used wrong Jetson Orin specs'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-1524
+track: tinyml
+level: L4
+zone: optimization
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: PSRAM Spilling Strategy for ESP32-S3
+scenario: Your model on ESP32-S3 (240 MHz, 512 KB SRAM, 8 MB PSRAM) needs a 1.2 MB
+  tensor arena — far exceeding SRAM. The ESP32-S3's PSRAM is accessible via SPI at
+  80 MHz (effective bandwidth ~40 MB/s vs SRAM's ~960 MB/s). If you place the entire
+  arena in PSRAM, how much slower is inference, and what hybrid SRAM/PSRAM placement
+  minimizes the slowdown?
+question: If you place the entire arena in PSRAM, how much slower is inference, and
+  what hybrid SRAM/PSRAM placement minimizes the slowdown?
+details:
+  realistic_solution: 'PSRAM bandwidth: 40 MB/s vs SRAM 960 MB/s = 24× slower. But
+    not all tensors are accessed equally. Profile the model: (1) Hot tensors (read/written
+    multiple times per layer, used in tight inner loops): place in SRAM. These include
+    the current layer''s input and output activation tensors (~100-200 KB for the
+    peak layer). (2) Cold tensors (skip connections, long-lived tensors read once
+    late in the network): place in PSRAM. These include skip connection tensors (read
+    once by a later decoder layer). (3) Scratch buffers (im2col, temporary computation):
+    always in SRAM (tight inner loop access). Strategy: allocate 450 KB SRAM for hot
+    region (current input/output activations + scratch), 750 KB PSRAM for cold region
+    (skip connections, early-layer outputs waiting for later consumers). As execution
+    progresses, DMA the next layer''s input from PSRAM to SRAM before processing.
+    Double-buffer: while the CPU processes layer N''s hot tensors in SRAM, DMA prefetches
+    layer N+1''s input from PSRAM.'
+  common_mistake: Placing everything in PSRAM and accepting the 24× bandwidth penalty.
+    Or placing everything in SRAM and failing because 1.2 MB > 512 KB. The optimal
+    strategy is selective placement based on access patterns.
+  napkin_math: 'All PSRAM: inference dominated by memory access. If model does 100M
+    MACs at 240 MHz = 417ms compute. Memory reads: 50 MB total at 40 MB/s = 1,250ms.
+    Total: 1,667ms. All SRAM (if it fit): 50 MB at 960 MB/s = 52ms + 417ms = 469ms.
+    Hybrid (80% SRAM hits): 40 MB at 960 MB/s = 42ms + 10 MB at 40 MB/s = 250ms +
+    417ms = 709ms. Hybrid is 1.5× slower than all-SRAM, vs 3.6× for all-PSRAM. DMA
+    double-buffering hides ~60% of PSRAM latency: effective time ≈ 550ms (1.17× all-SRAM).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

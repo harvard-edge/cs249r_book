@@ -13,18 +13,21 @@ scenario: You are running data-parallel training of a 7B model across 8 H100 GPU
   take?
 question: "How long does the AllReduce synchronization take?"
 details:
-  realistic_solution: 'About 54 ms. Gradient size = 7B * 4 bytes = 28 GB. Ring AllReduce sends 2*(N-1)/N
-    * data volume = 2*(7/8)*28 = 49 GB over the ring. At 900 GB/s NVLink: 49/900 ~ 54 ms.'
-  common_mistake: Using FP16 gradient size instead of FP32, or forgetting the 2*(N-1)/N ring AllReduce
-    overhead factor. Some candidates also confuse bidirectional bandwidth with unidirectional.
-  napkin_math: Gradients = 7B * 4 bytes (FP32) = 28 GB. Ring AllReduce factor = 2*(8-1)/8 = 1.75. Total
-    traffic = 1.75 * 28 = 49 GB. Time = 49 GB / 900 GB/s ≈ 0.054 s ≈ 54 ms.
+  realistic_solution: 'About 109 ms. Gradient size = 7B * 4 bytes (FP32) = 28 GB. Ring AllReduce sends
+    2*(N-1)/N * data = 2*(7/8)*28 = 49 GB along the ring. The ring is bottlenecked by the *unidirectional*
+    NVLink lane (450 GB/s for NVLink 4.0, since the 900 GB/s figure is bidirectional aggregate). Time
+    = 49 / 450 ≈ 109 ms.'
+  common_mistake: Dividing by the 900 GB/s bidirectional aggregate instead of the 450 GB/s unidirectional
+    bandwidth — ring AllReduce is bottlenecked by the slowest unidirectional lane. Other common errors
+    are using FP16 gradient size instead of FP32 or forgetting the 2*(N-1)/N ring factor.
+  napkin_math: Gradients = 7B * 4 bytes (FP32) = 28 GB. Ring factor = 2*(8-1)/8 = 1.75. Bus traffic =
+    1.75 * 28 = 49 GB. Unidirectional NVLink 4.0 = 450 GB/s. Time = 49 / 450 ≈ 0.109 s ≈ 109 ms.
   options:
-  - A) ~5 ms
+  - A) ~11 ms
   - B) ~54 ms
-  - C) ~540 ms
-  - D) ~5,400 ms
-  correct_index: 1
+  - C) ~109 ms
+  - D) ~1,090 ms
+  correct_index: 2
 status: published
 provenance: imported
 requires_explanation: false

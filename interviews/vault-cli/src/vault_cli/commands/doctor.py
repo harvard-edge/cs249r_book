@@ -51,44 +51,84 @@ def _check_schema_version(vault_dir: Path) -> CheckResult:
     versions = {lq.question.schema_version for lq in loaded}
     if not versions:
         return CheckResult("schema-version", "skip", "no questions loaded")
-    if versions == {1}:
+    # schema_version is a string like "1.0"; the v1.x family is supported.
+    if all(isinstance(v, str) and v.startswith("1.") for v in versions):
         return CheckResult(
-            "schema-version", "pass", f"v1 ({len(loaded)} questions, {len(errors)} load errors)",
+            "schema-version", "pass",
+            f"v{sorted(versions)[0]} ({len(loaded)} questions, "
+            f"{len(errors)} load errors)",
         )
     return CheckResult(
         "schema-version", "fail",
-        f"mixed schema versions detected: {sorted(versions)}",
+        f"unsupported schema versions detected: {sorted(versions)}",
     )
 
 
-def _check_registry_integrity(vault_dir: Path) -> CheckResult:
-    reg = vault_dir / "id-registry.yaml"
-    if not reg.exists():
-        return CheckResult("registry-integrity", "skip", f"{reg} not found")
-    # The registry is line-append-only and can grow past the per-question YAML
-    # size cap. Parse IDs via regex over lines rather than loading as structured
-    # YAML.
+def _parse_registry_ids(reg: Path) -> set[str]:
+    """Parse all IDs from the append-only id-registry.yaml line by line."""
     reg_ids: set[str] = set()
     for line in reg.read_text(encoding="utf-8").splitlines():
         m = re.search(r"\bid:\s*([A-Za-z0-9._-]+)", line)
         if m:
             reg_ids.add(m.group(1))
+    return reg_ids
+
+
+def _check_disk_coverage(vault_dir: Path) -> CheckResult:
+    """Hard check: every disk YAML's ID MUST be in the registry.
+
+    The registry is the canonical assigned-IDs ledger. If a YAML file
+    exists with an ID not in the registry, the registry is out of date —
+    likely a generation run that did not append on write. Run
+    ``tools/repair_registry.py`` to reconcile.
+    """
+    reg = vault_dir / "id-registry.yaml"
+    if not reg.exists():
+        return CheckResult("disk-coverage", "skip", f"{reg} not found")
+    reg_ids = _parse_registry_ids(reg)
     if not reg_ids:
-        return CheckResult("registry-integrity", "fail", "no entries parsed")
-    # Cross-check: every YAML file under questions/ has an id in the registry.
+        return CheckResult("disk-coverage", "fail", "no entries parsed")
     loaded, _ = load_all(vault_dir)
     file_ids = {lq.id for lq in loaded}
     orphan_files = file_ids - reg_ids
-    orphan_registry = reg_ids - file_ids
-    if orphan_files or orphan_registry:
+    if orphan_files:
+        sample = ", ".join(sorted(orphan_files)[:3])
         return CheckResult(
-            "registry-integrity", "fail",
-            f"{len(orphan_files)} file(s) missing from registry; "
-            f"{len(orphan_registry)} registry entry(s) missing files",
+            "disk-coverage", "fail",
+            f"{len(orphan_files)} disk YAML id(s) not in registry "
+            f"(e.g. {sample}). Run repair_registry.py.",
         )
     return CheckResult(
-        "registry-integrity", "pass",
-        f"{len(reg_ids)} entries, all files exist",
+        "disk-coverage", "pass",
+        f"all {len(file_ids):,} disk YAML id(s) registered",
+    )
+
+
+def _check_registry_history(vault_dir: Path) -> CheckResult:
+    """Informational check: registry entries with no live file.
+
+    The registry is by design an append-only audit log of every ID ever
+    assigned. Renames, deletions, and archival are NORMAL operations that
+    leave the original ID in the registry but remove its file. This check
+    surfaces the count for visibility but never fails — fails would
+    incorrectly conflate audit log with current manifest.
+    """
+    reg = vault_dir / "id-registry.yaml"
+    if not reg.exists():
+        return CheckResult("registry-history", "skip", f"{reg} not found")
+    reg_ids = _parse_registry_ids(reg)
+    loaded, _ = load_all(vault_dir)
+    file_ids = {lq.id for lq in loaded}
+    retired = reg_ids - file_ids
+    if retired:
+        return CheckResult(
+            "registry-history", "info",
+            f"{len(retired):,} retired id(s) in registry "
+            f"(renamed/deleted; preserved as audit trail)",
+        )
+    return CheckResult(
+        "registry-history", "pass",
+        f"no retired ids — every {len(reg_ids):,} registry entry has a live file",
     )
 
 
@@ -206,7 +246,8 @@ def _check_link_rot() -> CheckResult:
 SUBCHECKS = {
     "git-state":            _check_git_state,
     "schema-version":       _check_schema_version,
-    "registry-integrity":   _check_registry_integrity,
+    "disk-coverage":        _check_disk_coverage,
+    "registry-history":     _check_registry_history,
     "release-integrity":    _check_release_integrity,
     "d1-connectivity":      lambda _vd: _check_d1_connectivity(),
     "content-hash-sample":  _check_content_hash_sample,
@@ -254,7 +295,8 @@ def register(app: typer.Typer) -> None:
         table.add_column("check", style="cyan")
         table.add_column("status")
         table.add_column("detail", overflow="fold")
-        colors = {"pass": "green", "fail": "red", "warn": "yellow", "skip": "dim"}
+        colors = {"pass": "green", "fail": "red", "warn": "yellow",
+                  "info": "cyan", "skip": "dim"}
         for r in results:
             color = colors.get(r.status, "white")
             table.add_row(r.name, f"[{color}]{r.status}[/{color}]", r.detail)

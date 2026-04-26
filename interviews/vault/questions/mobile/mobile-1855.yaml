@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: mobile-1855
+track: mobile
+level: L4
+zone: optimization
+topic: responsible-ai
+competency_area: cross-cutting
+bloom_level: apply
+phase: both
+title: Guardrail Latency Budget on a Mobile LLM
+scenario: 'A mobile app runs a 1.3B on-device LLM for chat assistance. The product
+  team requires a content safety guardrail that blocks toxic outputs. The UX spec
+  allows 800ms first-token latency. On a Snapdragon 8 Gen 3, the LLM prefill takes
+  600ms. You have 200ms for the guardrail. Three options: (A) 125M classifier at 180ms,
+  (B) 7M classifier at 25ms with lower recall, (C) prefix embedding similarity at
+  8ms with limited coverage. Design the optimal guardrail strategy.'
+question: Which guardrail mix fits a 200 ms safety budget after a 600 ms 1.3B LLM
+  prefill on Snapdragon 8 Gen 3?
+details:
+  realistic_solution: 'Use a cascaded streaming guardrail: (1) At prefill: run the
+    8ms prefix similarity check (Option C) against known toxic prompt patterns. If
+    similarity > 0.9 threshold: block immediately, 0 generation cost. (2) During generation:
+    run Option B (7M classifier, ~25ms including load overhead) every 50 tokens on
+    the accumulated output. At 5 tokens/sec on Snapdragon, 50-token windows = 10 second
+    intervals — well within UX perception. (3) Option A (125M, ~180ms including overhead)
+    is too slow for streaming — reserve for async audit of full completed responses
+    for compliance logging. Cascade recall: prefix check catches ~40% of known attacks,
+    chunk classifier catches 80% of remainder, leaving ~12% miss rate on novel attacks.
+    Hybrid recall ≈ 1 - (0.6 × 0.2) = 88% at 8-25ms latency.'
+  common_mistake: Running the guardrail after the full response is generated — this
+    blocks display of any content until the entire response is checked, introducing
+    latency proportional to response length. For streaming, you need token-level or
+    chunk-level guardrail evaluation.
+  napkin_math: 'Snapdragon 8 Gen 3: ~45 TOPS INT8. Option B: 7M params × 2 MACs/param
+    × 1 token = 14M MACs = 14 MFLOP. At 45 TOPS: 14M / 45T = 0.00031ms = 0.31 µs per
+    inference. Batched over 50-token window: still <0.02ms. The 25ms figure includes
+    model load from storage and tokenization overhead. Prefix similarity: 8ms dominates
+    by embedding lookup, not compute. Option A: 125M × 2 MACs = 250 MFLOP. At 45 TOPS:
+    250M / 45T = 0.0056ms ≈ 5.6 µs compute, but memory bandwidth for 125M INT8 weights
+    at 51.2 GB/s: 125 MB / 51.2 GB/s = 2.4ms. Total ≈ 2.4ms, not 180ms — re-benchmark
+    on device before rejecting Option A.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Math error: 14 MFLOP / 45 TOPS = 0.00031 ms, not 0.31 ms. Off by 1000x.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

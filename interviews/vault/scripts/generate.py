@@ -9,7 +9,7 @@ Usage:
     python3 generate.py --track cloud            # Only fill gaps in cloud track
     python3 generate.py --level L1,L2            # Only fill L1 and L2 gaps
     python3 generate.py --dry-run                # Show plan without generating
-    python3 generate.py --model gemini-2.5-flash  # Use a different model
+    python3 generate.py --model gemini-3.1-pro-preview  # Use a different model
 
 The engine:
 1. Surveys the existing corpus coverage matrix
@@ -560,14 +560,14 @@ Examples:
   python3 generate.py --target 8             # 8 questions per cell before saturating
   python3 generate.py --track cloud --level L1,L2   # Focus on cloud L1/L2
   python3 generate.py --dry-run              # Show plan without generating
-  python3 generate.py --model gemini-2.5-flash      # Use Flash for speed
+  python3 generate.py --model gemini-3.1-pro-preview      # Use Flash for speed
         """,
     )
     parser.add_argument("--budget", type=int, default=30, help="Max questions to generate this run (default: 30)")
     parser.add_argument("--target", type=int, default=5, help="Target questions per track×level cell (default: 5)")
     parser.add_argument("--track", type=str, default=None, help="Comma-separated tracks to focus on")
     parser.add_argument("--level", type=str, default=None, help="Comma-separated levels to focus on (e.g. L1,L2)")
-    parser.add_argument("--model", type=str, default="gemini-2.5-pro", help="Gemini model to use")
+    parser.add_argument("--model", type=str, default="gemini-3.1-pro-preview", help="Gemini model to use")
     parser.add_argument("--dry-run", action="store_true", help="Show plan without generating")
     parser.add_argument("--skip-solver", action="store_true", help="Skip solver validation (faster)")
 

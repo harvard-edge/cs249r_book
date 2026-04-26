@@ -1,0 +1,94 @@
+schema_version: '1.0'
+id: cloud-3422
+track: cloud
+level: L6+
+zone: mastery
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: 'Scaling a 1.5 Trillion Parameter Model on NVIDIA H100: Model and Tensor Parallelism
+  Design'
+scenario: A research team is developing an extremely large language model with 1.5
+  trillion parameters, requiring approximately 6 TB of memory (FP16) just for its
+  weights and activations. Your task is to design an efficient training strategy for
+  this model on a cluster utilizing NVIDIA H100 GPUs. Each H100 provides 80 GB HBM3,
+  989 TFLOPS FP16 dense compute, and 3.35 TB/s memory bandwidth, connected by high-speed
+  NVLink and InfiniBand. Propose a detailed model and/or tensor parallelism scheme.
+  Explain how you would partition the model's layers (e.g., across attention heads,
+  within feed-forward networks, or layer-wise) to minimize communication overhead
+  and maximize the effective use of H100's capabilities. Specifically, outline how
+  you would manage communication-computation overlap for optimal throughput. Provide
+  napkin math to justify your partitioning strategy, focusing on memory distribution
+  per GPU and the communication bandwidth required between GPUs for a key operation
+  (e.g., an all-reduce within a transformer block) across a hypothetical 128-GPU setup.
+question: How would you partition a 1.5T-parameter model across 128 H100s and overlap
+  tensor/model-parallel communication with compute?
+details:
+  realistic_solution: 'A robust solution would likely combine ZeRO-stage 3 for sharding
+    optimizer states and gradients (as the total memory exceeds HBM capacity on a
+    single device even for weights) with a sophisticated tensor parallelism scheme
+    (e.g., Megatron-LM or T5-style) applied to large linear layers (column-wise and
+    row-wise partitioning). The design should emphasize: 1. Partitioning: Split large
+    weight matrices (e.g., in FFN or attention projection layers) into column-wise
+    or row-wise chunks, ensuring minimal data movement during forward/backward passes.
+    2. Communication Overlap: Aggressively overlap communication (e.g., all-reduce
+    for gradients, all-gather for activations/weights) with computation using asynchronous
+    operations and carefully orchestrated execution schedules. 3. Memory Optimization:
+    Utilize activation checkpointing, CPU offloading for less critical data, and ensure
+    efficient FP16/BF16 usage. 4. Hardware Awareness: Explicitly leverage NVLink for
+    intra-node communication and InfiniBand for inter-node, optimizing data transfer
+    sizes and patterns for the specific interconnect bandwidths. For instance, a column-wise
+    split of a large linear layer would require an all-reduce operation after the
+    matrix multiplication in the forward pass (or before in the backward pass) for
+    activations, while a row-wise split would require an all-gather for weights or
+    activations. The choice depends on minimizing communication volume and frequency.'
+  common_mistake: Overlooking the significant overhead of communication for collective
+    operations (like all-reduce) in tensor parallelism, especially when not properly
+    overlapping with computation. Another common mistake is not fully leveraging the
+    HBM3 bandwidth or NVLink interconnects, leading to memory-bound or communication-bound
+    bottlenecks despite high FLOPS. Candidates might also propose simple layer-wise
+    parallelism without considering the activation recomputation costs or the complexity
+    of managing variable layer sizes across devices, or failing to differentiate between
+    memory required for weights, activations, and optimizer states.
+  napkin_math: 'Consider a single transformer block''s feed-forward network (FFN)
+    with an input dimension `d_model = 16384` and an intermediate dimension `d_ff
+    = 65536`. For an FP16 model, the `d_ff x d_model` weight matrix (or vice versa)
+    is substantial. If we apply column-wise tensor parallelism across `P=128` GPUs
+    for this FFN layer. The output activation (of size `batch_size * sequence_length
+    * d_ff`) would require an all-reduce operation. Let `batch_size=1` and `sequence_length=4096`.
+    The data size for the all-reduce for this FFN layer output: `1 * 4096 * 65536
+    * 2 bytes ≈ 0.5 GB`. Using a ring all-reduce model for `P=128` GPUs, the total
+    data transferred would be approximately `2 * 0.5 GB = 1 GB`. With H100''s NVLink
+    providing up to 900 GB/s intra-node bandwidth (for 8-GPU systems, assuming scaling
+    or aggregation for 128 GPUs with InfiniBand for inter-node), this operation could
+    theoretically take roughly `1 GB / 900 GB/s ≈ 1.1 ms` within an NVLink-connected
+    node. For memory sizing, a 1.5 trillion parameter model in FP16 stores `1.5 *
+    10^12 * 2 bytes = 3 TB` for weights. Including activations and optimizer states,
+    this could easily reach the stated 6TB. Distributed across 128 H100 GPUs, each
+    GPU would ideally hold `6000 GB / 128 ≈ 46.8 GB` of the model''s total state,
+    which comfortably fits within the 80 GB HBM3 per H100, leaving ample room for
+    runtime activations and other overhead.'
+status: archived
+deletion_reason: 'Fundamental topology error: assumes a flat 900 GB/s NVLink bandwidth for a 128-GPU
+  ring AllReduce. NVLink only spans the 8 GPUs inside a single H100 node; a 128-GPU ring has to traverse
+  ~25 GB/s InfiniBand inter-node links 16 times, so the 1.1 ms estimate is off by roughly 36x. Combined
+  with generic LLM-template phrasing in the realistic_solution. The 1.5T-parameter sizing competency
+  is well covered by the rewritten cloud-0774 (3D parallel sizing on 70B Adam) and cloud-3431 (3D parallel
+  decomposition); archiving avoids propagating the topology mistake.'
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

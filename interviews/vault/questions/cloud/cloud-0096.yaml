@@ -8,39 +8,48 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: The Memory Wall of Long Contexts
-scenario: You are running a multi-tenant LLM serving system on H100 GPUs (80 GB HBM3). The system uses
-  continuous batching and performs well with short user prompts. However, when a few users start engaging
-  in very long conversations (e.g., summarizing a document with 16k tokens), you receive out-of-memory
-  (OOM) errors and the entire batch fails. Your manager asks why the system, which can handle 64 concurrent
-  users with short prompts, is failing with just a few users with long contexts. Using the scaling rules,
-  diagnose the problem.
-question: "Why can a few 16k-token conversations OOM an H100 system that handles 64 users with short prompts?"
+scenario: You are running a multi-tenant LLM serving system on H100 GPUs (80 GB HBM3).
+  The system uses continuous batching and performs well with short user prompts. However,
+  when a few users start engaging in very long conversations (e.g., summarizing a
+  document with 16k tokens), you receive out-of-memory (OOM) errors and the entire
+  batch fails. Your manager asks why the system, which can handle 64 concurrent users
+  with short prompts, is failing with just a few users with long contexts. Using the
+  scaling rules, diagnose the problem.
+question: Why can a few 16k-token conversations OOM an H100 system that handles 64
+  users with short prompts?
 details:
-  realistic_solution: The problem is the massive memory consumption of the KV cache for long sequences.
-    In a transformer, the key-value (KV) states for every token in the context window must be stored in
-    GPU memory to generate the next token. This memory usage scales linearly with sequence length and
-    batch size. While continuous batching is efficient, it doesn't eliminate the fundamental memory requirement
-    of the KV cache. A few users with very long contexts can quickly exhaust the 80 GB of HBM on an H100,
-    causing an OOM that kills the entire batch of users currently being processed. The system needs KV
-    cache compression (like quantization), paged attention mechanisms, or a stricter limit on the maximum
-    sequence length per user to manage this.
-  common_mistake: Assuming memory usage is only for model weights. Many engineers calculate the memory
-    required for the model parameters (e.g., Llama-70B FP16 ≈ 140GB) and forget that the KV cache for
-    the context window is often a much larger and more dynamic consumer of memory during inference.
-  napkin_math: '**Model:** Llama-70B class (80 layers, 8 KV heads via GQA, 128 head_dim, FP16) | **KV-cache
-    per token per layer:** 2 × 8 × 128 × 2 bytes = 4,096 bytes ≈ 4 KB | **KV-cache per token (all layers):**
-    4,096 × 80 = 327,680 bytes ≈ 320 KB/token | **Short prompt (512 tokens):** 320 KB × 512 = 163.8 MB
-    per user | 64 concurrent users × 163.8 MB = 10.5 GB KV-cache total | **Long prompt (16k tokens):**
-    320 KB × 16,384 = 5.24 GB per user | 64 concurrent users × 5.24 GB = 335 GB → far exceeds 80 GB VRAM
-    | Even 12 users at 16k: 12 × 5.24 GB = 62.9 GB KV-cache alone | Add model weights (~140 GB across
-    TP shards) → OOM | **Diagnosis:** KV-cache scales linearly with seq_len. Going from 512 → 16k tokens
-    is a 32× increase in per-user KV memory. The system was provisioned for short-context memory budgets;
+  realistic_solution: The problem is the massive memory consumption of the KV cache
+    for long sequences. In a transformer, the key-value (KV) states for every token
+    in the context window must be stored in GPU memory to generate the next token.
+    This memory usage scales linearly with sequence length and batch size. While continuous
+    batching is efficient, it doesn't eliminate the fundamental memory requirement
+    of the KV cache. A few users with very long contexts can quickly exhaust the 80
+    GB of HBM on an H100, causing an OOM that kills the entire batch of users currently
+    being processed. The system needs KV cache compression (like quantization), paged
+    attention mechanisms, or a stricter limit on the maximum sequence length per user
+    to manage this.
+  common_mistake: Assuming memory usage is only for model weights. Many engineers
+    calculate the memory required for the model parameters (e.g., Llama-70B FP16 ≈
+    140GB) and forget that the KV cache for the context window is often a much larger
+    and more dynamic consumer of memory during inference.
+  napkin_math: '**Model:** Llama-70B class (80 layers, 8 KV heads via GQA, 128 head_dim,
+    FP16) | **KV-cache per token per layer:** 2 × 8 × 128 × 2 bytes = 4,096 bytes
+    ≈ 4 KB | **KV-cache per token (all layers):** 4,096 × 80 = 327,680 bytes ≈ 320
+    KB/token | **Short prompt (512 tokens):** 320 KB × 512 = 163.8 MB per user | 64
+    concurrent users × 163.8 MB = 10.5 GB KV-cache total | **Long prompt (16k tokens):**
+    320 KB × 16,384 = 5.24 GB per user | 64 concurrent users × 5.24 GB = 335 GB →
+    far exceeds 80 GB VRAM | Even 12 users at 16k: 12 × 5.24 GB = 62.9 GB KV-cache
+    alone | Add model weights (~140 GB across TP shards) → OOM | **Diagnosis:** KV-cache
+    scales linearly with seq_len. Going from 512 → 16k tokens is a 32× increase in
+    per-user KV memory. The system was provisioned for short-context memory budgets;
     a few long-context users blow the VRAM budget.'
   options:
   - The OOM is caused by the model weights being loaded multiple times for each user.
-  - The KV cache for users with long sequence lengths is consuming all available HBM3 memory.
+  - The KV cache for users with long sequence lengths is consuming all available HBM3
+    memory.
   - The PCIe Gen5 bus is too slow to transfer the long prompts, causing a memory backlog.
-  - The continuous batching algorithm has a memory leak that gets worse with longer sequences.
+  - The continuous batching algorithm has a memory leak that gets worse with longer
+    sequences.
   correct_index: 1
 status: published
 provenance: imported
@@ -54,17 +63,20 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The Napkin Math provides a `KV-cache per token per layer` for a Llama-70B architecture with `8 KV heads`,
-  but then uses `80 layers` in the `KV-cache per token (all layers)` calculation without stating the total
-  number of layers for the 70B model, which is typically higher for Llama-70B.
-- The `64 concurrent users x 5.24 GB = 335 GB` calculation in Napkin Math is for 64 users with *long prompts*,
-  which then correctly states exceeds 80 GB VRAM, but it's not clear how the initial premise of 'a few
-  users' (not 64) leads to OOM for long contexts.
+- The Napkin Math provides a `KV-cache per token per layer` for a Llama-70B architecture
+  with `8 KV heads`, but then uses `80 layers` in the `KV-cache per token (all layers)`
+  calculation without stating the total number of layers for the 70B model, which
+  is typically higher for Llama-70B.
+- The `64 concurrent users x 5.24 GB = 335 GB` calculation in Napkin Math is for 64
+  users with *long prompts*, which then correctly states exceeds 80 GB VRAM, but it's
+  not clear how the initial premise of 'a few users' (not 64) leads to OOM for long
+  contexts.
 validation_status_pro: ERROR
 validation_issues_pro:
-- The Napkin Math section is malformed, containing author notes and an incorrect formula for GQA KV-cache
-  size.
-- The calculation required to answer the question is not performed in the napkin math section.
+- The Napkin Math section is malformed, containing author notes and an incorrect formula
+  for GQA KV-cache size.
+- The calculation required to answer the question is not performed in the napkin math
+  section.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
