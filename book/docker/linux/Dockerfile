@@ -277,6 +277,9 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
 # a later layer passes -repository for year N+1 — install-tl fails in seconds.
 # Bump TEXLIVE_INSTALLER_REVISION when the annual CTAN rollover requires a fresh
 # install-tl-unx.tar.gz for this image.
+# install-tl -repository must point at a base URL whose tlpdb is at .../tlpkg/texlive.tlpdb
+# (curl -I on that file should be 200). As of 2026-04, mirror.ctan install-tl-unx still unpacks
+# to install-tl-2025*; main tlnet is 2026, so 2025 historic tlnet-final is required for a match.
 ARG TEXLIVE_INSTALLER_REVISION=3
 RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base install" && \
     echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." && \
