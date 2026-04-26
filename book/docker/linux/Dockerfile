@@ -280,7 +280,7 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
 # install-tl -repository must point at a base URL whose tlpdb is at .../tlpkg/texlive.tlpdb
 # (curl -I on that file should be 200). As of 2026-04, mirror.ctan install-tl-unx still unpacks
 # to install-tl-2025*; main tlnet is 2026, so 2025 historic tlnet-final is required for a match.
-ARG TEXLIVE_INSTALLER_REVISION=3
+ARG TEXLIVE_INSTALLER_REVISION=4
 RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base install" && \
     echo "🔄 Downloading TeX Live installer (~4MB) with mirror fallbacks..." && \
     SUCCESS=false && \
@@ -320,11 +320,12 @@ RUN echo "🔄 TeX Live layer rev ${TEXLIVE_INSTALLER_REVISION}: download + base
         exit 1; \
     fi && \
     TLVER=$$(basename "$$1") && \
-    TLYY=$$(echo "$$TLVER" | sed 's/^install-tl-\(....\).*/\1/') && \
+    TLYY=$$(printf '%s\n' "$$TLVER" | cut -c12-15) && \
     case "$$TLYY" in \
         2025) TLNET="https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final" ;; \
-        2026|2027) TLNET="https://mirror.ctan.org/systems/texlive/tlnet" ;; \
-        *) echo "❌ Unsupported TeX install-tl id ($$TLVER, year=$$TLYY)" && exit 1 ;; \
+        2026) TLNET="https://mirror.ctan.org/systems/texlive/tlnet" ;; \
+        2027) TLNET="https://mirror.ctan.org/systems/texlive/tlnet" ;; \
+        *) echo "❌ Unsupported TeX install-tl id" && echo "  TLVER=$$TLVER" && echo "  TLYY=$$TLYY" && exit 1 ;; \
     esac && \
     echo "📍 TeX tlpdb repository (matches $$TLVER): $$TLNET" && \
     mkdir -p /opt && \
