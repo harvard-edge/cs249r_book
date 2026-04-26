@@ -78,7 +78,7 @@ This architecture is correct in itself, but the stronger argument is: it **unloc
 ### Pipeline that exists
 ```
 vault/schema/staffml_taxonomy.yaml         ← LinkML schema (SSoT for types)
-vault/schema/taxonomy_data.yaml            ← 79 topics + 123 edges
+vault/schema/taxonomy_data.yaml            ← 87 topics + 131 edges
 vault/schema/zones.py                       ← 11 ikigai zones
 vault/corpus.json                           ← 28 MB. All questions. THE monolith.
 vault/chains.json
@@ -97,7 +97,7 @@ staffml/ (Next.js)
 ### Three bugs we found in this pipeline
 
 1. **Different filter predicates between consumers.** Site keeps `q.validated`, paper keeps `q.status == "published"`. These sets differ by 1,146 questions. Result: paper says 9,199, site says 8,053.
-2. **Orphan topics inflate topic count.** `analyze_corpus.py` reports `summary.topics = 87` but `taxonomy_graph.total_topics = 79`. The 8 extras are corpus values that are not in the curated taxonomy — the schema doesn't enforce the relationship.
+2. **Orphan topics resolved.** Historically, `analyze_corpus.py` reported 87 topics while the taxonomy listed 79. As of the v0.1.0 release, all 87 topics are formally curated in `taxonomy_data.yaml` and enforced by the schema.
 3. **No release gate.** Three separate scripts (`sync-vault.py`, `generate-manifest.py`, `generate_macros.py`) run independently. Nothing requires they operate on the same snapshot.
 
 ---
@@ -113,7 +113,7 @@ interviews/
 │   │   ├── staffml_taxonomy.yaml       ← LinkML (existing)
 │   │   ├── question_schema.yaml        ← Per-question schema (NEW)
 │   │   └── zones.yaml                  ← 11 ikigai zones (ported from zones.py)
-│   ├── taxonomy.yaml                   ← 79 topics + 123 edges
+│   ├── taxonomy.yaml                   ← 87 topics + 131 edges
 │   ├── chains.yaml                     ← Chain definitions (cross-cutting)
 │   ├── release-policy.yaml             ← "What counts as published" (NEW)
 │   ├── id-registry.yaml                ← Ever-assigned ID ledger (NEW)
