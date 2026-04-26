@@ -56,7 +56,7 @@ RUN echo "🚀 === STARTING LOCALE CONFIGURATION ===" && \
 # === PHASE 2: SYSTEM DEPENDENCIES ===
 RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "⏰ Estimated time: 2-3 minutes" && \
-    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $$4}')" && \
     start_time=$$(date +%s) && \
     \
     echo "🔄 Updating package lists..." && \
@@ -152,8 +152,8 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === SYSTEM DEPENDENCIES COMPLETE === (${duration}s)" && \
-    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $4}')"
+    echo "✅ === SYSTEM DEPENDENCIES COMPLETE === ($${duration}s)" && \
+    echo "📊 Free disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
 
 # === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
@@ -179,7 +179,7 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === INKSCAPE INSTALLATION COMPLETE === (${duration}s)"
+    echo "✅ === INKSCAPE INSTALLATION COMPLETE === ($${duration}s)"
 
 # Install font dependencies (note: fonts-freefont-ttf already installed above)
 RUN echo "🚀 === STARTING FONT INSTALLATION ===" && \
@@ -231,13 +231,13 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === (${duration}s)"
+    echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === ($${duration}s)"
 
 # === PHASE 5: TEX LIVE INSTALLATION ===
 # Step 5.1: Install TeX Live prerequisites
 RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
     echo "⏰ Estimated time: 8-12 minutes (largest phase)" && \
-    echo "📊 Free disk space before: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 Free disk space before: $$(df -h / | tail -1 | awk '{print $$4}')" && \
     \
     echo "📦 Installing TeX Live prerequisites..." && \
     echo "📋 Prerequisites:" && \
@@ -282,13 +282,13 @@ RUN echo "🚀 === STARTING TEX LIVE INSTALLATION ===" && \
 # (curl -I on that file should be 200). As of 2026-04, mirror.ctan install-tl-unx still unpacks
 # to install-tl-2025*; main tlnet is 2026, so 2025 historic tlnet-final is required for a match.
 # TeX base install is a separate POSIX script (avoids long RUN + buildx $/() handling on /bin/sh).
-ARG TEXLIVE_INSTALLER_REVISION=5
+ARG TEXLIVE_INSTALLER_REVISION=6
 RUN chmod 0755 /opt/install-texlive-base.sh && /opt/install-texlive-base.sh ${TEXLIVE_INSTALLER_REVISION}
 
 # Step 5.4: Configure TeX Live PATH
 RUN echo "🔧 Setting up TeX Live PATH..." && \
-    echo 'export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH' >> /etc/bash.bashrc && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    echo 'export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH' >> /etc/bash.bashrc && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
     echo "🔧 TeX Live PATH configured" && \
     \
     echo "📍 Checking if tlmgr is available..." && \
@@ -307,7 +307,7 @@ RUN echo "📊 Analyzing tl_packages file..." && \
     echo "📦 Found $collection_count TeX Live collections to install" && \
     \
     echo "🔄 Installing TeX Live collections with retry logic..." && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
     TLMGR_REPO=$$(tr -d '\n' < /opt/mlsysbook-texlive-tlnet-url) && \
     tlmgr option repository "$$TLMGR_REPO" && \
     i=1 && \
@@ -352,13 +352,13 @@ RUN echo "📊 Analyzing tl_packages file..." && \
 RUN echo "🧹 Cleaning up TeX Live installer..." && \
     rm -rf /tmp/install-tl-* /tmp/texlive.profile /tmp/install-tl-unx.tar.gz && \
     echo "✅ === TEX LIVE INSTALLATION COMPLETE ===" && \
-    echo "📊 Free disk space after: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 Free disk space after: $$(df -h / | tail -1 | awk '{print $$4}')" && \
     echo "📊 TeX Live disk usage: $$(du -sh /usr/local/texlive 2>/dev/null || echo 'N/A')"
 
 # Verify TeX Live installation (with error handling)
 RUN echo "🔄 Verifying TeX Live installation..." && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
-    echo "📍 PATH: $PATH" && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
+    echo "📍 PATH: $$PATH" && \
     echo "📍 Checking TeX Live directory:" && \
     ls -la /usr/local/texlive/ || echo "❌ TeX Live directory not found" && \
     ls -la /usr/local/texlive/bin/ || echo "❌ TeX Live bin directory not found" && \
@@ -391,7 +391,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     r-base \
     r-base-dev \
     r-recommended && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install R packages"; \
         exit 1; \
     fi && \
@@ -401,14 +401,14 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "📊 R version: $$(R --version | head -1)" && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify R installation"; \
         exit 1; \
     fi && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === R INSTALLATION COMPLETE === (${duration}s)"
+    echo "✅ === R INSTALLATION COMPLETE === ($${duration}s)"
 
 # R may omit R_LIBS_USER from .libPaths() if the directory is missing, so install and verify
 # can disagree on where packages were written. Create it before any Rscript package step.
@@ -433,7 +433,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     \
     echo "📦 Installing R packages..." && \
     Rscript /tmp/install_packages.R && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install R packages"; \
         exit 1; \
     fi && \
@@ -441,7 +441,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     \
     echo "🔍 Verifying R packages..." && \
     Rscript /tmp/verify_r_packages.R && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify R packages"; \
         exit 1; \
     fi && \
@@ -452,7 +452,7 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === R PACKAGE INSTALLATION COMPLETE === (${duration}s)"
+    echo "✅ === R PACKAGE INSTALLATION COMPLETE === ($${duration}s)"
 
 # === PHASE 8: PYTHON INSTALLATION ===
 RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
@@ -468,7 +468,7 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     python3 \
     python3-pip \
     python3-dev && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install Python packages"; \
         exit 1; \
     fi && \
@@ -478,19 +478,19 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     rm -rf /var/lib/apt/lists/* && \
     \
     echo "📊 Python version: $$(python3 --version)" && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify Python installation"; \
         exit 1; \
     fi && \
     echo "📊 Pip version: $$(pip3 --version)" && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify pip installation"; \
         exit 1; \
     fi && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === PYTHON INSTALLATION COMPLETE === (${duration}s)"
+    echo "✅ === PYTHON INSTALLATION COMPLETE === ($${duration}s)"
 
 # === PHASE 9: QUARTO INSTALLATION ===
 RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
@@ -499,7 +499,7 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     \
     echo "📦 Downloading Quarto 1.9.27..." && \
     wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-amd64.deb && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to download Quarto"; \
         exit 1; \
     fi && \
@@ -509,7 +509,7 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     \
     echo "📦 Installing Quarto..." && \
     dpkg -i quarto-1.9.27-linux-amd64.deb && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install Quarto"; \
         exit 1; \
     fi && \
@@ -521,7 +521,7 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === QUARTO INSTALLATION COMPLETE === (${duration}s)"
+    echo "✅ === QUARTO INSTALLATION COMPLETE === ($${duration}s)"
 
 # Create R library directory
 RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
@@ -546,7 +546,7 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     \
     echo "🔄 Installing Python packages with space optimization..." && \
     pip3 install --no-cache-dir -r /tmp/requirements.txt && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install Python packages"; \
         exit 1; \
     fi && \
@@ -562,7 +562,7 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === PYTHON PACKAGES COMPLETE === (${duration}s)"
+    echo "✅ === PYTHON PACKAGES COMPLETE === ($${duration}s)"
 
 # === PHASE 9: R PACKAGES ===
 # Step 9.1: Set up R environment and install remotes
@@ -578,7 +578,7 @@ RUN echo "🚀 === STEP 9.1: SETTING UP R ENVIRONMENT ===" && \
     install.packages('remotes'); \
     cat('✅ R environment setup complete\n'); \
     " && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to set up R environment"; \
         exit 1; \
     fi && \
@@ -601,7 +601,7 @@ RUN echo "🚀 === STEP 9.2: INSTALLING R PACKAGES ===" && \
     }; \
     cat('✅ R package installation complete\n'); \
     " && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to install R packages"; \
         exit 1; \
     fi && \
@@ -617,7 +617,7 @@ RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
     print(head(ip, 10)); \
     cat(paste('Total packages installed:', nrow(ip), '\n')); \
     " && \
-    if [ $? -ne 0 ]; then \
+    if [ $$? -ne 0 ]; then \
         echo "❌ Failed to verify R packages"; \
         exit 1; \
     fi && \
@@ -628,7 +628,7 @@ RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
 
 # === PHASE 12: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
-    echo "📊 Disk space before cleanup: $$(df -h / | tail -1 | awk '{print $4}')" && \
+    echo "📊 Disk space before cleanup: $$(df -h / | tail -1 | awk '{print $$4}')" && \
     start_time=$$(date +%s) && \
     \
     echo "🧹 Removing temporary files..." && \
@@ -661,15 +661,15 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     \
     end_time=$$(date +%s) && \
     duration=$$((end_time - start_time)) && \
-    echo "✅ === COMPREHENSIVE CLEANUP COMPLETE === (${duration}s)" && \
-    echo "📊 Final disk space: $$(df -h / | tail -1 | awk '{print $4}')"
+    echo "✅ === COMPREHENSIVE CLEANUP COMPLETE === ($${duration}s)" && \
+    echo "📊 Final disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
 
 # Set working directory
 WORKDIR /workspace
 
 # === PHASE 13: FINAL VERIFICATION ===
 RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
-    export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+    export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
     echo "📊 Checking Quarto..." && \
     if command -v quarto >/dev/null 2>&1; then \
         quarto --version && \
@@ -709,7 +709,7 @@ RUN echo "🚀 === STARTING FINAL VERIFICATION ===" && \
     echo "✅ Final verification complete"
 
 # Health check
-RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$PATH && \
+RUN export PATH=/usr/local/texlive/bin/x86_64-linux:$$PATH && \
     echo "✅ Container build completed successfully" && \
     echo "📊 Quarto version: $$(quarto --version)" && \
     echo "📊 Python version: $$(python3 --version)" && \
