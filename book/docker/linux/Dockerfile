@@ -125,8 +125,6 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
 # === PHASE 3: INKSCAPE INSTALLATION ===
 RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
-    start_time=$$(date +%s) && \
-    \
     echo "🔄 Adding Inkscape PPA repository..." && \
     apt-get update && \
     echo "📦 Installing software-properties-common..." && \
@@ -144,10 +142,7 @@ RUN echo "🚀 === STARTING INKSCAPE INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === INKSCAPE INSTALLATION COMPLETE === ($${duration}s)"
+    echo "✅ === INKSCAPE INSTALLATION COMPLETE ==="
 
 # Install font dependencies (note: fonts-freefont-ttf already installed above)
 RUN echo "🚀 === STARTING FONT INSTALLATION ===" && \
@@ -187,8 +182,6 @@ RUN echo "🚀 === STARTING INKSCAPE TEST ===" && \
 # === PHASE 4: GHOSTSCRIPT INSTALLATION ===
 RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "⏰ Estimated time: 30 seconds" && \
-    start_time=$$(date +%s) && \
-    \
     echo "📦 Installing Ghostscript..." && \
     apt-get update && apt-get install -y ghostscript && \
     echo "📦 Ghostscript installed" && \
@@ -198,10 +191,7 @@ RUN echo "🚀 === STARTING GHOSTSCRIPT INSTALLATION ===" && \
     echo "🧹 Cleaning package cache..." && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE === ($${duration}s)"
+    echo "✅ === GHOSTSCRIPT INSTALLATION COMPLETE ==="
 
 # === PHASE 5: TEX LIVE INSTALLATION ===
 # Step 5.1: Install TeX Live prerequisites
@@ -310,7 +300,7 @@ RUN echo "📊 Analyzing tl_packages file..." && \
                 else \
                     echo "⚠️ tlmgr not available, skipping $collection"; \
                 fi; \
-                i=$$$((i+1)); \
+                i=$$(expr 1 + $$i); \
                 ;; \
         esac; \
     done < /tmp/tl_packages && \
@@ -346,8 +336,6 @@ RUN echo "🔄 Verifying TeX Live installation..." && \
 # === PHASE 6: R INSTALLATION (R 4.5 from CRAN) ===
 RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
-    start_time=$$(date +%s) && \
-    \
     echo "📦 Adding CRAN repository for R 4.5..." && \
     apt-get update && apt-get install -y --no-install-recommends software-properties-common dirmngr && \
     wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc > /dev/null && \
@@ -378,10 +366,7 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
         echo "❌ Failed to verify R installation"; \
         exit 1; \
     fi && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === R INSTALLATION COMPLETE === ($${duration}s)"
+    echo "✅ === R INSTALLATION COMPLETE ==="
 
 # R may omit R_LIBS_USER from .libPaths() if the directory is missing, so install and verify
 # can disagree on where packages were written. Create it before any Rscript package step.
@@ -398,8 +383,6 @@ RUN echo "🔎 Pre-flight: R build toolchain (cmake, pkg-config)…" && \
 # === PHASE 7: R PACKAGE INSTALLATION ===
 RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     echo "⏰ Cold build: this step compiles many CRAN packages; expect 20–60+ min (cache shortens reruns)" && \
-    start_time=$$(date +%s) && \
-    \
     echo "Running R setup script with the following files:" && \
     echo "  - /tmp/install_packages.R (from book/tools/dependencies/install_packages.R)" && \
     echo "  - /tmp/verify_r_packages.R (from book/docker/linux/verify_r_packages.R)" && \
@@ -422,16 +405,11 @@ RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
     \
     echo "🧹 Cleaning up R installation files..." && \
     rm -f /tmp/install_packages.R /tmp/verify_r_packages.R && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === R PACKAGE INSTALLATION COMPLETE === ($${duration}s)"
+    echo "✅ === R PACKAGE INSTALLATION COMPLETE ==="
 
 # === PHASE 8: PYTHON INSTALLATION ===
 RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
-    start_time=$$(date +%s) && \
-    \
     echo "📦 Installing Python 3 and development packages..." && \
     echo "📋 Python packages:" && \
     echo "  - python3" && \
@@ -461,16 +439,11 @@ RUN echo "🚀 === STARTING PYTHON INSTALLATION ===" && \
         echo "❌ Failed to verify pip installation"; \
         exit 1; \
     fi && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === PYTHON INSTALLATION COMPLETE === ($${duration}s)"
+    echo "✅ === PYTHON INSTALLATION COMPLETE ==="
 
 # === PHASE 9: QUARTO INSTALLATION ===
 RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
-    start_time=$$(date +%s) && \
-    \
     echo "📦 Downloading Quarto 1.9.27..." && \
     wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-amd64.deb && \
     if [ $$? -ne 0 ]; then \
@@ -492,10 +465,7 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "🧹 Cleaning up installer..." && \
     rm quarto-1.9.27-linux-amd64.deb && \
     echo "🧹 Installer cleaned up" && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === QUARTO INSTALLATION COMPLETE === ($${duration}s)"
+    echo "✅ === QUARTO INSTALLATION COMPLETE ==="
 
 # Create R library directory
 RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
@@ -509,8 +479,6 @@ RUN echo "🚀 === STARTING R LIBRARY SETUP ===" && \
 # === PHASE 10: PYTHON PACKAGES ===
 RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
-    start_time=$$(date +%s) && \
-    \
     echo "🔄 Upgrading pip..." && \
     pip3 install --upgrade pip && \
     \
@@ -533,10 +501,7 @@ RUN echo "🚀 === STARTING PYTHON PACKAGE INSTALLATION ===" && \
     echo "📊 Installed Python packages:" && \
     pip3 list | head -10 && \
     echo "📊 Total packages: $$(pip3 list | wc -l)" && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === PYTHON PACKAGES COMPLETE === ($${duration}s)"
+    echo "✅ === PYTHON PACKAGES COMPLETE ==="
 
 # === PHASE 9: R PACKAGES ===
 # Step 9.1: Set up R environment and install remotes
@@ -603,8 +568,6 @@ RUN echo "🚀 === STEP 9.3: VERIFYING R PACKAGES ===" && \
 # === PHASE 12: COMPREHENSIVE CLEANUP ===
 RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     echo "📊 Disk space before cleanup: $$(df -h / | tail -1 | awk '{print $$4}')" && \
-    start_time=$$(date +%s) && \
-    \
     echo "🧹 Removing temporary files..." && \
     rm -rf /tmp/* && \
     rm -rf /var/tmp/* && \
@@ -632,10 +595,7 @@ RUN echo "🚀 === STARTING COMPREHENSIVE CLEANUP ===" && \
     rm -rf /usr/share/man/* && \
     rm -rf /usr/share/info/* && \
     rm -rf /var/log/* && \
-    \
-    end_time=$$(date +%s) && \
-    duration=$$$((end_time - start_time)) && \
-    echo "✅ === COMPREHENSIVE CLEANUP COMPLETE === ($${duration}s)" && \
+    echo "✅ === COMPREHENSIVE CLEANUP COMPLETE ===" && \
     echo "📊 Final disk space: $$(df -h / | tail -1 | awk '{print $$4}')"
 
 # Set working directory
