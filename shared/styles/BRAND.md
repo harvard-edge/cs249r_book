@@ -50,7 +50,7 @@ independent subsite builds; future cleanup should refactor each to
 - [`kits/assets/styles/style.scss`](../../kits/assets/styles/style.scss)
 - [`slides/assets/styles/style.scss`](../../slides/assets/styles/style.scss)
 - [`mlsysim/docs/styles/style.scss`](../../mlsysim/docs/styles/style.scss)
-- [`book/quarto/assets/styles/style.scss`](../../book/quarto/assets/styles/style.scss)
+- [`book/quarto/assets/styles/style-vol1.scss`](../../book/quarto/assets/styles/style-vol1.scss) · [`book/quarto/assets/styles/style-vol2.scss`](../../book/quarto/assets/styles/style-vol2.scss)
 
 ### Other surfaces
 
