@@ -24,6 +24,7 @@ COPY book/tools/dependencies/install_packages.R /tmp/install_packages.R
 COPY book/tools/dependencies/tl_packages /tmp/tl_packages
 COPY book/docker/linux/verify_r_packages.R /tmp/verify_r_packages.R
 COPY book/docker/linux/install-texlive-base.sh /opt/install-texlive-base.sh
+COPY book/docker/linux/install-tl-collections.sh /opt/install-tl-collections.sh
 
 # Note: Python packages are installed later in Phase 10
 
@@ -264,53 +265,8 @@ RUN echo "🔧 Setting up TeX Live PATH..." && \
     fi && \
     echo "✅ TeX Live PATH and tlmgr verified"
 
-# Step 5.5: Install TeX Live packages with improved error handling
-# Docker preprocesses $var in RUN; use $$ for shell variables (i, collection, etc.).
-RUN echo "📊 Analyzing tl_packages file..." && \
-    collection_count=$$(grep -c '^collection-' /tmp/tl_packages) && \
-    echo "📦 Found $$collection_count TeX Live collections to install" && \
-    \
-    echo "🔄 Installing TeX Live collections with retry logic..." && \
-    export PATH="/usr/local/texlive/bin/x86_64-linux:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" && \
-    TLMGR_REPO=$$(tr -d '\n' < /opt/mlsysbook-texlive-tlnet-url) && \
-    tlmgr option repository "$$TLMGR_REPO" && \
-    i=1 && \
-    failed_packages="" && \
-    while IFS= read -r collection; do \
-        case "$$collection" in \
-            collection-*) \
-                echo "📦 [$$i/$$collection_count] Installing $$collection..."; \
-                if command -v tlmgr >/dev/null 2>&1; then \
-                    success=false; \
-                    for retry in 1 2; do \
-                        if tlmgr install "$$collection"; then \
-                            echo "✅ Successfully installed $$collection"; \
-                            success=true; \
-                            break; \
-                        else \
-                            echo "❌ Attempt $$retry failed for $$collection"; \
-                            if [ $$retry -lt 2 ]; then \
-                                echo "⏳ Retrying in 5 seconds..."; \
-                                sleep 5; \
-                            fi; \
-                        fi; \
-                    done; \
-                    if [ "$$success" = false ]; then \
-                        echo "⚠️ Failed to install $$collection after retries, continuing..."; \
-                        failed_packages="$$failed_packages $$collection"; \
-                    fi; \
-                else \
-                    echo "⚠️ tlmgr not available, skipping $$collection"; \
-                fi; \
-                i=$$(expr 1 + $$i); \
-                ;; \
-        esac; \
-    done < /tmp/tl_packages && \
-    if [ -n "$$failed_packages" ]; then \
-        echo "⚠️ Some packages failed to install: $$failed_packages"; \
-        echo "📋 This may not be critical for basic functionality"; \
-    fi && \
-    echo "✅ TeX Live packages installation completed"
+# Step 5.5: Install TeX Live collection packages (POSIX script; long RUN + $$ breaks dash on CI)
+RUN chmod 0755 /opt/install-tl-collections.sh && /opt/install-tl-collections.sh
 
 # Step 5.6: TeX Live cleanup and completion
 RUN echo "🧹 Cleaning up TeX Live installer..." && \
