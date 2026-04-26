@@ -469,9 +469,21 @@ RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     duration=$((end_time - start_time)) && \
     echo "✅ === R INSTALLATION COMPLETE === (${duration}s)"
 
+# R may omit R_LIBS_USER from .libPaths() if the directory is missing, so install and verify
+# can disagree on where packages were written. Create it before any Rscript package step.
+RUN mkdir -p $R_LIBS_USER
+
+# Fail fast: building CRAN source packages (e.g. fs → libuv) needs cmake. Without it,
+# the R step runs 30–60+ minutes then dies at verify. See e12d7dc4a8.
+RUN echo "🔎 Pre-flight: R build toolchain (cmake, pkg-config)…" && \
+    test -d "$R_LIBS_USER" || { echo "❌ R_LIBS_USER dir missing: $R_LIBS_USER"; exit 1; } && \
+    command -v cmake >/dev/null 2>&1 || { echo "❌ cmake not in PATH (required for R package fs, needed by rmarkdown/tidyverse)"; exit 1; } && \
+    command -v pkg-config >/dev/null 2>&1 || { echo "❌ pkg-config not in PATH"; exit 1; } && \
+    echo "✅ Pre-flight OK"
+
 # === PHASE 7: R PACKAGE INSTALLATION ===
 RUN echo "🚀 === STARTING R PACKAGE INSTALLATION ===" && \
-    echo "⏰ Estimated time: 2-3 minutes" && \
+    echo "⏰ Cold build: this step compiles many CRAN packages; expect 20–60+ min (cache shortens reruns)" && \
     start_time=$(date +%s) && \
     \
     echo "Running R setup script with the following files:" && \

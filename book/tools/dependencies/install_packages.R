@@ -5,6 +5,15 @@
 # If you need to add a new package, follow the instructions below.
 # ==============================================================
 
+# Docker/CI: R_LIBS_USER is ignored at startup if the path does not exist, so we ensure
+# a single target library and pin CRAN (HTTPS) before any install.
+lib <- Sys.getenv("R_LIBS_USER", unset = NA_character_)
+if (!is.na(lib) && nzchar(lib)) {
+  dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+  .libPaths(c(lib, .libPaths()))
+}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
 required_packages <- c(
   "downlit",    # Required for code linking in Quarto
   "ggplot2",    # Visualization package
@@ -24,14 +33,15 @@ required_packages <- c(
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg, repos = "http://cran.rstudio.com")
+    # Ncpus=1: avoid parallel compiles OOM'ing in Docker/Actions runners
+    install.packages(pkg, Ncpus = 1L)
   }
 }
 
 invisible(sapply(required_packages, install_if_missing))
 
 if (!requireNamespace("tinytex", quietly = TRUE)) {
-  install.packages("tinytex", repos = "http://cran.rstudio.com")
+  install.packages("tinytex", Ncpus = 1L)
   tinytex::install_tinytex()
 }
 
