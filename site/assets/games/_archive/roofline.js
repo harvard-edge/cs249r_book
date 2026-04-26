@@ -262,7 +262,7 @@ MLSP.games.roofline = function(canvas, opts) {
     ctx.fillStyle = secs <= 5 ? "#c44" : "#333"; ctx.font = "bold 13px 'Helvetica Neue', Arial, sans-serif";
     ctx.fillText("⏱ " + secs + "s", W/2 + 30, H - 26);
     ctx.fillStyle = "#333"; ctx.font = "11px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "right";
-    ctx.fillText("alltime best " + alltimeBest, W - 20, H - 26);
+    ctx.fillText("all-time best " + alltimeBest, W - 20, H - 26);
     ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999"; ctx.textAlign = "left";
     ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · mouse / arrows · R retry", 20, H - 10);
   }

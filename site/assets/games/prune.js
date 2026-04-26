@@ -324,7 +324,7 @@ MLSP.games.prune = function(canvas, opts) {
 
     ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999";
     ctx.textAlign = "left";
-    ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · alltime best " + alltimeBest + "% · R retry", barX, accY + accH + 12);
+    ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · all-time best " + alltimeBest + "% · R retry", barX, accY + accH + 12);
   }
 
   function drawGameOver() {

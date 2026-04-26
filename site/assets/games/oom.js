@@ -340,7 +340,7 @@ MLSP.games.oom = function(canvas, opts) {
     ctx.textAlign = "center"; ctx.fillStyle = secs <= 10 ? "#c44" : "#333";
     ctx.font = "bold 13px 'Helvetica Neue', Arial, sans-serif"; ctx.fillText("⏱ " + secs + "s", W/2, H - 26);
     ctx.fillStyle = "#333"; ctx.font = "11px 'Helvetica Neue', Arial, sans-serif"; ctx.textAlign = "right";
-    ctx.fillText("alltime best " + alltimeBest, W - 20, H - 26);
+    ctx.fillText("all-time best " + alltimeBest, W - 20, H - 26);
     ctx.font = "9px 'Helvetica Neue', Arial, sans-serif"; ctx.fillStyle = "#999"; ctx.textAlign = "left";
     ctx.fillText("daily " + today + " · day " + MLSP.dayNumber() + " · space = hard drop · R = retry", 20, H - 10);
 
