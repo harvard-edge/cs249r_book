@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Validate vault data integrity for StaffML deployment.
 
-Checks that corpus.json, taxonomy.json, and vault-manifest.json are
-consistent with each other and with the app's expectations.
+When ``corpus.json`` is present (e.g. after ``vault build --legacy-json``), runs
+full cross-checks against taxonomy and manifest.
+
+When ``corpus.json`` is absent — the normal case for a clean clone after
+2026-04-26, when corpus was retired as a tracked file — runs **sparse** checks
+only: committed ``taxonomy.json`` and ``vault-manifest.json`` must load and
+look self-consistent. Full per-question validation is expected from
+``vault check --strict`` in CI (``staffml-validate-vault.yml``) and from this
+script after a local or CI ``vault build -- ... --legacy-json``.
 
 Exit code 0 = all checks pass, 1 = errors found.
 
@@ -11,11 +18,10 @@ Usage: python3 interviews/staffml/scripts/validate-vault.py
 
 import json
 import sys
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 STAFFML_DATA = Path(__file__).parent.parent / "src" / "data"
-VAULT_DIR = Path(__file__).parent.parent.parent / "vault"
 
 errors: list[str] = []
 warnings: list[str] = []
@@ -35,29 +41,93 @@ def ok(msg: str) -> None:
     print(f"  ✅ {msg}")
 
 
-# ── 1. Load data ─────────────────────────────────────────────
+def run_sparse_validation(taxonomy_path: Path, manifest_path: Path) -> int:
+    """Validate committed JSON when the full bundled corpus is not on disk."""
+    print("\n🔍 Sparse mode (no corpus.json)")
+    print(
+        "   Per-question checks require a build artifact. Regenerate with:\n"
+        "   vault build --vault-dir interviews/vault --release-id <id> --legacy-json\n"
+    )
 
-print("\n🔍 Loading data files...")
+    if not taxonomy_path.exists():
+        error(f"taxonomy.json not found at {taxonomy_path}")
+        return 1
+    if not manifest_path.exists():
+        error(f"vault-manifest.json not found at {manifest_path}")
+        return 1
+
+    with open(taxonomy_path, encoding="utf-8") as f:
+        taxonomy = json.load(f)
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    concepts = taxonomy.get("concepts", [])
+    if not concepts:
+        error("taxonomy has no concepts")
+    else:
+        ok(f"taxonomy: {len(concepts)} concepts")
+
+    qc = manifest.get("questionCount")
+    if qc is None or not isinstance(qc, int) or qc < 1:
+        error("manifest.questionCount missing or invalid")
+    else:
+        ok(f"manifest: questionCount = {qc}")
+
+    td = manifest.get("trackDistribution") or {}
+    if isinstance(td, dict) and td:
+        s = sum(int(v) for v in td.values() if isinstance(v, int))
+        if s != qc:
+            warn(
+                f"trackDistribution sum ({s}) != questionCount ({qc}) — check manifest"
+            )
+        else:
+            ok("trackDistribution sums to questionCount")
+
+    ver = manifest.get("version", "?")
+    h = manifest.get("contentHash", "?")
+    ok(f"Vault v{ver} — hash {h}")
+
+    print(f"\n{'=' * 50}")
+    print(f"  Mode:     sparse (no corpus.json)")
+    print(f"  Errors:   {len(errors)}")
+    print(f"  Warnings: {len(warnings)}")
+    print(f"{'=' * 50}")
+
+    if errors:
+        print("\n❌ Sparse validation failed")
+        return 1
+    print(
+        "\n🎯 Sparse checks passed — for full deploy-grade validation, run vault build "
+        "--legacy-json and re-run this script, or rely on staffml-validate-vault (CI)."
+    )
+    if warnings:
+        print(f"   ({len(warnings)} warnings — review recommended)")
+    return 0
+
+
+# ── 1. Load data ─────────────────────────────────────────────
 
 corpus_path = STAFFML_DATA / "corpus.json"
 taxonomy_path = STAFFML_DATA / "taxonomy.json"
 manifest_path = STAFFML_DATA / "vault-manifest.json"
 
 if not corpus_path.exists():
-    error(f"corpus.json not found at {corpus_path}")
-    sys.exit(1)
+    sys.exit(run_sparse_validation(taxonomy_path, manifest_path))
+
 if not taxonomy_path.exists():
-    error(f"taxonomy.json not found at {taxonomy_path}")
+    print(f"  ❌ taxonomy.json not found at {taxonomy_path}", file=sys.stderr)
     sys.exit(1)
 
-with open(corpus_path) as f:
+print("\n🔍 Loading data files...")
+
+with open(corpus_path, encoding="utf-8") as f:
     corpus = json.load(f)
-with open(taxonomy_path) as f:
+with open(taxonomy_path, encoding="utf-8") as f:
     taxonomy = json.load(f)
 
 manifest = None
 if manifest_path.exists():
-    with open(manifest_path) as f:
+    with open(manifest_path, encoding="utf-8") as f:
         manifest = json.load(f)
 
 ok(f"Loaded {len(corpus)} questions, {len(taxonomy.get('concepts', []))} concepts")
@@ -66,7 +136,15 @@ ok(f"Loaded {len(corpus)} questions, {len(taxonomy.get('concepts', []))} concept
 
 print("\n📋 Schema validation...")
 
-REQUIRED_FIELDS = ["id", "title", "level", "track", "scenario", "competency_area", "details"]
+REQUIRED_FIELDS = [
+    "id",
+    "title",
+    "level",
+    "track",
+    "scenario",
+    "competency_area",
+    "details",
+]
 VALID_LEVELS = {"L1", "L2", "L3", "L4", "L5", "L6", "L6+"}
 VALID_TRACKS = {"cloud", "edge", "mobile", "tinyml", "global"}
 DETAIL_FIELDS = ["common_mistake", "realistic_solution"]
@@ -80,29 +158,24 @@ empty_answers = 0
 for q in corpus:
     qid = q.get("id", "???")
 
-    # Required fields
     for field in REQUIRED_FIELDS:
         if not q.get(field):
             error(f"{qid}: missing required field '{field}'")
             missing_fields += 1
 
-    # Valid level
     if q.get("level") not in VALID_LEVELS:
         error(f"{qid}: invalid level '{q.get('level')}'")
         bad_levels += 1
 
-    # Valid track
     if q.get("track") not in VALID_TRACKS:
         error(f"{qid}: invalid track '{q.get('track')}'")
         bad_tracks += 1
 
-    # Scenario quality
     scenario = q.get("scenario", "")
     if len(scenario.strip()) < 30:
         warn(f"{qid}: scenario too short ({len(scenario)} chars)")
         short_scenarios += 1
 
-    # Answer quality
     details = q.get("details", {})
     for df in DETAIL_FIELDS:
         if not details.get(df) or len(str(details.get(df, "")).strip()) < 5:
@@ -112,7 +185,9 @@ for q in corpus:
 if missing_fields == 0 and bad_levels == 0 and bad_tracks == 0:
     ok("All questions have valid required fields, levels, and tracks")
 else:
-    error(f"{missing_fields} missing fields, {bad_levels} bad levels, {bad_tracks} bad tracks")
+    error(
+        f"{missing_fields} missing fields, {bad_levels} bad levels, {bad_tracks} bad tracks"
+    )
 
 # ── 3. Uniqueness checks ─────────────────────────────────────
 
@@ -139,7 +214,6 @@ if unmapped:
 else:
     ok(f"All {len(corpus_concepts)} corpus concepts exist in taxonomy")
 
-# Check competency areas used in corpus
 corpus_areas = Counter(q.get("competency_area", "???") for q in corpus)
 ok(f"{len(corpus_areas)} competency areas in use")
 
@@ -161,16 +235,6 @@ solo_chains = sum(1 for c in chains.values() if len(c) <= 1)
 if solo_chains > 0:
     warn(f"{solo_chains} single-question chains (should be 2+)")
 
-# Check chain positions are unique + monotonic-by-level.
-#
-# v0.1.2: relaxed the "must be 0..N-1" rule. After deletion of mid-chain
-# members, the published view of a chain can have legitimate gaps
-# (e.g., positions [0, 2, 3] when position 1 was deleted). Position
-# gaps are normal and don't indicate corruption — what matters is:
-# (1) every position is unique within the chain (no two members share
-# a position), and (2) levels are non-decreasing along position
-# (Bloom-monotonic). The strict YAML check (`vault check --strict`)
-# enforces both invariants from the source-of-truth.
 duplicate_chains = 0
 for cid, qs in chains.items():
     pos_list = []
@@ -196,12 +260,16 @@ print("\n📦 Manifest consistency...")
 
 if manifest:
     if manifest.get("questionCount") != len(corpus):
-        error(f"Manifest says {manifest['questionCount']} questions, corpus has {len(corpus)}")
+        error(
+            f"Manifest says {manifest['questionCount']} questions, corpus has {len(corpus)}"
+        )
     else:
         ok(f"Manifest matches corpus: {len(corpus)} questions")
 
     if manifest.get("chainCount") != len(chains):
-        warn(f"Manifest says {manifest['chainCount']} chains, found {len(chains)}")
+        warn(
+            f"Manifest says {manifest['chainCount']} chains, found {len(chains)}"
+        )
 
     ok(f"Vault v{manifest.get('version', '?')} — hash {manifest.get('contentHash', '?')}")
 else:
@@ -214,7 +282,6 @@ print("\n📊 Distribution sanity...")
 level_dist = Counter(q.get("level") for q in corpus)
 track_dist = Counter(q.get("track") for q in corpus)
 
-# Check no track has < 5% of total
 for track, count in track_dist.items():
     pct = count / len(corpus) * 100
     if pct < 2:
@@ -236,8 +303,7 @@ print(f"{'=' * 50}")
 if errors:
     print(f"\n❌ {len(errors)} errors found — vault is NOT deployment-ready")
     sys.exit(1)
-else:
-    print(f"\n🎯 All checks passed — vault is deployment-ready")
-    if warnings:
-        print(f"   ({len(warnings)} warnings — review recommended)")
-    sys.exit(0)
+print("\n🎯 All checks passed — vault is deployment-ready")
+if warnings:
+    print(f"   ({len(warnings)} warnings — review recommended)")
+sys.exit(0)
