@@ -444,9 +444,15 @@ export function mountReadyOverlay(stage, opts = {}) {
     if (started) return;
     started = true;
     root.visible = false;
+    // Critical: in Pixi v8, visible=false does NOT stop event capture. Without
+    // this the overlay keeps swallowing every click meant for the game below.
+    root.eventMode = "none";
     PIXI.Ticker.shared.remove(tick);
     window.removeEventListener("keydown", onKey);
     root.off("pointerdown", onPointer);
+    // Belt-and-suspenders — also detach from the tree so it can't receive events
+    // even if some future code re-enables eventMode.
+    if (root.parent) root.parent.removeChild(root);
     if (opts.onLaunch) opts.onLaunch();
   }
 
