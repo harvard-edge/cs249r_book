@@ -5,8 +5,12 @@
 # -----------------------------------------------------------------------------
 .PHONY: all paper paper-full help paper-clean stats macros figures svgs layout-review clean watch
 
-# Set when the vault is present: enables corpus_stats, generated macros, and data plot PDFs.
-VAULT := $(and $(wildcard ../vault/corpus.json),$(wildcard ../vault/chains.json))
+# paper stats: `analyze_corpus` prefers ../vault/vault.db (D1/ship_d1 lineage), else generated corpus.json
+PAPER_CORPUS := $(firstword $(wildcard ../staffml/src/data/corpus.json) $(wildcard ../vault/corpus.json))
+PAPER_VAULT_DB := $(wildcard ../vault/vault.db)
+# Rebuild from DB alone, or from JSON, or both (make prefers the DB wildcard first when both exist)
+PAPER_DATA_OK := $(or $(PAPER_VAULT_DB),$(PAPER_CORPUS))
+VAULT := $(PAPER_DATA_OK)
 
 # ── Default: convert SVGs → PDF, compile (uses committed macros.tex + data fig PDFs) ─
 all: paper
@@ -19,7 +23,9 @@ paper-full: stats macros figures svgs paper
 	@:
 else
 paper-full:
-	@echo "paper-full requires ../vault/corpus.json and ../vault/chains.json (use 'make paper' with committed macros and figures)"
+	@echo "paper-full needs a stats input: ../vault/vault.db (after vault build) and/or generated corpus.json, plus release tooling for macros."
+	@echo "  (1) vault build  → interviews/vault/vault.db  (optional: vault build --legacy-json for JSON)"
+	@echo "  (2) Or: make paper  using committed macros + corpus_stats + figures (no local build)"
 	@false
 endif
 
@@ -39,10 +45,12 @@ DATA_FIGURES = figures/fig-corpus-distribution.pdf \
 figures: $(DATA_FIGURES)
 
 ifdef VAULT
-corpus_stats.json: ../vault/corpus.json ../vault/chains.json scripts/analyze_corpus.py
+# Chains for JSON path live in ../vault/chains.json; when using only vault.db, chain rows are inside the DB
+corpus_stats.json: $(PAPER_CORPUS) $(PAPER_VAULT_DB) scripts/analyze_corpus.py
 	python3 scripts/analyze_corpus.py
 
-macros.tex: corpus_stats.json ../vault/corpus.json scripts/generate_macros.py
+# macros: SQL over vault.db via export-paper; corpus.json not read here (only stats/figures do)
+macros.tex: corpus_stats.json scripts/generate_macros.py
 	PYTHONPATH=../vault-cli/src python3 scripts/generate_macros.py
 
 $(DATA_FIGURES): corpus_stats.json scripts/generate_figures.py
@@ -90,11 +98,13 @@ clean: paper-clean
 # Rebuild on changes (path to corpus optional — omit if you do not have a local vault)
 watch:
 	fswatch -o paper.tex references.bib tables/app_matrix.tex figures/*.svg \
-	  $(if $(VAULT),../vault/corpus.json ../vault/chains.json) | xargs -n1 -I{} make all
+	  $(if $(VAULT),$(PAPER_CORPUS) $(PAPER_VAULT_DB) ../vault/chains.json) | xargs -n1 -I{} make all
 
 help:
 	@echo "  make, make paper   — rsvg-convert figures/*.svg → .pdf, then pdflatex + bibtex"
-	@echo "  make paper-full    — recompute stats/macros/data figures (needs interviews/vault/corpus.json + chains.json)"
+	@echo "  make paper-full    — recompute stats/macros/data figures (../vault/vault.db or corpus JSON + chains.json)"
+	@echo "  Data figures: prefer vault.db (D1/ship_d1 lineage) → analyze_corpus → corpus_stats → generate_figures"
+	@echo "  Text macros:    vault export-paper (release vault.db) → macros.tex (same build = matching counts)"
 	@echo "  make svgs          — refresh PDFs from SVGs only"
 	@echo "  make paper-clean   — remove paper.pdf and LaTeX aux; keep figures and macros.tex"
 	@echo "  make clean         — also remove generated macros, data figures, and corpus_stats.json"

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate publication-quality data figures for the StaffML paper.
 
-Pipeline: corpus.json → analyze_corpus.py → corpus_stats.json → THIS → PDFs
+Pipeline: generated corpus.json (``vault build --legacy-json``) + chains
+  → analyze_corpus.py → corpus_stats.json → THIS → PDFs
 
 Run: python3 generate_figures.py
   (or: make figures)
@@ -81,7 +82,7 @@ plt.rcParams.update({
     "figure.dpi": 300,
     "savefig.dpi": 300,
     "savefig.bbox": "tight",
-    "savefig.pad_inches": 0.05,
+    "savefig.pad_inches": 0.1,
 })
 
 
@@ -113,9 +114,10 @@ def classify_format(scenario: str) -> list[str]:
 
 # ── Figure 1: Track × Level Heatmap + Competency Bars ───────────
 def fig_corpus_distribution(stats):
+    # Wide enough: heatmap + cbar + row totals, then gap, then bar panel
     fig, (ax_heat, ax_bar) = plt.subplots(
-        1, 2, figsize=(7.0, 3.0), width_ratios=[1.2, 1],
-        gridspec_kw={"wspace": 0.35},
+        1, 2, figsize=(7.8, 3.35), width_ratios=[1.35, 1],
+        gridspec_kw={"wspace": 0.42},
     )
 
     # Heatmap from stats
@@ -125,19 +127,24 @@ def fig_corpus_distribution(stats):
         for j, l in enumerate(LEVELS):
             matrix[i, j] = tlm["data"][t][l]
 
+    # Row sums on the same line as the track (avoids colorbar + extra-column clash)
+    row_totals = [int(matrix[i].sum()) for i in range(len(TRACKS))]
+    y_hm_labels = [f"{t.capitalize()} ({n:,})" for t, n in zip(TRACKS, row_totals)]
+
     sns.heatmap(
         matrix, ax=ax_heat, annot=True, fmt="d",
-        xticklabels=LEVELS, yticklabels=[t.capitalize() for t in TRACKS],
+        xticklabels=LEVELS, yticklabels=y_hm_labels,
         cmap="Blues", linewidths=0.5, linecolor="white",
-        cbar_kws={"label": "Questions", "shrink": 0.8},
+        annot_kws={"size": 7.5},
+        cbar_kws={
+            "label": "Questions",
+            "shrink": 0.72,
+            "pad": 0.04,
+        },
     )
-    # title in LaTeX caption
-
-    # Totals on right
-    for i, t in enumerate(TRACKS):
-        total = matrix[i].sum()
-        ax_heat.text(len(LEVELS) + 0.15, i + 0.5, f"= {total}",
-                     va="center", fontsize=8, color="#555")
+    ax_heat.set_xlabel("Mastery level", labelpad=6)
+    ax_heat.set_ylabel("Deployment track", labelpad=6)
+    ax_heat.tick_params(axis="y", which="major", labelsize=7, rotation=0)
 
     # Competency bar chart from stats
     sorted_areas = list(stats["competency_areas"].items())
@@ -162,15 +169,29 @@ def fig_corpus_distribution(stats):
     ax_bar.set_yticks(range(len(labels)))
     ax_bar.set_yticklabels(labels, fontsize=7.5)
     ax_bar.invert_yaxis()
-    ax_bar.set_xlabel("Questions")
+    ax_bar.set_ylabel("Competency area", labelpad=4)
+    ax_bar.set_xlabel("Questions", labelpad=3)
     # title in LaTeX caption
 
-    # Count labels on bars
+    # Count labels at bar end; expand x so labels do not clip
+    nmax = max(counts) if counts else 0
     for bar, count in zip(bars, counts):
-        ax_bar.text(bar.get_width() + 5, bar.get_y() + bar.get_height() / 2,
-                    str(count), va="center", fontsize=7, color="#555")
+        ax_bar.text(
+            bar.get_width() + 0.02 * nmax,
+            bar.get_y() + bar.get_height() / 2,
+            f"{count:,}",
+            va="center",
+            fontsize=6.5,
+            color="#555",
+        )
+    if nmax:
+        ax_bar.set_xlim(0, nmax * 1.2)
 
     # title in LaTeX caption (removed suptitle)
+    for ax in (ax_heat, ax_bar):
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.8)
+    # No tight_layout: seaborn heatmap + cbar is not always compatible; bbox tight handles margins.
 
     fig.savefig(FIGURES_DIR / "fig-corpus-distribution.pdf")
     print("  Saved figures/fig-corpus-distribution.pdf")
@@ -179,7 +200,8 @@ def fig_corpus_distribution(stats):
 
 # ── Figure 2: Question Format by Level (Stacked Bar) ────────────
 def fig_format_balance(stats):
-    fig, ax = plt.subplots(figsize=(4.5, 3.0))
+    # Legend above axes so it does not collide with two-line x tick labels
+    fig, ax = plt.subplots(figsize=(4.8, 3.55))
 
     formats = ["calculation", "design", "conceptual", "optimization", "diagnosis", "tradeoff"]
     data = {fmt: [] for fmt in formats}
@@ -205,21 +227,40 @@ def fig_format_balance(stats):
         # Label percentages > 10%
         for i, v in enumerate(values):
             if v > 10:
-                ax.text(x[i], bottom[i] + v / 2, f"{v:.0f}%",
-                        ha="center", va="center", fontsize=6.5, color="#333")
+                ax.text(
+                    x[i], bottom[i] + v / 2, f"{v:.0f}%",
+                    ha="center", va="center", fontsize=5.5, color="#333", zorder=3,
+                )
         bottom += values
 
     ax.set_xticks(x)
     xlabels = [f"{l}\n({BLOOM_LABELS[l]})" for l in LEVELS]
-    ax.set_xticklabels(xlabels, fontsize=7.5)
-    ax.set_ylabel("Percentage of Questions")
+    ax.set_xticklabels(xlabels, fontsize=6.5, ma="center")
+    plt.setp(ax.get_xticklabels(), linespacing=1.12)
+    ax.set_ylabel("Percent of questions in level", labelpad=5)
+    ax.set_xlabel("Mastery level", labelpad=4)
     # title in LaTeX caption
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=3, fontsize=7)
     ax.set_ylim(0, 105)
+    ax.set_xlim(x.min() - 0.5, x.max() + 0.5)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(20))
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", linestyle=":", alpha=0.4, linewidth=0.8, zorder=0)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_linewidth(0.8)
+    ax.tick_params(axis="both", which="major", width=0.8, length=3.5)
 
-    # Annotations removed — caption describes the pattern
-
-    fig.savefig(FIGURES_DIR / "fig-format-balance.pdf")
+    ax.legend(
+        loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, fontsize=6.5,
+        frameon=True, framealpha=0.95, edgecolor="#cccccc", fancybox=False,
+    )
+    fig.subplots_adjust(
+        top=0.80,
+        bottom=0.20,
+        left=0.12,
+        right=0.98,
+    )
+    fig.savefig(FIGURES_DIR / "fig-format-balance.pdf", bbox_inches="tight", pad_inches=0.12)
     print("  Saved figures/fig-format-balance.pdf")
     plt.close(fig)
 
@@ -249,19 +290,27 @@ def fig_zone_distribution(stats):
         else:
             zone_colors.append(GREEN)
 
-    fig, ax = plt.subplots(figsize=(4.5, 3.0))
+    cmax = max(counts) if counts else 1
+    fig, ax = plt.subplots(figsize=(4.7, 3.1))
     bars = ax.barh(range(len(labels)), counts, color=zone_colors, alpha=0.85, height=0.7)
     ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels([z.capitalize() for z in labels], fontsize=8)
+    ax.set_yticklabels([z.capitalize() for z in labels], fontsize=7.5)
     ax.invert_yaxis()
-    ax.set_xlabel("Questions")
+    ax.set_xlabel("Questions", labelpad=4)
     # title in LaTeX caption
 
     total = sum(counts)
     for bar, count in zip(bars, counts):
         pct = 100 * count / total
-        ax.text(bar.get_width() + 8, bar.get_y() + bar.get_height() / 2,
-                f"{count:,} ({pct:.1f}%)", va="center", fontsize=7, color="#555")
+        ax.text(
+            bar.get_width() + 0.01 * cmax,
+            bar.get_y() + bar.get_height() / 2,
+            f"{count:,} ({pct:.1f}%)",
+            va="center",
+            fontsize=6.2,
+            color="#555",
+        )
+    ax.set_xlim(0, cmax * 1.14)
 
     # Legend
     from matplotlib.patches import Patch
@@ -270,9 +319,11 @@ def fig_zone_distribution(stats):
         Patch(facecolor=GREEN, alpha=0.85, label="Compound (two skills)"),
         Patch(facecolor=CRIMSON, alpha=0.85, label="Mastery (all four)"),
     ]
-    ax.legend(handles=legend_elements, loc="lower right", fontsize=7)
-
-    fig.savefig(FIGURES_DIR / "fig-zone-distribution.pdf")
+    ax.legend(handles=legend_elements, loc="lower right", fontsize=6.5, frameon=True, framealpha=0.95)
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+    fig.subplots_adjust(left=0.22, right=0.98, top=0.98, bottom=0.12)
+    fig.savefig(FIGURES_DIR / "fig-zone-distribution.pdf", bbox_inches="tight", pad_inches=0.1)
     print("  Saved figures/fig-zone-distribution.pdf")
     plt.close(fig)
 
@@ -297,19 +348,26 @@ def fig_zone_level_heatmap(stats):
         for j, l in enumerate(LEVELS):
             matrix[i, j] = zlm.get(z, {}).get(l, 0)
 
-    fig, ax = plt.subplots(figsize=(4.5, 3.0))
+    fig, ax = plt.subplots(figsize=(4.7, 3.5))
     sns.heatmap(
         matrix, ax=ax, annot=True, fmt="d",
         xticklabels=LEVELS,
         yticklabels=[z.capitalize() for z in ZONES_ORDERED],
-        cmap="YlOrRd", linewidths=0.5, linecolor="white",
-        cbar_kws={"label": "Questions", "shrink": 0.8},
+        cmap="YlOrRd", linewidths=0.4, linecolor="white",
+        annot_kws={"size": 5.5},
+        cbar_kws={"label": "Questions", "shrink": 0.68, "pad": 0.02},
     )
-    # title in LaTeX caption
-    ax.set_xlabel("Mastery Level")
-    ax.set_ylabel("Cognitive Zone")
+    # title in LaTeX caption — match typography with other data figures
+    ax.set_xlabel("Mastery level", labelpad=5)
+    ax.set_ylabel("Cognitive zone", labelpad=5)
+    ax.tick_params(axis="x", which="major", labelsize=7.5)
+    ax.tick_params(axis="y", which="major", labelsize=6.0, pad=2)
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
+    # Leave room for 11 y-labels and colorbar; avoid tight_layout+heatmap cbar glitches
+    fig.subplots_adjust(left=0.22, right=0.90, top=0.98, bottom=0.12)
 
-    fig.savefig(FIGURES_DIR / "fig-zone-level-heatmap.pdf")
+    fig.savefig(FIGURES_DIR / "fig-zone-level-heatmap.pdf", bbox_inches="tight", pad_inches=0.1)
     print("  Saved figures/fig-zone-level-heatmap.pdf")
     plt.close(fig)
 
@@ -319,7 +377,35 @@ def main():
     print("Generating paper figures from corpus_stats.json...\n")
     stats = load_stats()
     print(f"  Published: {stats['summary']['published']}")
-    print(f"  Chains: {stats['summary']['chains_total']}\n")
+    print(f"  Chains: {stats['summary']['chains_total']}")
+    meta = stats.get("_meta", {})
+    if meta:
+        sk = meta.get("source", "unknown")
+        print(
+            f"  Provenance: {meta.get('generated_utc', '?')} "
+            f"({meta.get('pipeline', 'analyze_corpus')})  [source={sk}]"
+        )
+        m = meta.get("data") or meta.get("corpus")
+        if m and isinstance(m, dict) and m.get("sha256_12"):
+            print(
+                f"    {m.get('path', 'data')}: {m.get('bytes', 0):,} bytes, "
+                f"sha256…{m['sha256_12']}"
+            )
+            if m.get("resolved_path"):
+                print(f"      ← {m['resolved_path']}")
+        for key in ("chains_registry", "taxonomy_data_yaml", "chains"):
+            m2 = meta.get(key)
+            if m2 and isinstance(m2, dict) and m2.get("sha256_12") and key != "data":
+                print(
+                    f"    {m2.get('path', key)}: {m2.get('bytes', 0):,} bytes, "
+                    f"sha256…{m2['sha256_12']}"
+                )
+    else:
+        print(
+            "  [Hint] Re-run `python3 scripts/analyze_corpus.py` after changing the vault to "
+            "record `_meta` (input file fingerprints) in corpus_stats.json."
+        )
+    print()
 
     fig_corpus_distribution(stats)
     fig_format_balance(stats)

@@ -286,7 +286,7 @@ Each wall cites the foundational paper for its core equation.
 - **Where**: L214, L490, L588, L820
 - **Verdict**: ✅ Central to the algorithmic scaling domain.
 
-### `snell2024scaling` — Snell et al., "Scaling LLM Test-Time Compute" (ICLR 2025)
+### `snell2025scaling` — Snell et al., "Scaling LLM Test-Time Compute" (ICLR 2025)
 - **What they did**: Showed that scaling inference-time compute (chain-of-thought, tree search) can be more effective than scaling model parameters.
 - **Why we cite it**: Source for Wall 12 (Reasoning) — $T = K \times T_{step}$. Also motivates the CoT cost multiplier use case.
 - **Where**: L215, L597, L602
