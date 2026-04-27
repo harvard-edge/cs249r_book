@@ -4,18 +4,21 @@ name: '🧮 MLSYSIM · 📑 Update PDFs'
 # MLSYSIM — PDF-Only Update (No Site Rebuild)
 # =============================================================================
 #
-# Rebuilds and deploys the MLSYSIM research paper PDF directly to gh-pages
-# without touching the website. Use when only the paper content has changed.
+# Rebuilds and deploys the MLSYSIM research paper PDF and tutorial slide PDFs
+# directly to gh-pages without touching the website. Use when only the PDF
+# content has changed.
 #
 # Flow:
-#   1. BUILD_PAPER — Compile paper PDF (reusable workflow, from dev)
-#   2. DEPLOY_PDF  — Copy PDF into gh-pages/{DEV_MLSYSIM_PATH}/
+#   1. BUILD_PDFS — Compile paper + slide PDFs (reusable workflow, from dev)
+#   2. DEPLOY_PDFS — Copy PDFs into gh-pages/{DEV_MLSYSIM_PATH}/
 #   3. SUMMARY     — Build status report
 #
 # Triggers:
 #   - workflow_dispatch: manual only
 #
 # Deploys to: mlsysbook.ai/mlsysim/mlsysim-paper.pdf
+#             mlsysbook.ai/mlsysim/tutorial_part1.pdf
+#             mlsysbook.ai/mlsysim/tutorial_part2.pdf
 # Secrets:    GITHUB_TOKEN
 # Vars:       DEV_MLSYSIM_PATH
 #
@@ -36,17 +39,17 @@ permissions:
   contents: write
 
 jobs:
-  build-paper:
-    name: '📄 Build Research Paper'
+  build-pdfs:
+    name: '📄 Build PDFs'
     uses: ./.github/workflows/mlsysim-build-pdfs.yml
     with:
       ref: dev
 
-  deploy-pdf:
-    name: '🚀 Deploy PDF to gh-pages'
+  deploy-pdfs:
+    name: '🚀 Deploy PDFs to gh-pages'
     runs-on: ubuntu-latest
-    needs: [build-paper]
-    if: needs.build-paper.result == 'success'
+    needs: [build-pdfs]
+    if: needs.build-pdfs.result == 'success'
 
     steps:
       - name: 📥 Checkout gh-pages
@@ -61,11 +64,17 @@ jobs:
           name: MLSYSIM-Paper
           path: ./artifacts/paper
 
-      - name: 📁 Update PDF in gh-pages
+      - name: 📥 Download Tutorial Slides
+        uses: actions/download-artifact@v8
+        with:
+          name: MLSYSIM-Slides
+          path: ./artifacts/slides
+
+      - name: 📁 Update PDFs in gh-pages
         run: |
           cd gh-pages
 
-          # Place PDF where the docs site expects it
+          # Place PDFs where the docs site expects them
           DEST="${{ vars.DEV_MLSYSIM_PATH }}"
           mkdir -p "$DEST"
 
@@ -77,9 +86,20 @@ jobs:
             exit 1
           fi
 
+          for part in tutorial_part1 tutorial_part2; do
+            src="../artifacts/slides/${part}.pdf"
+            if [ -f "$src" ]; then
+              cp "$src" "$DEST/${part}.pdf"
+              echo "✅ Updated ${part}.pdf in $DEST/"
+            else
+              echo "❌ ${part}.pdf not found in artifacts"
+              exit 1
+            fi
+          done
+
           echo ""
           echo "📦 Updated files:"
-          ls -la "$DEST/mlsysim-paper.pdf"
+          ls -la "$DEST/mlsysim-paper.pdf" "$DEST/tutorial_part1.pdf" "$DEST/tutorial_part2.pdf"
 
       - name: 🚀 Push to gh-pages
         working-directory: gh-pages
@@ -88,13 +108,13 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add .
-          git commit -m "📄 Update MLSYSIM paper PDF" || echo "No changes to commit"
+          git commit -m "📄 Update MLSYSIM PDFs (paper + tutorial slides)" || echo "No changes to commit"
           git push origin gh-pages
 
   summary:
     name: '📊 Summary'
     runs-on: ubuntu-latest
-    needs: [build-paper, deploy-pdf]
+    needs: [build-pdfs, deploy-pdfs]
     if: always()
 
     steps:
@@ -104,5 +124,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Step | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📄 Build Paper | ${{ needs.build-paper.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🚀 Deploy PDF | ${{ needs.deploy-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📄 Build PDFs | ${{ needs.build-pdfs.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🚀 Deploy PDFs | ${{ needs.deploy-pdfs.result }} |" >> $GITHUB_STEP_SUMMARY

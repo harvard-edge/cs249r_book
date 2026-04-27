@@ -71,17 +71,25 @@ $(PDF_IMG_DIR):
 	@mkdir -p $@
 
 # --- Slide compilation ---
-slides: $(BUILD_DIR)/tutorial.pdf  ## Build the slide deck PDF
+# Build both decks. Each .tex is compiled twice so cross-references resolve.
+# The output is BUILD_DIR/<name>.pdf (xelatex -output-directory writes there).
+slides: $(BUILD_DIR)/tutorial_part1.pdf $(BUILD_DIR)/tutorial_part2.pdf  ## Build both tutorial deck PDFs
 
-$(BUILD_DIR)/tutorial.pdf: $(PART1) $(PART2) $(RELATED) $(PDFS) | $(BUILD_DIR)
-	@echo "Building tutorial slides..."
+$(BUILD_DIR)/tutorial_part1.pdf: $(PART1) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Part 1 (Parts 0-4)..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
 	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part1.tex
 	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part1.tex
-	@echo "Tutorial PDF: $(BUILD_DIR)/tutorial_part1.pdf"
-	@echo ""
-	@echo "NOTE: Part 1 and Part 2 are separate decks."
-	@echo "  Part 1 (Parts 0-4): $(BUILD_DIR)/tutorial_part1.pdf"
-	@echo "  Part 2 (Parts 5-9): Build with: cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part2.tex"
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_part1.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR)/tutorial_part2.pdf: $(PART2) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Part 2 (Parts 5-9)..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part2.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part2.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_part2.pdf $@
+	@echo "  ✓ $@"
 
 $(BUILD_DIR):
 	@mkdir -p $@
