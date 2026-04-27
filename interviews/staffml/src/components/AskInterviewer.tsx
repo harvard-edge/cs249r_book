@@ -36,8 +36,12 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 
+// Default to the production worker so local dev exercises the same hosted AI
+// path as deployed (the worker's CORS allowlist already permits localhost).
+// Override with NEXT_PUBLIC_INTERVIEWER_ENDPOINT to point at a different worker.
+const DEFAULT_INTERVIEWER_ENDPOINT = "https://mlsysbook.ai/api/staffml-interviewer";
 const INTERVIEWER_ENDPOINT =
-  process.env.NEXT_PUBLIC_INTERVIEWER_ENDPOINT?.replace(/\/+$/, "") || "";
+  process.env.NEXT_PUBLIC_INTERVIEWER_ENDPOINT?.replace(/\/+$/, "") || DEFAULT_INTERVIEWER_ENDPOINT;
 
 // The same Socratic constraint enforced in the Worker. Embedded here so the
 // Copy-as-prompt output carries it into whatever LLM the user pastes into.
@@ -461,7 +465,7 @@ Please answer each as the interviewer.`;
                 : "Ask a clarifying question — e.g. 'what's the latency budget?' or 'how many concurrent users?'"
             }
             rows={2}
-            className="w-full bg-background border border-border rounded-md p-2 font-mono text-[11px] text-textPrimary resize-none focus:outline-none focus:border-accentBlue/50 placeholder:text-textTertiary/60 leading-relaxed"
+            className="w-full bg-background border border-border rounded-md p-2 font-mono text-[11px] text-textPrimary resize-none focus:outline-none focus:border-accentBlue/50 placeholder:text-textTertiary leading-relaxed"
             spellCheck={false}
             disabled={busy}
           />
@@ -494,7 +498,7 @@ Please answer each as the interviewer.`;
           {/* Privacy footer — shows the social contract at the point of
               action. HOSTED mode now includes the waitlist CTA so the
               "would you pay for this?" signal is always capturable. */}
-          <div className="mt-3 pt-2 border-t border-borderSubtle flex items-start gap-1.5 text-[9px] text-textTertiary leading-relaxed">
+          <div className="mt-3 pt-2 border-t border-borderSubtle flex items-start gap-1.5 text-[10px] text-textSecondary leading-relaxed">
             <AlertTriangle className="w-2.5 h-2.5 shrink-0 mt-0.5" />
             <span>
               {HOSTED_AVAILABLE ? (
