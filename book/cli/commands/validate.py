@@ -136,6 +136,7 @@ class ValidateCommand:
             ("cross-refs", "_run_refs"),
             ("citations", "_run_citations"),
             ("duplicate-year", "_run_duplicate_citation_year"),  # "[@foo1964] (1964)" → redundant year
+            ("manual-bracket", "_run_manual_bracket_citation"),  # *et al.*(…) or *A & B*(…) + [@k] — citeproc dup
             ("inline", "_run_inline_refs"),
             ("self-ref", "_run_self_referential"),
             ("capitalized", "_run_mitpress_capitalized_refs"),  # "chapter 12" lowercase in prose
@@ -954,8 +955,7 @@ class ValidateCommand:
         dup_year = re.compile(r"\[-?@[^\]]+\]\s*\((1[89]\d{2}|20\d{2})\)")
 
         for file in files:
-            content = self._read_text(file)
-            lines = content.splitlines()
+            lines = self._read_text(file).splitlines()
             in_code = False
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
@@ -987,6 +987,101 @@ class ValidateCommand:
         return ValidationRunResult(
             name="duplicate-citation-year",
             description='Flag "[@citekey] (YEAR)" — citation already carries the year',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+
+    def _run_manual_bracket_citation(self, root: Path) -> ValidationRunResult:
+        """Flag a hand-typed author/venue line before a bracket cite on the same run.
+
+        Citeproc already renders names and (usually) year from `[@key]`. Writing
+        "Jeon et al. (ATC 2019) [@jeon2019analysis]" or "Cohen & Welling (2016) [@c]"
+        duplicates the in-text citation. Prefer only [@key] / [@a; @b], or
+        narrative @key, without a parallel hand-typed attribution in front.
+
+        Shapes we flag (prose, not code fences; inline backticks scrubbed first):
+
+        - *et al.* (…) … [@ — the common *venue/year* lead-in
+        - ``Surname & Surname (…)`` … [@ — two capitalized surnames joined by &
+
+        We do **not** flag acronyms in parentheses that are not *author* lines, e.g.
+        "DARTS (Differentiable …) [@liu2019darts]": that has no *et al.* and no
+        *Word & Word* before the paren. Fenced code and inline backtick docs
+        of anti-patterns are skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # "… et al. ( … ) [@"  — chains: "A et al. (x) [@a], B et al. (y) [@b]"
+        et_al_bracket = re.compile(
+            r"et al\.\s*\([^)\n]{0,500}\)\s*,?\s*\[@",
+            re.IGNORECASE,
+        )
+        # "Cohen & Welling (ReCOL 2016) [@"  — two Titlecase tokens and & (surname style)
+        two_surname_amp_bracket = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]*\s+&\s+[A-Z][a-z][a-zA-Z'-]*\s*"
+            r"\([^)\n]{0,500}\)\s*,?\s*\[@"
+        )
+        # Same issue code: message differentiates
+        def issue_et_al(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-written *et al.* (…) before a bracket cite—use only [@key] "
+                    "(or @key in narrative prose), not both. Citeproc already expands "
+                    "the key; drop the parenthetical name/venue you typed before [."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_ampersand(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *Author & Author* (…) before a bracket cite—use only "
+                    "[@key] (or @key in narrative), not both. Citeproc already prints "
+                    "names from the key; drop the duplicate author line."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                scrubbed = re.sub(r"`[^`]+`", "", line)
+                for m in et_al_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_et_al(file, idx, context))
+                for m in two_surname_amp_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_ampersand(file, idx, context))
+
+        return ValidationRunResult(
+            name="manual-bracket",
+            description="Flag hand-typed author (…) + [@key] on one line (citeproc duplicate)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
