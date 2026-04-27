@@ -1,0 +1,1 @@
+import{n as p}from"./src-CmKhyEBC.js";var l=p(({flowchart:t})=>{var i,o;let r=((i=t==null?void 0:t.subGraphTitleMargin)==null?void 0:i.top)??0,a=((o=t==null?void 0:t.subGraphTitleMargin)==null?void 0:o.bottom)??0;return{subGraphTitleTopMargin:r,subGraphTitleBottomMargin:a,subGraphTitleTotalMargin:r+a}},"getSubGraphTitleMargins");export{l as t};

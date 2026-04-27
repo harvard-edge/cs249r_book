@@ -1,0 +1,1 @@
+import{n as r}from"./src-CmKhyEBC.js";function l(i,c){var e,a,o;i.accDescr&&((e=c.setAccDescription)==null||e.call(c,i.accDescr)),i.accTitle&&((a=c.setAccTitle)==null||a.call(c,i.accTitle)),i.title&&((o=c.setDiagramTitle)==null||o.call(c,i.title))}r(l,"populateCommonDb");export{l as t};
