@@ -9,12 +9,12 @@ from .provenance import TraceableConstant
 
 # --- Reliability (Component MTTF) ---
 # Mean Time To Failure for datacenter-grade components.
-# Source: Meta (2024), Google (2024), Barroso et al. (2018)
+# Traceability: Kokolis et al. (HPCA 2025), Zu et al. (NSDI 2024), Barroso et al. (DASC 3e) — see appendix_reliability.qmd @tbl-component-fit
 GPU_MTTF_HOURS = TraceableConstant(
     50_000,
     name="GPU Mean Time To Failure",
     description="Steady-state MTTF for datacenter-grade GPU in continuous operation.",
-    citation="Meta (2024), Google (2024), Barroso et al. (2018)"
+    citation="kokolis2025reliability, zu2024tpuv4, barroso2019datacenter (MLSysBook appendix)",
 )
 NIC_MTTF_HOURS = 150_000           # Network interface card
 PSU_MTTF_HOURS = 100_000           # Power supply unit
