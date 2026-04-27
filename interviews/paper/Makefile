@@ -52,13 +52,21 @@ corpus_stats.json: $(PAPER_CORPUS) $(PAPER_VAULT_DB) scripts/analyze_corpus.py
 # macros: SQL over vault.db via export-paper; corpus.json not read here (only stats/figures do)
 macros.tex: corpus_stats.json scripts/generate_macros.py
 	PYTHONPATH=../vault-cli/src python3 scripts/generate_macros.py
-
-$(DATA_FIGURES): corpus_stats.json scripts/generate_figures.py
-	python3 scripts/generate_figures.py
 endif
 
+# Data figures regenerate whenever corpus_stats.json or the script changes,
+# regardless of VAULT — corpus_stats.json is committed, so this rule fires
+# even on a clean checkout. Side effect: every `make paper` builds these
+# figures from source rather than relying on a possibly-stale committed PDF.
+$(DATA_FIGURES): corpus_stats.json scripts/generate_figures.py
+	python3 scripts/generate_figures.py
+
 # ── Step 3: Convert SVGs to PDFs ─────────────────────────────────────────────
-SVG_SOURCES = $(wildcard figures/*.svg)
+# Filter out data-figure stems: those PDFs are produced by generate_figures.py,
+# and a stale .svg of the same name would otherwise win via the pattern rule
+# below (with FORCE) and overwrite the matplotlib output on every build.
+DATA_FIGURE_SVG_SHADOWS = $(DATA_FIGURES:.pdf=.svg)
+SVG_SOURCES = $(filter-out $(DATA_FIGURE_SVG_SHADOWS),$(wildcard figures/*.svg))
 
 SVG_PDFS = $(SVG_SOURCES:.svg=.pdf)
 
