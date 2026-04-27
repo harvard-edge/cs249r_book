@@ -42,19 +42,22 @@ PORT = 3000
 # and optionally a visible-text assertion in `ASSERT_CONTAINS`.
 ROUTES = [
     "/",
-    "/practice.html",
-    "/plans.html",
-    "/gauntlet.html",
-    "/about.html",
-    "/progress.html",
+    "/practice/",
+    "/plans/",
+    "/gauntlet/",
+    "/about/",
+    "/progress/",
 ]
 
 # After load, assert these substrings appear somewhere in document.body.
 # Catches "page loads but content missing" — exactly the failure mode
 # of the hydration shape-mismatch bug.
+# next.config.mjs sets `trailingSlash: true`, so the canonical URLs are
+# /<page>/ (served as <page>/index.html); the legacy /<page>.html paths
+# return 404.
 ASSERT_CONTAINS: dict[str, list[str]] = {
-    "/practice.html": ["Practice"],      # title at minimum
-    "/about.html":    ["StaffML"],
+    "/practice/": ["Practice"],      # title at minimum
+    "/about/":    ["StaffML"],
 }
 
 # Console errors whose text matches any of these substrings are ignored.
