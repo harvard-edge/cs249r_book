@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: cloud-4368
+track: cloud
+level: L4
+zone: analyze
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: both
+title: ROCm vs CUDA Ecosystem Overhead for MI300X Deployment
+scenario: A team evaluating MI300X for production serving finds that vLLM on ROCm
+  achieves 85% of the throughput of vLLM on H100 despite the MI300X having 58% more
+  memory bandwidth. A CUDA kernel profiler shows the H100 run uses FlashAttention-2
+  (custom CUDA kernel), while the ROCm run falls back to a naive attention implementation.
+  Quantify the performance gap attributable to software maturity vs hardware capability,
+  and estimate the timeline to close it.
+question: How much of the 85% MI300X vLLM throughput is a ROCm kernel gap versus hardware
+  capability, and what is expected with FlashAttention on ROCm?
+details:
+  realistic_solution: 'FlashAttention-2 impact: naive attention is O(N²) memory I/O
+    (materializes full N×N attention matrix per head). FlashAttention-2 is O(N) memory
+    I/O via tiled SRAM-based computation. For N=2048 with 64 heads, naive attention
+    writes/reads N²×num_heads×2bytes = 2048²×64×2 = 512 MB per layer per forward pass.
+    FlashAttention-2: tiles fit in SRAM, reduces to ~67 MB per layer. Bandwidth savings:
+    ~7.6×. If H100 uses FlashAttention-2 and MI300X falls back to naive: H100 effective
+    attention BW use: 67 MB per layer. MI300X: 512 MB per layer. On H100: 67 MB /
+    3,350 GB/s = 0.02ms/layer. On MI300X: 512 MB / 5,300 GB/s = 0.097ms/layer. MI300X
+    is ~5× slower on attention despite superior bandwidth — this largely explains
+    the 85% throughput gap. With proper FlashAttention on ROCm: expected MI300X throughput
+    = 1.58× H100.'
+  common_mistake: Attributing hardware capability differences when the bottleneck
+    is clearly software (kernel availability). The roofline analysis shows MI300X
+    should be faster, so any throughput deficit is a software/ecosystem issue, not
+    a hardware limitation.
+  napkin_math: 'Attention FLOPs for 70B, N=2048, 80 layers: naive attention memory
+    = N² × num_heads × L × 2 bytes (attention scores, not N²×d). For 64 heads: N²×64×80×2
+    = 4M×64×80×2 = 42.9 GB — impossible to materialize. Scaled to single layer (batch=1):
+    N²×64×2 = 4M×128 = 512MB per layer. FlashAttention: uses SRAM tiles, memory traffic
+    ≈ 2×N×d_head×num_heads×2 = 2×2048×128×64×2 = 67MB per layer — 7.6× less. The real
+    gain is avoiding slow HBM random access. Without FlashAttention on ROCm, HBM access
+    patterns are suboptimal.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Naive attention memory formula is incorrect. It scales by the hidden dimension `d`
+  (N²×d×L×2 bytes), but the attention map memory should only scale by the number of
+  heads (N²×num_heads×L×2 bytes).
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

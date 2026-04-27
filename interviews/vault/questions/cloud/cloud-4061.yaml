@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-4061
+track: cloud
+level: L4
+zone: design
+topic: rdma-transport
+competency_area: networking
+bloom_level: create
+phase: both
+title: Zero-Copy RDMA for Gradient Transfer
+scenario: 'In traditional TCP networking, gradient data follows the path: GPU VRAM
+  → PCIe → CPU memory → kernel network stack → NIC DMA → wire. RDMA eliminates most
+  of these copies. Design the zero-copy RDMA data path for a gradient AllReduce between
+  two MI300X GPUs in different nodes, specifying each memory registration and data
+  movement step.'
+question: What zero-copy GPUDirect RDMA data path would you use for gradient AllReduce
+  between two MI300X GPUs in different nodes?
+details:
+  realistic_solution: 'Zero-copy RDMA path with GPUDirect RDMA: (1) Memory registration:
+    GPU allocates gradient buffer in HBM (192GB on MI300X). The RDMA driver maps a
+    region of GPU VRAM into the HCA''s address space via PCIe BAR1 mapping. This creates
+    an MR (Memory Region) with lkey/rkey for RDMA access. Cost: one-time setup, ~100μs.
+    (2) Sender posts RDMA Write Work Request (WR) to the Send Queue, specifying: source
+    = GPU VRAM address, destination = remote GPU VRAM address + rkey, length = gradient
+    chunk size. (3) HCA DMA engine reads gradient data directly from GPU VRAM via
+    PCIe Gen5 (64 GB/s per x16 link). Data goes from MI300X HBM → infinity fabric
+    → PCIe root complex → HCA. (4) HCA segments data into IB packets, adds headers,
+    sends over 400Gbps link. (5) Remote HCA receives packets, DMAs directly into remote
+    GPU VRAM via PCIe, writing to the pre-registered MR. (6) Remote GPU can immediately
+    use the data — no CPU involvement on either side. Total copies: 0 CPU-memory copies
+    (true zero-copy). CPU involvement: 0 (HCA processes WRs in hardware). Bottleneck:
+    PCIe Gen5 x16 = 64 GB/s per direction, while MI300X HBM = 5.3 TB/s — the PCIe
+    link is 83× slower than HBM.'
+  common_mistake: Assuming RDMA directly accesses GPU VRAM across the network. Standard
+    RDMA (IB verbs) operates on host memory. GPU-to-GPU RDMA requires GPUDirect RDMA,
+    which maps GPU VRAM BAR space into the RDMA subsystem's address space — an additional
+    registration step beyond standard RDMA memory registration.
+  napkin_math: 'Traditional TCP path: GPU→CPU (32 GB/s PCIe) + 2 kernel copies (each
+    ~20 GB/s) + CPU→NIC (32 GB/s) = 4 copies, effective throughput ~10 GB/s. RDMA
+    zero-copy: GPU→NIC (64 GB/s PCIe Gen5) = 1 DMA, effective throughput ~50 GB/s
+    (400Gbps line rate). 5× faster plus CPU is free for computation.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

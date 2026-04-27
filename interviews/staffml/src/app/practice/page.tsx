@@ -11,6 +11,10 @@ import clsx from "clsx";
 import HardwareRef from "@/components/HardwareRef";
 import { ScenarioSkeleton } from "@/components/ScenarioSkeleton";
 import NapkinCalc from "@/components/NapkinCalc";
+// Legacy ID redirect map (cloud-balance-* → cloud-NNNN, etc.). Built by
+// rename_legacy_ids.py on 2026-04-25; preserves shareable links to the
+// 4,754 cohort-tagged IDs that were renamed to the clean form.
+import idRedirects from "@/data/id-redirects.json";
 import AskInterviewer from "@/components/AskInterviewer";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
@@ -267,7 +271,18 @@ function PracticePage() {
     // Direct question link: ?q=<id> — load that specific question
     const qParam = searchParams.get('q');
     if (qParam) {
-      const directQ = getQuestionById(qParam);
+      let directQ = getQuestionById(qParam);
+      // Fallback: legacy cohort-tagged IDs (cloud-fill-*, cloud-cell-*, ...)
+      // were renamed to clean <track>-NNNN form on 2026-04-25. The redirect
+      // map preserves access to old shared links — try resolving the param
+      // through it before deciding the question is unknown.
+      if (!directQ) {
+        const redirects = (idRedirects as { redirects: Record<string, string> }).redirects;
+        const newId = redirects[qParam];
+        if (newId) {
+          directQ = getQuestionById(newId);
+        }
+      }
       if (directQ) {
         // React batches track/level/area setState calls into ONE re-render,
         // so the filter-change effect fires exactly once from the mount

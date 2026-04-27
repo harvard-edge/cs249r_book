@@ -9,7 +9,8 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
   const state = {
     score: 0,
     health: 100,
-    gameOver: false
+    gameOver: false,
+    started: false
   };
   
   const container = new PIXI.Container();
@@ -68,9 +69,19 @@ window.MLSP.games.roofline = async function(canvas, callbacks) {
   container.addChildAt(trail, 0);
   const history = [];
   
+  // Pre-game READY overlay
+  runtime.mountReadyOverlay(stage, {
+    width: width, height: height,
+    title: "ROOFLINE RIDER",
+    goal: "Stay under the cyan ceiling — that's your hardware roof.",
+    controls: "↑ ↓  steer · dodge orange walls",
+    onLaunch: () => { state.started = true; }
+  });
+
   onTick((dt) => {
+    if (!state.started) return;
     if (state.gameOver) return;
-    
+
     if (keys.ArrowUp) py -= dt * 0.25;
     if (keys.ArrowDown) py += dt * 0.25;
     

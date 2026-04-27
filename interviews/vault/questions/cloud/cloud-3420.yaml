@@ -1,0 +1,72 @@
+schema_version: '1.0'
+id: cloud-3420
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Diagnosing Tensor Parallelism Bottlenecks on NVIDIA H100 for LLMs
+scenario: You are managing the training of a 175-billion parameter Large Language
+  Model (LLM) using tensor parallelism on a cluster of NVIDIA H100 GPUs. Each H100
+  boasts 80 GB HBM3 memory, 989 TFLOPS FP16 dense performance, and 3.35 TB/s HBM bandwidth.
+  Your current setup employs an 8-way tensor parallelism scheme for specific large
+  layers, distributing different parts of the weight matrices and activations across
+  8 H100s. After an initial warm-up, you observe that the GPU utilization across these
+  8 H100s, while high, is not leading to the expected training throughput. Specifically,
+  `nvprof` or NSight reports show periods of low compute utilization interleaved with
+  bursts of high memory bandwidth usage, but not sustained compute. The inter-GPU
+  communication fabric (NVLink/PCIe) shows significant activity. You suspect a bottleneck
+  related to your tensor parallelism implementation. How would you diagnose the root
+  cause of this underperformance, considering the H100's capabilities and typical
+  tensor parallelism challenges?
+question: How would you diagnose tensor-parallel underperformance across 8 H100s with
+  low compute utilization and heavy inter-GPU communication?
+details:
+  realistic_solution: 'The diagnosis should start with profiling the kernel execution
+    and communication patterns. Use `nvprof` or NVIDIA NSight Compute/Systems to get
+    a detailed timeline. Look for: 1. **Communication hotspots**: Identify which collective
+    operations are taking the longest. Are they balanced? 2. **Compute-Communication
+    Overlap**: Verify if communication is truly overlapping with computation. If not,
+    analyze the tensor parallelism library (e.g., Megatron-LM, FSDP) to ensure asynchronous
+    communication calls are correctly implemented and placed. 3. **Memory Access Patterns**:
+    Ensure data is accessed optimally from HBM3 to maximize the 3.35 TB/s bandwidth
+    without causing stalls. 4. **Micro-benchmarking**: Isolate and benchmark the collective
+    operations on your specific cluster to understand baseline performance. 5. **Topology**:
+    Verify the NVLink/PCIe topology and ensure the 8 H100s involved in tensor parallelism
+    are optimally connected to minimize latency.'
+  common_mistake: A common mistake is assuming uniform communication overhead. Often,
+    developers overlook the specific collective communication primitives used (e.g.,
+    `all-reduce` vs. `all-gather` vs. `reduce-scatter` in PyTorch's `DistributedDataParallel`
+    or Megatron-LM's tensor parallelism) and their interaction with the network topology
+    and H100's high bandwidth. They might also improperly size the tensor chunks,
+    leading to an unfavorable computation-to-communication ratio, or fail to overlap
+    communication with computation effectively.
+  napkin_math: Let's assume an `all-reduce` operation on a 1GB tensor across 8 H100s.
+    With a theoretical HBM3 bandwidth of 3.35 TB/s, and a realistic inter-GPU bandwidth
+    (e.g., 600 GB/s for NVLink between peers). For `all-reduce`, each GPU sends 7/8
+    of the data and receives 7/8. So, total data communicated per GPU is approximately
+    `2 * (N-1)/N * TensorSize`. For N=8, `2 * 7/8 * 1GB = 1.75GB`. At 600 GB/s, this
+    would ideally take `1.75 GB / 600 GB/s = 0.0029 seconds` or `2.9 milliseconds`.
+    If your profiler shows communication phases lasting significantly longer, say
+    10ms-50ms, then communication is indeed a bottleneck, and the effective bandwidth
+    is much lower than expected. The discrepancy indicates either network saturation,
+    contention, or non-optimal collective implementation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

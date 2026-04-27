@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, flash, burst, floatText } from "./runtime.mjs";
+import { mountPixiOnCanvas, flash, burst, floatText, mountReadyOverlay } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
@@ -10,6 +10,7 @@ export async function mountKVCache(canvas, opts = {}) {
 
   let score = 0;
   let over = false;
+  let started = false;
   let timeElapsed = 0;
   const TOTAL_TIME = 50;
 
@@ -127,7 +128,7 @@ export async function mountKVCache(canvas, opts = {}) {
   }
 
   function handleGridClick(r, c) {
-    if (over) return;
+    if (!started || over) return;
 
     if (!pagedMode) {
       // Phase 1: Needs contiguous space in the clicked row
@@ -185,7 +186,7 @@ export async function mountKVCache(canvas, opts = {}) {
   }
 
   function defrag() {
-    if (!pagedMode || over) return;
+    if (!started || !pagedMode || over) return;
     for (let r = 0; r < ROWS; r++) {
       let writeC = 0;
       for (let readC = 0; readC < COLS; readC++) {
@@ -209,8 +210,18 @@ export async function mountKVCache(canvas, opts = {}) {
   };
   window.addEventListener("keydown", handleKeydown);
 
+  // Pre-game READY overlay
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "KV CACHE PACKER",
+    goal: "Pack incoming requests. Beat fragmentation.",
+    controls: "CLICK to place · SPACE to defrag · R  retry",
+    onLaunch: () => { started = true; }
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!started) return;
     if (over) return;
 
     timeElapsed += dt / 1000;

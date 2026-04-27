@@ -12,6 +12,7 @@ are rebuilt from the plural `chains: [{id, position}]` YAML list.
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -220,4 +221,59 @@ def copy_visual_assets(vault_dir: Path, staffml_public_dir: Path) -> dict[str, A
     return {"copied": copied, "deleted": deleted, "total_assets": len(source_files)}
 
 
-__all__ = ["emit_legacy_corpus", "copy_visual_assets"]
+def emit_manifest(
+    loaded: list[LoadedQuestion],
+    output: Path,
+    *,
+    release_id: str,
+    release_hash: str,
+    published_count: int,
+    chain_count: int,
+    concept_count: int = 87,
+    area_count: int = 13,
+    taxonomy_version: str = "87-topics",
+    schema_version: str = "0.1.2-dev",
+) -> dict[str, Any]:
+    """Emit `vault-manifest.json` next to the corpus bundle.
+
+    Added 2026-04-25 (Phase E.2): the staffml `validate-vault.py` and
+    `vault doctor` both read this file; it must agree with the corpus
+    or the pre-commit hook fails. Prior to this change the manifest was
+    hand-edited and drifted on every regeneration. Now it's emitted
+    deterministically from the same loaded set that produced the
+    bundle, so it can never drift.
+    """
+    from collections import Counter
+    from datetime import datetime
+
+    track_dist = Counter(lq.question.track for lq in loaded
+                         if lq.question.status == "published")
+    level_dist = Counter(lq.question.level for lq in loaded
+                         if lq.question.status == "published")
+
+    manifest = {
+        "version": schema_version,
+        "buildDate": datetime.now(UTC).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"),
+        "contentHash": release_hash[:12],
+        "questionCount": published_count,
+        "chainCount": chain_count,
+        "conceptCount": concept_count,
+        "trackDistribution": dict(track_dist),
+        "levelDistribution": dict(level_dist),
+        "areaCount": area_count,
+        "taxonomyVersion": taxonomy_version,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(manifest, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "output": str(output),
+        "questionCount": published_count,
+        "chainCount": chain_count,
+    }
+
+
+__all__ = ["emit_legacy_corpus", "emit_manifest", "copy_visual_assets"]

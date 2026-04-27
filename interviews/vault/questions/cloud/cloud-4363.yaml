@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: cloud-4363
+track: cloud
+level: L5
+zone: evaluation
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: 'Serving a 70B Model: MI300X Single-Card vs H100 Tensor Parallel'
+scenario: 'A 70B LLM (FP16, 140GB) must be served at 200 req/s with p99 latency <
+  200ms. Option A: 2× MI300X (192GB each, 5.3 TB/s each) with tensor parallelism TP=2
+  via PCIe. Option B: 2× H100 SXM5 (80GB each, 3.35 TB/s each) with TP=2 via NVLink
+  4.0 (900 GB/s). Analyze tensor parallel communication overhead for both and recommend
+  the serving configuration.'
+question: For the 70B LLM at 200 req/s and p99 <200 ms, how do MI300X PCIe TP=2 and
+  H100 NVLink TP=2 compare, and what should you deploy?
+details:
+  realistic_solution: 'Memory per card: MI300X option: 70B × 2 bytes / 2 cards = 70GB
+    per card (fits in 192GB with 122GB slack for KV cache). H100 option: 70GB per
+    card (fits in 80GB with 10GB slack — tight for KV cache). Communication analysis:
+    AllReduce per transformer layer: tensor size = batch × seq × hidden = 32 × 512
+    × 8192 × 2 bytes = 268MB per AllReduce. Per 80-layer model: 80 × 2 AllReduces
+    = 160 AllReduces per forward pass. MI300X PCIe 5.0 (128 GB/s for P2P): 268MB /
+    128GB/s = 2.1ms per AllReduce. 160 × 2.1ms = 336ms communication overhead. H100
+    NVLink (900 GB/s effective): 268MB / 900GB/s = 0.30ms. 160 × 0.30ms = 47ms. H100
+    TP communication: 47ms out of ~150ms total → 31% overhead. MI300X PCIe TP: 336ms
+    — exceeds the 200ms latency budget entirely. Recommendation: single MI300X (70GB
+    fits, 50GB+ KV cache headroom) with no TP. Single-card MI300X eliminates communication
+    overhead entirely and leverages the 5.3 TB/s bandwidth advantage for decode.'
+  common_mistake: 'Assuming TP=2 communication overhead is negligible on both platforms.
+    The interconnect bandwidth and latency differ significantly: PCIe 5.0 (MI300X)
+    at 128 GB/s bidirectional vs NVLink 4.0 (H100) at 900 GB/s. For TP, each AllReduce
+    after attention and FFN layers transfers activation tensors proportional to batch
+    size × sequence length × hidden dim.'
+  napkin_math: 'Model fits on 1× MI300X: 140GB < 192GB. KV cache headroom: 192-140
+    = 52GB = 6,325 concurrent requests at 8.2MB/req. Single MI300X decode: 5,300 GB/s
+    × 0.8 FLOP/byte ÷ 140 GFLOP/token = 30 tok/sec/req. At 200 req/s × 100 output
+    tokens = 20,000 tok/sec needed. 20,000/30 = 667 MI300X cards needed for throughput
+    — the constraint is throughput, not fitting. Scale with multiple single-card instances
+    (no TP needed). H100 single-card: 140GB > 80GB — cannot fit. Minimum H100 TP=2.
+    H100 TP=2 decode: 3,350 GB/s effective / 2 cards × eff 0.85 = 1,424 GB/s × 0.8
+    = 1,139 GFLOP/s effective. Tokens/sec = 1,139/140 = 8.1 tok/sec (slower decode
+    than MI300X despite TP=2).'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

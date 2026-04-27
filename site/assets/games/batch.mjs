@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, flash, shake } from "./runtime.mjs";
+import { mountPixiOnCanvas, flash, shake, mountReadyOverlay } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
 export async function mountBatch(canvas, opts = {}) {
@@ -6,6 +6,7 @@ export async function mountBatch(canvas, opts = {}) {
 
   let score = 0;
   let over = false;
+  let started = false;
   let timeLeft = 30000;
   
   let queue = 10;
@@ -61,7 +62,7 @@ export async function mountBatch(canvas, opts = {}) {
   hudLayer.addChild(memLabel);
 
   const setBatch = (newB) => {
-    if (over) return;
+    if (!started || over) return;
     B = Math.max(1, Math.min(newB, MAX_B));
     bText.text = B.toString();
   };
@@ -83,8 +84,18 @@ export async function mountBatch(canvas, opts = {}) {
   btnDownText.anchor.set(0.5); btnDownText.position.set(centerX + 80, centerY + 100);
   hudLayer.addChild(btnUp, btnUpText, btnDown, btnDownText);
 
+  // Pre-game READY overlay
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "BATCH SIZE BALANCER",
+    goal: "Push batch size up for throughput — but don't OOM.",
+    controls: "↑ ↓  tune batch size · TAP arrows · R  retry",
+    onLaunch: () => { started = true; }
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!started) return;
     if (over) return;
 
     timeLeft -= dt;

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-3774
+track: cloud
+level: L3
+zone: implement
+topic: flash-attention
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: 'FlashAttention Tiling: Why SRAM Size Determines Tile Shape'
+scenario: An H100 GPU has 256 KB of shared memory (SRAM) per SM. Standard attention
+  for a 70B model with hidden_dim=8192, num_heads=64 (head_dim=128) computes Q×K^T
+  which produces an N×N attention matrix per head. FlashAttention tiles this computation.
+  For a sequence length of 4096, calculate the tile sizes that fit in SRAM and explain
+  why tiling reduces HBM reads from O(N²) to O(N).
+question: Which FlashAttention tile sizes fit in 256 KB SRAM for N=4096, d=128, and
+  why does tiling reduce HBM traffic from O(N²) to O(N)?
+details:
+  realistic_solution: 'Each tile must hold: Q_tile (B_r × d), K_tile (B_c × d), S_tile
+    (B_r × B_c), and V_tile (B_c × d), plus output O_tile (B_r × d) and running statistics
+    (row max, row sum). With d=128 and BF16 (2 bytes): Q_tile = B_r × 128 × 2 = 256×B_r
+    bytes. K_tile = B_c × 128 × 2 = 256×B_c bytes. S_tile = B_r × B_c × 2 bytes. Total
+    SRAM ≤ 256 KB = 262,144 bytes. With B_r = B_c = 128: Q=32KB, K=32KB, S=32KB, V=32KB,
+    O=32KB = 160KB. Fits with margin. Standard attention reads Q,K,V from HBM, writes
+    N²-sized attention matrix to HBM, reads it back for V multiplication — total HBM
+    traffic O(N² × d). FlashAttention: reads Q,K,V from HBM once (O(N×d)), computes
+    S tiles in SRAM (never written to HBM), accumulates output in SRAM. HBM traffic
+    drops from O(N²) to O(N×d). For N=4096, d=128: ratio = N/d = 32× fewer HBM accesses.'
+  common_mistake: Thinking FlashAttention changes the mathematical computation. It
+    computes the exact same attention — it just changes the memory access pattern
+    by tiling the computation to fit in fast SRAM instead of materializing the full
+    N×N matrix in slow HBM.
+  napkin_math: 'Standard HBM traffic: Q,K,V reads (3×N×d) + S write (N²) + S read
+    (N²) + O write (N×d) ≈ 2N² + 4Nd. FlashAttention: Q,K,V reads (3Nd) + O write
+    (Nd) = 4Nd. Ratio: (2N² + 4Nd) / 4Nd ≈ N/2d for large N. N=4096, d=128: 16× fewer
+    HBM accesses.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

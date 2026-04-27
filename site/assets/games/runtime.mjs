@@ -353,6 +353,129 @@ export function getFilters() {
 }
 
 /* -----------------------------------------------------------
+   Shared READY overlay — every game starts paused so the player
+   can read what's expected before pressing ENTER (or Space, or ↑,
+   or tapping the canvas). One implementation, every game uses it.
+
+   Usage:
+     const ready = mountReadyOverlay(stage, {
+       title: "PIPELINE PACER",
+       goal: "Keep the GPUs fed without bubbling.",
+       controls: "Space  launch microbatch · R  retry",
+       width: W, height: H,
+       onLaunch: () => { state.started = true; }
+     });
+     // Game's existing event handlers + ticker should gate on
+     // ready.isStarted() so they don't fire before launch.
+   ----------------------------------------------------------- */
+export function mountReadyOverlay(stage, opts = {}) {
+  const W = opts.width  ?? stage.hitArea?.width  ?? 680;
+  const H = opts.height ?? stage.hitArea?.height ?? 460;
+
+  const root = new PIXI.Container();
+  root.eventMode = "static";
+  root.cursor = "default";
+
+  const dim = new PIXI.Graphics();
+  dim.rect(0, 0, W, H).fill({ color: 0x101827, alpha: 0.78 });
+  root.addChild(dim);
+
+  const title = new PIXI.Text({
+    text: opts.title ?? "READY",
+    style: { fill: 0xffffff, fontSize: 30, fontWeight: "800", letterSpacing: 2, align: "center" }
+  });
+  title.anchor.set(0.5);
+  title.position.set(W / 2, H / 2 - 70);
+  root.addChild(title);
+
+  if (opts.goal) {
+    const goal = new PIXI.Text({
+      text: opts.goal,
+      style: { fill: 0xd4edda, fontSize: 15, align: "center", wordWrap: true, wordWrapWidth: W * 0.78 }
+    });
+    goal.anchor.set(0.5);
+    goal.position.set(W / 2, H / 2 - 30);
+    root.addChild(goal);
+  }
+
+  if (opts.controls) {
+    const controls = new PIXI.Text({
+      text: opts.controls,
+      style: { fill: 0xffffff, fontSize: 14, align: "center", lineHeight: 22, wordWrap: true, wordWrapWidth: W * 0.85 }
+    });
+    controls.anchor.set(0.5);
+    controls.position.set(W / 2, H / 2 + 14);
+    root.addChild(controls);
+  }
+
+  const hint = new PIXI.Text({
+    text: "Take your time — read the controls.",
+    style: { fill: 0xb8c2cc, fontSize: 12, fontStyle: "italic" }
+  });
+  hint.anchor.set(0.5);
+  hint.position.set(W / 2, H / 2 + 56);
+  root.addChild(hint);
+
+  const cta = new PIXI.Text({
+    text: "press  ENTER  to launch",
+    style: { fill: 0xffd6a8, fontSize: 18, fontWeight: "700", letterSpacing: 1.5 }
+  });
+  cta.anchor.set(0.5);
+  cta.position.set(W / 2, H / 2 + 86);
+  root.addChild(cta);
+
+  // Always add overlay last so it's on top.
+  stage.addChild(root);
+  // If anything later mutates child order, callers can re-pin via stage.setChildIndex.
+
+  let started = false;
+  let pulseT = 0;
+  const reduceMotion = typeof window !== "undefined" && window.matchMedia &&
+                       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function tick() {
+    if (started || reduceMotion) return;
+    pulseT += 0.08;
+    cta.alpha = 0.75 + 0.25 * Math.sin(pulseT);
+  }
+  PIXI.Ticker.shared.add(tick);
+
+  function launch() {
+    if (started) return;
+    started = true;
+    root.visible = false;
+    // Critical: in Pixi v8, visible=false does NOT stop event capture. Without
+    // this the overlay keeps swallowing every click meant for the game below.
+    root.eventMode = "none";
+    PIXI.Ticker.shared.remove(tick);
+    window.removeEventListener("keydown", onKey);
+    root.off("pointerdown", onPointer);
+    // Belt-and-suspenders — also detach from the tree so it can't receive events
+    // even if some future code re-enables eventMode.
+    if (root.parent) root.parent.removeChild(root);
+    if (opts.onLaunch) opts.onLaunch();
+  }
+
+  // Accept Enter (primary), Space, ↑, or any pointer tap. The "any of these works"
+  // approach means a player isn't blocked guessing the right key.
+  const onKey = (e) => {
+    if (e.key === "Enter" || e.key === " " || e.key === "ArrowUp") {
+      e.preventDefault();
+      launch();
+    }
+  };
+  const onPointer = () => launch();
+  window.addEventListener("keydown", onKey);
+  root.on("pointerdown", onPointer);
+
+  return {
+    container: root,
+    dismiss: launch,
+    isStarted: () => started
+  };
+}
+
+/* -----------------------------------------------------------
    Camera-shake helper — applies a temporary jitter offset
    to a target Pixi container (typically the game-layer container,
    not the whole stage, so HUD stays still).
@@ -400,7 +523,8 @@ window.MLSP.PIXI = PIXI;
 window.MLSP.runtime = {
   mountPixiOnCanvas,
   pop, flash, burst, floatText, shake, tween, getFilters,
-  dailySeed
+  dailySeed,
+  mountReadyOverlay
 };
 
 if (!window.MLSP.__fullscreenToggleBound) {

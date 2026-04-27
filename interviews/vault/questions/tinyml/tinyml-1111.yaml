@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: tinyml-1111
+track: tinyml
+level: L4
+zone: diagnosis
+topic: model-format-conversion
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Diagnosing Operator Fallback in TFLite Micro Conversion
+scenario: You are deploying an INT8 quantized keyword spotting model to an ARM Cortex-M4
+  (STM32F4) using TFLite Micro. The target hardware runs at 168 MHz with 256 KB SRAM,
+  1 MB flash, and has no FPU. During profiling, you notice the dense and convolutional
+  layers are extremely fast, but a single Softmax layer at the end of the network
+  takes up 85% of the total inference time. How would you diagnose the root cause
+  of this anomaly during the conversion and deployment pipeline?
+question: How would you diagnose the root cause of this anomaly during the conversion
+  and deployment pipeline?
+details:
+  realistic_solution: The root cause is an operator coverage gap in the CMSIS-NN delegate.
+    If the TFLite Micro converter encounters an operator (like an incompatible Softmax
+    variant) that lacks a dedicated CMSIS-NN INT8 SIMD kernel, it falls back to the
+    reference C++ implementation. Because the STM32F4 lacks a hardware FPU, the runtime
+    inserts Dequantize/Quantize nodes and computes the activations using software-emulated
+    FP32 math. The diagnosis requires inspecting the converted .tflite flatbuffer
+    (e.g., using Netron) to identify inserted DEQUANTIZE nodes and replacing the Softmax
+    with a CMSIS-NN supported approximation or removing it entirely if relative logits
+    are sufficient.
+  common_mistake: Candidates often assume the latency is caused by SRAM bandwidth
+    bottlenecks or cache misses when moving data between layers. They fail to analyze
+    the TFLite conversion process, missing that unsupported INT8 operators trigger
+    a fallback to unoptimized reference kernels or software-emulated floating point.
+  napkin_math: 'For a final layer outputting 1,000 classes: An optimized INT8 SIMD
+    operation using CMSIS-NN utilizes 2x INT8 MACs/cycle. 1,000 ops / 2 = 500 cycles.
+    At 168 MHz, optimized execution takes 500 / 168,000,000 = 2.97 microseconds. In
+    contrast, software-emulated FP32 math (due to the lack of an FPU) requires roughly
+    150 cycles per operation for dequantization, exponentiation, and accumulation.
+    1,000 classes * 150 cycles = 150,000 cycles. Unoptimized execution takes 150,000
+    / 168,000,000 = ~0.89 milliseconds. The fallback is 300x slower, dominating the
+    end-to-end latency.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- RC, KA, and Mode are all set to None; these should be explicitly classified for
+  a Staff-level question.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

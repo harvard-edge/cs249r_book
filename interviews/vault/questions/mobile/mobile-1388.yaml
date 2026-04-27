@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: mobile-1388
+track: mobile
+level: L6+
+zone: mastery
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: create
+phase: inference
+title: Zero-Copy LLM Architecture on Google Tensor G3
+scenario: You are leading the deployment of a 2B parameter LLM (e.g., Gemini Nano)
+  on the Google Tensor G3. Multiple system apps need concurrent access to this model
+  for instant text processing. Design a memory-mapped inference architecture that
+  leverages the 12 GB LPDDR5X memory to achieve zero-copy weight sharing across processes.
+  Your design must minimize cold start latency, prevent OS OOM evictions, and optimally
+  feed the on-device TPU without memory duplication.
+question: How would you design a memory-mapped inference architecture that leverages
+  the 12 GB LPDDR5X memory to achieve zero-copy weight sharing across processes?
+details:
+  realistic_solution: Implement a centralized ML service daemon that maps the model
+    weights into memory using a read-only mmap backed by hardware-friendly buffers
+    (like dmabuf). Client applications communicate with this daemon via IPC (Binder).
+    The daemon locks the memory (mlock) to prevent paging and passes the buffer file
+    descriptors directly to the TPU delegate. This allows the TPU to perform zero-copy
+    DMA reads straight from the LPDDR5X RAM, serving multiple clients sequentially
+    without duplicating the memory footprint.
+  common_mistake: Candidates often suggest standard per-process weight loading, which
+    rapidly exhausts the 12 GB RAM when multiple apps invoke the model. They also
+    frequently miss the need to specifically align mmap buffers (e.g., using dmabuf
+    or ION/GKI equivalents) so the TPU's DMA engine can read weights without CPU intervention.
+  napkin_math: 'A 2B parameter model quantized to INT4 takes ~1 GB of space. Without
+    mmap sharing, 3 concurrent apps would consume 3 GB (25% of the 12 GB LPDDR5X).
+    With shared mmap, we save 2 GB. The TPU provides 7.5 TOPS. Generating a token
+    requires ~4 GOPs (2 * 2B parameters). Compute time per token is 4 GOP / 7.5 TOPS
+    = 0.53ms. The real bottleneck is memory: fetching 1 GB of weights at LPDDR5X bandwidth
+    (~50 GB/s) takes 20ms. Total time per token is ~20.5ms (approx. 48 tokens/sec).
+    By eliminating 250ms+ UFS storage reads via mlock and avoiding CPU-RAM copies,
+    we guarantee sub-50ms Time-To-First-Token.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

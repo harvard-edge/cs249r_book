@@ -34,10 +34,10 @@ export interface Question {
    * task callout so the reading order is context → diagram → ask.
    */
   visual?: {
-    kind: "svg" | "mermaid";
+    kind: "svg";               // closed enum as of v0.1.2 (mermaid retired)
     path: string;              // bare filename, resolves under /question-visuals/<track>/
-    alt: string;                // a11y-required description
-    caption?: string;
+    alt: string;                // a11y-required description, ≥10 chars
+    caption: string;            // required as of v0.1.2, ≥5 chars
   };
   topic: string;            // one of 87 curated topic IDs
   zone: string;             // one of 11 ikigai zones

@@ -343,6 +343,14 @@ def main() -> int:
                         help="How many cells to recommend in the plan.")
     parser.add_argument("--visual", action="store_true",
                         help="Bias the plan toward visual-archetype topics.")
+    parser.add_argument("--include-areas", default="",
+                        help="Comma-separated list of competency_areas (e.g. "
+                             "'parallelism,networking') to inject as forced "
+                             "targets into the plan. For each listed area, "
+                             "add 1 cell per (track, parallelism-flavored "
+                             "topic) where the track×area gap is high. "
+                             "Closes the structural mismatch where "
+                             "topic-level priority misses area-level gaps.")
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     args = parser.parse_args()
 
@@ -354,6 +362,63 @@ def main() -> int:
     zone_level = rank_track_zone_level_gaps(records)
     visual_topics = visual_coverage(records)
     plan = recommend_generation_plan(records, args.total, args.visual)
+
+    # E.3: --include-areas. For each listed area, inject hand-targeted
+    # cells using area-canonical topics, biased toward (track, area)
+    # gaps where the analyzer's topic-priority ranking misses the
+    # area-level signal. Each forced cell stamps `forced_area=True` so
+    # callers can spot which entries came from the override.
+    AREA_TO_TOPICS = {
+        "parallelism":  ["pipeline-parallelism", "collective-communication",
+                         "kv-cache-management", "interconnect-topology"],
+        "networking":   ["network-bandwidth-bottlenecks",
+                         "collective-communication", "interconnect-topology"],
+        "memory":       ["memory-hierarchy-design", "kv-cache-management"],
+        "latency":      ["queueing-theory"],
+        "compute":      ["compute-cost-estimation"],
+        "data":         ["data-pipeline-engineering"],
+        "power":        ["duty-cycling"],
+        "precision":    ["quantization-fundamentals"],
+        "reliability":  ["fault-tolerance-checkpointing"],
+        "deployment":   ["model-serving-infrastructure"],
+        "optimization": ["communication-computation-overlap"],
+        "architecture": ["kv-cache-management"],
+    }
+    include_areas = [a.strip() for a in args.include_areas.split(",") if a.strip()]
+    if include_areas:
+        # For each listed area, walk the track×area ranking and
+        # inject up to 6 cells per track (across topics × {L4,L5,L6+}).
+        ta_by_priority = sorted(track_area, key=lambda r: -r.get("priority", 0))
+        for ta in ta_by_priority:
+            area = ta.get("area")
+            track = ta.get("track")
+            if area not in include_areas:
+                continue
+            if track == "global" or track == "?":
+                continue
+            topics = AREA_TO_TOPICS.get(area, [])
+            for topic in topics:
+                if topic in TRACK_TOPIC_BLOCKLIST.get(track, set()):
+                    continue
+                for level, zone in [("L4", "diagnosis"), ("L5", "specification"),
+                                    ("L6+", "mastery")]:
+                    plan.append({
+                        "track": track, "topic": topic, "zone": zone,
+                        "level": level, "with_visual": False,
+                        "priority": round(ta.get("priority", 0) + 0.5, 2),
+                        "current_count": 0,
+                        "forced_area": area,
+                    })
+        # Dedup by (track, topic, zone, level) and trim back to total
+        seen_keys = set()
+        deduped = []
+        for c in plan:
+            key = (c["track"], c["topic"], c["zone"], c["level"])
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            deduped.append(c)
+        plan = sorted(deduped, key=lambda r: -r.get("priority", 0))[:args.total]
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_dir = args.output_dir / timestamp

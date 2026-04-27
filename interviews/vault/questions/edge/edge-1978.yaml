@@ -1,0 +1,103 @@
+schema_version: '1.0'
+id: edge-1978
+track: edge
+level: L4
+zone: diagnosis
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Diagnosing Coral Edge TPU Graph Compilation & Performance Issues
+scenario: 'You are deploying a large vision model (e.g., a complex object detection
+  model) to a Google Coral Edge TPU. The model was successfully trained and quantized
+  to INT8 using TensorFlow Lite. However, during the final compilation and inference
+  stage on the Coral, you encounter two significant problems:
+
+  1. The `edgetpu_compiler` frequently fails with errors such as `Unsupported custom
+  op: ''FlexMergeV2''` or `Node operation not supported: ''tf.Pad''`. The compilation
+  reports that a substantial portion of the graph (e.g., 30-40%) cannot be offloaded
+  to the Edge TPU.
+
+  2. For the parts of the model that do compile, the inference latency is significantly
+  higher than expected, often showing signs of CPU fallback despite the entire model
+  being specified for INT8. The Coral Edge TPU has a spec of 4 TOPS INT8, 2W power
+  consumption, and supports INT8 only operations. Diagnose the root causes of these
+  compilation failures and performance regressions, and outline a strategy to resolve
+  them, focusing on the graph compilation and optimization pipeline.'
+question: Why is the INT8 TFLite model failing or falling back on Coral Edge TPU,
+  and how would you fix the graph compilation pipeline?
+details:
+  realistic_solution: "1. **Analyze Compiler Output Verbosity**: Run `edgetpu_compiler`\
+    \ with verbose logging (`--verbose`) to get detailed reports on which operations\
+    \ are not supported by the Edge TPU and why they are falling back to CPU. The\
+    \ `FlexMergeV2` and `tf.Pad` errors specifically indicate operations that the\
+    \ Edge TPU's delegate does not natively support or convert from TensorFlow's `Flex`\
+    \ ops.\n2. **Graph Inspection**: Use tools like Netron or TensorFlow Lite's `visualize.py`\
+    \ or `tflite_model_analyzer` to visually inspect the `.tflite` graph. Identify\
+    \ the problematic nodes and their inputs/outputs. Trace back to the original TensorFlow\
+    \ graph if necessary.\n3. **Operator Lowering and Mapping**: Understand the set\
+    \ of operations natively supported by the Edge TPU (its operator set). For unsupported\
+    \ operations:\n    *   **Model Refactoring**: Modify the model architecture to\
+    \ use alternative, Edge TPU-friendly operations. For example, `tf.Pad` might need\
+    \ to be replaced with a series of `tf.concat` or custom TFLite ops if the padding\
+    \ strategy is complex. For `FlexMergeV2`, identify the source of the `MergeV2`\
+    \ operation (often related to control flow or dynamic shapes) and redesign the\
+    \ graph to avoid it.\n    *   **Custom Operators/Delegates (Advanced)**: If a\
+    \ critical operation cannot be refactored, investigate if a custom TFLite operator\
+    \ or a custom Edge TPU delegate can be implemented, though this is a significant\
+    \ undertaking.\n4. **Quantization Review**: While the model is INT8, ensure that\
+    \ the quantization process didn't introduce any implicit dequantization/requantization\
+    \ steps or create paths that force FP32 execution. Check `tflite_model_analyzer`\
+    \ for mixed-precision details.\n5. **AOT Compilation & Constant Folding**: Ensure\
+    \ that the compiler is effectively performing ahead-of-time optimizations like\
+    \ constant folding. If complex constants are not being folded, they can add unnecessary\
+    \ runtime overhead or even cause unsupported operation issues. Sometimes, simplifying\
+    \ input shapes or graph structures can help the compiler optimize better.\n6.\
+    \ **Iterative Deployment & Profiling**: After modifications, recompile and re-profile\
+    \ on the Coral. Use `top` or Coral's profiling tools to monitor CPU and TPU utilization,\
+    \ identifying if CPU fallback is still occurring and for which specific operations."
+  common_mistake: A common mistake is to immediately assume the model is too large
+    or the quantization was flawed. Another mistake is to only look at the model architecture
+    without investigating the specific operations that the Edge TPU compiler reports
+    as unsupported. Blaming the hardware without understanding the software compilation
+    stack (TFLite, Edge TPU compiler, operator lowering) is also a frequent misstep.
+  napkin_math: 'The Coral Edge TPU provides 4 TOPS (Tera Operations Per Second) for
+    INT8 operations. If an object detection model like MobileNetV2-SSD has roughly
+    1.3 billion MAC operations (which translate to 2.6 billion INT8 OPs due to separate
+    multiply and add) and the Coral processes them at 4 TOPS:
+
+    Theoretical minimum inference time = (2.6 * 10^9 Ops) / (4 * 10^12 Ops/s) = 0.65
+    * 10^-3 seconds = 0.65 ms.
+
+
+    If the compilation report states 40% of operations fall back to CPU, and assuming
+    CPU execution is 1000x slower for those specific operations than the TPU:
+
+    -   TPU-executed ops (60%): 0.6 * 0.65 ms = 0.39 ms
+
+    -   CPU-executed ops (40%): 0.4 * 0.65 ms * 1000 = 260 ms
+
+    Total estimated inference time = 0.39 ms + 260 ms ≈ 260 ms.
+
+
+    This simple calculation immediately highlights that even a relatively small percentage
+    of CPU fallback can drastically increase total latency, making the 2W, 4 TOPS
+    Edge TPU bottlenecked by its host CPU. The goal is to get as close to 0% CPU fallback
+    as possible, ideally achieving sub-10ms inference for such models.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

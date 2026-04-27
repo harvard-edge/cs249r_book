@@ -7,21 +7,33 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Cloud New 0025
-scenario: Architect an activation recomputation strategy to train a 200B parameter model on 128 A100 80GB
-  GPUs. Prevent OOM errors while minimizing the compute overhead on the 312 TFLOPS hardware.
-question: "How would you design activation recomputation for a 200B model on 128 A100 80GB GPUs to avoid OOM with minimal overhead?"
+title: Heterogeneous-Bandwidth Data-Parallel AllReduce Architecture
+scenario: 'Architect a data-parallel AllReduce strategy for a 13B parameter model trained on 128 A100
+  80 GB GPUs distributed across 16 nodes. The cluster has heterogeneous interconnect — 8 of the 16
+  nodes share an InfiniBand HDR (200 Gbps) island, while the other 8 nodes are connected only via 100
+  Gbps Ethernet to the IB island via two gateway switches. Per-node intra-node fabric is NVLink 3.0
+  (600 GB/s bidirectional / 300 GB/s unidirectional). Design a DP-only synchronization strategy that
+  respects this asymmetric topology and bounds the exposed AllReduce time so that it fits inside the
+  380 ms backward pass.'
+question: "How would you architect data-parallel AllReduce on 128 A100s split between an InfiniBand HDR island and an Ethernet half so synchronization fits inside a 380 ms backward pass?"
 details:
-  realistic_solution: Design a selective activation recomputation architecture. Instead of recomputing
-    all layers or completely discarding activations, profile the model to identify operators with high
-    memory footprints but low compute intensity (e.g., LayerNorm, Dropout, Softmax). Discard these activations
-    to save VRAM and recompute them on-the-fly during the backward pass. Retain the activations of heavy
-    compute operators (like MatMuls) in HBM. Checkpoint only the boundaries of Transformer blocks.
-  common_mistake: Checkpointing absolutely no activations and recomputing the entire forward pass natively,
-    wasting almost 50% of your compute budget redundantly.
-  napkin_math: 200B model across 128 GPUs requires complex 3D parallelism. Assuming DP=2, PP=8, TP=8.
-    Softmax/LayerNorm activations consume ~30% of VRAM but only represent <2% of the 312 TFLOPS compute.
-    Selective recomputation saves ~20GB VRAM per GPU.
+  realistic_solution: 'Use a topology-aware three-level hierarchical AllReduce instead of a flat 128-rank
+    ring. Level 1: intra-node ring reduce-scatter on NVLink (sub-1 ms per node). Level 2: split the
+    global AllReduce into two parallel sub-rings (one for the IB island and one for the Ethernet half)
+    and bridge them via a single dedicated reduction over the 100 Gbps gateway link. Level 3: intra-node
+    AllGather on NVLink. Pipeline this with bucketed AllReduce (32 MB buckets) so the slow gateway hop
+    overlaps with the latter half of the backward pass. Also enable BF16 gradient communication to halve
+    the payload from 52 GB to 26 GB so the gateway hop fits inside the 380 ms budget once overlapped.'
+  common_mistake: Treating the 128-GPU world as a flat ring AllReduce. A flat ring is bottlenecked by
+    the slowest link (the 100 Gbps Ethernet), so total bus traffic = 2*(127/128) * 26 GB ≈ 51.6 GB at
+    12.5 GB/s ≈ 4.1 s — over 10x the backward pass. The fix is hierarchy and topology awareness, not
+    gradient compression alone.
+  napkin_math: 'Gradient = 13B * 2 bytes (BF16) = 26 GB. Flat ring on the 12.5 GB/s gateway: 51.6 GB
+    / 12.5 ≈ 4.1 s. Two sub-rings + bridge hop: each sub-ring (8 nodes, ~25 GB/s unidirectional IB)
+    moves 2*(7/8)*26 GB / 25 GB/s ≈ 1.8 s naive, ≈150 ms with NVLink-aware reduce-scatter inside each
+    node. Gateway bridge hop moves 26 GB once at 12.5 GB/s ≈ 2.08 s un-overlapped; bucketed pipelining
+    of 32 MB chunks cuts *exposed* gateway time to ≈ 200-300 ms once overlapped with backward. Total
+    exposed AllReduce ≤ 380 ms.'
 status: published
 provenance: imported
 requires_explanation: true

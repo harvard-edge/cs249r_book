@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, burst, flash, floatText, shake, tween } from "./runtime.mjs";
+import { mountPixiOnCanvas, burst, flash, floatText, shake, tween, mountReadyOverlay } from "./runtime.mjs";
 import * as P from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
@@ -31,7 +31,8 @@ export async function mountAllreduce(canvas, opts = {}) {
     score: 0,
     time: 0,
     lastBeatTime: 0,
-    over: false
+    over: false,
+    started: false
   };
 
   const gpus = [];
@@ -106,7 +107,7 @@ export async function mountAllreduce(canvas, opts = {}) {
   }
 
   function handleInput(idx) {
-    if (state.over) return;
+    if (!state.started || state.over) return;
     
     // Check timing
     const nextBeat = state.lastBeatTime + beatInterval;
@@ -140,8 +141,17 @@ export async function mountAllreduce(canvas, opts = {}) {
     }
   });
 
+  // Pre-game READY overlay
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "ALL-REDUCE RHYTHM",
+    goal: "Tap each GPU on the beat. Keep gradients flowing.",
+    controls: "1 2 3 4  fire to GPU · TAP a GPU · R  retry",
+    onLaunch: () => { state.started = true; state.lastBeatTime = state.time; }
+  });
+
   onTick((dt) => {
-    if (state.over) return;
+    if (!state.started || state.over) return;
     state.time += dt;
 
     if (state.time >= state.lastBeatTime + beatInterval) {

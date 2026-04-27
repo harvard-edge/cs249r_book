@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: cloud-4077
+track: cloud
+level: L4
+zone: diagnosis
+topic: rdma-transport
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: RDMA Atomic Operations for Distributed Locking
+scenario: Your parameter server implementation uses RDMA Compare-and-Swap (CAS) atomics
+  for distributed locking. Each of 256 H100 workers acquires a lock before updating
+  shared parameters. Under high contention (all 256 workers trying to acquire the
+  same lock simultaneously), each CAS takes 3μs. Calculate the maximum lock acquisition
+  throughput and diagnose why RDMA atomics become a bottleneck at scale.
+question: Under 256-way contention on a single RDMA CAS lock, what is the maximum
+  lock throughput and why do atomics bottleneck?
+details:
+  realistic_solution: 'RDMA CAS throughput to a single address: 1 / 3μs = 333K operations/sec,
+    regardless of bandwidth. With 256 workers contending: each CAS attempt has 1/256
+    probability of success (only one wins). Expected attempts per successful acquisition:
+    256 (geometric distribution mean). Time per lock acquisition: 256 × 3μs = 768μs
+    on average. Maximum lock turnover rate: 333K ops/sec / 256 contenders = ~1,302
+    lock acquisitions per second across the entire system. If each parameter update
+    requires the lock for 10μs of critical section: effective throughput = 1/(768μs
+    + 10μs) = 1,284 updates/sec. At this rate, 256 workers each get ~5 updates/sec
+    — completely inadequate for SGD which needs 1000+ updates/sec per worker. Fix:
+    (1) Eliminate distributed locking — use AllReduce (lock-free by design). (2) Use
+    partitioned locks — 256 independent lock addresses, each worker acquires a different
+    lock. Contention drops to 1 worker per lock = 333K ops/sec. (3) Use RDMA Write
+    for parameter updates (no atomics needed if updates are commutative — gradient
+    addition is commutative).'
+  common_mistake: Assuming RDMA atomics scale with bandwidth. RDMA atomics are processed
+    sequentially by the target HCA's atomic processing unit — there is no parallelism.
+    Each atomic operation must read, compare, and write to a single memory location,
+    and concurrent atomics to the same address are serialized.
+  napkin_math: 'Single lock CAS: 333K ops/sec total. 256 contenders: 333K/256 = 1.3K
+    acquisitions/sec per worker. SGD at 1000 iter/sec needs 1000 lock acquisitions/sec
+    per worker. Deficit: 1.3K vs 1000 — barely sufficient, and only with zero-contention
+    lock usage. In practice: lock waiters spin on CAS, consuming RDMA bandwidth on
+    failed attempts. 256 workers × 333K attempts/sec = 85.3M RDMA atomics/sec hitting
+    one HCA port.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

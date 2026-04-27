@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-4440
+track: cloud
+level: L5
+zone: optimization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: KV-Cache Transfer Compression to Reduce Network Bottleneck
+scenario: In a disaggregated serving cluster, KV-cache transfer from prefill to decode
+  GPUs uses 400 Gbps InfiniBand. A 70B model with 512-token prompt has KV cache that
+  takes 3.2ms to transfer, adding 16% to TTFT. Design a compression scheme to reduce
+  transfer time.
+question: What KV-cache compression scheme would reduce the 3.2 ms prefill-to-decode
+  transfer over 400 Gbps InfiniBand and lower TTFT overhead?
+details:
+  realistic_solution: 'KV cache compression strategies: (1) Quantization: KV caches
+    can be quantized to INT8 without significant quality loss (attention scores are
+    softmax-normalized, less sensitive to quantization). INT8 KV = 2× compression,
+    halves transfer size. (2) Cross-layer sharing (CLA): many adjacent layers have
+    nearly identical KV patterns. Share KV cache across every 2 layers: 2× reduction
+    in cache size at cost of minor quality degradation. (3) Head pruning: not all
+    attention heads carry equal information across layers. Drop bottom 20% of heads
+    by attention entropy variance: 20% reduction with <0.5% quality impact. Combined:
+    INT8 (2×) + 20% head pruning (1.25×) = 2.5× compression. Transfer time: 3.2ms
+    / 2.5 = 1.28ms. TTFT overhead drops from 16% to 6.4%. (4) Speculative KV: decode
+    GPU speculatively starts generation with a partial KV cache (first 8 layers),
+    receives remaining layers asynchronously — hides transfer behind compute.'
+  common_mistake: Applying general-purpose compression (LZ4, Zstd) to KV cache tensors.
+    KV caches are floating point tensors with low compressibility under entropy coding
+    — typical compression ratios are only 1.1-1.3x. The compute overhead of compression
+    often exceeds the transfer savings.
+  napkin_math: '70B model KV cache for 512 tokens: layers=80, heads=64, head_dim=128.
+    KV cache = 2 * 80 * 64 * 128 * 512 * 2B = 1,342,177,280 bytes = 1.25 GiB (1.34
+    GB). At 400 Gbps = 50 GB/s: 1.34GB / 50 GB/s = 26.8ms. But stated 3.2ms — implies
+    this is for a smaller model or fewer heads. At 3.2ms: effective bandwidth = 1.34GB/3.2ms
+    = 419 GB/s. With INT8 compression: 0.67GB at 419 GB/s = 1.6ms. TTFT improvement:
+    3.2ms - 1.6ms = 1.6ms saved.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 2*80*64*128*512*2B is 1.34GB, not 1.68GB
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

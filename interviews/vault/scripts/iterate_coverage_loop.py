@@ -217,13 +217,13 @@ def saturation_reached(history: list[dict[str, Any]], current: dict[str, Any],
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--max-iters", type=int, default=20)
-    parser.add_argument("--max-calls", type=int, default=60,
+    parser.add_argument("--max-iters", type=int, default=30)
+    parser.add_argument("--max-calls", type=int, default=80,
                         help="Hard cap on TOTAL Gemini API calls (gen + judge).")
-    parser.add_argument("--gen-batch-size", type=int, default=12)
-    parser.add_argument("--gen-calls-per-iter", type=int, default=3,
-                        help="Gen calls per iteration. With batch_size=12 → 36 q/iter.")
-    parser.add_argument("--judge-chunk-size", type=int, default=15)
+    parser.add_argument("--gen-batch-size", type=int, default=30)
+    parser.add_argument("--gen-calls-per-iter", type=int, default=4,
+                        help="Gen calls per iteration. With batch_size=30 → 120 q/iter.")
+    parser.add_argument("--judge-chunk-size", type=int, default=25)
     parser.add_argument("--gap-threshold", type=float, default=1.0,
                         help="Stop when top priority gap drops below this.")
     parser.add_argument("--max-drop-rate", type=float, default=0.3,

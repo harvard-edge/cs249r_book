@@ -23,7 +23,8 @@
 
 import {
   mountPixiOnCanvas, dailySeed, dayNumber, bestScore,
-  pop, flash, burst, floatText, shake, distToSegment, tween, getFilters
+  pop, flash, burst, floatText, shake, distToSegment, tween, getFilters,
+  mountReadyOverlay
 } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
@@ -134,7 +135,7 @@ export async function mountPulsePrune(canvas, opts = {}) {
     total: weights.length,
     removedImp: 0,
     timeLeft: TIME_LIMIT_MS,
-    started: !startOnFirstAction,
+    started: false,                  // always pause until READY overlay is dismissed
     over: false,
     won: false,
     hoverIdx: -1,
@@ -355,6 +356,14 @@ export async function mountPulsePrune(canvas, opts = {}) {
   const gameOverOverlay = new PIXI.Container();
   gameOverOverlay.visible = false;
   overlayLayer.addChild(gameOverOverlay);
+
+  /* --- Pre-game READY overlay --- */
+  mountReadyOverlay(stage, {
+    title: "PULSE PRUNE",
+    goal: "Cut faint weights to 60% sparsity. Keep accuracy above 50%.",
+    controls: "CLICK a weight to prune it · R  retry",
+    onLaunch: () => { state.started = true; }
+  });
 
   /* --- Frame loop --- */
   let last = performance.now();

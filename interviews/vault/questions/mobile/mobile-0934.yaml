@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-0934
+track: mobile
+level: L4
+zone: optimization
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'Kernel Fusion: Optimize SwiGLU Fusion for Mobile LLM on Tensor G3'
+scenario: 'Your 1B LLM on Tensor G3 (7.5 TOPS, 12GB) uses SwiGLU activation: SwiGLU(x)
+  = x × σ(x) × gate. Profiling shows the SwiGLU activation takes 8ms out of 50ms per
+  token (16% of decode time). The activation operates on a 4096-element vector. Optimize.'
+question: Why is an 8ms SwiGLU activation on Tensor G3 unrealistic, and what fusion
+  fix should remove the overhead?
+details:
+  realistic_solution: '8ms for SwiGLU on 4096 elements is clearly wrong computationally
+    (4096 × 10 FLOPs = 41K FLOPs / 7.5 TOPS = 5.5ns). Root cause: the 8ms must be
+    kernel dispatch overhead, CPU-GPU sync, or format conversion, not actual compute.'
+  common_mistake: Treating 8ms for a SwiGLU on a 4096-element vector as realistic
+    — this is far too slow for an elementwise operation. The actual time should be
+    microseconds. Likely the issue is the kernel launch overhead or memory transfer,
+    not the computation.
+  napkin_math: 'SwiGLU on 4096 elements: ~30 FLOPs/element (mul + sigmoid + mul) =
+    123K FLOPs. At 7.5 TOPS: 123K / 7.5T = 0.016µs compute. Memory: 4096 × 2B (fp16)
+    × 3 tensors (x, gate, output) = 24KB. At 51 GB/s: 0.47µs. Total theoretical: 0.49µs.
+    Reported: 8ms = 16,330× slower than theoretical. Diagnosis: Python/framework overhead,
+    CPU-GPU memory copy, or synchronization. Fix: ensure SwiGLU runs entirely on GPU
+    without CPU-GPU sync. Fuse with adjacent Linear: Linear(x) + SwiGLU in one kernel.
+    After fix: 0.49µs → negligible. Overall decode: 50ms - 8ms + 0.0005ms ≈ 42ms →
+    23.8 tok/sec. Key lesson: profiling attribution errors are common; 8ms for elementwise
+    on 4K elements always indicates framework overhead, not compute.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

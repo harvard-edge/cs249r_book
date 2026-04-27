@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, burst, flash, shake, tween } from "./runtime.mjs";
+import { mountPixiOnCanvas, burst, flash, shake, tween, mountReadyOverlay } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
 export async function mountMoe(canvas, opts = {}) {
@@ -6,6 +6,7 @@ export async function mountMoe(canvas, opts = {}) {
 
   let score = 0;
   let over = false;
+  let started = false;
   let tokens = [];
   let nextTokenId = 0;
   let timeElapsed = 0;
@@ -71,7 +72,7 @@ export async function mountMoe(canvas, opts = {}) {
   }
 
   function routeToken(expertIndex) {
-    if (over || tokens.length === 0) return;
+    if (!started || over || tokens.length === 0) return;
     // Find lowest token
     const token = tokens[0];
     tokens.shift();
@@ -109,10 +110,20 @@ export async function mountMoe(canvas, opts = {}) {
   };
   window.addEventListener("keydown", onKey);
 
+  // Pre-game READY overlay
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "MoE ROUTER",
+    goal: "Route each colored token to the matching expert.",
+    controls: "1 2 3 4  route to expert · TAP an expert · R  retry",
+    onLaunch: () => { started = true; }
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!started) return;
     if (over) return;
-    
+
     timeElapsed += dt / 1000;
     spawnTimer -= dt;
     

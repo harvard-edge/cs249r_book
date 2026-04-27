@@ -1,0 +1,84 @@
+schema_version: '1.0'
+id: edge-2090
+track: edge
+level: L4
+zone: analyze
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: 'Edge TPU Storage: Optimizing Data Formats for Real-time Inference Buffering'
+scenario: A remote wildlife monitoring system utilizes a camera and a Google Coral
+  Edge TPU (4 TOPS INT8, 2W power budget, INT8-only inference) for real-time object
+  detection and classification. Due to highly intermittent satellite connectivity,
+  the system must buffer up to 12 hours of processed inference results locally on
+  a small, low-power NVMe drive before successful uplink. Each inference produces
+  approximately 10KB of structured metadata (bounding boxes, class IDs, confidences,
+  timestamps) and a 50KB cropped image region (PNG/JPEG) per frame. The Edge TPU processes
+  data at 5 frames per second. Design an optimal strategy for storage format and compression
+  for these buffered results, explaining the trade-offs and rationale specifically
+  considering the Coral's hardware constraints and the need for energy efficiency
+  and reliable local buffering.
+question: How would you store and compress 12 hours of Coral inference results at
+  5 FPS for energy-efficient, reliable local buffering?
+details:
+  realistic_solution: A realistic and efficient solution is to leverage TFRecord with
+    appropriate compression. TFRecord is designed for efficient serialization and
+    deserialization of structured data and binary blobs, making it ideal for storing
+    inference metadata alongside cropped image regions. For compression, GZIP or ZLIB
+    should be favored. While CPU-intensive, these offer superior compression ratios
+    compared to Snappy or LZ4, which is crucial for maximizing the 12-hour buffer
+    capacity on limited local storage. The Coral's primary computational strength
+    is INT8 inference; its general-purpose CPU has sufficient headroom for background
+    compression/decompression without impacting the inference pipeline's 2W power
+    budget excessively. Structuring TFRecords into manageable files (e.g., one file
+    per minute or per five minutes of data) optimizes sequential I/O and simplifies
+    eventual batch uploads. Within each TFRecord, the metadata can be serialized as
+    `tf.train.Features` and the image as a raw byte string (PNG/JPEG), minimizing
+    parsing and maximizing compactness.
+  common_mistake: A common mistake is to choose a general-purpose, human-readable
+    format like JSON/CSV or a columnar analytics format like Parquet without deep
+    consideration for the Edge TPU's constraints. JSON/CSV introduce significant parsing
+    overhead, larger file sizes due to verbose text encoding, and inefficient binary
+    data handling, stressing the CPU and consuming more precious 2W power. Parquet,
+    while excellent for analytical queries on larger datasets, carries overhead for
+    schema management, block-level indexing, and potential random access patterns
+    that are mismatched with the Edge TPU's primary need for sequential reads/writes
+    and its limited general-purpose CPU capabilities (compared to the dedicated INT8
+    accelerator).
+  napkin_math: 'Let''s quantify the storage requirements and I/O impact:
+
+    - **Raw Data Rate:** 5 frames/sec * (10KB metadata + 50KB image) = 5 frames/sec
+    * 60KB/frame = 300KB/second.
+
+    - **12-hour Buffer (uncompressed):** 300KB/sec * 3600 sec/hour * 12 hours = 12,960,000
+    KB = ~12.96 GB. This is a substantial amount for typical edge device storage,
+    necessitating compression.
+
+    - **Compression Benefit:** With GZIP/ZLIB, an average 3x compression ratio (e.g.,
+    60KB per frame down to 20KB) would reduce the 12-hour buffer size to ~4.32 GB.
+    This makes local storage significantly more feasible.
+
+    - **CPU Load for Compression/Decompression:** While GZIP/ZLIB are CPU-intensive,
+    modern ARM cores (often paired with the Coral) can typically achieve decompression
+    speeds of 50-100MB/s. Our compressed data rate for buffering is ~100KB/s (300KB/s
+    / 3x compression), which is well within the CPU''s capability to handle without
+    significant contention with the 4 TOPS INT8 inference engine or exceeding the
+    2W power envelope, especially if operations are batched and asynchronous.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

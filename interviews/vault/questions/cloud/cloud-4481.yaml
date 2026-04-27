@@ -1,0 +1,63 @@
+schema_version: '1.0'
+id: cloud-4481
+track: cloud
+level: L6+
+zone: mastery
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: Distributed Training Throughput for 100TB Embedding Cluster
+scenario: A social platform needs to train a recommendation model with 100TB of embedding
+  tables on 1024 GPUs. The system must complete a full epoch (1T training samples)
+  in under 24 hours. Design the distributed training architecture and verify feasibility.
+question: How would you design the distributed training architecture and verify whether
+  1024 GPUs can process 1T samples in under 24 hours?
+details:
+  realistic_solution: 'Architecture: (1) Embedding tables: 100TB distributed across
+    1000 CPU parameter servers, each with 100GB HDD + 64GB DRAM cache. Hot rows (top
+    1%) in DRAM: 1TB total. (2) Dense compute: 1024 H100s for MLP forward/backward.
+    2-stage pipeline: stage 1 embedding lookup (CPU PS), stage 2 dense compute (H100).
+    (3) Batch size: 64K samples per global batch. Per H100: 64K/1024 = 62.5 samples.
+    (4) Step time budget: 1T samples / 24hr = 11.6M samples/sec throughput. At batch=64K:
+    181 steps/sec = 5.5ms per step. (5) Embedding lookup time: 62.5 samples * 200
+    lookups = 12.5K lookups per GPU per step. At 100us per lookup (CPU PS): 1.25 seconds
+    per step — way over budget. Fix: async prefetch 2 steps ahead. Effective hidden
+    latency. Pre-shard hot items to GPU: 1% of 100TB = 1TB on GPU (10TB total HBM
+    across 1024 GPUs if 10GB/GPU — too much). Use layered caching: DRAM on PS nodes.
+    (6) Realistic throughput: with optimized FBGEMM + async all-to-all + overlapped
+    compute: industry RecSys at this scale achieves 1T samples in 24hr with ~2048
+    GPUs at Meta/Google scale. 1024 GPUs may need 48hr.'
+  common_mistake: 'Treating the problem as a pure compute problem and calculating
+    TFLOPS required. Recommendation model training is embedding-lookup-dominated:
+    the bottleneck is embedding table I/O (reading sparse row gradients from 100TB
+    distributed tables), not matrix multiply compute.'
+  napkin_math: 'Dense compute: 1T samples * (DLRM dense FLOP per sample). DLRM dense
+    MLP: 3 layers * 512 neurons = ~3M params. Per-sample FLOP: 3M * 6 = 18M FLOP.
+    1T * 18M = 18E FLOP. 1024 H100 at 989T at 50% MFU: 507T * 1024 = 519P TFLOPS.
+    Time: 18E / 519P = 34.7 seconds for dense compute alone. Embedding lookup dominates.
+    With optimized async pipelining: embedding lookup hidden behind compute → dense
+    compute time = 34.7 seconds for 1T samples if perfectly pipelined. But communication
+    overhead: all-to-all for 1024 GPUs at each step. Realistic: 3-5x slowdown = 100-175
+    seconds for 1T samples. Far under 24hr. Bottleneck is CPU PS lookup speed, not
+    GPU compute.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Parameter count derivation is unclear. 3 layers of 512 neurons yields ~786K params,
+  not 3M, unless a specific unstated large input dimension is assumed.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

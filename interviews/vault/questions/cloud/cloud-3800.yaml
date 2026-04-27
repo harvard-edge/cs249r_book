@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-3800
+track: cloud
+level: L5
+zone: design
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: 'Expert Parallelism: All-to-All Communication Pattern'
+scenario: You train a 1T parameter MoE model with 64 experts across 64 H100 GPUs (one
+  expert per GPU). Each token's top-2 routing requires sending tokens to the GPUs
+  hosting the selected experts. This creates an all-to-all communication pattern.
+  Calculate the communication volume and explain why All-to-All is the MoE-specific
+  collective, unlike AllReduce for data parallelism.
+question: What is the MoE All-to-All communication volume, and why is All-to-All the
+  expert-parallel collective instead of AllReduce?
+details:
+  realistic_solution: 'In expert parallelism, each GPU processes a shard of the batch
+    (e.g., 64 tokens) and must route each token to 2 of the 64 expert GPUs. All-to-All
+    step: each GPU sends 2 tokens'' hidden states to 2 other GPUs and receives tokens
+    routed to its expert. Communication volume per GPU: sends 64 × 2 × hidden_dim
+    × 2 bytes (tokens × top-k × dim × BF16). For hidden_dim=8192: 64 × 2 × 8192 ×
+    2 = 2 MB outgoing per GPU. But total across all 64 GPUs: 64 × 2 MB = 128 MB aggregate.
+    This happens twice per MoE layer (dispatch tokens, then collect results). With
+    16 MoE layers: 128 MB × 2 × 16 = 4.1 GB per step. At 400 Gbps InfiniBand: 4.1
+    GB / 50 GB/s = 82ms. This is significant — comparable to the compute time. Key
+    difference from AllReduce: All-to-All traffic is irregular (depends on routing),
+    making it harder to optimize. Solutions: use expert capacity buffers with fixed-size
+    All-to-All (pad to capacity factor), and overlap All-to-All with MLP computation
+    of non-MoE layers.'
+  common_mistake: Confusing expert parallelism's All-to-All with data parallelism's
+    AllReduce. AllReduce aggregates identical-shaped gradients across replicas. All-to-All
+    redistributes different tokens to different GPUs based on routing decisions —
+    the traffic pattern is data-dependent.
+  napkin_math: 'Per MoE layer: 64 GPUs × 64 tokens × 2 experts × 8192d × 2B = 128
+    MB All-to-All × 2 (dispatch + collect) = 256 MB. 16 MoE layers: 4.1 GB. At 50
+    GB/s IB: 82ms. Compute per step: ~200ms. Communication overhead: ~41%.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

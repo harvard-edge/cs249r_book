@@ -8,34 +8,40 @@ competency_area: precision
 bloom_level: apply
 phase: inference
 title: The Zero-Point Shift Wreck
-scenario: You are debugging a simple 2-layer keyword-spotting MLP on a Cortex-M4. The model takes an INT8
-  input vector and should output an INT8 classification vector. You've quantized the weights for each
-  layer independently. When you run a test vector through the model, the output is garbage—mostly saturated
-  at the max INT8 value (127). The first layer's quantization scheme (scale, zero-point) is `(0.1, 0)`,
-  but the second layer's is `(0.2, -128)` to accommodate a ReLU6 activation. You suspect an issue with
-  the quantization arithmetic between the layers. What is the most likely cause of the garbage output?
-question: "What is the most likely cause of the garbage output?"
+scenario: You are debugging a simple 2-layer keyword-spotting MLP on a Cortex-M4.
+  The model takes an INT8 input vector and should output an INT8 classification vector.
+  You've quantized the weights for each layer independently. When you run a test vector
+  through the model, the output is garbage—mostly saturated at the max INT8 value
+  (127). The first layer's quantization scheme (scale, zero-point) is `(0.1, 0)`,
+  but the second layer's is `(0.2, -128)` to accommodate a ReLU6 activation. You suspect
+  an issue with the quantization arithmetic between the layers. What is the most likely
+  cause of the garbage output?
+question: What is the most likely cause of the garbage output?
 details:
-  realistic_solution: The core issue is the lack of a proper requantization step. The 32-bit integer accumulator
-    values from the first layer's matrix multiplication cannot be directly passed to the second layer.
-    They exist on a scale and zero-point derived from the first layer's inputs and weights. They must
-    be rescaled and re-centered to match the INT8 quantization scheme (both scale and zero-point) expected
-    by the second layer. Without this, adding the second layer's zero-point `(-128)` to a large positive
-    accumulator that hasn't been properly scaled down creates a massive error, which then saturates the
-    result when clipped to the INT8 range.
-  common_mistake: Engineers often forget that the zero-point is part of a quantized number's identity.
-    They treat the raw INT8/INT32 values from one layer as if they share the same zero-point as the next,
-    leading to catastrophic shifts in magnitude. They focus only on the scaling factor and apply a naive
-    bit-shift.
-  napkin_math: 'L1 accumulator=25000, scale S1_in*S1_w=0.001. Real value=25.0. Proper requant to L2 (S=0.2,
-    ZP=-128): q2=25/0.2+(-128)=-3. Without requant: raw 25000+(-128)=24872→clipped to 127. Every neuron
-    saturates at 127. Fix: insert requantization (multiply by M=S1/S2, shift, add ZP2) between layers.'
+  realistic_solution: The core issue is the lack of a proper requantization step.
+    The 32-bit integer accumulator values from the first layer's matrix multiplication
+    cannot be directly passed to the second layer. They exist on a scale and zero-point
+    derived from the first layer's inputs and weights. They must be rescaled and re-centered
+    to match the INT8 quantization scheme (both scale and zero-point) expected by
+    the second layer. Without this, adding the second layer's zero-point `(-128)`
+    to a large positive accumulator that hasn't been properly scaled down creates
+    a massive error, which then saturates the result when clipped to the INT8 range.
+  common_mistake: Engineers often forget that the zero-point is part of a quantized
+    number's identity. They treat the raw INT8/INT32 values from one layer as if they
+    share the same zero-point as the next, leading to catastrophic shifts in magnitude.
+    They focus only on the scaling factor and apply a naive bit-shift.
+  napkin_math: 'L1 accumulator=25000, scale S1_in*S1_w=0.001. Real value=25.0. Proper
+    requant to L2 (S=0.2, ZP=-128): q2=25/0.2+(-128)=-3. Without requant: raw 25000+(-128)=24872→clipped
+    to 127. Every neuron saturates at 127. Fix: insert requantization (multiply by
+    M=S1/S2, shift, add ZP2) between layers.'
   options:
   - The 32-bit accumulator is overflowing before the second layer runs.
   - The ReLU6 activation function is not correctly implemented for INT8 inputs.
-  - The intermediate 32-bit accumulator values are being used by the second layer without being correctly
-    rescaled and shifted to the second layer's zero-point and scale.
-  - The weights for the second layer were quantized using per-tensor instead of per-channel quantization.
+  - The intermediate 32-bit accumulator values are being used by the second layer
+    without being correctly rescaled and shifted to the second layer's zero-point
+    and scale.
+  - The weights for the second layer were quantized using per-tensor instead of per-channel
+    quantization.
   correct_index: 2
 status: published
 provenance: imported

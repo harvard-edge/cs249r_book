@@ -7,34 +7,38 @@ topic: 3d-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: The Optimizer State Explosion
-scenario: 'A junior engineer is fine-tuning a 7B model on a single A100 80 GB. They report: ''The model
-  is only 14 GB in FP16, but training OOMs at batch_size=1. How can a 14 GB model not fit on an 80 GB
-  GPU?'' Walk them through where the other 66 GB went.'
-question: "Where did the other 66 GB of GPU memory go during full fine-tuning?"
+title: 3D Parallelism Sizing — Where the Adam OOM Lives
+scenario: A 70B-parameter LLM is being fine-tuned with mixed-precision Adam on H100
+  80 GB GPUs connected by NVLink intra-node and IB NDR inter-node. The team plans
+  a 3D parallel layout but cannot agree on TP/PP sizing. Compute the per-GPU memory
+  footprint and identify the minimum (TP * PP) that fits on 80 GB H100s, accounting
+  for FP16 weights, FP16 gradients, FP32 master weights, FP32 Adam m, FP32 Adam v,
+  and a 16 GB activation+workspace reservation. Then explain which dimension of the
+  3D parallel layout shrinks each component.
+question: For a 70B Adam-trained model on 80 GB H100s, what is the minimum (TP*PP)
+  that fits, and which 3D-parallel axis shrinks each Adam memory component?
 details:
-  realistic_solution: 'The Adam optimizer stores *two additional copies* of every parameter: the first
-    moment (mean of gradients, $m_t$) and the second moment (variance of gradients, $v_t$), both in FP32.
-    Combined with the FP32 master copy of weights (needed for mixed-precision training), the optimizer
-    state is the dominant memory consumer. The full breakdown: (1) FP16 model weights: 7B × 2 = **14 GB**;
-    (2) FP32 master weights (for optimizer update): 7B × 4 = **28 GB**; (3) FP32 gradients: 7B × 4 = **28
-    GB**; (4) FP32 Adam $m$: 7B × 4 = **28 GB**; (5) FP32 Adam $v$: 7B × 4 = **28 GB**. Total: **126 GB**
-    — 1.6× the GPU''s memory, and we haven''t even counted activations. The 14 GB model "expands" to 126
-    GB during training because the optimizer needs 16 bytes per parameter (FP16 weight + FP32 master +
-    FP32 grad + FP32 m + FP32 v = 2 + 4 + 4 + 4 + 4 = 18 bytes, but the FP16 weight is a view of the FP32
-    master, so effectively 16 bytes of *additional* state). Fix: use LoRA (only optimize ~0.1% of parameters),
-    8-bit Adam (halves optimizer state), or gradient checkpointing + CPU offloading.'
-  common_mistake: '"The model must be loading in FP32 — that''s 28 GB" or "The batch size is too large."
-    Even FP32 weights are only 28 GB, and they said batch_size=1. The real memory consumer is invisible
-    in `model.parameters()`.'
-  napkin_math: '**Full fine-tuning memory:** FP16 weights: **14 GB**. FP32 master weights: **28 GB**.
-    FP32 gradients: **28 GB**. Adam $m_t$ (FP32): **28 GB**. Adam $v_t$ (FP32): **28 GB**. Activations
-    (batch=1, seq=2048, 32 layers): ~**4 GB**. CUDA workspace + fragmentation: ~**2 GB**. **Total: ~132
-    GB** on an 80 GB GPU → **OOM**. **LoRA (rank=16) memory:** Trainable params: $2 \times 32 \times 2
-    \times 4096 \times 16 = $ 8.4M (0.12% of 7B). LoRA optimizer state: 8.4M × 12 bytes = **101 MB**.
-    Frozen FP16 weights: **14 GB**. Activations: **4 GB**. **Total: ~18.1 GB** — fits on 80 GB with room
-    for batch_size=16. The optimizer state went from 84 GB to 101 MB — a **830× reduction**.'
-status: published
+  realistic_solution: 'Mixed-precision Adam stores 16 bytes per parameter total (FP16
+    weight 2 + FP16 grad 2 + FP32 master 4 + FP32 m 4 + FP32 v 4). For 70B params
+    that is 1120 GB of model state. With a 16 GB activation+workspace reservation
+    per GPU, the per-GPU model-state budget is 64 GB. Minimum (TP * PP) = ceil(1120
+    / 64) = 18 → choose TP=8 inside the NVLink island and PP=4 across nodes (TP*PP
+    = 32, per-GPU model state = 35 GB). Each axis shrinks a *different* part of the
+    state: PP shrinks every component proportionally by partitioning *layers* across
+    stages; TP shrinks weights, grads, and (with ZeRO-1) optimizer state along the
+    tensor dimension; DP alone does not shrink any of these — it only divides the
+    global batch.'
+  common_mistake: 'Sizing only by the FP16 weight count ("14 GB → 70B fits in 6 GPUs").
+    Mixed-precision Adam costs 16 bytes per param, not 2. Other common errors: assuming
+    DP shrinks per-GPU memory (it does not), or pushing TP across the IB boundary
+    (every layer''s AllReduce stalls on the 25 GB/s inter-node link).'
+  napkin_math: '**Per-parameter Adam state (mixed precision):** 2 (FP16 W) + 2 (FP16
+    G) + 4 (FP32 W master) + 4 (FP32 m) + 4 (FP32 v) = 16 bytes. **70B model state:**
+    70B * 16 = 1120 GB. **Per-GPU budget:** 80 - 16 (activations) = 64 GB. **Min (TP*PP):**
+    ceil(1120 / 64) = 18 → choose 32 (TP=8, PP=4). **Per-GPU model state at TP=8,
+    PP=4:** 1120 / 32 = 35 GB. **Activation budget remaining:** 80 - 35 = 45 GB. **DP:**
+    can be added freely for throughput; per-GPU memory unchanged.'
+status: archived
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
@@ -51,3 +55,6 @@ human_reviewed:
   by: null
   date: null
   notes: null
+deletion_reason: Archived after G.H cleanup rewrite still failed Phase D's strict
+  judge bar (G.L re-judge). Pre-Phase-D legacy item that doesn't meet today's parallelism
+  prompt standards.

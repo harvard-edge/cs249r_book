@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-4299
+track: cloud
+level: L6+
+zone: mastery
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Speculative Decoding in Disaggregated Architecture
+scenario: 'You want to add speculative decoding (draft model + target model verification)
+  to a disaggregated serving system. The target model is 70B on MI300X decode nodes;
+  the draft model is 7B. Design the placement architecture: where does the draft model
+  run, how does the KV-cache interaction work, and what new failure modes does this
+  introduce vs. non-disaggregated speculative decoding?'
+question: Where should the 7B draft model run in disaggregated speculative decoding,
+  how should KV caches interact, and what failure modes arise?
+details:
+  realistic_solution: 'Optimal placement: co-locate the 7B draft model on each decode
+    node alongside the 70B target model. MI300X has 192 GB — 70B target (140 GB) +
+    7B draft (14 GB) = 154 GB, fits with 38 GB for KV. Draft runs γ=4 steps autonomously
+    on the decode node, producing 4 candidate tokens. Target model verifies in one
+    forward pass (also on decode node). Accepted tokens skip target decode steps;
+    rejected tokens revert. KV-cache interaction: draft model and target model maintain
+    separate KV caches; accepted tokens'' target-model KV entries are written, draft
+    KV is discarded. New failure modes: (1) Draft-target KV desynchronization if preemption
+    occurs mid-speculation — requires atomic speculation rollback. (2) Speculative
+    decoding changes batch composition unpredictably, breaking the fixed-size decode
+    step assumption used by the prefill-to-decode scheduling contract. (3) Rejection
+    rate spikes under distribution shift, wasting compute without throughput gain.'
+  common_mistake: Placing the draft model on the prefill nodes — prefill nodes are
+    sized for compute-bound workloads and will be underutilized for the memory-bound
+    draft decode steps. Also ignoring that speculation rejection requires re-running
+    target model decode, which changes the scheduling contract.
+  napkin_math: 'Draft model (7B) token throughput on MI300X: 5.3e12 / 14e9 = 378 tok/s.
+    Target verify pass: same cost as 1 decode step but processes γ+1=5 tokens as a
+    small prefill → ~5× cheaper per token vs sequential. Expected speedup with γ=4
+    and acceptance rate α=0.8: E[tokens/step] = (1-α^(γ+1))/(1-α) = (1-0.32768)/0.2
+    = 3.36. Throughput gain: 3.36× fewer target model calls. Net: ~2.5× end-to-end
+    TPOT improvement after draft overhead.'
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

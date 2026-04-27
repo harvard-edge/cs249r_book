@@ -1,0 +1,58 @@
+schema_version: '1.0'
+id: cloud-4038
+track: cloud
+level: L4
+zone: diagnosis
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Diagnosing Gradient Staleness in Async SGD
+scenario: Your 64-MI300X async SGD training job converges 30% slower than synchronous
+  SGD at the same learning rate. The parameter server receives gradient updates with
+  an average staleness of 12 iterations (some workers are 25 iterations behind). The
+  model is a 13B parameter LLM. Diagnose why staleness degrades convergence and determine
+  the maximum tolerable staleness.
+question: Why does average staleness of 12 iterations hurt async SGD convergence for
+  a 13B LLM, and what staleness is tolerable?
+details:
+  realistic_solution: 'Gradient staleness of τ iterations means a worker computed
+    gradients using weights w_t but the server has already advanced to w_{t+τ}. The
+    gradient ∇L(w_t) is applied to w_{t+τ}, introducing an error proportional to τ
+    × η × ||∇²L|| (the Hessian curvature). For a 13B LLM with typical η=1e-4 and τ=25:
+    if ||∇²L|| ≈ 10 (common for Transformers), the relative error ≈ 25 × 1e-4 × 10
+    = 0.025, which is 2.5% error per gradient — significant when accumulated. Fix:
+    (1) Scale learning rate by 1/√τ: η_eff = 1e-4/√12 = 2.9e-5 for average staleness
+    12. (2) Use bounded staleness: discard gradients with τ > 16 (the SSP — Stale
+    Synchronous Parallel threshold). (3) Apply Nesterov-style momentum correction:
+    adjust stale gradient by subtracting τ × η × Hessian-vector product. (4) Switch
+    to Local SGD: workers do K local steps then sync every K iterations, achieving
+    the throughput of async without unbounded staleness.'
+  common_mistake: Assuming staleness is just a minor noise source. Stale gradients
+    point in the direction of a loss surface that no longer exists — the parameters
+    have moved significantly since the gradient was computed. With a 13B parameter
+    model and learning rate η, 25 steps of parameter updates change the weight vector
+    by ~25ηΔ, potentially invalidating the stale gradient entirely.
+  napkin_math: 'Sync SGD at 64 GPUs: 64× gradient throughput but limited by slowest
+    worker. Async at 64 GPUs: ~58× effective throughput (some stale gradients are
+    wasted). With staleness=12 and η scaling: effective learning rate drops by √12
+    = 3.5×, requiring 3.5× more iterations. Net speedup of async vs sync: 58/64 ×
+    1/3.5 = 0.26× — async is actually 4× SLOWER when staleness is this high. Maximum
+    useful staleness ≈ √N = √64 = 8 iterations.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -5,33 +5,47 @@
 # If you need to add a new package, follow the instructions below.
 # ==============================================================
 
-required_packages <- c(
-  "downlit",    # Required for code linking in Quarto
-  "ggplot2",    # Visualization package
-  "ggrepel",    # Visualization package (pinned below for R < 4.5)
-  "knitr",      # Needed for Quarto rendering
-  "png",        # PNG support
-  "rmarkdown",  # Markdown rendering in R
-  "tidyverse",  #
-  "reshape2",   #
-  "reticulate", #
-  "rsvg",       #
-  "viridis",    #
-  "xml2",       # Required for XML/HTML processing
-  "dplyr",      # Data manipulation (used in sustainable_ai.qmd)
-  "grid"        # Grid graphics (used in hw_acceleration.qmd)
-)
+# Docker/CI: R_LIBS_USER is ignored at startup if the path does not exist, so we ensure
+# a single target library and pin CRAN (HTTPS) before any install.
+lib <- Sys.getenv("R_LIBS_USER", unset = NA_character_)
+if (!is.na(lib) && nzchar(lib)) {
+  dir.create(lib, recursive = TRUE, showWarnings = FALSE)
+  .libPaths(c(lib, .libPaths()))
+}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# required_packages (single list in required_r_packages.R; Docker: /tmp/required_r_packages.R)
+a <- commandArgs()
+fa <- a[grepl("^--file=", a)]
+script_dir <- if (length(fa)) {
+  normalizePath(dirname(sub("^--file=", "", fa[1])), mustWork = FALSE)
+} else {
+  "."
+}
+rpf <- if (file.exists("/tmp/required_r_packages.R")) {
+  "/tmp/required_r_packages.R"
+} else {
+  file.path(script_dir, "required_r_packages.R")
+}
+if (!file.exists(rpf)) {
+  stop("required_r_packages.R not found: ", rpf, call. = FALSE)
+}
+source(rpf, local = FALSE) # defines required_packages
 
 install_if_missing <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
-    install.packages(pkg, repos = "http://cran.rstudio.com")
+    # Ncpus=1: avoid parallel compiles OOM'ing in Docker/Actions runners
+    install.packages(pkg, Ncpus = 1L)
+  }
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Failed to install or load: ", pkg, call. = FALSE)
   }
 }
 
 invisible(sapply(required_packages, install_if_missing))
 
 if (!requireNamespace("tinytex", quietly = TRUE)) {
-  install.packages("tinytex", repos = "http://cran.rstudio.com")
+  install.packages("tinytex", Ncpus = 1L)
   tinytex::install_tinytex()
 }
 

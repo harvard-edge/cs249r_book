@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, burst, flash, floatText, shake, tween } from "./runtime.mjs";
+import { mountPixiOnCanvas, burst, flash, floatText, shake, tween, mountReadyOverlay } from "./runtime.mjs";
 import * as P from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
@@ -23,6 +23,7 @@ export async function mountTopology(canvas, opts = {}) {
 
   const state = {
     phase: 'build', // 'build' | 'run' | 'over'
+    started: false,
     time: 20, // 20s build, 30s run
     score: 0,
     nvlinksUsed: 0,
@@ -234,7 +235,17 @@ export async function mountTopology(canvas, opts = {}) {
     }
   }
 
+  // Pre-game READY overlay
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "TOPOLOGY TYCOON",
+    goal: "Wire 8 GPUs. Maximize bandwidth, avoid bottlenecks.",
+    controls: "CLICK two nodes to toggle a link · then watch packets flow",
+    onLaunch: () => { state.started = true; }
+  });
+
   onTick((dt) => {
+    if (!state.started) return;
     if (state.phase === 'over') return;
 
     state.time -= dt / 1000;

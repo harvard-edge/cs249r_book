@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: edge-1252
+track: edge
+level: L3
+zone: analyze
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: Edge TPU Sequence Scaling Bottleneck Analysis
+scenario: We deployed a quantized INT8 Vision Transformer on a Google Coral Edge TPU
+  (4 TOPS INT8, 2W, USB/PCIe form factor). At a base sequence length of 196 tokens,
+  the model runs efficiently at 15ms per inference. However, when we increase the
+  input resolution to yield 784 tokens (a 4x increase in sequence length), the inference
+  time spikes disproportionately to over 240ms, and we observe heavy PCIe bus traffic
+  and host CPU thrashing. Given the Edge TPU's architecture and limited operator support,
+  explain why the latency scales so aggressively and what causes the host memory pressure.
+question: Why does increasing ViT sequence length from 196 to 784 tokens make Coral
+  Edge TPU latency exceed 240ms and trigger host thrashing?
+details:
+  realistic_solution: The severe latency spike is driven by the O(n²) time and space
+    complexity of the self-attention mechanism. When the sequence length increases
+    by a factor of 4, the number of attention operations and the size of the attention
+    matrix increase by a factor of 16. Because the Coral Edge TPU has a small on-chip
+    SRAM cache (typically ~8MB), the 16x larger intermediate attention matrices can
+    no longer fit entirely on-chip. The Edge TPU runtime is forced to spill these
+    intermediate INT8 activations back to the host CPU over the USB/PCIe bus, causing
+    the massive latency penalty and host thrashing.
+  common_mistake: Candidates often assume that compute time scales linearly with input
+    size (4x longer sequence = 4x slower) and overlook the O(n²) complexity of the
+    self-attention mechanism. They may also fail to recognize that large intermediate
+    tensors from attention can easily exceed the Edge TPU's limited on-chip SRAM,
+    forcing a fallback to the host CPU over a slow USB/PCIe connection.
+  napkin_math: Sequence length increases from N=196 to N=784 (4x). Attention compute
+    and memory scale as O(N²), so the attention overhead increases by (784/196)² =
+    16x. The attention score matrix size per head grows from 196 × 196 = ~38KB to
+    784 × 784 = ~614KB at INT8. Across 12 attention heads, the intermediate memory
+    required for just the attention scores grows from ~460KB to ~7.3MB. Combined with
+    the KV-cache and model weights, this instantly exceeds the Edge TPU's ~8MB SRAM,
+    triggering a fallback to the host CPU.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

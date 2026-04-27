@@ -1,4 +1,4 @@
-import { mountPixiOnCanvas, flash, floatText, shake } from "./runtime.mjs";
+import { mountPixiOnCanvas, flash, floatText, shake, mountReadyOverlay } from "./runtime.mjs";
 import * as PIXI from "./vendor/pixi.min.mjs";
 
 window.MLSP = window.MLSP || {};
@@ -10,6 +10,7 @@ export async function mountCluster(canvas, opts = {}) {
 
   let score = 0;
   let over = false;
+  let started = false;
   let timeElapsed = 0;
   const TOTAL_TIME = 45;
 
@@ -41,13 +42,46 @@ export async function mountCluster(canvas, opts = {}) {
       g.rect(0, 0, CELL, CELL).fill(colors.empty).stroke({ width: 1, color: colors.border });
       gridLayer.addChild(g);
       cellGraphics[r][c] = g;
-      
-      g.eventMode = "static";
-      g.on("pointerdown", () => handleGridClick(r, c));
-      g.on("pointerover", () => drawHover(r, c));
-      g.on("pointerout", () => clearHover());
     }
   }
+
+  // Canvas-level pointer handlers compute the cell from coordinates. Pixi v8's
+  // per-Graphics hit testing was unreliable here (clicks fired pointerover but
+  // not pointerdown), so we route all grid pointer events through the canvas DOM
+  // element and translate to grid (r, c) ourselves. Robust regardless of Pixi
+  // event-system quirks.
+  function cellAtCanvasCoord(canvasX, canvasY) {
+    const c = Math.floor((canvasX - startX) / (CELL + PADDING));
+    const r = Math.floor((canvasY - startY) / (CELL + PADDING));
+    if (r < 0 || r >= GRID_SIZE || c < 0 || c >= GRID_SIZE) return null;
+    // Reject clicks in the inter-cell padding gap.
+    const localX = (canvasX - startX) - c * (CELL + PADDING);
+    const localY = (canvasY - startY) - r * (CELL + PADDING);
+    if (localX > CELL || localY > CELL) return null;
+    return { r, c };
+  }
+  function pointerToCanvas(e) {
+    const rect = canvas.getBoundingClientRect();
+    const sx = canvas.width  / rect.width;
+    const sy = canvas.height / rect.height;
+    return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+  }
+  const onCanvasMove = (e) => {
+    if (!started || over) return;
+    const p = pointerToCanvas(e);
+    const cell = cellAtCanvasCoord(p.x, p.y);
+    if (cell) drawHover(cell.r, cell.c);
+    else clearHover();
+  };
+  const onCanvasDown = (e) => {
+    if (!started || over) return;
+    const p = pointerToCanvas(e);
+    const cell = cellAtCanvasCoord(p.x, p.y);
+    if (cell) handleGridClick(cell.r, cell.c);
+  };
+  canvas.addEventListener("pointermove", onCanvasMove);
+  canvas.addEventListener("pointerdown", onCanvasDown);
+  canvas.addEventListener("pointerleave", () => clearHover());
 
   // HUD
   const title = new PIXI.Text({ text: "Cluster Commander", style: { fontSize: 16, fontWeight: "bold", fill: colors.text } });
@@ -145,7 +179,7 @@ export async function mountCluster(canvas, opts = {}) {
   let alarmTimer = 0;
 
   function handleGridClick(r, c) {
-    if (over) return;
+    if (!started || over) return;
     const job = queue[0];
     if (canFit(r, c, job.size)) {
       // Place job
@@ -168,8 +202,18 @@ export async function mountCluster(canvas, opts = {}) {
     }
   }
 
+  // Pre-game READY overlay — game starts paused so the player can read.
+  mountReadyOverlay(stage, {
+    width: W, height: H,
+    title: "CLUSTER COMMANDER",
+    goal: "Schedule jobs without fragmenting the fleet.",
+    controls: "CLICK a cell to place the front-of-queue job · R  retry",
+    onLaunch: () => { started = true; }
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS;
+    if (!started) return;
     if (over) return;
 
     timeElapsed += dt / 1000;
@@ -261,6 +305,8 @@ export async function mountCluster(canvas, opts = {}) {
     ahaText: "When small jobs scatter across a cluster, they cause fragmentation. Even if 50% of the GPUs are idle, a massive pre-training job requiring contiguous nodes will be blocked, ruining cluster utilization.",
     destroy() {
       window.removeEventListener("keydown", handleKeydown);
+      canvas.removeEventListener("pointermove", onCanvasMove);
+      canvas.removeEventListener("pointerdown", onCanvasDown);
       app.destroy(true, { children: true, texture: true });
     }
   };
