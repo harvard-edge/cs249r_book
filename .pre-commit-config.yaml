@@ -64,10 +64,21 @@ repos:
         args: ["--toml", "pyproject.toml"]
         exclude: "^(_site/|_book/|htmlcov/|site/assets/games/vendor/|.*\\.js$|.*\\.pdf$)"
 
-  # --- Global: Bibliography (format + semantic) ---
-  # Repo-wide bibtex auto-formatter. Matches every .bib file in the repo
-  # (book/, tinytorch/paper/, anywhere else). The bib-lint hook below runs
-  # after this one so it validates the post-tidy state.
+  # --- Global: Bibliography (mechanical fixes + format + semantic) ---
+  # 1) Safe §5 field fixes (DOI prefix, title period, pages --, journal abbrevs)
+  #    on changed .bib only — idempotent. Exits 1 if it rewrote a file
+  #    (re-stage and commit again). Same logic as the first step of
+  #    `book/binder bib normalize`.
+  # 2) bibtex-tidy — layout. 3) bib-lint (binder) — error-level schema.
+  - repo: local
+    hooks:
+      - id: bib-apply-mechanical
+        name: "Global: Apply safe §5 mechanical fixes to .bib"
+        entry: python3 book/tools/bib_apply_mechanical_fixes.py --pre-commit
+        language: system
+        pass_filenames: true
+        files: \.bib$
+
   - repo: https://github.com/FlamingTempura/bibtex-tidy
     rev: v1.14.0
     hooks:
@@ -89,7 +100,7 @@ repos:
         files: \.bib$
 
   # Repo-wide bibtex semantic validator (§5 Bibliography Hygiene).
-  # Runs AFTER bibtex-tidy so it validates the post-tidy state. Uses the
+  # Runs AFTER bib-apply-mechanical + bibtex-tidy; validates post-tidy state. Uses the
   # baseline allow-list at book/tools/bib_lint_baseline.json to grandfather
   # pre-existing violations — only NEW violations block the commit.
   # Regenerate baseline via: python3 book/tools/bib_lint.py --all --baseline
@@ -260,6 +271,13 @@ repos:
       - id: book-check-duplicate-citation-year
         name: "Book: No redundant (YEAR) after citations"
         entry: ./book/binder check refs --scope duplicate-year
+        language: system
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-check-manual-bracket-citation
+        name: "Book: No manual *et al.* before bracket citations"
+        entry: ./book/binder check refs --scope manual-bracket
         language: system
         pass_filenames: false
         files: ^book/quarto/contents/.*\.qmd$
