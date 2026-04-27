@@ -45,12 +45,22 @@
   // and we explicitly want to interoperate, not shadow it.
   var STORAGE_KEY = 'quarto-color-scheme';
 
+  // Quarto's built-in toggle stores 'alternate' (= dark, the layered sheet)
+  // or 'default' (= light, the base sheet) under STORAGE_KEY. Sibling
+  // (non-Quarto) subsites store 'dark' / 'light'. Both conventions hit the
+  // same key, so we accept either and normalize. Quarto's own startup still
+  // checks `=== 'alternate'`, so we MUST NOT rewrite Quarto's writes — only
+  // mirror them onto <html>'s data-bs-theme attribute.
+  function normalize(value) {
+    if (value === 'dark' || value === 'alternate') return 'dark';
+    if (value === 'light' || value === 'default') return 'light';
+    return null;
+  }
+
   function preferredScheme() {
     try {
-      var stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored === 'dark' || stored === 'light') {
-        return stored;
-      }
+      var n = normalize(window.localStorage.getItem(STORAGE_KEY));
+      if (n) return n;
     } catch (e) {
       // localStorage may be blocked (private mode, sandboxed iframe).
       // Silent fallback to OS preference is the right behavior.
@@ -76,15 +86,49 @@
   // 1. Apply the initial scheme synchronously (before paint).
   apply(preferredScheme());
 
-  // 2. Cross-tab sync: react when *another* tab updates the choice.
+  // 2. Same-tab sync: Quarto's toggle writes to localStorage but does NOT
+  //    update <html> attributes. After Quarto's toggle handler runs, mirror
+  //    the new storage value onto <html>. Without this, clicking the toggle
+  //    leaves data-bs-theme stale until the next reload, and any CSS keyed
+  //    off [data-bs-theme="dark"] renders against the wrong stylesheet.
+  function syncFromStorage() {
+    try {
+      var n = normalize(window.localStorage.getItem(STORAGE_KEY));
+      if (n) apply(n);
+    } catch (e) { /* see preferredScheme */ }
+  }
+  function wrapToggle() {
+    var orig = window.quartoToggleColorScheme;
+    if (typeof orig !== 'function' || orig.__mlsbWrapped) return;
+    var wrapped = function () {
+      var r = orig.apply(this, arguments);
+      syncFromStorage();
+      return r;
+    };
+    wrapped.__mlsbWrapped = true;
+    window.quartoToggleColorScheme = wrapped;
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      wrapToggle();
+      // Quarto's startup may pick a different scheme than us if storage held
+      // an 'alternate'/'default' Quarto value we previously couldn't parse;
+      // reconcile once Quarto has finished its own startup.
+      syncFromStorage();
+    });
+  } else {
+    wrapToggle();
+    syncFromStorage();
+  }
+
+  // 3. Cross-tab sync: react when *another* tab updates the choice.
   window.addEventListener('storage', function (ev) {
     if (ev.key !== STORAGE_KEY) return;
-    var next = ev.newValue;
-    if (next !== 'dark' && next !== 'light') return;
-    apply(next);
+    var n = normalize(ev.newValue);
+    if (n) apply(n);
   });
 
-  // 3. OS-preference change: only apply if the user has NOT explicitly
+  // 4. OS-preference change: only apply if the user has NOT explicitly
   //    chosen via the toggle (i.e. nothing in localStorage).
   if (window.matchMedia) {
     try {
