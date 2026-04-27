@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate a quiz JSON file against the canonical spec and the chapter's anchors.
 
-Per ``.claude/rules/quiz-generation.md`` §1 and §11: one quiz per ``##``
+Per ``.claude/docs/shared/quiz-generation.md`` §1 and §11: one quiz per ``##``
 section only; material spans the whole section including its ``###``
 subsections but ``###`` anchors are never valid ``section_id`` values.
 

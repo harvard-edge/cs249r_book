@@ -4,7 +4,7 @@ This directory regenerates `{chapter}_quizzes.json` from chapter prose for
 every chapter in Vol1 and Vol2. It is the **plumbing** half of the
 spec-plus-runner pattern. The **spec** — what "good" looks like — lives at:
 
-    .claude/rules/quiz-generation.md
+    .claude/docs/shared/quiz-generation.md
 
 Every decision about taxonomy, per-type answer formats, quality bar,
 anti-patterns, schema, and difficulty progression is in the spec. When

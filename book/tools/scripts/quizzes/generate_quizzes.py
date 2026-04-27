@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quiz regeneration runner for Vol1 and Vol2 of the ML Systems textbook.
 
-Reads the canonical spec at ``.claude/rules/quiz-generation.md``, reads a
+Reads the canonical spec at ``.claude/docs/shared/quiz-generation.md``, reads a
 chapter's prose, and produces ``{chapter}_quizzes.json.new`` at the
 canonical path. Every decision about taxonomy, format, quality bar, and
 schema lives in the spec — this script is plumbing.
