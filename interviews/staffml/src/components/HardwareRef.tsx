@@ -44,9 +44,9 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
           {activeTab === 'specs' && (
             <div className="space-y-1 max-h-48 overflow-y-auto">
               {HARDWARE_SPECS.map(hw => (
-                <div key={hw.name} className="flex items-center justify-between text-[10px] font-mono py-1 border-b border-border/50 last:border-0">
-                  <span className="text-textSecondary truncate mr-2">{hw.name}</span>
-                  <div className="flex items-center gap-3 text-textTertiary shrink-0">
+                <div key={hw.name} className="flex items-center justify-between text-[11px] font-mono py-1 border-b border-border/50 last:border-0">
+                  <span className="text-textPrimary truncate mr-2">{hw.name}</span>
+                  <div className="flex items-center gap-3 text-textSecondary shrink-0">
                     <span>{hw.compute_tflops} T</span>
                     <span>{formatBandwidth(hw.bandwidth_tbs)}</span>
                     <span>{formatMemory(hw.memory_gb)}</span>
@@ -60,11 +60,11 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
           {activeTab === 'latency' && (
             <div className="space-y-1">
               {LATENCY_HIERARCHY.map(l => (
-                <div key={l.operation} className="flex items-center justify-between text-[10px] font-mono py-1 border-b border-border/50 last:border-0">
-                  <span className="text-textSecondary">{l.operation}</span>
-                  <div className="flex items-center gap-3 text-textTertiary">
+                <div key={l.operation} className="flex items-center justify-between text-[11px] font-mono py-1 border-b border-border/50 last:border-0">
+                  <span className="text-textPrimary">{l.operation}</span>
+                  <div className="flex items-center gap-3 text-textSecondary">
                     <span>{formatLatency(l.latency_ns)}</span>
-                    <span className="text-textTertiary/50 w-16 text-right">{l.human_scale}</span>
+                    <span className="text-textTertiary w-16 text-right">{l.human_scale}</span>
                   </div>
                 </div>
               ))}
@@ -74,9 +74,9 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
           {activeTab === 'interconnects' && (
             <div className="space-y-1">
               {INTERCONNECTS.map(ic => (
-                <div key={ic.name} className="flex items-center justify-between text-[10px] font-mono py-1 border-b border-border/50 last:border-0">
-                  <span className="text-textSecondary">{ic.name}</span>
-                  <div className="flex items-center gap-3 text-textTertiary">
+                <div key={ic.name} className="flex items-center justify-between text-[11px] font-mono py-1 border-b border-border/50 last:border-0">
+                  <span className="text-textPrimary">{ic.name}</span>
+                  <div className="flex items-center gap-3 text-textSecondary">
                     <span>{ic.bandwidth_gbs} GB/s</span>
                     <span>{ic.latency_us} µs</span>
                   </div>
@@ -85,7 +85,7 @@ export default function HardwareRef({ defaultOpen = false }: { defaultOpen?: boo
             </div>
           )}
 
-          <div className="mt-2 text-[9px] text-textTertiary/50 italic">
+          <div className="mt-2 text-[10px] text-textTertiary italic">
             Source: mlsysim/core/constants.py
           </div>
         </div>
