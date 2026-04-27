@@ -1,29 +1,31 @@
 name: '🧮 MLSYSIM · 🔨 Build PDFs'
 
 # =============================================================================
-# MLSYSIM — Build Research Paper PDF Artifact
+# MLSYSIM — Build Research Paper + Tutorial Slide PDFs
 # =============================================================================
 #
-# Builds the MLSYSIM research paper PDF using pdflatex (via Makefile) and
-# uploads as a workflow artifact. PDF is injected into the docs site during
-# deployment (not committed to repo).
+# Builds two artifacts that get injected into the docs site at deploy time:
+#   - MLSYSIM-Paper  : the research paper PDF (mlsysim/paper/paper.pdf)
+#   - MLSYSIM-Slides : ISCA tutorial slide PDFs (tutorial_part1.pdf, _part2.pdf)
+#
+# Neither PDF is committed to the repo; both are downloaded from artifacts
+# and copied into the Quarto site root during the publish/preview workflows.
 #
 # Flow:
-#   1. BUILD_PDF  — Install LaTeX deps + run make
-#   2. VALIDATE   — Verify PDF exists and report page count
-#   3. UPLOAD     — Upload as MLSYSIM-Paper artifact (90-day retention)
-#   4. SUMMARY    — Build status report
+#   1. BUILD_PAPER   — Install LaTeX deps + build paper PDF, upload artifact
+#   2. BUILD_SLIDES  — Install xelatex + fonts, build tutorial decks, upload
+#   3. SUMMARY       — Build status report
 #
 # Triggers:
 #   - workflow_dispatch: manual
 #   - workflow_call: called by preview and publish workflows
 #
-# Deploys to: N/A (artifact only)
+# Deploys to: N/A (artifacts only)
 #
 # Related:
-#   - mlsysim-preview-dev.yml  — Downloads artifact for dev deploy
-#   - mlsysim-publish-live.yml — Downloads artifact for live deploy
-#   - mlsysim-update-pdfs.yml  — Rebuilds + deploys PDF without site
+#   - mlsysim-preview-dev.yml  — Downloads artifacts for dev deploy
+#   - mlsysim-publish-live.yml — Downloads artifacts for live deploy
+#   - mlsysim-update-pdfs.yml  — Rebuilds + deploys PDFs without site
 #
 # =============================================================================
 
@@ -42,14 +44,17 @@ on:
         default: ''
     outputs:
       pdf_built:
-        description: "Whether the PDF was built successfully"
-        value: ${{ jobs.build-pdf.result == 'success' }}
+        description: "Whether the paper PDF was built successfully"
+        value: ${{ jobs.build-paper.result == 'success' }}
+      slides_built:
+        description: "Whether the tutorial slide PDFs were built successfully"
+        value: ${{ jobs.build-slides.result == 'success' }}
 
 permissions:
   contents: read
 
 jobs:
-  build-pdf:
+  build-paper:
     name: '📄 Build Research Paper PDF'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -93,24 +98,95 @@ jobs:
           path: mlsysim/paper/paper.pdf
           retention-days: 90
 
+  build-slides:
+    name: '📊 Build Tutorial Slide PDFs'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # Mirrors the dependency set used by slides-build-pdfs.yml so the tutorial
+      # decks compile with the same toolchain as the textbook lecture decks.
+      - name: 🔧 Install TeX Live (xelatex)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-xetex \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-latex-extra \
+            texlive-latex-recommended \
+            lmodern \
+            fonts-liberation
+
+      - name: 🔧 Install Inkscape + Poppler
+        run: |
+          sudo apt-get install -y --no-install-recommends inkscape poppler-utils
+
+      - name: 🔧 Install JetBrains Mono
+        run: |
+          wget -q https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+          unzip -q JetBrainsMono-2.304.zip -d /tmp/jbmono
+          sudo mkdir -p /usr/share/fonts/truetype/jetbrains-mono
+          sudo cp /tmp/jbmono/fonts/ttf/*.ttf /usr/share/fonts/truetype/jetbrains-mono/
+          sudo fc-cache -f -v > /dev/null 2>&1
+
+      - name: 🔧 Install Beamer Metropolis Theme
+        run: |
+          tlmgr install beamertheme-metropolis pgfopts || true
+
+      - name: 📊 Build Tutorial Decks
+        working-directory: mlsysim/tutorial
+        run: make
+
+      - name: 🔍 Validate Slide PDFs
+        working-directory: mlsysim/tutorial
+        run: |
+          missing=0
+          for f in _build/tutorial_part1.pdf _build/tutorial_part2.pdf; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Missing: $f"
+              missing=$((missing + 1))
+              continue
+            fi
+            PAGES=$(pdfinfo "$f" 2>/dev/null | grep Pages | awk '{print $2}' || echo "?")
+            SIZE=$(du -h "$f" | awk '{print $1}')
+            echo "✅ $f (${PAGES} pages, ${SIZE})"
+          done
+          if [ "$missing" -gt 0 ]; then
+            exit 1
+          fi
+
+      - name: 📤 Upload Slides Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: MLSYSIM-Slides
+          path: |
+            mlsysim/tutorial/_build/tutorial_part1.pdf
+            mlsysim/tutorial/_build/tutorial_part2.pdf
+          retention-days: 90
+
   summary:
     name: '📊 Build Summary'
     runs-on: ubuntu-latest
-    needs: [build-pdf]
+    needs: [build-paper, build-slides]
     if: always()
 
     steps:
       - name: 📊 Generate Summary
         run: |
-          echo "## 🧮 MLSYSIM Paper PDF Build" >> $GITHUB_STEP_SUMMARY
+          echo "## 🧮 MLSYSIM PDF Builds" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| PDF | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📄 Research Paper | ${{ needs.build-pdf.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 📄 Research Paper (MLSYSIM-Paper) | ${{ needs.build-paper.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📊 Tutorial Slides (MLSYSIM-Slides) | ${{ needs.build-slides.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Usage" >> $GITHUB_STEP_SUMMARY
-          echo "PDF is uploaded as artifact and will be injected during site deployment." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "To deploy with this PDF, run the appropriate publish workflow:" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts are downloaded and injected during site deployment:" >> $GITHUB_STEP_SUMMARY
           echo "- **Live**: MLSYSIM Publish (Live)" >> $GITHUB_STEP_SUMMARY
           echo "- **Dev**: MLSYSIM Preview (Dev)" >> $GITHUB_STEP_SUMMARY
