@@ -8,19 +8,25 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The SPI DMA Cache Coherency Failure
-scenario: You configure a DMA controller on a Cortex-M7 to stream SPI camera data directly into a RAM buffer. When the DMA finishes, an interrupt fires, and your CPU prints the first few pixels of the buffer to the console. The printed values are all zeros (the old data), but if you pause the debugger and look at the raw memory, the correct camera pixels are physically there.
+scenario: >
+  You configure a DMA controller on a Cortex-M7 to stream SPI camera data directly into a RAM buffer. When the DMA finishes, an interrupt fires, and your CPU prints the first few pixels of the buffer to the console. The printed values are all zeros (the old data), but if you pause the debugger and look at the raw memory, the correct camera pixels are physically there.
 question: Why does a Cortex-M7 print stale zero values after the DMA successfully writes correct SPI camera pixels into RAM?
 details:
-  realistic_solution: You encountered a **D-Cache Coherency Failure**. A D-Cache hit takes 1 cycle. An SRAM read takes ~6 cycles. The cache is doing exactly what it's supposed to do (being fast), but in hardware architectures with parallel DMA bus masters, software must manually invalidate the D-Cache before reading the DMA buffer.
+  realistic_solution: >
+    You encountered a D-Cache Coherency Failure. In architectures with parallel bus masters (DMA and CPU), the D-Cache maintains older CPU-read state. The cache operates correctly, serving zero-latency stale data instead of fetching from SRAM. Software must issue an explicit cache invalidate instruction (e.g., `SCB_InvalidateDCache_by_Addr`) before the CPU attempts to read the DMA-populated buffer.
   common_mistake: |
     **The Pitfall:** Assuming the DMA transfer didn't finish.
     **The Rationale:** Because the printed values are zeros, candidates logically suspect the write never occurred, ignoring that the interrupt already confirmed completion.
     **The Consequence:** Engineers will spend hours debugging correct DMA configuration instead of addressing the missing cache invalidation.
   napkin_math: |
-    - D-Cache hit = 1 cycle.
-    - SRAM read = ~6 cycles.
-    - CPU reads from the fast D-Cache (which holds the old zeros) instead of the SRAM (which holds the new DMA data).
-    - **Final Result:** The cache is behaving correctly, but software must **manually invalidate the D-Cache** to maintain data truth.
+    1. **Assumptions & Constraints:**
+       - CPU reads from fast D-Cache (1 cycle).
+       - DMA writes directly to slower SRAM (~6 cycles).
+    2. **Calculations:**
+       - Cache hit = 1 cycle (stale zeros).
+       - Physical SRAM = Valid camera pixels.
+    3. **Conclusion & Interpretation:**
+       - **Result: D-Cache serves stale zeros.** The cache hardware is correctly executing a 1-cycle hit, but software must manually invalidate the D-Cache to ensure data coherency. **Bottleneck: Cache Coherency.**
 status: published
 provenance: imported
 requires_explanation: false

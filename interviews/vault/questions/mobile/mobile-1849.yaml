@@ -8,20 +8,26 @@ competency_area: architecture
 bloom_level: apply
 phase: both
 title: LoRA Inference Optimization on A17 Pro Neural Engine
-scenario: You are deploying a fine-tuned LLM with LoRA adapters on A17 Pro. The Core ML compiler rejects the dynamic LoRA application as a non-statically-shapeable graph.
+scenario: You are deploying a fine-tuned LLM with LoRA adapters on an A17 Pro device. The Core ML compiler rejects the dynamic LoRA application implementation as a non-statically-shapeable graph.
 question: Why does Core ML reject dynamic LoRA on A17 Pro, and how should the adapters be compiled?
 details:
-  realistic_solution: 'Merge LoRA adapters into base weights before Core ML compilation. The merged weights are static and Core ML can fully optimize the computation graph for ANE. For multiple adapters, compile separate Core ML models per adapter.'
+  realistic_solution: 'Merge the LoRA adapters permanently into the base weights prior to Core ML compilation. The Neural Engine strictly demands static execution graphs. By fusing the adapters offline, the weights become static, allowing Core ML to completely optimize the math for the ANE. For a multi-adapter system, export entirely separate Core ML model bundles per adapter.'
   common_mistake: |
-    **The Pitfall:** Trying to pass adapter weights as dynamic inputs to Core ML.
-    **The Rationale:** Treating Core ML like PyTorch and ignoring the Neural Engine's requirement for static graph compilation.
-    **The Consequence:** The model falls back to the CPU, running 11x slower than native ANE execution.
+    **The Pitfall:** Attempting to pass the low-rank adapter matrices as dynamic input tensors to the Core ML graph at runtime.
+    **The Rationale:** Erroneously treating Apple's Core ML compilation like dynamic PyTorch graph execution.
+    **The Consequence:** The compiler rejects the graph, forcing the entire network to fall back to the CPU, running an order of magnitude slower than native ANE execution.
   napkin_math: |
-    - 1B INT4 Model: 0.5 GB.
-    - Rank-4 Adapter: 2 * 4 * 2048 * 24 * 2 bytes = ~1.6 MB.
-    - 10 variants: 10 * (0.5 GB + 1.6 MB) = ~5.0 GB.
-    - Fits easily in 8 GB RAM.
-    - **Merge adapters into base weights statically ahead of time to maintain 35 TOPS ANE performance with only a 1.6 MB per-adapter footprint penalty.**
+    1. **Assumptions & Constraints:**
+       - Base model: 1B parameters INT4 (0.5 GB).
+       - LoRA Adapter: Rank-4, 2048 hidden dim, 24 layers, FP16.
+       - Number of unique variants required: 10.
+       - Device RAM: 8 GB.
+    2. **Calculations:**
+       - Adapter size: 2 (Wq, Wv matrices) * 2 (A, B factors) * 4 (rank) * 2048 (dim) * 24 (layers) * 2 bytes (FP16) ≈ 1.6 MB.
+       - Static compiled model footprint: 0.5 GB base + 1.6 MB adapter ≈ 0.5016 GB.
+       - Total footprint for 10 distinct models: 10 * 0.5016 GB ≈ 5.02 GB.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bound (Mitigated). Statically fusing 10 separate variants before compilation costs only ~5 GB of RAM—easily fitting the 8 GB limit—while guaranteeing execution on the 35 TOPS ANE.**
 status: published
 provenance: imported
 requires_explanation: false

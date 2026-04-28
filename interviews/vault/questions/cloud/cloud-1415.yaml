@@ -9,20 +9,24 @@ bloom_level: apply
 phase: both
 title: Multi-Stage Inference Pipeline Bottleneck Calculation
 scenario: 'You are deploying an object detection service on an AWS g4dn.xlarge instance (1 NVIDIA T4 GPU, 4 vCPUs). The inference pipeline has three stages: CPU preprocessing (15ms), GPU neural network execution (10ms), and CPU post-processing (5ms).'
-question: 'What is the maximum FPS for synchronous versus asynchronous execution, and how many preprocessing threads are required to saturate the T4 GPU?'
+question: What is the maximum FPS for synchronous versus asynchronous execution, and how many preprocessing threads are required to saturate the T4 GPU?
 details:
-  realistic_solution: 'Implement an asynchronous pipeline using queues and multi-threading. The pipeline throughput becomes bottlenecked by the slowest stage (15ms CPU preprocessing), capping it at 66.7 FPS. To achieve the GPU theory limit of 100 FPS, run at least 2 parallel CPU preprocessing threads across the available vCPUs.'
+  realistic_solution: Implement an asynchronous pipeline using queues and multi-threading. The pipeline throughput becomes bottlenecked by the slowest stage (15ms CPU preprocessing), capping it at 66.7 FPS. To achieve the GPU theory limit of 100 FPS, run at least 2 parallel CPU preprocessing threads across the available vCPUs to feed the GPU fast enough.
   common_mistake: |
-    **The Pitfall:** Calculating throughput purely by summing the latencies, or assuming the GPU dictates system speed.
-    **The Rationale:** Forgetting about pipelining or Amdahl's Law in multi-stage systems.
-    **The Consequence:** Leaving 2/3rds of the GPU's compute capacity totally idle because the CPU data pipeline is starved.
+    **The Pitfall:** Calculating pipeline throughput purely by summing latencies.
+    **The Rationale:** Forgetting Amdahl's Law and pipelining dynamics in multi-stage systems.
+    **The Consequence:** Leaving 2/3rds of the GPU's expensive compute capacity totally idle because the slower CPU data pipeline severely starves it.
   napkin_math: |
-    - **Synchronous Latency:** 15ms + 10ms + 5ms = 30ms.
-    - **Synchronous Throughput:** 1000ms / 30ms = 33.3 FPS.
-    - **Asynchronous Bottleneck:** max(15ms, 10ms, 5ms) = 15ms.
-    - **Asynchronous Throughput:** 1000ms / 15ms = 66.7 FPS.
-    - **Theoretical GPU Max:** 1000ms / 10ms = 100 FPS.
-    - **Result: Threads to Saturate GPU = ceil(Preprocessing Time / GPU Time) = ceil(15 / 10) = 2 threads.**
+    1. **Assumptions & Constraints:**
+       - CPU Preprocessing: 15ms. GPU Exec: 10ms. CPU Post: 5ms.
+       - Instance: 4 vCPUs, 1 T4 GPU.
+    2. **Calculations:**
+       - Synchronous Latency: 15 + 10 + 5 = 30ms (33.3 FPS).
+       - Asynchronous Bottleneck (Single Thread): max(15, 10, 5) = 15ms (66.7 FPS).
+       - Theoretical GPU Max: 1000ms / 10ms = 100 FPS.
+       - Required Preprocess Threads: ceil(15ms / 10ms) = 2.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU-Bound Pipeline.** To hit the GPU max of 100 FPS, at least 2 parallel CPU preprocessing threads must be run asynchronously to mask the 15ms latency.
 status: published
 provenance: imported
 requires_explanation: false

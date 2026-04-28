@@ -12,17 +12,24 @@ scenario: You deployed a tiny 500KB image preprocessing model (10M FLOPs) on a m
 question: What is a common, often overlooked factor causing this high latency on the CPU, and how would you investigate it?
 details:
   realistic_solution: |
-    The culprit is poor cache locality and inefficient memory access patterns. If tensor operations access memory non-sequentially, the CPU spends time fetching data from slower DRAM rather than L1/L2 caches. Investigate by using CPU profilers (like `perf`) to look for high cache miss rates, analyze tensor layouts (NHWC vs NCHW), ensure proper operator fusion to prevent writing intermediate results to DRAM, and align data to cache lines.
+    The culprit is poor cache locality and inefficient memory access patterns. If tensor operations access memory non-sequentially, the CPU spends time fetching data from slower DRAM rather than L1/L2 caches. Investigate by using hardware performance counters (like `perf` or `simpleperf`) to look for high cache miss rates, analyze tensor layouts (e.g., NHWC vs NCHW), ensure proper operator fusion to prevent writing intermediate activations to DRAM, and align data to cache line boundaries.
   common_mistake: |
     **The Pitfall:** Blaming the CPU speed or ML framework overhead.
     **The Rationale:** Candidates fail to realize that for models this small, execution time is dominated by memory fetch stalls rather than raw computation.
-    **The Consequence:** They attempt to switch to an NPU or change frameworks without resolving the underlying memory access pattern.
+    **The Consequence:** They attempt to switch to an NPU or change frameworks without resolving the underlying memory access pattern, missing real-time deadlines.
   napkin_math: |
-    - L1 hit takes ~1-4 cycles, L2 ~10-20 cycles, DRAM ~200-400 cycles.
-    - A 10M FLOPs model with 10% L1 miss rate and 5% L2 miss rate incurs massive penalties.
-    - 1M L1 misses * 10 cycles = 10M cycles; 0.5M L2 misses * 50 cycles = 25M cycles.
-    - At 2GHz, (10M + 25M) cycles / (2 * 10^9) = 17.5ms.
-    - **The memory access penalty alone easily dominates compute time, turning a <1ms compute task into 15ms+ latency.**
+    1. **Assumptions & Constraints:**
+       - Compute: 10M FLOPs model.
+       - CPU clock: 2 GHz.
+       - Penalty: L1 miss ~10 cycles, L2 miss ~50 cycles.
+    2. **Calculations:**
+       - Assume 10M FLOPs model with 10% L1 miss rate (1M misses) and 5% L2 miss rate (0.5M misses).
+       - L1 stall cycles: 1M misses * 10 cycles = 10M cycles.
+       - L2 stall cycles: 0.5M misses * 50 cycles = 25M cycles.
+       - Total memory stall cycles = 35M cycles.
+       - Time spent stalling = 35M cycles / (2 * 10^9 cycles/sec) = 17.5ms.
+    3. **Conclusion & Interpretation:**
+       - **The memory access penalty alone easily dominates compute time, turning a <1ms compute task into 15ms+ latency. Bottleneck: Memory-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

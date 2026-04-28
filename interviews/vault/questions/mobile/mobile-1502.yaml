@@ -8,20 +8,24 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: On-Device Summarization Architecture Selection for Snapdragon 8 Gen 3
-scenario: "Your team is building an offline, real-time document summarization feature for a flagship smartphone utilizing the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). The system has access to a shared 12-16 GB LPDDR5X memory pool, but the memory bandwidth is highly contended by the OS and GPU. With a maximum of 45 TOPS INT8 available on the NPU, you must design an architecture that minimizes memory bandwidth during generation for inputs up to 1000 tokens and short outputs of 50 tokens."
-question: "Which architecture should Snapdragon 8 Gen 3 use for long-input, short-output summarization and why?"
+scenario: Your team is building offline document summarization for a flagship smartphone utilizing the Hexagon NPU. You must design an architecture that minimizes memory bandwidth during generation for inputs up to 1000 tokens and short outputs of 50 tokens.
+question: Which architecture should Snapdragon 8 Gen 3 use for long-input, short-output summarization and why?
 details:
-  realistic_solution: An encoder-decoder architecture is optimal for this asymmetric input/output constraint. The encoder processes the dense 1000-token input in a single, highly parallel pass, perfectly utilizing the NPU's 45 TOPS INT8 compute in a compute-bound regime. The decoder then generates the 50 tokens. Because the heavy 1000-token context is compressed into the static encoder hidden states (accessed via cross-attention) rather than a continuously re-read self-attention KV cache, the per-token memory bandwidth requirement during generation is significantly reduced.
+  realistic_solution: An encoder-decoder architecture is optimal for this asymmetric input/output constraint. The encoder processes the dense 1000-token input in a highly parallel pass, saturating the NPU compute. The decoder then generates 50 tokens using static cross-attention states rather than continuously re-reading a massive self-attention KV cache.
   common_mistake: |
-    **The Pitfall:** Defaulting to a decoder-only LLM.
-    **The Rationale:** Candidates often immediately propose a trending decoder-only LLM, ignoring that the KV cache for a 1000-token input must be continuously loaded from shared LPDDR5X memory during each auto-regressive step.
-    **The Consequence:** A massive memory bandwidth bottleneck on mobile.
+    **The Pitfall:** Defaulting to a massive decoder-only LLM.
+    **The Rationale:** Candidates immediately propose trending decoder-only architectures, ignoring that the KV cache for a 1000-token input must be continuously loaded from shared LPDDR5X memory during every auto-regressive step.
+    **The Consequence:** A massive memory bandwidth bottleneck completely starving the NPU.
   napkin_math: |
-    - Assume a 2B parameter decoder-only model in INT8 (2GB weights).
-    - Generating 1 token requires loading 2GB of weights + KV cache.
-    - For 50 output tokens, memory traffic for weights alone is `50 * 2GB = 100GB`.
-    - By splitting into a 1B encoder and 1B decoder: the 1B encoder runs once (1GB loaded), and the 1B decoder runs 50 times (50GB loaded).
-    - **Conclusion:** This nearly halves the generation bandwidth pressure from 100GB to **51GB**.
+    1. **Assumptions & Constraints:**
+       - Model: 2B parameters (2GB INT8 footprint).
+       - Target task: 1000 input tokens, 50 output tokens.
+       - Evaluated architectures: 2B Decoder-Only vs. (1B Encoder + 1B Decoder).
+    2. **Calculations:**
+       - Decoder-only bandwidth (generation): 50 tokens * 2GB weights = 100GB transferred.
+       - Enc-Dec bandwidth: 1B Encoder runs once (1GB loaded) + 1B Decoder runs 50 times (50 * 1GB = 50GB). Total = 51GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound**. The Encoder-Decoder architecture halves the generative memory bandwidth pressure (from 100GB to 51GB) by avoiding redundant reads of the heavy input context from a KV cache.
 status: published
 provenance: imported
 requires_explanation: true

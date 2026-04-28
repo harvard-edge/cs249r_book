@@ -8,21 +8,27 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: OOM Crash on A17 Pro During High-Res Inference
-scenario: You are deploying a vision model on an iPhone 15 Pro with the Apple A17 Pro Neural Engine (16-core). The device has 8 GB of unified memory shared across CPU, GPU, and NPU. When processing a batch of high-resolution images (1024x1024), the application suddenly crashes due to a Jetsam event (OS-level memory eviction), despite the model weights only taking up 1.5 GB.
+scenario: You are deploying a vision model on an iPhone 15 Pro. When processing a batch of high-resolution images (1024x1024), the application suddenly crashes due to a Jetsam event (OS-level memory eviction), despite the model weights only taking up 1.5 GB.
 question: Why did the OS kill the process during high-res inference, and how does the unified memory architecture contribute?
 details:
-  realistic_solution: The crash occurs because the activation memory spikes significantly during high-resolution processing. Because the 8 GB is unified, the OS likely only grants a portion (e.g., 50-60%) to any single app to keep the system responsive. If the model's weights plus peak activations exceed this OS-enforced limit (around 4-5 GB), Jetsam will kill the app to protect system stability. The solution involves reducing batch size, using gradient checkpointing if training, or processing smaller tiles to lower peak activation memory.
+  realistic_solution: The crash is driven by peak activation memory spikes during high-resolution forward passes. In iOS's unified memory architecture, the OS enforces a strict high-water mark (typically ~50-60% of total RAM) for any single process via the memorystatus daemon (Jetsam). When the sum of static weights, peak activation buffers, and app heap exceeds this limit, Jetsam sends SIGKILL. The solution requires tiling the input via patch-based inference, fusing operations to avoid materializing intermediate tensors in DRAM, or implementing dynamic activation recomputation.
   common_mistake: |
-    **The Pitfall:** Assuming that if model weights fit in memory, the model will run fine.
-    **The Rationale:** Engineers focus on the static parameter count and ignore the dynamic activation memory required during high-resolution forward passes.
-    **The Consequence:** Unpredictable app crashes (Jetsam events) under load because activations drastically exceed the shared unified memory budget.
+    **The Pitfall:** Assuming that if model weights fit in memory, the model will execute without memory pressure.
+    **The Rationale:** Engineers focus strictly on the static parameter count and ignore the dynamic activation memory required during high-resolution forward passes.
+    **The Consequence:** Unpredictable app crashes (Jetsam events) under load because massive intermediate feature maps drastically exceed the shared unified memory budget.
   napkin_math: |
-    1. **Total Memory Budget:** 8 GB. OS/System Reserve ≈ 3 GB. Available to App ≈ 5 GB.
-    2. **Weights:** 1.5 GB.
-    3. **Activation Memory (Single Layer):** 1024x1024 at 256 channels (FP16) = 1024 * 1024 * 256 * 2 bytes = 536,870,912 bytes (512 MB).
-    4. **Peak Activation Usage:** If a residual block needs 4 such feature maps in memory simultaneously, activation memory alone hits ~2 GB.
-    5. **Total Footprint:** 1.5 GB (weights) + 2.0 GB (activations) + 1.0 GB (app/UI overhead) = 4.5 GB.
-    **This pushes right against the OS-enforced 5 GB limit, triggering Jetsam to kill the app.**
+    1. **Assumptions & Constraints:**
+       - Total unified RAM: 8 GB (App budget ~5 GB max).
+       - Weights footprint: 1.5 GB.
+       - Activation map: 1024x1024 spatial, 256 channels, FP16 (2 bytes/element).
+       - Residual block peak: Requires 4 concurrent feature maps.
+       - App/UI overhead: 1.0 GB.
+    2. **Calculations:**
+       - Single feature map: 1024 * 1024 * 256 * 2 bytes = 536.8 MB.
+       - Peak activation memory: 4 * 536.8 MB = 2.15 GB.
+       - Total peak footprint: 1.5 GB (weights) + 2.15 GB (activations) + 1.0 GB (app) = 4.65 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (OOM).** The 4.65 GB footprint flirts dangerously with the OS-enforced ~5 GB limit, triggering deterministic Jetsam kills under memory pressure.
 status: published
 provenance: imported
 requires_explanation: false

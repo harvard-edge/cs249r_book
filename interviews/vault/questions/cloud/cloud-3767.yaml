@@ -11,17 +11,21 @@ title: 'mmap vs Safetensors: Cold Start Optimization for Model Serving'
 scenario: Your inference platform serves 50 different fine-tuned 7B models from a shared GPU pool. Models are stored as safetensors files on NVMe. When a cold request arrives, you need sub-3-second cold start latency.
 question: For sub-3-second cold starts across 50 safetensors 7B models, how do NVMe read, mmap, and host-RAM caching compare?
 details:
-  realistic_solution: 'Approach 1 (NVMe read): 14 GB / 7 GB/s NVMe = 2.0s read + 14 GB / 64 GB/s (PCIe 5.0) = 0.22s to GPU. Total: ~2.2s. Approach 2 (mmap safetensors): Maps instantly. First copy to GPU triggers fault-in: ~2.5-3.5s cold. But subsequent loads: if pages remain in page cache, <0.5s. Approach 3 (host RAM pool): Pre-load all 50 models = 50 × 14 GB = 700 GB host RAM. Expensive but zero cold start. Hybrid approach: mmap all 50 models, let OS page cache manage which are resident (~200 GB RAM for top-15 hot models), cold models fault-in from NVMe at ~2.5s. Cost-effective and self-tuning.'
+  realistic_solution: 'Approach 1 (NVMe read): 14 GB / 7 GB/s NVMe = 2.0s read + 14 GB / 64 GB/s (PCIe 5.0) = 0.22s to GPU. Total: ~2.2s. Approach 2 (mmap safetensors): Maps instantly. First copy to GPU triggers fault-in: ~2.5-3.5s cold. But subsequent loads: if pages remain in page cache, <0.5s. Approach 3 (host RAM pool): Pre-load all 50 models = 50 * 14 GB = 700 GB host RAM. Expensive but zero cold start. Hybrid approach: mmap all 50 models, let OS page cache manage which are resident (~200 GB RAM for top-15 hot models), cold models fault-in from NVMe at ~2.5s. Cost-effective and self-tuning.'
   common_mistake: |
     **The Pitfall:** Ignoring the zero-copy design of safetensors and failing to leverage mmap.
     **The Rationale:** Candidates default to legacy loading methods (like pickle-based `.bin` files) that require CPU deserialization.
     **The Consequence:** Unnecessarily slow load times and excessive CPU memory usage, severely limiting the number of models the platform can realistically host.
   napkin_math: |
-    1. NVMe Read: 14 GB / 7 GB/s NVMe = 2.0s read + 0.22s to GPU = 2.2s.
-    2. Host RAM pool: 50 models * 14 GB = 700 GB RAM required (expensive).
-    3. mmap (cold): ~2.5s page fault overhead. Subsequent loads from cache: <0.5s.
-    4. Hybrid mmap: OS page cache manages the top 15 hot models (~200 GB RAM).
-    **mmap easily hits the sub-3-second target while letting the OS intelligently manage RAM.**
+    1. **Assumptions & Constraints:**
+       - Models: 50 * 14 GB.
+       - NVMe BW: 7 GB/s. PCIe BW: 64 GB/s. Target: <3s.
+    2. **Calculations:**
+       - NVMe Read: (14/7)s + (14/64)s = 2.22s.
+       - Host RAM cache: 50 * 14 GB = 700 GB.
+       - mmap (cold): ~2.5s page fault. Subsequent: <0.5s.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound.** mmap safely hits the sub-3-second target while letting the OS intelligently manage RAM.
 status: published
 provenance: imported
 requires_explanation: false

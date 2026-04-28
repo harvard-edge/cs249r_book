@@ -8,19 +8,26 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: Evaluating SDC Mitigations in ZeRO-3 Training
-scenario: You are managing the training of a 70B parameter LLM on 1,024 GPUs using ZeRO-3. You notice occasional irrecoverable loss spikes forcing frequent rollbacks, isolated to Silent Data Corruptions (SDCs) from Byzantine GPUs producing incorrect math. You must evaluate three mitigation designs: 1) Software-level cryptographic gradient checksumming, 2) Statistical anomaly detection on gradient norms, and 3) N-Modular Redundancy (NMR) for the forward pass. The system has a strict step iteration time budget of 250ms and memory bandwidth of 2TB/s.
-question: Which SDC mitigation—cryptographic checksums, gradient-norm anomaly detection, or NMR—best fits the 250ms ZeRO-3 step budget, and why?
+scenario: 'You are managing the training of a 70B parameter LLM on 1,024 GPUs using ZeRO-3. You notice occasional irrecoverable loss spikes forcing frequent rollbacks, isolated to Silent Data Corruptions (SDCs) from Byzantine GPUs producing incorrect math. You must evaluate three mitigation designs: 1) Software-level cryptographic gradient checksumming, 2) Statistical anomaly detection on gradient norms, and 3) N-Modular Redundancy (NMR) for the forward pass. The system has a strict step iteration time budget of 250ms and memory bandwidth of 2TB/s.'
+question: Which SDC mitigation best fits the 250ms ZeRO-3 step budget, and why?
 details:
-  realistic_solution: Implement statistical anomaly detection (e.g., L2 norm tracking of gradients) immediately before the Reduce-Scatter phase in ZeRO-3. Computing the L2 norm of 500MB of gradients at 2 TB/s memory bandwidth takes only 0.25ms — negligible compared to the 250ms iteration budget. This catches Byzantine GPU output before it pollutes the global gradient shard.
+  realistic_solution: 'Implement statistical anomaly detection (L2 norm tracking) immediately before the Reduce-Scatter collective phase in ZeRO-3. Leveraging the GPU''s native 2 TB/s memory bandwidth allows scanning the 500 MB gradient shard in fractions of a millisecond. This catches Byzantine ALU explosions before they broadcast globally and pollute the distributed optimizer state.'
   common_mistake: |
-    **The Pitfall:** Assuming cryptographic checksums on gradients will catch ALU computation errors (SDCs) or suggesting redundant execution.
-    **The Rationale:** Engineers conflate network transmission errors (caught by checksums) with arithmetic errors, or default to expensive NMR without calculating the hardware cost.
-    **The Consequence:** The mitigation strategy either completely fails to catch the math errors or wastes 50% of the cluster's compute capacity.
+    **The Pitfall:** Recommending cryptographic checksums on gradients or defaulting to expensive redundant execution (NMR).
+    **The Rationale:** Engineers conflate network transmission bit-flips (caught by checksums) with hardware arithmetic errors, or default to brute-force redundancy without calculating MFU cost.
+    **The Consequence:** Cryptographic hashing destroys the iteration budget via CPU transfer bottlenecks, while NMR immediately halves the compute capacity of a billion-dollar cluster.
   napkin_math: |
-    1. Evaluate NMR: Redundant execution cuts throughput by 50% (effectively wasting 512 GPUs).
-    2. Evaluate cryptographic checksumming: Checksumming 500MB of gradients via CPU takes ~100ms, consuming 40% of the 250ms iteration budget.
-    3. Evaluate anomaly detection: GPU L2 norm calculation on 500MB at 2TB/s memory bandwidth takes 500MB / 2TB/s = 0.25ms.
-    4. Conclude: Statistical anomaly detection has a negligible overhead, representing exactly **0.1% of the 250ms iteration time**.
+    1. **Assumptions & Constraints:**
+       - Iteration Budget: 250 ms.
+       - HBM Bandwidth: 2 TB/s.
+       - NMR Penalty: 50% cluster throughput loss.
+       - Cryptographic Checksums (CPU): ~100 ms penalty.
+    2. **Calculations:**
+       - Gradient Shard Size (approx): 500 MB.
+       - Anomaly Detection (L2 norm on GPU): 500 MB / 2 TB/s = 0.25 ms.
+       - Budget Impact: 0.25 ms / 250 ms = 0.1% overhead.
+    3. **Conclusion & Interpretation:**
+       - **Statistical anomaly detection natively leverages GPU memory bandwidth, scanning shards in 0.25ms safely within the iteration budget. Result: Compute-Overhead Bound.**
 status: published
 provenance: imported
 requires_explanation: false

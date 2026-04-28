@@ -8,29 +8,25 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Node Affinity for GPU Topology in K8s
-scenario: 'Your Kubernetes cluster has two node types: gpu-h100 (8× H100, NVLink)
-  and gpu-a100 (8× A100, NVLink). A training job requires H100s for FP8 support. Write
-  the pod spec with node affinity, tolerations, and resource requests to ensure correct
-  placement.'
-question: What pod spec would ensure the FP8 training job is placed only on gpu-h100
-  nodes with the right tolerations and GPU requests?
+scenario: 'Your Kubernetes cluster has two node types: gpu-h100 (FP8 support) and gpu-a100. A training job requires FP8 support. Write the pod spec with node affinity, tolerations, and resource requests to ensure correct placement.'
+question: What pod spec would ensure the FP8 training job is placed only on appropriate nodes with the right tolerations and GPU requests?
 details:
-  realistic_solution: 'Pod spec: spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution
-    with matchExpressions: key=accelerator-type, operator=In, values=[h100]. This
-    hard requirement ensures only H100 nodes are considered. Tolerations: key=nvidia.com/gpu,
-    operator=Exists, effect=NoSchedule — allows the pod to be scheduled on GPU-tainted
-    nodes. Resource requests: resources.limits: nvidia.com/gpu: 8 (request all 8 GPUs
-    for distributed training). resources.requests: cpu: 64, memory: 512Gi (ensure
-    enough CPU and RAM for data loading). Additional labels for topology: topology.kubernetes.io/zone
-    can be used to co-locate pods in the same data center zone for low-latency inter-node
-    communication. For multi-node training, use a podAffinity rule with topologyKey=kubernetes.io/hostname
-    to prefer co-locating pods on the same rack (labeled with a rack topology key).
-    The NVIDIA GPU Operator automates node labeling (nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3)
-    and tainting.'
-  common_mistake: Using nodeSelector alone (too rigid, cannot express preferences)
-    or forgetting tolerations (GPU nodes are typically tainted to prevent non-GPU
-    pods from landing on them).
-  napkin_math: 'Misplacement on A100 instead of H100: no FP8 support → must fall back to BF16. Training throughput penalty: ~1.7× slower (bottlenecked by memory bandwidth: 3.35 TB/s vs 2.0 TB/s). Cost of misplacement: $3/hr × 8 GPUs × 1.7× longer = $40.8/hr effective cost vs $24/hr on proper hardware.'
+  realistic_solution: |
+    Pod spec: spec.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution with matchExpressions: key=accelerator-type, operator=In, values=[h100]. This hard requirement ensures only H100 nodes are considered. Tolerations: key=nvidia.com/gpu, operator=Exists, effect=NoSchedule — allows the pod to be scheduled on GPU-tainted nodes. Resource requests: resources.limits: nvidia.com/gpu: 8 (request all 8 GPUs for distributed training). resources.requests: cpu: 64, memory: 512Gi (ensure enough CPU and RAM for data loading). Additional labels for topology: topology.kubernetes.io/zone can be used to co-locate pods in the same data center zone for low-latency inter-node communication. For multi-node training, use a podAffinity rule with topologyKey=kubernetes.io/hostname to prefer co-locating pods on the same rack (labeled with a rack topology key). The NVIDIA GPU Operator automates node labeling (nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3) and tainting.
+  common_mistake: |
+    **The Pitfall:** Using `nodeSelector` alone and ignoring node tolerations.
+    **The Rationale:** Engineers assume basic selectors are enough, forgetting that GPU nodes are typically tainted to prevent non-GPU pods from landing on them.
+    **The Consequence:** Pods remain stuck in a Pending state indefinitely because they cannot tolerate the hardware-specific node taints.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - H100 (FP8, 3.35 TB/s) vs A100 (BF16, 2.0 TB/s).
+       - Cost: $3/hr/GPU.
+    2. **Calculations:**
+       - Misplacement forces BF16 fallback.
+       - Bandwidth ratio = 3.35 / 2.0 ≈ 1.7x slower.
+       - Cost penalty = $3/hr * 8 GPUs * 1.7 = $40.8/hr effective.
+    3. **Conclusion & Interpretation:**
+       - **Result: Cost-Bound**. Misplacement on older hardware destroys training throughput and nearly doubles the effective compute cost.
 status: published
 provenance: imported
 requires_explanation: false

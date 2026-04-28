@@ -8,34 +8,21 @@ competency_area: data
 bloom_level: analyze
 phase: training
 title: The Silent Redis Feature Skew
-scenario: Your cloud-based recommender system serves 10,000 QPS with a strict 50ms p99 latency SLA. Yesterday, you deployed a new model version that had a +2% offline AUC improvement. However, production CTR immediately dropped by 15%. Interestingly, latency actually improved to 35ms p99. Standard drift metrics on the raw input stream show no covariate shift.
-question: What is the likely cause of the 15% CTR drop despite improved latency and green raw drift metrics, and how would you detect it?
+scenario: 'A recommender serves 10,000 QPS with a 50ms p99 SLA. A new model version with better offline AUC is deployed. Production CTR drops 15%, but p99 latency improves to 35ms. Raw feature streams show no drift.'
+question: 'What is the likely cause of the CTR drop despite improved latency and green raw drift metrics?'
 details:
-  realistic_solution: |
-    The root cause is a training-serving skew induced by an infrastructure failure, specifically a caching layer issue. The latency drop (50ms to 35ms) is the primary clue. In production, historical user features are fetched from a Redis cluster. A recent configuration change or memory limit caused a massive spike in Redis evictions. When the serving pipeline experiences a cache miss, it defaults the `user_historical_ctr` feature to 0 to meet the strict SLA, rather than querying the slower persistent store. The offline training data uses exact historical aggregates, while the online model is suddenly predicting on zero-imputed data for a huge percentage of traffic. The fix requires implementing point-in-time correct logging (logging the exact feature vectors used at inference) and running continuous statistical tests (e.g., KS tests) between the logged serving features and the training data distributions.
+  realistic_solution: 'A training-serving skew induced by infrastructure failure. A Redis caching issue caused massive evictions. The serving pipeline defaulted the user_historical_ctr feature to 0 to meet the strict SLA during cache misses. Implement point-in-time correct logging to detect this.'
   common_mistake: |
-    **The Pitfall:** Rolling back the model and blaming an offline-online metric mismatch.
-    **The Rationale:** Candidates assume the model simply overfit the training data without checking the serving infrastructure that feeds it.
-    **The Consequence:** The true root cause (infrastructure failure) remains undetected, and all subsequent models will fail in exactly the same way.
+    **The Pitfall:** Blaming the model for offline-online mismatch and rolling back.
+    **The Rationale:** Candidates assume the model overfit without checking serving infrastructure.
+    **The Consequence:** The infrastructure root cause remains undetected, ensuring all future models fail similarly.
   napkin_math: |
-    - **Cache Setup:** 100M user profiles × 1KB each = 100 GB.
-    - **Misconfiguration Impact:** If Redis is capped at 60 GB, 40% of the working set is continuously evicted.
-    - **Cache Miss Rate:** 40% of 10,000 QPS = 4,000 requests/sec miss the cache.
-    - **Result:** **Defaulting to 0 saves ~15ms of persistent DB lookup time (explaining the p99 latency drop from 50ms to 35ms), but corrupts the most predictive feature for 40% of traffic.**
-status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 18
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - Cache: 100 GB. Capped at 60 GB.
+       - QPS: 10,000.
+    2. **Calculations:**
+       - Cache Miss Rate: 40% (4,000 req/s).
+       - Latency Impact: Defaulting to 0 saves 15ms persistent DB lookup time (explaining 50ms to 35ms drop).
+    3. **Conclusion & Interpretation:**
+       - **Result: 40% of traffic predicted on corrupted features.**
+       - **Conclusion: Infrastructure-Bound; SLA fallback logic silently destroyed predictive accuracy.**

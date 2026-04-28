@@ -8,23 +8,22 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Diagnosing GEMM Tensor Core Underutilization
-scenario: A team is profiling a custom Transformer model on NVIDIA A100 GPUs (312 TFLOPs FP16 peak). They
-  notice two structurally similar matrix multiplications (GEMMs). The first has dimensions M=1023, K=4096,
-  N=4096, while the second has M=1024, K=4096, N=4096. Profiling shows the first GEMM achieves only 45
-  TFLOPs, while the second achieves over 200 TFLOPs. Both are executed via standard PyTorch mixed precision
-  (FP16). Diagnose the root cause of this performance discrepancy.
+scenario: Profiling a custom Transformer model reveals two structurally similar matrix multiplications. The first has dimensions M=1023, K=4096, N=4096, while the second has M=1024, K=4096, N=4096. The first achieves only 45 TFLOPs, while the second achieves over 200 TFLOPs in mixed precision (FP16).
 question: "Why does the M=1023 GEMM achieve 45 TFLOPs while the M=1024 GEMM exceeds 200 TFLOPs in FP16 PyTorch?"
 details:
-  realistic_solution: Analyze the Nsight Systems trace to inspect the cuBLAS kernel names. The M=1023
-    dimension prevents optimal Tensor Core tile sizing (which requires multiples of 8 or 16 for FP16),
-    forcing cuBLAS to use inefficient edge-case kernels or fall back to CUDA cores. The solution is to
-    pad the M dimension to 1024 before the matrix operation and slice the output.
-  common_mistake: Assuming the discrepancy is due to memory bandwidth saturation, CPU launch overheads,
-    or thermal throttling, rather than structural dimension alignment requirements for hardware accelerators.
-  napkin_math: GEMM1 (1023x4096x4096) has unaligned dims, dropping to CUDA cores. FLOPs = 2 * 1023 * 4096^2
-    = 34.3 GFLOPs. At ~45 TFLOPS (FP16 no tensor core), it takes 34.3 / 45,000 = 0.76ms. GEMM2 pads M=1024
-    (aligned for Tensor Cores). FLOPs = 34.36 GFLOPs. On A100 Tensor Cores running at ~200 TFLOPS effective,
-    time = 34.36 / 200,000 = 0.17ms. Padding adds 0.1% FLOPs but yields a 4.5x speedup.
+  realistic_solution: The M=1023 dimension prevents optimal Tensor Core tile sizing (which requires multiples of 8 or 16 for FP16), forcing cuBLAS to fall back to inefficient CUDA cores. Pad the M dimension to 1024.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is memory bandwidth or thermal throttling.
+    **The Rationale:** Engineers overlook structural dimension alignment requirements specific to hardware accelerators.
+    **The Consequence:** Severe compute underutilization that cannot be fixed by caching or system-level tuning.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - GEMM1 unaligned (M=1023), GEMM2 aligned (M=1024).
+    2. **Calculations:**
+       - GEMM1 FLOPs = 34.3 GFLOPs. At 45 TFLOPS (CUDA cores) -> 0.76ms.
+       - GEMM2 FLOPs = 34.36 GFLOPs. At 200 TFLOPS (Tensor Cores) -> 0.17ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Padding adds 0.1% operations but yields a 4.5x Tensor Core speedup.**
 status: published
 provenance: imported
 requires_explanation: false

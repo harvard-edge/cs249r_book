@@ -8,19 +8,24 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The Memory-Mapped Page Fault
-scenario: You are using TensorFlow Lite with memory mapping (`mmap`) to load a 100 MB model on an Android
-  device. The documentation says `mmap` is great because it has 'zero load time' and 'zero memory overhead.'
-  But during the very first inference, the UI thread completely freezes for 800ms. Subsequent inferences
-  take only 30ms. Why did `mmap` cause a UI freeze?
-question: "Why does mmap of a 100 MB TFLite model freeze the UI for 800 ms on first Android inference?"
+scenario: "You are using TensorFlow Lite with memory mapping (`mmap`) to load a 100 MB model on a mobile device. During the very first inference, the UI thread completely freezes for 800ms, while subsequent inferences take only 30ms."
+question: "Why does mmap of a 100 MB TFLite model freeze the UI for 800 ms on the first Android inference?"
 details:
-  realistic_solution: You experienced a massive storm of **Major Page Faults**. `mmap` does not load the
-    file into RAM; it simply reserves a range of virtual memory addresses and maps them to the file on
-    the physical NAND flash storage.
-  common_mistake: '"TFLite needs to initialize its tensors on the first run." Tensor allocation takes
-    a few milliseconds, not 800ms.'
-  napkin_math: 100 MB model = 102,400 KB / 4 KB page size = 25,600 pages. A random read from mobile UFS storage takes
-    ~0.03ms. 25,600 faults * 0.03ms = 768ms of pure storage I/O block time during the first forward pass.
+  realistic_solution: "The freeze is caused by a massive storm of Major Page Faults. Calling `mmap` does not copy the file into RAM; it only reserves virtual memory addresses. During the first forward pass, the NPU attempts to read the unbacked memory, triggering tens of thousands of blocking page faults as the OS synchronously reads the weights block-by-block from the physical NAND flash storage into physical memory."
+  common_mistake: |
+    **The Pitfall:** Attributing the 800ms delay to tensor allocation or framework initialization overhead.
+    **The Rationale:** Candidates misunderstand how virtual memory and `mmap` work, assuming the file is fully loaded into RAM the moment the API is called.
+    **The Consequence:** Trying to optimize framework initialization code instead of addressing the massive block I/O storm (e.g., using `mlock` or a background warm-up inference).
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model size = 100 MB (102,400 KB).
+       - OS Page size = 4 KB.
+       - Random read latency from mobile UFS storage = ~0.03 ms per page.
+    2. **Calculations:**
+       - Total pages mapped = 102,400 KB / 4 KB = 25,600 pages.
+       - Total block I/O time = 25,600 pages * 0.03 ms/page = 768 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound.** The 800ms UI freeze is strictly dominated by **~768 ms** of pure storage block I/O latency as the OS services thousands of major page faults.
 status: published
 provenance: imported
 requires_explanation: false

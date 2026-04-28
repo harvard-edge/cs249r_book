@@ -8,16 +8,8 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: PowerSGD vs FP8 Gradients on a 32-MI300X Inter-Node Ring
-scenario: A 100B BF16 model trains across 32 AMD MI300X GPUs (192 GB HBM3, 1307 TFLOPS
-  FP16, Infinity Fabric intra-node, 4 nodes connected by 200 Gbps RoCE v2 with effective
-  unidirectional ~22 GB/s). Per-step backward = 600 ms. The current ring AllReduce
-  of FP16 gradients exposes 1.6 s of communication per step, dominating wall clock.
-  Compare two production-realistic compression levers — PowerSGD with rank r=8, and
-  FP8 quantized gradients — by computing the post-compression AllReduce time and the
-  convergence-step overhead each typically adds.
-question: On 32 MI300Xs over 200 Gbps RoCE with a 600 ms backward and 1.6 s baseline
-  AllReduce, which gradient compression — PowerSGD r=8 or FP8 — closes the gap, and
-  what is each approach's convergence cost?
+scenario: A 100B BF16 model trains across 32 AMD MI300X GPUs. The current ring AllReduce of FP16 gradients exposes 1.6 s of communication per step, dominating wall clock. Compare two production-realistic compression levers — PowerSGD with rank r=8, and FP8 quantized gradients — by computing the post-compression AllReduce time and the convergence-step overhead each typically adds.
+question: On 32 MI300Xs over 200 Gbps RoCE with a 600 ms backward and 1.6 s baseline AllReduce, which gradient compression — PowerSGD r=8 or FP8 — closes the gap, and what is each approach's convergence cost?
 details:
   realistic_solution: 'Baseline gradient size = 100B * 2 bytes (BF16) = 200 GB. Ring
     AllReduce on the inter-node 22 GB/s unidirectional ring transfers 2*(31/32) *
@@ -31,18 +23,14 @@ details:
     is mostly preserved (within 1%) for FP8 with careful loss-scale calibration. PowerSGD
     wins on raw throughput; FP8 wins on convergence quality. Recommended: PowerSGD
     r=8 if the model tolerates rank-r approximation (most LLMs do), else FP8.'
-  common_mistake: 'Computing AllReduce time as `payload / bandwidth` — that omits
-    the 2*(N-1)/N ring factor and ignores hierarchical inter-node reduction. Another
-    common mistake: treating compression purely as a throughput knob without accounting
-    for convergence overhead — e.g., 1-bit SGD looks like a 16x speedup but typically
-    costs 1.5-2x more steps to converge for foundation models.'
-  napkin_math: 'Baseline ring AllReduce inter-node: 2*(N-1)/N * 200 GB / 22 GB/s.
-    Flat 32-rank ring: 387.5 / 22 ≈ 17.6 s. Hierarchical (4-node ring of shards):
-    2*(3/4) * 200 / 22 ≈ 13.6 s naive, ~1.6 s with NVLink/IF intra-node reduction
-    first and bucketed overlap of ~85% of comm against backward. PowerSGD r=8: payload
-    ≈ 200 GB / 25 = 8 GB → AllReduce ≈ 0.4 s. FP8 gradients: payload = 100 GB → AllReduce
-    ≈ 0.8 s. Convergence cost: PowerSGD r=8 ≈ +1-3% steps; FP8 ≈ +0-1% steps with
-    calibrated loss scale.'
+  common_mistake: |
+    **The Pitfall:** Computing AllReduce time natively as `payload / bandwidth` or ignoring convergence overhead.
+    **The Rationale:** Candidates omit the 2*(N-1)/N ring factor and treat gradient compression purely as a throughput knob without accounting for the extra steps required to converge.
+    **The Consequence:** Selecting a highly compressed protocol (like 1-bit SGD) that speeds up step time but doubles total training time.
+  napkin_math: |
+    1. **Assumptions & Constraints:** 100B params, 32 MI300X GPUs, 200 Gbps RoCE v2 (22 GB/s). Baseline AllReduce = 1.6s. Backward = 600ms.
+    2. **Calculations:** Baseline weights = 100B * 2 bytes = 200 GB. PowerSGD r=8 compresses 200 GB -> ~8 GB. AllReduce Time = ~0.4s (+1-3% steps). FP8 halves 200 GB -> 100 GB. AllReduce Time = ~0.8s (+0-1% steps).
+    3. **Conclusion & Interpretation:** **Result: Network-Bound (Inter-node). PowerSGD completely hides communication inside the 600ms backward, whereas FP8 remains exposed.**
 status: archived
 provenance: imported
 requires_explanation: false

@@ -8,22 +8,29 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: The Unstructured Pruning Illusion
-scenario: Your team is serving a 14B parameter LLM (FP16) on an A10G GPU (900 GB/s memory bandwidth, 125 TFLOPS FP16 compute). To reduce the latency of autoregressive generation at batch size 1, a researcher applies 50% unstructured pruning to the model. Profiling confirms total FLOPs per token drop by exactly 50%, but latency remains identically stuck at ~31ms.
+scenario: Your team is serving a 14B parameter LLM (FP16) on an A10G GPU. To reduce the latency of autoregressive generation at batch size 1, a researcher applies 50% unstructured pruning to the model. Profiling confirms total FLOPs per token drop by exactly 50%, but latency remains identically stuck at ~31ms.
 question: Why does 50% unstructured pruning halve FLOPs but leave 14B batch-1 decoding latency stuck at 31ms on A10G?
 details:
-  realistic_solution: The root cause is a fundamental misunderstanding of the roofline model and arithmetic intensity. Autoregressive token generation at batch size 1 is strictly memory-bandwidth bound. The arithmetic intensity is approximately 1 FLOP/byte (2 operations per parameter, 2 bytes per FP16 parameter). The A10G's roofline ridge point is roughly 138 FLOPs/byte (125 TFLOPS / 900 GB/s). Because 1 << 138, the workload is deep in the memory-bound regime. Unstructured pruning zeros out 50% of the weights, reducing FLOPs, but it does not compress the dense tensor loaded from HBM. The GPU still must transfer the full 28GB of weight matrices from memory. The compute units (SMs) execute fewer operations, but they were already sitting idle waiting for memory. To see latency improvements, the model requires structured pruning or weight quantization (e.g., INT8) that physically reduces the memory payload.
+  realistic_solution: The root cause is a fundamental misunderstanding of the roofline model and arithmetic intensity. Autoregressive token generation at batch size 1 is strictly memory-bandwidth bound. The arithmetic intensity is approximately 1 FLOP/byte (2 operations per parameter, 2 bytes per FP16 parameter). The A10G's roofline ridge point is roughly 138 FLOPs/byte. Because 1 << 138, the workload is deep in the memory-bound regime. Unstructured pruning zeros out 50% of the weights, reducing FLOPs, but it does not compress the dense tensor loaded from HBM. The GPU still must transfer the full 28GB of weight matrices from memory. The compute units (SMs) execute fewer operations, but they were already sitting idle waiting for memory. To see latency improvements, the model requires structured pruning or weight quantization (e.g., INT8) that physically reduces the memory payload.
   common_mistake: |
     **The Pitfall:** Assuming that a 50% reduction in FLOPs will linearly translate to a 50% reduction in latency without checking the roofline model.
     **The Rationale:** Unstructured pruning zeros out weights but doesn't compress the dense tensor loaded from HBM. Batch-1 decoding is strictly memory-bandwidth bound.
     **The Consequence:** Wasting time debugging PyTorch overhead when the issue is a fundamental hardware bandwidth limitation.
   napkin_math: |
-    1. Model size = 14B params * 2 bytes = 28 GB.
-    2. Arithmetic Intensity = 28 GFLOPs / 28 GB = 1 FLOP/byte.
-    3. A10G Ridge Point = 125 TFLOPS / 900 GB/s ≈ 138 FLOPs/byte (1 << 138 -> severely memory bound).
-    4. Memory Latency = 28 GB / 900 GB/s = 31.1 ms.
-    5. Compute Latency (Dense) = 28 GFLOPs / 125 TFLOPS = 0.22 ms.
-    6. Compute Latency (Pruned) = 14 GFLOPs / 125 TFLOPS = 0.11 ms.
-    7. **Total time = max(Compute, Memory) = max(0.11ms, 31.1ms) = 31.1 ms.**
+    1. **Assumptions & Constraints:**
+       - Model: 14B parameters, FP16 (2 bytes/param).
+       - Hardware: A10G GPU (900 GB/s memory bandwidth, 125 TFLOPS FP16 compute).
+       - Workload: Autoregressive decoding at batch size 1.
+    2. **Calculations:**
+       - Model size = 14B * 2 bytes = 28 GB.
+       - Arithmetic Intensity = 28 GFLOPs / 28 GB = 1 FLOP/byte.
+       - A10G Ridge Point = 125 TFLOPS / 900 GB/s ≈ 138 FLOPs/byte.
+       - Memory Latency = 28 GB / 900 GB/s = 31.1 ms.
+       - Compute Latency (Dense) = 28 GFLOPs / 125 TFLOPS = 0.22 ms.
+       - Compute Latency (Pruned) = 14 GFLOPs / 125 TFLOPS = 0.11 ms.
+    3. **Conclusion & Interpretation:**
+       - Total time = max(Compute, Memory) = max(0.11ms, 31.1ms) = 31.1 ms.
+       - **Result: Memory-Bound Workload**
 status: published
 provenance: imported
 requires_explanation: false

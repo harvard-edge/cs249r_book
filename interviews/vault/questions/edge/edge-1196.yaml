@@ -8,12 +8,22 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Design Continuous Batching for Edge LLM Serving on Hailo-8
-scenario: 'A Hailo-8 edge server handles LLM inference requests for a retail analytics application. Requests arrive at 2 req/s (Poisson). Each request has 128-token prompt and 64-token response. Hailo-8 running a 3B INT4 model: prefill 128 tokens = 20ms, decode per token = 8ms, decode 64 tokens = 512ms. Total per request: 532ms. Design a continuous batching strategy to maximize throughput while keeping P99 latency < 1000ms for each request.'
+scenario: A Hailo-8 edge server handles LLM requests at 2 req/s (Poisson). Each request requires 532ms of service time.
 question: For the Hailo-8 continuous batching queue, should P99 be estimated from waiting time Wq or total sojourn time W?
 details:
-  realistic_solution: P99 latency \u2248 4.6 \u00d7 W (mean sojourn time = Wq + 1/\u03bc), not 4.6 \u00d7 Wq. Wq excludes the service time component.
-  common_mistake: Using static batching where the full batch waits for the longest request; continuous batching inserts new requests at decode boundaries, improving GPU utilization without increasing individual request latency.
-  napkin_math: 'M/M/1 P99 approximation: P99 \u2248 -ln(0.01) * W (where W is mean sojourn time), not waiting time Wq. W = 1/(\u03bc(1-\u03c1)) is the mean sojourn time. P99 \u2248 4.6 \u00d7 W where W includes service time. Using Wq (queue wait only) would underestimate by excluding service time.'
+  realistic_solution: P99 latency must be estimated using the total sojourn time (W), which encompasses both the queue waiting time (Wq) and the actual service/execution time (1/μ). Utilizing continuous batching ensures new requests are injected into the batch stream at token boundaries, improving hardware utilization, but the P99 SLA is governed by the entire lifecycle of the request inside the system.
+  common_mistake: |
+    **The Pitfall:** Estimating P99 latency strictly from the queue waiting time (Wq).
+    **The Rationale:** Assuming that once a request begins execution, the latency is negligible, ignoring the heavy half-second service time of the LLM.
+    **The Consequence:** Promising an impossibly tight latency SLA that fails instantly in production because it omitted 532ms of baseline compute.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Arrival rate: 2 req/s (Poisson). Service time: 532ms per request.
+    2. **Calculations:**
+       - Mean Sojourn Time (W): Wq + Service Time.
+       - P99 approximation: P99 ≈ 4.6 * W (assuming exponential decay tail).
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound. W must be used because omitting the massive 532ms service time invalidates the latency model.**
 status: published
 provenance: imported
 requires_explanation: true

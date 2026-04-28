@@ -8,7 +8,7 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Realizing Why GPU Jobs Hang After Node Preemption
-scenario: A distributed training job running on 8 nodes hangs indefinitely after one node is preempted. The surviving 7 nodes' pods show as 'Running', but GPU utilization drops to 0% with no errors in the logs. The job has been hung for 45 minutes.
+scenario: A distributed training job running on 8 nodes hangs indefinitely after one node is preempted. The surviving 7 nodes' pods show as 'Running', but GPU utilization drops to 0% with no errors in the logs.
 question: What is happening when the job hangs after preemption, and how would you detect this failure proactively?
 details:
   realistic_solution: 'PyTorch DDP/NCCL collective operations (AllReduce) block until all ranks respond. When rank N is evicted, the remaining ranks block inside the NCCL barrier indefinitely — no timeout by default. The pods appear Running because the process is alive but blocked in a CUDA kernel call. Detection: emit a `step_timestamp` metric from each rank every N seconds; alert if any rank''s timestamp is stale for >5 min. Fix: set `NCCL_ASYNC_ERROR_HANDLING=1` (raises exception after timeout) and implement a heartbeat watchdog thread that calls `dist.monitored_barrier(timeout=300s)` to surface the failure.'
@@ -17,11 +17,15 @@ details:
     **The Rationale:** Relying on Kubernetes container states instead of application-level progress metrics, and not configuring NCCL timeouts.
     **The Consequence:** Wasting thousands of dollars in idle compute while waiting for a stalled job that will never recover.
   napkin_math: |
-    - 8 nodes × 8 GPUs = 64 GPUs.
-    - Idle power: 64 GPUs × 700 W = 44.8 kW.
-    - 45 min hang = 0.75 hr × 44.8 kW = 33.6 kWh wasted (approx $4 in electricity).
-    - Compute cost: 64 GPUs × ~$0.75/GPU-hr (cloud pricing) × 0.75 hr = ~$36.
-    - **A single undetected 45-minute hang wastes significant compute credits and electricity.**
+    1. **Assumptions & Constraints:**
+       - 8 nodes * 8 GPUs = 64 GPUs.
+       - Idle power: 700 W/GPU. Cloud cost: ~$0.75/GPU-hr.
+    2. **Calculations:**
+       - Idle power total: 64 GPUs * 700 W = 44.8 kW.
+       - 45 min hang cost (Power): 0.75 hr * 44.8 kW = 33.6 kWh.
+       - 45 min hang cost (Compute): 64 GPUs * $0.75 * 0.75 hr = $36.
+    3. **Conclusion & Interpretation:**
+       **Result: Synchronization-Bound (Deadlock).** An undetected NCCL barrier deadlock wastes significant compute credits and power.
 status: published
 provenance: imported
 requires_explanation: false
@@ -34,8 +38,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

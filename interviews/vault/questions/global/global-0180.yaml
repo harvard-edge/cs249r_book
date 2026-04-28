@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: The Gradient Sync Penalty
-scenario: You are training a 10B parameter model with data parallelism across 2 datacenters: 64 GPUs in US-East and 64 GPUs in EU-West, connected by a 100 Gbps link with 60ms RTT. Each gradient is FP32 (4 bytes per parameter).
+scenario: 'You are training a 10B parameter model with data parallelism across 2 datacenters: 64 GPUs in US-East and 64 GPUs in EU-West, connected by a 100 Gbps link with 60ms RTT. Each gradient is FP32.'
 question: How long does a full FP32 gradient AllReduce for the 10B-parameter model take over the 100 Gbps, 60ms RTT cross-DC link?
 details:
   realistic_solution: 'Gradient size: 10B x 4 bytes = 40 GB. For a 2-node (2-DC) AllReduce, the data transferred across the link is 2 x (n-1)/n x 40 GB = 2 x 1/2 x 40 GB = 40 GB (reduce-scatter + all-gather, each sending half). Bandwidth time: 40 GB / (100 Gbps / 8) = 40 GB / 12.5 GB/s = 3.2 seconds. Latency overhead: ring AllReduce with 2 nodes needs 2 phases x 60ms = 120ms (negligible vs bandwidth). Total: ~3.32 seconds per AllReduce. If the compute per step is 2 seconds, the communication overhead is 62% — making cross-DC synchronous training severely inefficient.'
@@ -17,12 +17,19 @@ details:
     **The Rationale:** Focusing solely on the 100 Gbps figure and forgetting the 60ms RTT penalty of a multi-phase ring AllReduce.
     **The Consequence:** Underestimating the true communication overhead, missing the severe inefficiency of cross-DC synchronous training.
   napkin_math: |
-    - Gradient size: 10B params × 4 B = 40 GB.
-    - Bandwidth: 100 Gbps = 12.5 GB/s.
-    - Data transferred for 2-node AllReduce: 40 GB (reduce-scatter 20 GB + all-gather 20 GB).
-    - Bandwidth time: 40 GB / 12.5 GB/s = 3.2 seconds.
-    - Latency overhead: 2 phases × 60ms = 0.12 seconds.
-    - Total communication time: **~3.32 seconds**.
+    1. **Assumptions & Constraints:**
+       - 10B parameters, FP32 (4 bytes/param).
+       - 2 datacenters (2 nodes for AllReduce).
+       - 100 Gbps cross-DC link (12.5 GB/s bandwidth), 60ms RTT.
+    2. **Calculations:**
+       - Gradient size: 10B * 4 bytes = 40 GB.
+       - Data transferred per node (reduce-scatter + all-gather): 2 * (1/2) * 40 GB = 40 GB.
+       - Bandwidth time: 40 GB / 12.5 GB/s = 3.2 seconds.
+       - Latency overhead: 2 phases * 60ms = 0.12 seconds.
+       - Total comms time: 3.2s + 0.12s = 3.32 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Synchronous cross-DC AllReduce takes ~3.32 seconds per step, dominating the training loop.**
+       - **Result: Network-Bandwidth Bound**
 status: published
 provenance: imported
 requires_explanation: false

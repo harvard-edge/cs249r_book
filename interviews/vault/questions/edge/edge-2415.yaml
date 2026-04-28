@@ -8,19 +8,23 @@ competency_area: optimization
 bloom_level: evaluate
 phase: both
 title: Evaluating Unified Memory Asynchronous Transfers on SoC
-scenario: An AGX Orin processes radar data using custom CUDA kernels while receiving gigabit ethernet packets. The network thread copies data to pinned host memory, then asynchronously copies it to device memory.
+scenario: An edge SoC processes radar data using custom CUDA kernels while receiving gigabit ethernet packets. The network thread copies data to pinned host memory, then asynchronously copies it to device memory.
 question: Evaluate why the memory copies might still serialize with computation despite using asynchronous CUDA APIs.
 details:
-  realistic_solution: Since Orin has a unified memory architecture, pinned host memory and device memory physically reside in the same LPDDR5 RAM. An explicit `cudaMemcpyAsync` consumes memory bandwidth and may sync on default streams, effectively serializing the GPU execution rather than operating like a discrete PCIe transfer.
+  realistic_solution: Since the edge SoC relies on a Unified Memory Architecture (UMA), pinned host memory and device memory physically reside in the same LPDDR5 RAM. An explicit `cudaMemcpyAsync` consumes shared memory bandwidth and may sync on default streams, effectively serializing the GPU execution rather than operating like a discrete PCIe DMA transfer. Zero-copy access should be used instead.
   common_mistake: |
-    **The Pitfall:** Treating the Orin SoC like a discrete GPU.
+    **The Pitfall:** Treating the edge SoC like a discrete GPU over PCIe.
     **The Rationale:** Candidates assume there is a separate PCIe bus and dedicated VRAM, leading them to believe that asynchronous DMA transfers happen completely independently of the unified memory controller.
-    **The Consequence:** Developers write redundant `cudaMemcpyAsync` calls that actually degrade performance by unnecessarily moving data within the same physical memory, rather than using zero-copy pointers.
+    **The Consequence:** Developers write redundant `cudaMemcpyAsync` calls that degrade performance by unnecessarily moving data within the same physical memory.
   napkin_math: |
-    *   1 Gbps = 125 MB/s.
-    *   Orin LPDDR5 bandwidth is 204.8 GB/s.
-    *   125 MB/s is well within 204.8 GB/s bandwidth.
-    *   **The serialization is not due to bandwidth limits, but because unified memory relies on the same physical RAM, making explicit memory copies consume memory controller cycles or sync on default streams.**
+    1. **Assumptions & Constraints:**
+       * 1 Gbps ethernet ingestion.
+       * SoC LPDDR5 bandwidth is 204.8 GB/s.
+    2. **Calculations:**
+       * 1 Gbps = 125 MB/s payload ingestion.
+       * 125 MB/s is << 204.8 GB/s total bandwidth, meaning raw bandwidth isn't fully saturated.
+    3. **Conclusion & Interpretation:**
+       * **The serialization is not due to bandwidth limits, but because unified memory makes explicit memory copies consume shared memory controller cycles and default stream syncs. Result: Synchronization-Bound.**
 status: published
 provenance: llm-draft
 expected_time_minutes: 10

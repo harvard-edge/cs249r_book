@@ -8,36 +8,25 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: FP8 Gradient Casting Overflow Crisis
-scenario: You are migrating a 70B parameter LLM fine-tuning pipeline from FP16 to FP8 on H100 GPUs to double throughput to 4,000 tokens/sec/GPU. The forward pass works perfectly, but during the backward pass in QAT, the loss immediately spikes to NaN after 15 steps. The gradient norms are roughly ~800.0 before the crash.
+scenario: You are migrating a 70B parameter LLM fine-tuning pipeline from FP16 to FP8 to double throughput. The forward pass works perfectly, but during the backward pass in QAT, the loss immediately spikes to NaN after 15 steps. The gradient norms are roughly ~800.0 before the crash.
 question: What caused this catastrophic failure?
 details:
-  realistic_solution: 'The root cause is a mismatch in FP8 encoding formats. FP8 has two standard formats: E4M3 (4 exponent bits, 3 mantissa bits) and E5M2 (5 exponent bits, 2 mantissa bits). You used E4M3 for both the forward and backward passes. E4M3 provides higher precision (needed for activations/weights) but has a maximum representable value of 448. When gradients hit ~800.0, E4M3 overflows, producing NaNs. The fix is to use E4M3 for the forward pass (activations and weights) and E5M2 for the backward pass (gradients), as E5M2 sacrifices precision for a much larger dynamic range (max value 57,344), comfortably accommodating the gradient norms.'
+  realistic_solution: 'The root cause is a mismatch in FP8 encoding formats. FP8 has two standard formats: E4M3 (4 exponent bits, 3 mantissa bits) and E5M2 (5 exponent bits, 2 mantissa bits). You used E4M3 for both the forward and backward passes. E4M3 provides higher precision but has a maximum representable value of 448. When gradients hit ~800.0, E4M3 overflows, producing NaNs. The fix is to use E4M3 for the forward pass (activations and weights) and E5M2 for the backward pass (gradients), as E5M2 sacrifices precision for a much larger dynamic range (max value 57,344).'
   common_mistake: |
     **The Pitfall:** Assuming FP8 has a uniform dynamic range and attributing the NaN to a learning rate that is too high for quantized training.
     **The Rationale:** Treating all 8-bit floats as having identical exponent/mantissa distributions.
     **The Consequence:** Spending weeks tuning hyperparameters for a fundamentally impossible numerical representation, stalling the FP8 migration.
   napkin_math: |
-    - **FP8 E4M3 Max Value:** (1 + 6/8) × 2^(15-7) = 1.75 × 256 = **448**.
-    - **Crash Cause:** A gradient of 800 exceeds 448, causing an immediate NaN overflow.
-    - **FP8 E5M2 Max Value:** (1 + 3/4) × 2^(30-15) = 1.75 × 32,768 = **57,344**.
-    - **Conclusion:** Gradient 800 fits comfortably in E5M2. Use E4M3 for forward pass and E5M2 for backward pass gradients.
+    1. **Assumptions & Constraints:**
+       - Gradients hit ~800.0.
+       - FP8 E4M3 vs E5M2 formats.
+    2. **Calculations:**
+       - FP8 E4M3 Max Value: (1 + 6/8) * 2^(15-7) = 1.75 * 256 = 448.
+       - Overflow Check: 800 > 448 (NaN crash).
+       - FP8 E5M2 Max Value: (1 + 3/4) * 2^(30-15) = 1.75 * 32,768 = 57,344.
+    3. **Conclusion & Interpretation:**
+       - **Result: Dynamic Range Overflow.** The E4M3 format strictly overflows at 448. Gradients must use E5M2 to accommodate values up to 57,344.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
-chains:
-- id: global-chain-030
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

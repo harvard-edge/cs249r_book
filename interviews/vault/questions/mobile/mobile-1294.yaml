@@ -8,20 +8,25 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: On-Device LLM Profiling Alternatives for Tensor G3
-scenario: "You are deploying a distilled version of Gemini Nano on a device powered by the Google Tensor G3. Initial profiling during the autoregressive generation phase shows an unacceptable latency of 150ms per token. You are presented with two alternative hypotheses from your team: Hypothesis A suggests the bottleneck is the TPU compute capacity (7.5 TOPS), while Hypothesis B suggests the bottleneck is the memory bandwidth of the 12 GB LPDDR5X memory."
-question: "Is Tensor G3 LLM generation at 150 ms/token limited by 7.5 TOPS TPU compute or 12 GB LPDDR5X bandwidth?"
+scenario: You are deploying Gemini Nano on the Google Tensor G3. Initial profiling during the autoregressive generation phase shows an unacceptable latency of 150ms per token.
+question: Is Tensor G3 LLM generation at 150 ms/token limited by 7.5 TOPS TPU compute or 12 GB LPDDR5X bandwidth?
 details:
-  realistic_solution: Hypothesis B is correct. During autoregressive decoding at batch size 1, the entire model must be loaded from memory into the TPU for every single token generated. The TPU's 7.5 TOPS are vastly underutilized because the system is starved waiting for weights to be fetched from the LPDDR5X RAM. The solution is to profile memory read bandwidth using hardware counters and apply weight-only quantization (e.g., 4-bit) to reduce the memory I/O required per token.
+  realistic_solution: Hypothesis B is correct. During autoregressive decoding at batch size 1, the entire model must be loaded from memory into the TPU for every single token generated. The TPU's 7.5 TOPS are vastly underutilized because the system is starved waiting for weights. Apply weight-only quantization (e.g., INT4) to fix this.
   common_mistake: |
-    **The Pitfall:** Assuming LLMs are always compute-bound.
+    **The Pitfall:** Assuming LLMs are always compute-bound on edge hardware.
     **The Rationale:** Candidates fail to distinguish between the compute-heavy prefill phase and the memory-bandwidth-heavy autoregressive decoding phase (batch size 1) typical in mobile deployments.
-    **The Consequence:** Choosing the wrong optimization path, such as pruning instead of quantization.
+    **The Consequence:** Choosing the wrong optimization path, such as aggressive network pruning instead of quantization.
   napkin_math: |
-    - Assume a 3 billion parameter model. In 16-bit (FP16), it takes 6 GB of memory.
-    - Generating 1 token requires loading all 6 GB.
-    - Memory Time: `6 GB / 50 GB/s = 120ms` (close to the 150ms observed).
-    - Compute Time: The TPU requires ~6 Giga-operations per token. `6 GOPs / 7.5 TOPS = 0.8ms`.
-    - **Conclusion:** Memory I/O (120ms) completely dominates compute (0.8ms). It is **bandwidth limited**.
+    1. **Assumptions & Constraints:**
+       - TPU Compute: 7.5 TOPS.
+       - Memory: 12 GB LPDDR5X (~50 GB/s bandwidth).
+       - Model: 3B parameters FP16 (6 GB memory footprint).
+       - Batch Size: 1 (autoregressive decoding).
+    2. **Calculations:**
+       - Required Memory IO Time: 6 GB / 50 GB/s = 120ms.
+       - Required Compute Time: 6 GOPs / 7.5 TOPS = 0.8ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound**. Memory I/O (120ms) entirely dominates compute (0.8ms). The TPU is starved for weights, directly causing the ~150ms latency.
 status: published
 provenance: imported
 requires_explanation: false

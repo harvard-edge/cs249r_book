@@ -8,21 +8,26 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The Multi-Modal Token Starvation
-scenario: You are serving a multi-modal model (like LLaVA). A user uploads a 4K image and asks, 'What is this?'. The image is encoded into 4,000 visual tokens by the Vision Encoder. The LLM then begins decoding text. During the text decode phase, the GPU utilization is at 4%. Your manager asks you to optimize the Vision Encoder to fix this.
+scenario: You are serving a multi-modal model. A user uploads a 4K image and asks, 'What is this?'. The image is encoded into 4,000 visual tokens by the Vision Encoder. The LLM then begins decoding text. During the text decode phase, the GPU utilization is at 4%. Your manager asks you to optimize the Vision Encoder to fix this.
 question: Why is the manager focusing on the wrong part of the stack?
 details:
-  realistic_solution: 'The manager is wrong because the bottleneck is in the autoregressive text decode phase, not the vision encoder. The vision encoder runs once, is compute-bound, and processes 4000 visual tokens in parallel — it''s fast. But text generation is autoregressive: each token requires reading the full 140GB of weights plus the 4000-token visual KV-cache from HBM. At 3 TB/s bandwidth, that''s ~47ms per token, yielding only ~3 TFLOPS of compute utilization (0.3% of the H100''s peak). The GPU is memory-bound during decode regardless of how the visual tokens were produced. Optimizing the encoder won''t help.'
+  realistic_solution: 'The bottleneck is in the autoregressive text decode phase, not the vision encoder. The vision encoder runs once, is compute-bound, and processes 4000 visual tokens in parallel. But text generation is autoregressive: each token requires reading the full weights plus the visual KV-cache from HBM. The GPU is memory-bound during decode regardless of how the visual tokens were produced.'
   common_mistake: |
     **The Pitfall:** Blaming the Vision Encoder for low GPU utilization during text generation.
     **The Rationale:** Because 4,000 tokens sounds like a massive input, managers assume the encoder is the heavy, slow part of the pipeline.
     **The Consequence:** The team wastes months compressing the vision encoder, gaining exactly zero improvement in text decode utilization.
   napkin_math: |
-    1. **Memory Read per Token:** 140 GB (70B params FP16) + 2 GB (4K visual KV-cache) = 142 GB.
-    2. **Memory Bandwidth (H100):** 3.35 TB/s.
-    3. **Read Time:** 142 GB / 3.35 TB/s = 42.4 ms per token.
-    4. **Compute per Token:** 2 $\times$ 70B = 140 GFLOPs.
-    5. **Actual Compute Rate:** 140 GFLOPs / 0.0424s = 3.3 TFLOPS.
-    6. **Result:** **3.3 TFLOPS is only 0.33% of the H100's peak 989 TFLOPS. The process is completely memory-bound, making the encoder irrelevant.**
+    1. **Assumptions & Constraints:**
+       - Memory Read per Token: 140 GB (70B params FP16) + 2 GB (4K visual KV-cache) = 142 GB.
+       - Memory Bandwidth: 3.35 TB/s.
+       - Compute per Token: 2 * 70B = 140 GFLOPs.
+       - Peak Compute: 989 TFLOPS.
+    2. **Calculations:**
+       - Read Time: 142 GB / 3.35 TB/s = 42.4 ms per token.
+       - Actual Compute Rate: 140 GFLOPs / 0.0424s = 3.3 TFLOPS.
+       - Utilization: 3.3 / 989 ≈ 0.33%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound. Text decode utilizes <1% of peak compute because it is bottlenecked by HBM reads, making the encoder irrelevant.**
 status: published
 provenance: imported
 requires_explanation: true

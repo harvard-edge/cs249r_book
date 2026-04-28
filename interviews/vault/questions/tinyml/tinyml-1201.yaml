@@ -8,23 +8,25 @@ competency_area: precision
 bloom_level: create
 phase: inference
 title: Mixed-Precision Audio Keyword Spotting on ESP32-S3
-scenario: >
-  You are deploying a continuous keyword spotting (KWS) model on an ESP32-S3 (240 MHz dual-core Xtensa, 512 KB SRAM, 8 MB PSRAM, vector extensions for INT8). The model initially uses standard INT8 per-tensor PTQ but exhibits unacceptable accuracy drops on a critical subset of keywords. To fit within the tight 512 KB SRAM constraints and meet real-time latency requirements, you must design a mixed-precision (INT4/INT8/INT16) quantization strategy from scratch.
-question: >
-  How do you architect the calibration pipeline, partition the network layers for different precisions, and ensure the vector extensions are maximally utilized despite the mixed bit-widths?
+scenario: You are deploying a continuous keyword spotting (KWS) model on an ESP32-S3. The model initially uses standard INT8 per-tensor PTQ but exhibits unacceptable accuracy drops. To fit within 512 KB SRAM and meet real-time latency requirements, you must design a mixed-precision (INT4/INT8/INT16) quantization strategy from scratch.
+question: How do you architect the calibration pipeline, partition the network layers for different precisions, and ensure the vector extensions are maximally utilized despite the mixed bit-widths?
 details:
-  realistic_solution: >
-    Design a hybrid Quantization-Aware Training (QAT) pipeline. Keep the feature extraction and final classifier layers in INT16 or high-granularity INT8 to preserve dynamic range. Compress the heavy intermediate convolutional/dense layers to INT4 weights with INT8 activations. At runtime, the ESP32-S3 can unpack INT4 weights to INT8 on-the-fly (or via LUT) into the 512 KB SRAM and feed them into the INT8 vector instructions. This keeps the active working set entirely in fast SRAM while leveraging hardware acceleration for the bulk of the MAC operations.
+  realistic_solution: Architect a hybrid Quantization-Aware Training (QAT) loop. Retain INT16 or highly-granular INT8 for feature extraction and final logits to guard dynamic range. Compress heavy intermediate layers to INT4 weights with INT8 activations. Crucially, unpack the INT4 weights to INT8 on-the-fly (or via LUT) before feeding them to the ESP32-S3's native INT8 vector extensions. This strategy isolates the working set strictly to SRAM, avoiding PSRAM cache penalties while leaning on hardware acceleration.
   common_mistake: |
-    **The Pitfall:** Suggesting placing the entire model in PSRAM to solve memory issues.
-    **The Rationale:** Candidates fail to realize the massive latency penalty of PSRAM cache misses. They might also incorrectly propose per-channel INT4 quantization across all layers, ignoring that the ESP32-S3's vector extensions are optimized for INT8 MAC operations.
-    **The Consequence:** Software emulation overhead for INT4 and PSRAM latency completely break real-time KWS.
+    **The Pitfall:** Suggesting placing the entire INT8 model in external PSRAM to solve memory limits.
+    **The Rationale:** Candidates fail to realize the massive latency penalty of PSRAM cache misses, or they propose INT4 MACs without checking hardware support.
+    **The Consequence:** Software emulation overhead for unsupported INT4 and slow PSRAM latency severely violate real-time deadlines.
   napkin_math: |
-    - **Memory constraint:** Let the model have 1M parameters. At INT8, weights take 1MB (forces PSRAM usage).
-    - **Mixed precision:** Quantizing 90% to INT4 (0.45MB) and 10% to INT8 (0.1MB) = Total weights of 0.55MB.
-    - **Throughput:** ESP32-S3 INT8 vector extensions at 240 MHz achieve ~1-2 GMACs/sec.
-    - **Efficiency penalty:** Assuming 20% efficiency due to memory bandwidth and INT4-to-INT8 unpacking, throughput is ~200 MMACs/sec.
-    - **Conclusion:** A 10 MMAC inference completes in 10M / 200M = **50 ms**, leaving safety margin within a 100ms budget.
+    1. **Assumptions & Constraints:**
+       - ESP32-S3 @ 240 MHz. Target SRAM: < 512 KB.
+       - Model: 1M parameters. Native INT8 throughput: ~2 GMACs/sec.
+       - 90% INT4 weights, 10% INT8 weights.
+    2. **Calculations:**
+       - Memory: (0.9M * 0.5 bytes) + (0.1M * 1.0 bytes) = 0.45MB + 0.1MB = 0.55 MB total weights.
+       - Unpack Efficiency Penalty: throughput drops to ~200 MMACs/sec.
+       - Inference Time (10 MMAC workload): 10M / 200M = 50 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Fast On-the-Fly Unpacking**. Despite the unpacking tax, 50 ms safely meets a 100ms real-time audio budget entirely within fast SRAM.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,22 +11,27 @@ title: The Zero-Point Shift Wreck
 scenario: You are debugging a simple 2-layer keyword-spotting MLP on a Cortex-M4. The model takes an INT8 input vector and should output an INT8 classification vector. You've quantized the weights for each layer independently. When you run a test vector through the model, the output is garbage—mostly saturated at the max INT8 value (127). The first layer's quantization scheme (scale, zero-point) is `(0.1, 0)`, but the second layer's is `(0.2, -128)` to accommodate a ReLU6 activation. You suspect an issue with the quantization arithmetic between the layers.
 question: What is the most likely cause of the garbage output?
 details:
-  realistic_solution: The core issue is the lack of a proper requantization step. The 32-bit integer accumulator values from the first layer's matrix multiplication cannot be directly passed to the second layer. They exist on a scale and zero-point derived from the first layer's inputs and weights. They must be rescaled and re-centered to match the INT8 quantization scheme (both scale and zero-point) expected by the second layer.
+  realistic_solution: 'The core issue is the lack of a proper requantization step. The 32-bit integer accumulator values from the first layer''s matrix multiplication cannot be directly passed to the second layer. They exist on a scale and zero-point derived from the first layer''s inputs and weights. They must be rescaled and re-centered to match the INT8 quantization scheme (both scale and zero-point) expected by the second layer.'
   common_mistake: |
-    **The Pitfall:** Ignoring zero-point shifts between layers.
-    **The Rationale:** Engineers often forget that the zero-point is part of a quantized number's identity and treat raw INT8/INT32 values as absolute.
-    **The Consequence:** Without proper requantization, adding the second layer's zero-point to an unscaled positive accumulator creates a massive error that saturates the result when clipped.
+    **The Pitfall:** Ignoring zero-point requantization shifts between layers.
+    **The Rationale:** Engineers treat raw INT32 accumulator values as absolute numbers, forgetting that they exist relative to the specific scale and zero-point of the preceding layer.
+    **The Consequence:** Feeding raw accumulators into the next layer without resynchronizing the zero-point introduces a massive offset error, permanently saturating the activation function and yielding garbage outputs.
   napkin_math: |
-    - Let L1 accumulator = 25000, scale S1_in * S1_w = 0.001. Real value = 25.0.
-    - Calculate proper requantization for L2 (Scale = 0.2, Zero Point = -128): q2 = (25.0 / 0.2) + (-128) = 125 - 128 = -3.
-    - Calculate what happens without requantization: raw 25000 + (-128) = 24872 is **127 (saturated)**.
-    - **Conclusion:** Without inserting the proper multiply-by-M and shift operations between layers, every neuron saturates to 127.
+    1. **Assumptions & Constraints:**
+       - L1 scheme: (0.1, 0).
+       - L2 scheme: (0.2, -128).
+       - Test true value output from L1: 25.0.
+    2. **Calculations:**
+       - Proper L2 Requantization (q2 = Real / Scale_2 + ZP_2): q2 = (25.0 / 0.2) + (-128) = 125 - 128 = -3.
+       - Unrequantized failure: passing raw unscaled values directly to L2 without rescaling + shifting. Adding -128 to large unscaled values instantly clips at +127.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** Without correctly executing the multiply-by-M and shift instructions to bridge the quantization scales, the intermediate tensor is irrecoverably corrupted.
   options:
   - The 32-bit accumulator is overflowing before the second layer runs.
-  - The ReLU6 activation function is not correctly implemented for INT8 inputs.
   - The intermediate 32-bit accumulator values are being used by the second layer without being correctly rescaled and shifted to the second layer's zero-point and scale.
+  - The ReLU6 activation function is not correctly implemented for INT8 inputs.
   - The weights for the second layer were quantized using per-tensor instead of per-channel quantization.
-  correct_index: 2
+  correct_index: 1
 status: published
 provenance: imported
 requires_explanation: false

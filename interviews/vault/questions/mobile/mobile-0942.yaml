@@ -8,20 +8,27 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: 'KV-Cache: Design Multi-Turn KV Cache Persistence for Mobile App Switching'
-scenario: Your LLM chat app on A17 Pro (35 TOPS, 8GB) needs to survive iOS app switching (app may be backgrounded and KV cache evicted by OS).
+scenario: Your LLM chat app runs on a flagship edge device with limited unified memory. It must survive OS app switching, where backgrounding the app forces eviction of the KV cache from RAM.
 question: How would you design a KV cache persistence strategy that allows resuming conversation within 3 seconds of app foreground?
 details:
   realistic_solution: |
-    1B model decode on 35 TOPS device: 2 GFLOPs / 35 TOPS = ~0.06ms at peak, ~0.7ms with realistic utilization. Units are GFLOPs (not TFLOPs) and time is milliseconds (not seconds).
+    A highly optimized solution avoids serializing the massive KV cache tensors to flash storage altogether. Instead, persist only the token IDs and conversation history in a lightweight SQLite or JSON format. Upon app foreground, trigger a highly optimized, compute-bound prefill phase to regenerate the KV cache from scratch using the NPU. Because NPU matrix multiplication throughput is extremely high, re-processing thousands of tokens takes a fraction of a second, which is vastly faster than reading hundreds of megabytes from slow mobile flash storage (NVMe/UFS).
   common_mistake: |
-    **The Pitfall:** Storing the full KV cache to flash memory.
-    **The Rationale:** Candidates do not calculate the IO latency and don't consider that recomputing KV from saved tokens is often faster than reloading gigabytes from flash.
-    **The Consequence:** Unacceptable resume times exceeding the 3-second target.
+    **The Pitfall:** Storing the full KV cache to flash memory upon app backgrounding.
+    **The Rationale:** Candidates mistakenly treat the KV cache as application state that must be strictly saved to disk, without calculating I/O transfer latencies.
+    **The Consequence:** Unacceptable resume times exceeding 3 seconds, coupled with severe flash memory degradation (wear leveling issues) due to constantly writing gigabytes of tensors.
   napkin_math: |
-    - **Prefill Compute:** 2 * 1B params * 2048 tokens = 4.096 TFLOPs.
-    - **Theoretical Prefill Time:** 4.096 TFLOPs / 35 TOPS = 117 ms.
-    - **Decode Step:** 2 GFLOPs / 35 TOPS = ~0.057 ms/token (theoretical). With overhead, ~0.70 ms per token.
-    - **Result:** **Re-running a 2048-token prefill from scratch takes ~117ms, which is vastly faster than reading hundreds of megabytes of KV tensors from mobile flash.**
+    1. **Assumptions & Constraints:**
+       - Target Resume Latency: < 3 seconds.
+       - Model: 1B parameters. Context length: 2048 tokens.
+       - Flash Read Speed: ~1.5 GB/s. NPU Compute: ~35 TOPS.
+    2. **Calculations:**
+       - Recompute Prefill Compute: 2 * 1B params * 2048 tokens = 4.096 TFLOPs.
+       - Recompute Time (Compute-Bound): 4.096 TFLOPs / 35 TOPS = ~117 ms.
+       - KV Cache Memory Size (1B model, 2048 tokens): ~200-300 MB.
+       - Flash Read Time (I/O-Bound): 300 MB / 1.5 GB/s = ~200 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 117ms compute vs 200ms flash read (Compute vs I/O tradeoff).** Re-running the prefill from saved tokens is empirically faster and prevents catastrophic write-wear on the device's flash memory.
 status: published
 provenance: imported
 requires_explanation: true

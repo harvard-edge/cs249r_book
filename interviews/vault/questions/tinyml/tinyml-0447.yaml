@@ -8,27 +8,32 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: 'The Transformer''s Memory Spike: Attention Scaling & Variants'
-scenario: You are trying to deploy a person-detection model on a microcontroller with 512KB of SRAM. You have two models with similar parameter counts (~250K): a MobileNet-based CNN and a tiny Vision Transformer (ViT). The input is a 96x96 grayscale image, and the ViT uses a patch size of 8x8. During inference, the CNN runs fine, but the ViT immediately crashes with an out-of-memory error.
+scenario: 'You are trying to deploy a person-detection model on a microcontroller with 512KB of SRAM. You have two models with similar parameter counts: a MobileNet-based CNN and a tiny Vision Transformer (ViT). The input is a 96x96 grayscale image, and the ViT uses a patch size of 8x8. During inference, the CNN runs fine, but the ViT immediately crashes with an out-of-memory error.'
 question: Why does a tiny ViT on 96x96 images spike memory versus a similarly sized MobileNet CNN on a 512 KB SRAM MCU?
 details:
-  realistic_solution: 'The root cause is the quadratic scaling of self-attention activation memory. For the ViT: a 96x96 input with 8x8 patches yields a sequence length N = (96/8)^2 = 144. The attention matrix per head is 144*144 = 20,736 elements. At FP32, this is ~81 KB per head. With 4 heads, that''s 324 KB. Plus the Q/K/V projections (216 KB), the peak activation memory for a single attention layer is 540 KB. This 540 KB activation alone exceeds the entire 512 KB SRAM budget, causing an immediate out-of-memory crash. A CNN like MobileNet scales linearly with resolution, and its peak activation is much smaller (e.g., ~288 KB), comfortably fitting within the memory budget.'
+  realistic_solution: The root cause is the intrinsic quadratic scaling of the self-attention activation memory matrix. While MobileNet scales linearly with input resolution, generating narrow feature maps, the ViT must construct an exhaustive N x N attention matrix. When fully populated across multiple attention heads in FP32 precision, this dense activation blob physically exceeds the microcontroller's 512 KB SRAM, prompting an immediate hard OOM crash.
   common_mistake: |
-    **The Pitfall:** Comparing models based on parameter count alone.
-    **The Rationale:** Engineers assume parameter count is the primary driver of memory usage and forget intermediate activation tensors.
-    **The Consequence:** They deploy memory-intensive architectures like Transformers that vastly exceed the SRAM budget and cause OOM crashes.
+    **The Pitfall:** Comparing disparate network architectures utilizing parameter counts exclusively.
+    **The Rationale:** Engineers assume parameter footprint dominates storage, ignoring the peak intermediate activation tensor dimensions.
+    **The Consequence:** They mistakenly push memory-aggressive mechanisms (like self-attention) to MCUs, resulting in unbootable graph allocations.
   napkin_math: |
-    - **Sequence Length (N):** N = (96 × 96) / (8 × 8) = 9,216 / 64 = **144 patches**.
-    - **Attention Matrix Size per Head:** N × N = 144 × 144 = 20,736 elements.
-    - **Memory per Head (FP32):** 20,736 × 4 bytes = 82,944 B ≈ **81 KiB**.
-    - **Multi-Head Attention (4 heads):** 4 × 81 KiB = **324 KiB**.
-    - **Q, K, V Matrices:** 3 matrices × 144 tokens × 128 dim × 4 bytes = 221,184 B ≈ **216 KiB**.
-    - **Total Attention Layer Peak:** 324 KiB + 216 KiB = **540 KiB**.
-    - **Conclusion:** 540 KiB > 512 KB SRAM budget, leading to an OOM crash.
+    1. **Assumptions & Constraints:**
+       - Image: 96x96. Patch size: 8x8.
+       - ViT: 4 Heads, 128 embedding dimension. FP32 (4 bytes).
+       - Constraint: 512 KB SRAM limit.
+    2. **Calculations:**
+       - Sequence Length (N) = (96/8)^2 = 144 patches.
+       - Single Head Attention Matrix: 144 * 144 = 20,736 elements * 4 bytes = ~81 KiB.
+       - All 4 Heads: 81 KiB * 4 = 324 KiB.
+       - Q, K, V Projections: 3 * 144 * 128 * 4 bytes = 216 KiB.
+       - Peak Activation Layer = 324 KiB + 216 KiB = 540 KiB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Hard OOM Failure**. The peak 540 KiB activation alone breaches the 512 KB boundary, crashing the chip.
   options:
-  - The ViT's MLP blocks have far more parameters than the CNN's convolutional layers, causing the memory overflow.
-  - The ViT crashes because its self-attention mechanism creates a large (N x N) activation tensor that scales quadratically with the number of image patches.
-  - The patch embedding layer of the ViT requires storing the entire 96x96 image in a special format that exceeds the 512KB SRAM.
-  - The ViT is a newer architecture that requires special hardware acceleration not present on the microcontroller.
+  - The ViT MLP blocks hold 600 KB of parameters, structurally blowing past the MCU limit while the CNN maintains lighter dense layers.
+  - The self-attention matrix generates an N x N activation tensor per head that sums to 540 KB, instantly breaching the 512 KB limit.
+  - The initial patch embedding layer creates a massive 96x96x128 feature block summing to 1.1 MB, violating memory.
+  - ViT networks inherently demand specialized Tensor Core hardware instructions that panic the generic ARM instruction set.
   correct_index: 1
 status: deleted
 provenance: imported

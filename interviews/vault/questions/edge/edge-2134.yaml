@@ -8,31 +8,28 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: Congestion Avoidance in Multi-Sensor Edge Inference Pipelines
-scenario: You run a Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W) at an autonomous
-  vehicle edge node. The Orin receives sensor streams from 6 cameras (each 30 fps,
-  4 MB/frame compressed) and 1 LiDAR (10 fps, 50 MB/scan) over a PCIe-attached Ethernet
-  NIC (10 GbE). During peak load, sensor data arrives at 6×30×4 + 10×50 = 1,220 MB/s
-  but the NIC is only 1.25 GB/s. You observe dropped LiDAR frames causing inference
-  degradation. Design a congestion-aware ingestion strategy.
-question: How would you design congestion-aware sensor ingestion to prevent LiDAR
-  drops on the 10 GbE Jetson Orin node?
+scenario: You run a Jetson Orin at an autonomous vehicle edge node. The Orin receives sensor streams from 6 cameras (each 30 fps, 4 MB/frame compressed) and 1 LiDAR (10 fps, 50 MB/scan) over a PCIe-attached Ethernet NIC (10 GbE). During peak load, you observe dropped LiDAR frames causing inference degradation.
+question: "How would you design congestion-aware sensor ingestion to prevent LiDAR drops on the 10 GbE Jetson Orin node?"
 details:
-  realistic_solution: 'Implement strict-priority queuing at the NIC driver level:
-    LiDAR traffic gets priority class 7 (highest), camera streams share priority class
-    4. Configure interrupt coalescing for cameras (batch 5 frames before DMA) to reduce
-    PCIe contention. Apply intra-pipeline backpressure: if the Orin inference queue
-    depth exceeds 3 frames, drop the lowest-priority camera frames first using a weighted
-    drop policy.'
-  common_mistake: Treating all sensor streams with equal priority. Camera frames can
-    tolerate 1-2 frame drops without significant model quality loss, while missing
-    a LiDAR scan causes 100ms gaps in 3D perception that are safety-critical. Round-robin
-    scheduling starves LiDAR when all 6 cameras burst simultaneously.
-  napkin_math: 'Peak ingress: 6×120 MB/s (cameras) + 500 MB/s (LiDAR) = 1,220 MB/s.
-    NIC capacity: 10 GbE = 1,250 MB/s. Headroom: 30 MB/s (2.4%). Any burst causes
-    drops. LiDAR frame: 50 MB. Drop cost: 1 missed scan / 10 Hz = 100ms perception
-    gap. Camera frame: 4 MB. Drop cost: 1/30s = 33ms gap, tolerable for camera-only
-    fallback. Priority scheduling ensures LiDAR 500 MB/s is guaranteed; remaining
-    750 MB/s serves cameras, dropping ~40% of camera bandwidth during peak.'
+  realistic_solution: 'Implement strict-priority queuing at the NIC driver level: LiDAR traffic gets priority class 7 (highest), camera streams share priority class 4. Configure interrupt coalescing for cameras to reduce PCIe contention. Apply intra-pipeline backpressure: if the Orin inference queue depth exceeds 3 frames, drop the lowest-priority camera frames first using a weighted drop policy.'
+  common_mistake: |
+    **The Pitfall:** Treating all sensor streams with equal priority (e.g., Round-Robin scheduling).
+    **The Rationale:** Candidates assume uniform data importance, failing to recognize that LiDAR is safety-critical (missing a scan causes a 100ms perception gap) while cameras tolerate 1-2 frame drops seamlessly.
+    **The Consequence:** Critical 3D perception data is randomly dropped under burst loads, causing catastrophic failures in the autonomy stack.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - NIC limit: 10 GbE = 1.25 GB/s (effective ~1,180 MB/s TCP payload).
+       - Camera load: 6 * 30 fps * 4 MB = 720 MB/s.
+       - LiDAR load: 10 fps * 50 MB = 500 MB/s.
+    2. **Calculations:**
+       - Total ingress = 720 MB/s + 500 MB/s = 1,220 MB/s.
+       - Ingress (1,220 MB/s) > Effective Limit (1,180 MB/s).
+       - Overload = 40 MB/s.
+       - Priority routing guarantees LiDAR 500 MB/s.
+       - Remaining for cameras = 1,180 MB/s - 500 MB/s = 680 MB/s.
+       - Camera drop rate = (720 - 680) / 720 = ~5.5% drop rate for camera frames.
+    3. **Conclusion & Interpretation:**
+       - **Result: LiDAR guaranteed, ~5.5% camera drops** (Network-Ingest Bound).
 status: deleted
 provenance: imported
 requires_explanation: true

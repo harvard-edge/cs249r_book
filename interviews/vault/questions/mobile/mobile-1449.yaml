@@ -8,20 +8,25 @@ competency_area: precision
 bloom_level: evaluate
 phase: training
 title: On-Device LLM Precision Strategy for Tensor G3
-scenario: You are deploying a 3.2-billion parameter LLM onto the Google Tensor G3 chip (7.5 TOPS, shared 12 GB LPDDR5X). Your strict memory budget for the model (weights and runtime) is 3.5 GB to avoid OS app killing.
+scenario: You are deploying a 3.2-billion parameter LLM onto the Google Tensor G3 chip. Your strict memory budget for the model (weights and runtime) is 3.5 GB to avoid OS app killing under memory pressure.
 question: How would you evaluate precision formats and decide on a deployment recipe that fits the 3.5 GB limit while maximizing throughput?
 details:
-  realistic_solution: A mixed-precision approach using 4-bit weight quantization (W4) and 16-bit activations (A16 or BF16) is required. The TPU can perform rapid dequantization of the 4-bit weights into 16-bit registers during inference to maintain precision for the matrix multiplications.
+  realistic_solution: A mixed-precision architecture (W4A16) utilizing 4-bit weight quantization and 16-bit activations (BF16) is imperative. The TPU executes rapid symmetric dequantization of the INT4 weights into 16-bit registers immediately prior to the MAC array, preserving numerical fidelity for attention calculations while radically compressing the flash footprint.
   common_mistake: |
-    **The Pitfall:** Proposing standard FP16 deployment or basic INT8 quantization.
-    **The Rationale:** Failing to calculate the memory footprint, assuming 3.2B parameters fit easily in 12 GB.
-    **The Consequence:** INT8 consumes 3.2 GB for weights alone, leaving only 300 MB for the KV cache and activations, guaranteeing OOM under the 3.5 GB cap.
+    **The Pitfall:** Proposing naive INT8 static quantization for weights and activations.
+    **The Rationale:** Failing to calculate the exact spatial requirements for the KV Cache state at maximum context length.
+    **The Consequence:** The INT8 weights consume 3.2 GB, leaving a paltry 300 MB margin—guaranteeing Out-Of-Memory (OOM) crashes the moment the KV cache populates past a few hundred tokens.
   napkin_math: |
-    - FP16 Weights: 3.2B * 2 bytes = 6.4 GB (OOM).
-    - INT8 Weights: 3.2B * 1 byte = 3.2 GB (Leaves 300 MB for KV).
-    - W4A16 Weights: 3.2B * 0.5 bytes = 1.6 GB. (Leaves 1.9 GB for KV).
-    - KV Cache (2048 tokens): 32 layers * 2048 dim * 2 (K/V) * 2 bytes * 2048 = 512 MB.
-    - **W4A16 leaves 1.9 GB margin, comfortably fitting the 512 MB KV cache within the 3.5 GB budget.**
+    1. **Assumptions & Constraints:**
+       - Model: 3.2B parameters.
+       - System Budget: 3.5 GB maximum footprint.
+       - KV Cache: 32 layers, 2048 token context, 2048 hidden dim, 2 (K/V vectors), FP16 (2 bytes).
+    2. **Calculations:**
+       - W4A16 Weights (4-bit): 3.2B * 0.5 bytes = 1.6 GB.
+       - KV Cache Size: 32 * 2048 * 2048 * 2 * 2 bytes = 536,870,912 bytes ≈ 512 MB.
+       - Total Runtime Footprint: 1.6 GB (weights) + 0.512 GB (KV) = 2.112 GB.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bound. The W4A16 precision strategy successfully reduces the total footprint to ~2.1 GB, safely accommodating the 512 MB KV cache and leaving a 1.4 GB buffer beneath the rigid 3.5 GB system limit.**
 status: published
 provenance: imported
 requires_explanation: false

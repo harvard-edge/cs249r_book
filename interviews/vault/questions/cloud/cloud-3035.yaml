@@ -7,19 +7,25 @@ topic: model-size-estimation
 competency_area: memory
 bloom_level: evaluate
 phase: both
-title: 'Model Size Estimation: Diagnose OOM Error During Fine-Tuning on H100'
-scenario: 'A team hits OOM (out of memory) while fine-tuning a 13B model on an H100 with batch size 8, sequence length 2048, using full FP16 training (no mixed precision). Memory profiler shows: weights 26GB, gradients 26GB, optimizer states 52GB — total 104GB.'
-question: 'Why does the 13B fine-tuning run OOM, and what minimum changes make it fit in 80GB?'
+title: 'Model Size Estimation: Diagnose OOM Error During Fine-Tuning'
+scenario: 'A team hits OOM (out of memory) while fine-tuning a 13B model with batch size 8, sequence length 2048, using full FP16 training (no mixed precision). Memory profiler shows: weights 26GB, gradients 26GB, optimizer states 52GB — total 104GB.'
+question: "Why does the 13B fine-tuning run OOM, and what minimum changes make it fit in 80GB?"
 details:
   realistic_solution: 'Full FP16 training (wrong for stability): weights 26GB + grads 26GB + Adam FP32 states 104GB? No: full FP16 Adam has FP16 m+v = 13B×2B×2=52GB. Total: 104GB > 80GB. Fix options: (1) 8-bit Adam (bitsandbytes): optimizer states 13B×1B×2=26GB. New total: 26+26+26=78GB < 80GB ✓ (barely). (2) LoRA: only train 2% of params. LoRA grads: 0.26B×2B=520MB. LoRA optimizer: 1.04GB. Total: 26+0.52+1.04=27.56GB ✓ massively. Recommend LoRA for minimal overhead.'
   common_mistake: |
     **The Pitfall:** Immediately switching to ZeRO-3.
     **The Rationale:** Candidates assume complex distributed training is required for all OOM errors without calculating basic optimizer state sizes.
-    **The Consequence:** Adds severe communication overhead when simpler fixes (8-bit Adam, LoRA) suffice within a single GPU.
+    **The Consequence:** Adds severe communication overhead when simpler single-GPU fixes (8-bit Adam, LoRA) suffice.
   napkin_math: |
-    - **Full FP16 Adam**: Weights 26GB + Gradients 26GB + m (FP16) 26GB + v (FP16) 26GB = **104GB**.
-    - **8-bit Adam**: m (INT8) 13GB + v (INT8) 13GB. Total: 26+26+13+13 = 78GB. With 2GB activations at batch=8: **80GB exactly** (Very tight).
-    - **LoRA rank 64**: Trainable params = 2×64×5120×40 layers = 26M. Gradients: ~0.1GB. Adam: ~0.2GB. Total: 26+0.1+0.2 = **26.3GB** (**53.7GB headroom**).
+    1. **Assumptions & Constraints:**
+       - GPU Memory: 80GB.
+       - Full FP16 Adam: Weights 26GB, Gradients 26GB, Momentum 26GB, Variance 26GB.
+    2. **Calculations:**
+       - Baseline Memory = 26 + 26 + 26 + 26 = 104GB (OOM).
+       - 8-bit Adam = 26 (W) + 26 (G) + 13 (m) + 13 (v) = 78GB (+2GB activations = 80GB, fits tightly).
+       - LoRA (rank 64) = 26 (W) + 0.1 (G) + 0.2 (Adam) = 26.3GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 26.3GB (Memory-Capacity-Bound).** LoRA provides massive 53.7GB headroom, making it far superior to full fine-tuning.
 status: published
 provenance: imported
 requires_explanation: false

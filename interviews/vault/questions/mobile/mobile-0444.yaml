@@ -8,40 +8,31 @@ competency_area: networking
 bloom_level: apply
 phase: inference
 title: The AR Frame Drop
-scenario: You're a mobile ML engineer optimizing an AR application on a high-end smartphone. The app uses
-  the NPU to run object detection on the camera feed and then directs the GPU to render a complex 3D overlay
-  on the detected object. You observe that while NPU inference is fast (~10ms), the app frequently misses
-  its 16ms frame budget (it "janks") specifically when the GPU needs to access the original, high-resolution
-  4K camera frame to blend the AR overlay correctly. A system profiler shows the GPU is stalled, waiting
-  for data. What is the most likely bottleneck causing this jank?
-question: "Why does a 4K camera frame stall the GPU despite 10ms NPU inference in an AR overlay pipeline?"
+scenario: You're a mobile ML engineer optimizing an AR application. The app uses the NPU to run object detection on the camera feed and then directs the GPU to render a complex 3D overlay on the detected object. You observe that while NPU inference is fast (~10ms), the app frequently misses its 16ms frame budget specifically when the GPU needs to access the original, high-resolution 4K camera frame to blend the AR overlay correctly. A system profiler shows the GPU is stalled, waiting for data.
+question: Why does a 4K camera frame stall the GPU despite 10ms NPU inference in an AR overlay pipeline?
 details:
-  realistic_solution: The bottleneck is the bandwidth of the MIPI camera bus. The GPU is waiting for the
-    large, high-resolution 4K frame to be transferred from the camera sensor into the shared LPDDR5 memory.
-    While the main memory bus connecting the SoC components (CPU, GPU, NPU) is extremely fast, it is being
-    fed by a much slower peripheral bus (MIPI CSI-2). The GPU can't start rendering the overlay on a frame
-    that hasn't fully arrived in memory yet. This is a classic producer-consumer problem where the producer
-    (camera sensor via MIPI bus) is much slower than the consumer (GPU accessing DRAM).
-  common_mistake: Engineers often blame the unified memory itself, assuming contention is the only possible
-    issue. They forget that unified memory is only as fast as the data feeding into it. Another common
-    mistake is to blame a software issue like cache coherency, which typically operates on a nanosecond-to-microsecond
-    scale, not the millisecond-scale stalls seen here.
-  napkin_math: Let's diagnose the data transfer. A 4K camera frame (3840x2160) using a YUV420 pixel format
-    (1.5 bytes/pixel) is about 12.4 MB. The camera communicates with the SoC over a MIPI CSI-2 bus, which
-    has a bandwidth of about 2.5 GB/s. The time to transfer one frame into DRAM is `12.4 MB / 2.5 GB/s
-    ≈ 5 ms`. This 5ms latency is a significant portion of the 16ms frame budget and directly explains
-    why the GPU is stalled waiting for its source data. By contrast, once the data is in DRAM, the GPU
-    can access it at the full LPDDR5X bandwidth of ~77 GB/s, which would only take `12.4 MB / 77 GB/s
-    ≈ 0.16 ms`. The bottleneck isn't reading from memory; it's waiting for the data to get *to* memory.
+  realistic_solution: |
+    The bottleneck is the bandwidth of the MIPI camera bus. The GPU is waiting for the large, high-resolution 4K frame to be transferred from the camera sensor into the shared LPDDR5 memory. While the main memory bus connecting the SoC components is extremely fast, it is fed by a much slower peripheral bus (MIPI CSI-2). The GPU cannot start blending until the frame has fully arrived in DRAM.
+  common_mistake: |
+    **The Pitfall:** Blaming unified memory contention or cache coherency.
+    **The Rationale:** Engineers assume the unified memory itself is saturated, forgetting that data must first traverse slow peripheral buses (producer) before the GPU (consumer) can access it.
+    **The Consequence:** Unnecessary optimization of GPU shaders while the true bottleneck remains unaddressed at the hardware I/O level.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 4K frame (3840x2160), YUV420 format (1.5 bytes/pixel).
+       - MIPI CSI-2 bus bandwidth: ~2.5 GB/s.
+       - LPDDR5X DRAM bandwidth: ~77 GB/s.
+    2. **Calculations:**
+       - Frame size: 3840 * 2160 * 1.5 = ~12.4 MB.
+       - MIPI transfer time: 12.4 MB / 2.5 GB/s = ~5 ms.
+       - DRAM read time: 12.4 MB / 77 GB/s = ~0.16 ms.
+    3. **Conclusion & Interpretation:**
+       - **Transferring the frame to memory takes ~5ms, which is a massive chunk of the 16ms budget. Bottleneck: Peripheral I/O Bandwidth.**
   options:
-  - The NPU is taking longer than profiled, and the GPU is waiting for the detection results before it
-    can start rendering.
-  - The unified LPDDR5 memory bus is saturated due to contention between the CPU, GPU, and NPU, slowing
-    down the GPU's data fetch.
-  - The GPU is stalled waiting for the full 4K camera frame to transfer over the slow MIPI bus into DRAM;
-    the peripheral bus is the bottleneck.
-  - A cache coherency delay between the NPU's write to memory and the GPU's read from memory is forcing
-    a slow data synchronization.
+  - The NPU is taking longer than profiled, and the GPU is waiting for the detection results before it can start rendering.
+  - The unified LPDDR5 memory bus is saturated due to contention between the CPU, GPU, and NPU, slowing down the GPU's data fetch.
+  - The GPU is stalled waiting for the full 4K camera frame to transfer over the slow MIPI bus into DRAM; the peripheral bus is the bottleneck.
+  - A cache coherency delay between the NPU's write to memory and the GPU's read from memory is forcing a slow data synchronization.
   correct_index: 2
 status: published
 provenance: imported

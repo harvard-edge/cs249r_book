@@ -8,30 +8,32 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: DRAM Bandwidth for 30 FPS Inference
-scenario: Your edge device has LPDDR4x memory with 25.6 GB/s bandwidth, shared between the CPU, GPU, ISP,
-  and display controller. You need to run a segmentation model (DeepLabv3-MobileNetV2, 2.7 GFLOPs, 2.1M
-  params INT8) at 30 FPS on the GPU. The ISP consumes 4 GB/s for 1080p camera processing, and the display
-  controller uses 2 GB/s. Estimate whether you have enough DRAM bandwidth for 30 FPS inference.
-question: "Do you have enough DRAM bandwidth to run DeepLabv3-MobileNetV2 at 30 FPS alongside the ISP and display?"
+scenario: Your edge device has LPDDR4x memory with 25.6 GB/s bandwidth, shared between the CPU, GPU, ISP, and display controller. You need to run a segmentation model (DeepLabv3-MobileNetV2, 2.7 GFLOPs, 2.1M params INT8) at 30 FPS on the GPU. The ISP consumes 4 GB/s for 1080p camera processing, and the display controller uses 2 GB/s. Estimate whether you have enough DRAM bandwidth for 30 FPS inference.
+question: Do you have enough DRAM bandwidth to run DeepLabv3-MobileNetV2 at 30 FPS alongside the ISP and display?
 details:
-  realistic_solution: Segmentation models have high activation-to-weight ratios because they maintain
-    spatial resolution through the network.
-  common_mistake: '"Model weights are 2.1 MB. At 30 FPS that''s 63 MB/s. Trivial compared to 25.6 GB/s."
-    This only counts weight reads and ignores activation memory traffic, which dominates for segmentation
-    models that produce large spatial feature maps.'
-  napkin_math: 'GPU bandwidth need: 1.8 GB/s out of 25.6 GB/s = 7%. System total: 9.3 GB/s = 36%. Comfortable
-    on average. But ISP bursts at 8 GB/s for 2ms during frame readout → instantaneous demand = 8 + 1.8
-    + 2 + 1.5 = 13.3 GB/s = 52%. Still under peak, but memory controller queuing adds ~1ms latency to
-    GPU requests during ISP bursts. Fix: schedule inference to start 5ms after ISP frame capture completes,
-    avoiding the burst overlap.'
+  realistic_solution: Segmentation models have high activation-to-weight ratios because they maintain spatial resolution through the network.
+  common_mistake: |
+    **The Pitfall:** Only calculating weight read bandwidth and ignoring activation traffic.
+    **The Rationale:** Candidates assume model weights dominate memory I/O, forgetting that segmentation models maintain massive spatial feature maps.
+    **The Consequence:** The system experiences 1ms queuing latency spikes during ISP bursts, violating the 30 FPS hard real-time deadline.
+  napkin_math: |
+    1. Assumptions & Constraints:
+       - LPDDR4x bandwidth: 25.6 GB/s
+       - GPU target: 30 FPS
+       - ISP average: 4 GB/s (bursts 8 GB/s for 2ms)
+       - Display controller: 2 GB/s
+       - GPU model requirements: 2.7 GFLOPs, 2.1 MB INT8 weights
+    2. Calculations:
+       - GPU average bandwidth need = 1.8 GB/s (7% of total)
+       - Total average system bandwidth = 1.8 + 4.0 + 2.0 = 7.8 GB/s (well within 25.6 GB/s)
+       - Instantaneous burst demand = 1.8 (GPU) + 8.0 (ISP) + 2.0 (Display) + 1.5 (OS) = 13.3 GB/s (52%)
+    3. Conclusion & Interpretation:
+       - **Result: Queue-Bound. While average bandwidth is ample, overlapping GPU inference with ISP readouts causes ~1ms queuing latency; inference should be offset by 5ms.**
   options:
-  - Segmentation models have high activation-to-weight ratios because they maintain spatial resolution
-    through the network.
-  - Network I/O is the dominant bottleneck; optimizing the model or inference pipeline will have minimal
-    impact on end-to-end latency.
-  - The bottleneck is PCIe transfer between CPU and GPU; using zero-copy memory will eliminate this overhead
-    entirely.
-  - Model weights are 2.1 MB. At 30 FPS that's 63 MB/s.
+  - "Yes, peak demand is 13.3 GB/s (52% of 25.6 GB/s), but overlapping ISP bursts adds ~1ms queuing latency."
+  - "Yes, model weights are 2.1 MB, so at 30 FPS it only uses 63 MB/s, which is <1% of 25.6 GB/s."
+  - "No, the ISP continuous read of 4 GB/s plus the GPU's 13.3 GB/s burst will exceed 25.6 GB/s."
+  - "No, deep segmentation models require at least 32 GB/s of bandwidth due to self-attention activation mapping."
   correct_index: 0
 status: published
 provenance: imported

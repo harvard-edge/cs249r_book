@@ -9,19 +9,24 @@ bloom_level: evaluate
 phase: training
 title: Evaluating Framework Execution Overhead
 scenario: 'You are evaluating execution frameworks for a real-time anomaly detection pipeline on GPUs. The deep MLP model with 200 narrow layers processes batch size 1 to meet a strict 2ms latency SLA. The forward pass takes 4.5ms in PyTorch eager mode. Profiling reveals the GPU is only active for 0.5ms per pass, with massive gaps between kernel executions.'
-question: 'Should you build a custom monolithic CUDA kernel or use a JIT graph compiler to meet the 2ms batch-1 SLA, and why?'
+question: 'Should you build a custom monolithic CUDA kernel or use a JIT graph compiler to meet the SLA, and why?'
 details:
-  realistic_solution: 'Identify that the CPU interpreter overhead is dominating execution. While a custom CUDA kernel eliminates dispatch tax entirely (reducing dispatch to 1 launch), it requires massive engineering effort to maintain. A JIT compiler (like torch.compile) automatically fuses operations into larger sub-graphs, reducing kernel launches significantly with minimal code changes, comfortably hitting the SLA while maintaining Pythonic flexibility.'
+  realistic_solution: 'Identify that the CPU interpreter overhead is dominating execution. While a custom CUDA kernel eliminates dispatch tax entirely, it requires massive engineering effort to maintain. A JIT compiler (like torch.compile or torch.jit) automatically fuses operations into larger sub-graphs, drastically reducing kernel launches and CPU dispatch overhead with minimal code changes, comfortably hitting the SLA.'
   common_mistake: |
     **The Pitfall:** Misdiagnosing the latency as a GPU memory bandwidth issue.
     **The Rationale:** Because large MLPs are typically memory-bound, candidates assume the GPU is struggling to fetch weights fast enough.
-    **The Consequence:** They might suggest increasing the batch size (which violates the strict 1-batch SLA) instead of recognizing the actual bottleneck is the CPU-bound Python dispatch tax.
+    **The Consequence:** They might suggest increasing the batch size (which violates the strict SLA) instead of recognizing the actual bottleneck is the CPU-bound Python dispatch tax.
   napkin_math: |
-    - **Eager Execution Profile:** 4.5ms total. GPU time = 0.5ms.
-    - **CPU Dispatch Tax:** 4.5ms for 200 ops = ~22.5µs dispatch tax per op.
-    - **Custom CUDA Kernel:** 1 kernel launch (22.5µs dispatch) and 0.5ms compute. Since dispatch < compute, the step takes exactly 0.5ms total.
-    - **JIT Graph Compiler (torch.compile):** Fuses to ~10 kernels (`10 * 22.5µs = 0.225ms` dispatch) and 0.5ms compute.
-    - **Result: The JIT compiler achieves ~0.5ms total latency, comfortably beating the 2.0ms SLA without writing custom C++.**
+    1. **Assumptions & Constraints:**
+       * Eager Execution: 4.5ms total. GPU active time: 0.5ms.
+       * 200 individual operations.
+    2. **Calculations:**
+       * CPU Dispatch Tax: 4.5ms - 0.5ms = 4.0ms.
+       * Dispatch per op: 4.0ms / 200 ≈ 20µs dispatch overhead per op.
+       * JIT Compiler fusing to 10 kernels: 10 * 20µs = 0.2ms dispatch.
+       * Total JIT latency: 0.2ms + 0.5ms = 0.7ms.
+    3. **Conclusion & Interpretation:**
+       * **Result: CPU-Bound by Python dispatch. A JIT compiler achieves ~0.7ms total latency, comfortably beating the 2.0ms SLA without writing custom C++.**
 status: published
 provenance: imported
 requires_explanation: true

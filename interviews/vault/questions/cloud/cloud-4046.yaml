@@ -9,22 +9,28 @@ bloom_level: create
 phase: training
 title: PowerSGD Low-Rank Gradient Compression
 scenario: PowerSGD compresses gradients by projecting them onto a low-rank approximation. For a weight matrix W ∈ ℝ^{4096×4096} (a Transformer layer), PowerSGD uses rank r=4, sending two small matrices P ∈ ℝ^{4096×4} and Q ∈ ℝ^{4096×4} instead of the full gradient.
-question: For PowerSGD rank 4 on a 4096×4096 gradient, what are the compression ratio, AllReduce savings on 256 H100s, and approximation error?
+question: For PowerSGD rank 4 on a 4096×4096 gradient, what are the compression ratio, AllReduce savings on 256 GPUs, and approximation error?
 details:
-  realistic_solution: 'Full gradient: 4096 × 4096 × 2 bytes (FP16) = 32MB. PowerSGD with rank r=4: P = 4096×4×2 = 32KB, Q = 4096×4×2 = 32KB. Total communicated: 64KB. Compression ratio: 32MB / 64KB = 512×. AllReduce time (256 H100s, 400Gbps): Full gradient: 2 × 255/256 × 32MB / 50GB/s = 1.27ms. PowerSGD: 2 × (2 × 255/256 × 32KB / 50GB/s) = 2 × 1.27μs = 2.54μs for AllReduce, plus local MM: (1) Q_t = G × P_{t-1}, AllReduce Q_t. (2) Orthogonalize Q_t. (3) P_t = G^T × Q_t, AllReduce P_t. Local compute: two matrix multiplies of (4096×4096) × (4096×4) = 134M FLOPs each = 268M FLOPs total. On H100 at 989 TFLOPS FP16: 268M / 990T = 0.27μs. Negligible. Total PowerSGD time: ~3μs vs 1.27ms = 423× faster. Approximation error: the rank-4 approximation captures the top-4 singular vectors. Error = ||G - G_r||_F / ||G||_F ≈ σ₅/σ₁ for typical gradient spectra. Transformer gradients have rapidly decaying spectra; rank-4 typically captures >90% of Frobenius norm.'
+  realistic_solution: 'Full gradient: 4096 × 4096 × 2 bytes (FP16) = 33.5 MB. PowerSGD with rank r=4: P = 4096×4×2 = 32.7 KB, Q = 4096×4×2 = 32.7 KB. Total communicated: 65.5 KB. Compression ratio: 33.5 MB / 65.5 KB = 512×. AllReduce time (256 GPUs, 50GB/s): Full gradient: 2 × 255/256 × 33.5MB / 50GB/s = 1.34ms. PowerSGD: 2 × (2 × 255/256 × 32.7KB / 50GB/s) = 2.6μs for AllReduce, plus local MM: (1) Q_t = G × P_{t-1}, AllReduce Q_t. (2) Orthogonalize Q_t. (3) P_t = G^T × Q_t, AllReduce P_t. Local compute: two matrix multiplies of (4096×4096) × (4096×4) = 134M FLOPs each = 268M FLOPs total. On 989 TFLOPS FP16: 268M / 990T = 0.27μs. Negligible. Total PowerSGD time: ~3μs vs 1.34ms = 446× faster. Approximation error: the rank-4 approximation captures the top-4 singular vectors. Error = ||G - G_r||_F / ||G||_F ≈ σ₅/σ₁ for typical gradient spectra. Transformer gradients have rapidly decaying spectra; rank-4 typically captures >90% of Frobenius norm.'
   common_mistake: |
     **The Pitfall:** Forgetting that PowerSGD requires two distinct AllReduce operations per step.
     **The Rationale:** Candidates assume that simply compressing to a low-rank matrix means you only run AllReduce once.
     **The Consequence:** They underestimate the communication latency and ignore the required intermediate local matrix multiplication steps entirely.
   napkin_math: |
-    - Full gradient size: 4096 × 4096 × 2 bytes = 32 MB.
-    - PowerSGD (Rank 4): P = 4096×4×2 bytes = 32 KB, Q = 4096×4×2 bytes = 32 KB.
-    - Compression Ratio: 32 MB / 64 KB = 512x.
-    - Full AllReduce (256 H100s at 50GB/s): 2 × (255/256) × 32 MB / 50 GB/s ≈ 1.27 ms.
-    - PowerSGD AllReduce (2 ops): 2 × (2 × 32 KB / 50 GB/s) ≈ 2.54 μs.
-    - Local Compute (2 Matrix Muls): 2 × 134M FLOPs = 268M FLOPs.
-    - Compute Time (H100): 268M FLOPs / 989 TFLOPS ≈ 0.27 μs.
-    - **Conclusion:** Total time drops from 1.27 ms to ~3 μs (423x speedup).
+    1. **Assumptions & Constraints:**
+       - Full gradient size: 4096 × 4096, FP16 (2 bytes).
+       - PowerSGD Rank 4: P and Q matrices.
+       - Network: 256 GPUs, 50 GB/s bandwidth. Compute: 989 TFLOPS.
+    2. **Calculations:**
+       - Full gradient size: 4096 × 4096 × 2 bytes = 33.55 MB.
+       - Compressed size: (4096 × 4 × 2 bytes) × 2 = 65.53 KB.
+       - Compression Ratio: 33.55 MB / 65.53 KB = 512x.
+       - Full AllReduce: 2 × (255/256) × 33.55 MB / 50 GB/s ≈ 1.34 ms.
+       - PowerSGD AllReduce (2 ops): 2 × (2 × 32.76 KB / 50 GB/s) ≈ 2.6 μs.
+       - Local Compute: 2 × 134M FLOPs = 268M FLOPs.
+       - Compute Time: 268M FLOPs / 989 TFLOPS ≈ 0.27 μs.
+    3. **Conclusion & Interpretation:**
+       - **Result: 512x compression, total time drops from ~1.34 ms to ~3 μs.** (Network-Bound to Compute-Bound transition)
 status: published
 provenance: imported
 requires_explanation: false

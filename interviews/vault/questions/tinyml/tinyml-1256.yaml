@@ -8,21 +8,27 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: inference
 title: Sizing an On-Device Anti-Spoofing Guardrail
-scenario: You are deploying a biometric voice authentication system on an ARM Cortex-M4 (STM32F4) featuring a 168 MHz clock, 256 KB SRAM, 1 MB flash, and CMSIS-NN SIMD capabilities. Following an internal red-team audit, the Responsible AI committee mandates adding an on-device anti-spoofing guardrail model to prevent replay attacks and ensure system integrity. The main authentication model currently uses 150 KB SRAM, 400 KB flash, and 150ms of execution time per 1-second audio frame. The system has a strict total latency limit of 400ms per frame to maintain real-time responsiveness.
+scenario: You are deploying a biometric voice authentication system on an ARM Cortex-M4. Following an internal red-team audit, the Responsible AI committee mandates adding an on-device anti-spoofing guardrail model to prevent replay attacks. The main model currently uses 150 KB SRAM, 400 KB flash, and 150ms of execution time per 1-second audio frame. The system has a strict total latency limit of 400ms per frame to maintain real-time responsiveness.
 question: What is the maximum allowable capacity (in memory and MACs) for the new INT8 guardrail model?
 details:
-  realistic_solution: A strong L5 candidate will immediately reserve 40-50 KB of SRAM for system overhead (RTOS, double-buffered audio DMA, and MFCC buffers), leaving a strict ~56 KB SRAM bottleneck for the guardrail's tensor arena. They will allocate the remaining 250ms latency budget conservatively by setting aside 50ms for DSP preprocessing. Recognizing the CMSIS-NN capability of 2x INT8 MACs/cycle, they will calculate the peak throughput but correctly apply a realistic 50% utilization factor to account for memory load/store stalls on the Cortex-M4, sizing the guardrail at roughly 33.6 million MACs.
+  realistic_solution: A strong architect immediately deducts OS overhead. They reserve 40-50 KB of SRAM for RTOS state, double-buffered DMA audio pipelines, and DSP feature extraction, calculating a strict 56 KB remaining boundary for the guardrail tensor arena. Factoring the Cortex-M4's CMSIS-NN SIMD capabilities, they project realistic MAC throughput (incorporating memory load stalls) to properly cap the model's arithmetic complexity.
   common_mistake: |
-    **The Pitfall:** Allocating all remaining SRAM and theoretical peak MACs to the guardrail model.
-    **The Rationale:** Candidates often assume the theoretical peak MACs equals achievable performance and forget to budget SRAM for the RTOS, audio DMA buffers, and DSP feature extraction.
-    **The Consequence:** This inevitably causes memory corruption, stack overflows, or missed real-time deadlines during actual execution.
+    **The Pitfall:** Allocating all remaining theoretical SRAM and peak analytical MACs exclusively to the guardrail network.
+    **The Rationale:** Candidates mechanically subtract model footprint from total RAM, entirely forgetting OS overhead, network stacks, and hardware DMA buffers.
+    **The Consequence:** The guardrail induces catastrophic memory corruption, stack overflows, and breaks the 400ms real-time deadline during physical deployment.
   napkin_math: |
-    - **SRAM Budget:** 256 KB (Total) - 150 KB (Main Model) - 50 KB (OS/DMA/DSP Buffers) = **56 KB** available for the guardrail's peak memory arena.
-    - **Flash Budget:** 1024 KB (Total) - 400 KB (Main Model) - 150 KB (Firmware) = **474 KB** available for weights.
-    - **Latency Budget:** 400ms (Total limit) - 150ms (Main Model) - 50ms (feature extraction) = **200ms (0.2s)** for guardrail inference.
-    - **Peak Compute:** 168 MHz * 2 MACs/cycle = 336 MMACs/sec.
-    - **Effective Compute:** 336 MMACs/sec * 0.50 (realistic CMSIS-NN utilization) = 168 MMACs/sec.
-    - **Max Guardrail Complexity:** 168 MMACs/sec * 0.2s = **33.6 Million MACs**.
+    1. **Assumptions & Constraints:**
+       - Total Capacity: 256 KB SRAM, 1024 KB Flash, 400ms latency.
+       - Main Model: 150 KB SRAM, 400 KB Flash, 150ms latency.
+       - Compute: 168 MHz * 2 MACs/cycle * 50% utilization = 168 MMACs/sec effective.
+       - System Overhead: 50 KB SRAM, 150 KB Flash, 50ms (DSP extraction).
+    2. **Calculations:**
+       - Available SRAM: 256 - 150 - 50 = 56 KB.
+       - Available Flash: 1024 - 400 - 150 = 474 KB.
+       - Available Latency: 400ms - 150ms - 50ms = 200ms (0.2s).
+       - Peak Guardrail Complexity: 168 MMACs/sec * 0.2s = 33.6 MMACs.
+    3. **Conclusion & Interpretation:**
+       - **Result: Constrained Boundary**. The guardrail is strictly bound to 56 KB SRAM and 33.6 Million MACs to guarantee real-time stability.
 status: published
 provenance: imported
 requires_explanation: false

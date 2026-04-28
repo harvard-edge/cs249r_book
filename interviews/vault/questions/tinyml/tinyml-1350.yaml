@@ -8,19 +8,24 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: 'Real-Time TinyML Inference on ESP32-S3: Diagnosing Latency and Jank'
-scenario: You are tasked with deploying a gesture recognition model on an ESP32-S3. The system requires real-time inference, with a strict 33ms frame budget for processing sensor data and generating a classification. However, during initial testing, you observe occasional jank in the downstream actuation and even Application Not Responding (ANR) timeouts. The current implementation uses a polling loop for sensor data and directly runs inference within the main task.
-question: How would you systematically diagnose and mitigate these real-time performance issues, ensuring the 33ms deadline is consistently met?
+scenario: You are deploying a gesture recognition model on an ESP32-S3 with a strict 33ms frame budget. During initial testing, you observe occasional jank in downstream actuation and Application Not Responding (ANR) timeouts. The current implementation uses a polling loop for sensor data and runs inference directly within the main task.
+question: How should the system architecture be restructured to systematically diagnose and mitigate latency jitter to guarantee the 33ms real-time deadline?
 details:
-  realistic_solution: '1. **WCET Analysis**: Profile the model inference and sensor reading routines on the ESP32-S3 using ESP-IDF''s built-in tracing and performance monitors to establish the true WCET for the entire pipeline. Identify bottlenecks. 2. **FreeRTOS Task Prioritization**: Restructure the application using FreeRTOS. Create a high-priority task for sensor data acquisition and model inference, ensuring it preempts lower-priority tasks. 3. **Interrupt-Driven Pipeline**: Implement sensor data acquisition using hardware interrupts to trigger data collection and subsequently signal the inference task. This avoids polling and reduces latency jitter. 4. **Memory Optimization**: Ensure the critical model graph and intermediate buffers fit within the 512 KB SRAM. If model weights must reside in 8 MB PSRAM, optimize access patterns to minimize the impact of PSRAM''s higher latency on WCET. 5. **Jank/ANR Prevention**: Break down large computational blocks into smaller, cooperative chunks if possible, or offload non-critical processing to the second core.'
+  realistic_solution: The architecture must shift from polling to an interrupt-driven pipeline managed by an RTOS. First, establish the Worst-Case Execution Time (WCET) using ESP-IDF performance monitors. Second, leverage FreeRTOS to create a high-priority, preemptive task for inference, triggered by hardware sensor interrupts. Finally, ensure the critical model graph remains locked in the 512 KB internal SRAM, as arbitrary cache misses from the 8 MB PSRAM will catastrophically spike the WCET.
   common_mistake: |
-    **The Pitfall:** Relying solely on average-case performance metrics.
-    **The Rationale:** Candidates optimize for typical execution time and neglect Worst-Case Execution Time (WCET) analysis and real-time task prioritization.
-    **The Consequence:** The system misses deadlines during edge cases (e.g., PSRAM cache misses or interrupt contention), leading to priority inversion, dropped frames, and ANR timeouts.
+    **The Pitfall:** Optimizing for average-case latency rather than WCET.
+    **The Rationale:** Candidates optimize the model until the "average" inference time fits the 33ms budget, neglecting real-time task prioritization and PSRAM cache miss penalties.
+    **The Consequence:** The system inevitably misses deadlines during worst-case edge scenarios (e.g., concurrent network interrupts), leading to dropped frames and severe actuation jank.
   napkin_math: |
-    - 33ms frame budget at 240 MHz yields ~7.92 million available cycles per frame.
-    - Assuming a model with ~1 Million MAC operations at 3 cycles/MAC (no dedicated DSP): (1M * 3) / 240MHz = 12.5ms average inference.
-    - If WCET spikes to 25ms due to contention, only 8ms remains for I/O and OS overhead.
-    - **Strict WCET analysis and interrupt-driven pipelines are required to guarantee the 33ms deadline.**
+    1. **Assumptions & Constraints**:
+       - 33ms strict frame budget on 240 MHz ESP32-S3.
+       - Model requires ~1M MAC operations at 3 cycles/MAC.
+    2. **Calculations**:
+       - Available Cycles per Frame: 0.033s * 240,000,000 Hz = 7.92M cycles.
+       - Average Inference: (1M * 3) / 240,000,000 Hz = 12.5ms.
+       - WCET Cache Miss Penalty: Fetching from PSRAM can spike inference to >25ms.
+    3. **Conclusion & Interpretation**:
+       - **Result: Latency-Bound Architecture**. While average inference (12.5ms) easily fits the 33ms budget, PSRAM cache misses and polling jitter push the WCET beyond acceptable limits, necessitating an interrupt-driven SRAM-locked pipeline.
 status: published
 provenance: imported
 requires_explanation: false

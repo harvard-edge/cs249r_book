@@ -8,20 +8,27 @@ competency_area: data
 bloom_level: evaluate
 phase: training
 title: Fusing Accelerometer + Microphone + Temperature on One MCU
-scenario: You're building an industrial equipment health monitor on a single Cortex-M4 (256 KB SRAM, 168 MHz). It must fuse data from three sensors: a 3-axis accelerometer (1 kHz), a microphone (16 kHz), and a temperature sensor (1 Hz). Each sensor feeds a different model branch.
+scenario: "You're building an industrial equipment health monitor on a single MCU (256 KB SRAM). It must fuse data from three sensors: a 3-axis accelerometer (1 kHz), a microphone (16 kHz), and a temperature sensor (1 Hz). Each sensor feeds a different model branch."
 question: "How would you design the memory layout, DMA strategy, and scheduling for three sensor branches in 256 KB SRAM?"
 details:
-  realistic_solution: Use a shared-backbone multi-head architecture to fit in 256KB SRAM. Three separate models need 360KB SRAM (doesn't fit). Instead: shared backbone (100KB weights in flash) + 3 small heads (30KB total). Single tensor arena: 180KB SRAM. DMA strategy: mic uses DMA double-buffer, accelerometer uses DMA single-buffer, temp uses polled I2C.
+  realistic_solution: "Use a shared-backbone multi-head architecture to fit in 256KB SRAM. Three separate models need 360KB SRAM (doesn't fit). Instead: shared backbone (100KB weights in flash) + 3 small heads (30KB total). Single tensor arena: 180KB SRAM. DMA strategy: mic uses DMA double-buffer, accelerometer uses DMA single-buffer, temp uses polled I2C."
   common_mistake: |
     **The Pitfall:** Proposing to run three separate models sequentially.
     **The Rationale:** Candidates assume standard model separation is feasible without calculating the combined memory footprint.
     **The Consequence:** The three separate models triple the weight storage and exceed flash, and sequential execution misses real-time deadlines.
   napkin_math: |
-    1. Evaluate three separate models: 3 * 80 KB weights = 240 KB flash + 3 * 120 KB arenas = 360 KB SRAM (Doesn't fit).
-    2. Evaluate shared backbone + 3 heads: 100 KB weights (shared backbone) + 3 * 10 KB heads = 130 KB flash.
-    3. Calculate single arena size: 180 KB SRAM.
-    4. Calculate total SRAM needed: 180 KB + 40 KB firmware + 20 KB DMA buffers = 240 KB.
-    5. **Final Result: Shared backbone uses 240 KB SRAM, fitting within the 256 KB limit with 16 KB headroom.**
+    1. **Assumptions & Constraints:**
+       - MCU Constraints: 256 KB SRAM, 168 MHz.
+       - Separate models require 120 KB SRAM per arena (360 KB total).
+       - Shared backbone requires 180 KB SRAM total.
+       - OS/Firmware/DMA buffer overhead: 60 KB.
+    2. **Calculations:**
+       - Three independent arenas: 3 × 120 KB = 360 KB (Exceeds 256 KB).
+       - Shared backbone arena: 180 KB.
+       - Total Memory Required: 180 KB + 40 KB (firmware) + 20 KB (DMA buffers) = 240 KB.
+       - Headroom: 256 KB - 240 KB = 16 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 240 KB Used. Memory-Bound.** Fusing the model branches into a shared backbone allows all three sensors to execute concurrently within the strict 256 KB SRAM limit.
   options:
   - Run three separate models sequentially, each with its own 120 KB tensor arena and 80 KB weights in SRAM, totaling 360 KB SRAM for arenas alone.
   - 'Use a shared-backbone multi-head architecture: shared backbone (100 KB flash) + 3 small heads (30 KB total flash). Single tensor arena: 180 KB SRAM. DMA strategy: mic uses double-buffer (16 kHz continuous), accelerometer uses single-buffer (1 kHz bursts), temp uses polled I2C (1 Hz). Total SRAM: 240 KB / 256 KB. This avoids the 360 KB SRAM requirement of three separate models.'

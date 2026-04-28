@@ -8,20 +8,25 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: The Distillation Temperature Bottleneck
-scenario: A 1000-class classification student model was trained via Knowledge Distillation (using a Temperature T=5) to run on an ARM Cortex-M4 (STM32F4) clocked at 168 MHz with 256 KB SRAM, 1 MB flash, and no FPU. The model's convolutional layers are quantized to INT8 and leverage CMSIS-NN SIMD (2x INT8 MACs/cycle), successfully executing 1.5 million MACs in about 9 ms. However, hardware profiling reveals that the final Temperature-scaled Softmax layer (q_i = exp(z_i/T) / sum(exp(z_j/T))) takes an additional 6 ms, consuming a massive 40% of the total inference time.
+scenario: A 1000-class classification model on a Cortex-M4 (STM32F4, no FPU) executes 1.5 million MACs in 9 ms. However, profiling reveals that the final Temperature-scaled Softmax layer takes an additional 6 ms, consuming 40% of the total inference time.
 question: Why does this specific layer cause such a severe performance degradation, and what is the optimal deployment strategy?
 details:
-  realistic_solution: The extreme bottleneck is caused by the lack of a hardware FPU on this Cortex-M4 variant, forcing the CPU to use slow software emulation for floating-point division (for T) and exponentiation. Because temperature scaling (division by a positive constant) and the exponential function are strictly monotonic, they do not alter the relative ordering of the logits. For edge deployment where only the predicted class (argmax) is needed, the entire Temperature-scaled Softmax layer should be deleted. The argmax should be computed directly on the raw INT8 output logits.
+  realistic_solution: Delete the Softmax completely. Temperature scaling and the exponential function are strictly monotonic and do not alter the relative ordering of the logits, so argmax operates perfectly on raw outputs.
   common_mistake: |
     **The Pitfall:** Attempting to optimize the Softmax implementation mathematically (e.g., Taylor series or LUTs).
     **The Rationale:** Candidates get distracted by approximation techniques, missing that Temperature scaling and exponentiation are strictly monotonic and do not alter argmax predictions.
     **The Consequence:** Wasting engineering effort to optimize an operation that is logically completely redundant for edge classification, leaving unnecessary latency in the pipeline.
   napkin_math: |
-    1. **Bottleneck Execution:** 1000 classes * (~800 cycles for soft-FP exp() + ~200 cycles for soft-FP division) = 1,000,000 cycles.
-    2. **Softmax Time:** At 168 MHz, 1,000,000 / 168,000,000 = **5.95 ms** (~6 ms overhead).
-    3. **Optimized Execution:** Computing argmax directly on 1000 INT8 logits takes 1 cycle per comparison = 1000 cycles.
-    4. **Argmax Time:** 1000 / 168,000,000 = **0.0059 ms** (5.9 microseconds).
-    5. **Conclusion:** Deleting the Softmax layer entirely saves ~6 ms and eliminates all FPU emulation penalties.
+    1. **Assumptions & Constraints:**
+       - Cortex-M4 (STM32F4): 168 MHz, no hardware FPU.
+       - Softmax classes: 1000.
+    2. **Calculations:**
+       - Emulated FPU Softmax: 1000 classes * (~1000 cycles for div/exp) = 1M cycles.
+       - Latency: 1M / 168 MHz = 5.95 ms.
+       - Direct Argmax: 1000 classes * 1 cycle = 1000 cycles.
+       - Argmax latency: 1000 / 168 MHz = 0.006 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: Argmax saves ~6 ms (40% total time).** The final layer is strictly **FPU-Emulation-Bound**, solved by deleting redundant monotonic operators.
 status: published
 provenance: imported
 requires_explanation: false

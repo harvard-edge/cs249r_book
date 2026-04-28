@@ -8,20 +8,23 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Analyzing RBAC and Security Context for Multi-Tenant GPU Namespaces
-scenario: "A regulated enterprise runs ML workloads on a shared H100 Kubernetes cluster. A security audit finds that researchers in Namespace A can inadvertently see GPU metrics from Namespace B via the cluster-wide DCGM Exporter DaemonSet, which scrapes all GPUs on every node."
+scenario: "A regulated enterprise runs ML workloads on a shared Kubernetes cluster. A security audit finds that researchers in Namespace A can inadvertently see GPU metrics from Namespace B via the cluster-wide DCGM Exporter DaemonSet, which scrapes all GPUs on every node."
 question: "What is the blast radius of the cluster-wide DCGM Exporter, and how would you design RBAC and GPU metric isolation between namespaces?"
 details:
-  realistic_solution: "DCGM Exporter exposes metrics at node level without namespace awareness. Isolation requires: (1) Deploy per-namespace metric proxies (e.g., `prometheus-operator` per namespace with `namespaceSelector`) that only scrape pods within their namespace. (2) Use RBAC to restrict `metrics.k8s.io` endpoint access: bind `ClusterRole` with `get` on `/metrics` only to the owning service account per namespace. (3) For GPU-level isolation, use MIG on H100 — each team gets a named MIG instance (`nvidia.com/mig-1g.10gb`), and DCGM can be configured to report per-MIG metrics. (4) PodSecurityAdmission to block `privileged: true` which could allow `/proc` enumeration of sibling containers."
+  realistic_solution: "DCGM Exporter exposes metrics at node level without namespace awareness. Isolation requires: (1) Deploy per-namespace metric proxies that only scrape pods within their namespace. (2) Use RBAC to restrict metrics.k8s.io endpoint access. (3) For GPU-level isolation, use MIG on H100 \u2014 each team gets a named MIG instance, and DCGM can be configured to report per-MIG metrics. (4) PodSecurityAdmission to block privileged containers."
   common_mistake: |
     **The Pitfall:** Attempting to solve metric isolation via NetworkPolicy alone or trying to namespace-scope a DaemonSet.
     **The Rationale:** Engineers don't realize DaemonSets are inherently node-scoped and NetworkPolicies don't restrict Kubernetes API RBAC access.
-    **The Consequence:** A false sense of security where tenants can still easily scrape the central `/metrics` endpoint to snoop on competitors' hardware utilization.
+    **The Consequence:** A false sense of security where tenants can still easily scrape the central /metrics endpoint to snoop on competitors' hardware utilization.
   napkin_math: |
-    *   **Cluster Scale:** 25 nodes × 8 H100s = 200 GPUs.
-    *   **MIG Partitioning:** 7 instances per H100 = 1,400 isolatable slices.
-    *   **Metric Cardinality:** DCGM exports ~150 metrics per slice.
-    *   **Total Series:** 150 × 1,400 = 210,000 metrics scraped cluster-wide.
-    *   **Result:** **The lack of isolation creates a massive 210,000-series blast radius, exposing hardware telemetry across tenant boundaries.**
+    1. **Assumptions & Constraints:**
+       - 25 nodes * 8 GPUs = 200 GPUs.
+       - MIG Partitioning: 7 instances per GPU = 1,400 slices.
+    2. **Calculations:**
+       - Metric Cardinality: DCGM exports ~150 metrics per slice.
+       - Total Series: 150 * 1,400 = 210,000 metrics scraped cluster-wide.
+    3. **Conclusion & Interpretation:**
+       **The lack of isolation creates a massive 210,000-series blast radius. Result: Security-Isolation-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

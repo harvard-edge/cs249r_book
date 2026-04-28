@@ -8,21 +8,28 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Speculative Decoding Feasibility on Mobile NPU
-scenario: On a Snapdragon 8 Gen 3 (16GB LPDDR5x, 51.2 GB/s, 45 TOPS INT8), you run a 3B INT4 target model. A 150M INT4 draft model achieves alpha=0.60.
-question: How does speculative decoding impact on-device latency given the NPU cannot run two models concurrently?
+scenario: On a Snapdragon 8 Gen 3 device, you run a 3B INT4 target model. A 150M INT4 draft model achieves an acceptance rate (alpha) of 0.60.
+question: How does speculative decoding impact on-device latency given the NPU cannot run two models concurrently and must swap them in shared memory?
 details:
-  realistic_solution: 'Target decode: 3B x 0.5B (INT4) = 1.5GB weight read at 51.2 GB/s = 29ms/token + compute: 3B x 2 = 6 GFLOP / 45 TOPS = 0.13ms. Memory-bound at 29ms. Draft: 150M x 0.5B = 75MB read at 51.2 = 1.5ms/token. K=5: 7.5ms. Model switching overhead: NPU needs to reload weight buffers, clear activations: ~5ms per switch. Sequence: load draft (5ms) + 5 draft tokens (7.5ms) + load target (5ms) + verify (29ms for 6 tokens, memory-bound). Total: 47ms for E[tokens] at alpha=0.6: (1-0.6^6)/0.4 = 2.38 tokens. Effective: 47/2.38 = 19.7ms/token. Without speculation: 29ms/token (34 tok/s). With: 19.7ms = 51 tok/s. Wait — that''s wrong. Verification of 6 tokens reads weights once but processes 6 tokens: still 1.5GB read = 29ms (the KV is negligible). So 47ms for 2.38 tokens = 19.7ms. Speedup: 1.47x. Marginal. The 10ms model-switching overhead is 21% of the round.'
+  realistic_solution: Mobile NPUs rely on Unified Memory Architecture (UMA) where model switching incurs a severe penalty due to reloading weights from LPDDR5X DRAM into the NPU's SRAM. The context-switching overhead heavily offsets the theoretical gains of speculative decoding. While the draft model rapidly generates tokens, the constant DRAM contention and NPU driver overhead to swap between the draft and target models yields only a marginal end-to-end latency improvement, making it a poor architectural choice compared to simple autoregressive generation with an optimized KV-cache.
   common_mistake: |
-    **The Pitfall:** Ignoring the context-switching overhead of mobile NPUs.
-    **The Rationale:** Candidates often assume mobile NPUs can seamlessly switch between models like datacenter GPUs, forgetting that loading weights from DRAM creates severe memory bandwidth contention.
-    **The Consequence:** The candidate incorrectly predicts a massive speedup, whereas the actual performance gain is marginal or even negative.
+    **The Pitfall:** Ignoring the context-switching and weight-loading overhead of mobile NPUs.
+    **The Rationale:** Candidates often assume mobile NPUs can seamlessly multi-task or hold multiple models in SRAM like datacenter GPUs, forgetting LPDDR5X bandwidth limits.
+    **The Consequence:** The candidate incorrectly predicts a massive speedup (e.g., 2-3x), whereas the actual performance gain is heavily degraded by memory I/O bottlenecks.
   napkin_math: |
-    1. **Target Model (3B INT4):** 1.5GB weights. Read time at 51.2 GB/s = 29ms/token. Compute is negligible (0.13ms). Memory-bound at 29ms/token.
-    2. **Draft Model (150M INT4):** 75MB weights. Read time = 1.5ms/token. For K=5 tokens = 7.5ms.
-    3. **Switching Overhead:** Reloading weight buffers takes ~5ms per switch. Sequence = load draft (5ms) + 5 draft tokens (7.5ms) + load target (5ms) + verify 6 tokens (29ms) = 46.5ms total.
-    4. **Expected Tokens:** At alpha=0.6, expected tokens E[tokens] = (1-0.6^6)/0.4 = 2.38 tokens.
-    5. **Effective Latency:** 46.5ms / 2.38 tokens = 19.5ms/token.
-    6. **Speedup:** 29ms / 19.5ms = **1.48x speedup** (model switching eats ~21% of the potential gain).
+    1. **Assumptions & Constraints:**
+       - Target Model (3B INT4): 1.5GB weights. LPDDR5X = 51.2 GB/s.
+       - Draft Model (150M INT4): 75MB weights. Alpha = 0.60, K = 5 tokens.
+       - Model Switching Overhead = ~5ms per swap.
+    2. **Calculations:**
+       - Target read time = 1.5GB / 51.2 GB/s = 29.3ms/token (memory-bound).
+       - Draft read time = 75MB / 51.2 GB/s = 1.5ms/token -> 7.5ms for 5 tokens.
+       - Sequence = Load draft (5ms) + 5 draft tokens (7.5ms) + Load target (5ms) + verify 6 tokens (29.3ms) = 46.8ms total.
+       - Expected Tokens = (1 - 0.6^6) / 0.4 = 2.38 tokens.
+       - Effective Latency = 46.8ms / 2.38 tokens = 19.6ms/token.
+    3. **Conclusion & Interpretation:**
+       - Switching eats ~21% of the potential gain.
+       - **Result: Memory-Bandwidth Bound (Marginal 1.49x Speedup)**.
 status: published
 provenance: imported
 requires_explanation: false
@@ -35,8 +42,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

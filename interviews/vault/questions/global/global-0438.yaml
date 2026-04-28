@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: evaluate
 phase: both
 title: Evaluating Compute-Communication Overlap in MoE Layers
-scenario: An Expert Parallel MoE layer runs on 8 H100 GPUs, requiring a 2 GB AllToAll exchange per GPU. The NVLink bidirectional bandwidth is 900 GB/s, and the expert compute phase takes 4 ms.
+scenario: An Expert Parallel MoE layer runs on 8 H100 GPUs, requiring a 2 GB AllToAll exchange per GPU. The expert compute phase takes 4 ms.
 question: Evaluate whether dividing the workload into 4 overlapping micro-steps completely hides the AllToAll communication latency behind compute.
 details:
   realistic_solution: 'The AllToAll sends/receives 2 * (7/8) = 1.75 GB per GPU. At 900 GB/s, the transfer takes 1.75 / 900 = 1.94 ms total. Without overlap, time is 1.94 + 4 = 5.94 ms. With 4 micro-steps, each comms step is ~0.485 ms and compute is 1 ms. Because comms must finish before the corresponding compute starts, there is a pipeline bubble: 0.485 ms start delay + 4 ms total compute = 4.485 ms. Overlap is achieved, but the 0.485 ms startup bubble cannot be perfectly hidden.'
@@ -17,12 +17,21 @@ details:
     **The Rationale:** Assuming runtime simply equals max(compute, comms).
     **The Consequence:** Overestimating overlap efficiency and incorrectly predicting step times in distributed MoE models.
   napkin_math: |
-    - **Data Transfer**: AllToAll sends 2 GB * (7/8) = 1.75 GB per GPU.
-    - **Total Comms Time**: 1.75 GB / 900 GB/s = 1.94 ms.
-    - **Micro-steps**: 4 steps. Comms per step = 1.94 / 4 = 0.485 ms. Compute = 4 / 4 = 1.0 ms.
-    - **Pipeline Bubble**: Comms must finish before compute starts, creating a 0.485 ms startup bubble.
-    - **Total Time**: 0.485 ms (bubble) + 4.0 ms (total compute) = 4.485 ms.
-    - **Conclusion**: Overlap is achieved, but the startup bubble means it is not **completely** hidden.
+    1. **Assumptions & Constraints:**
+       - 8 H100 GPUs (900 GB/s NVLink bidirectional).
+       - 2 GB AllToAll exchange per GPU.
+       - 4 ms expert compute phase.
+       - 4 overlapping micro-steps.
+    2. **Calculations:**
+       - Data per GPU: 2 GB * (7/8) = 1.75 GB.
+       - Total comms time: 1.75 GB / 900 GB/s = 1.94 ms.
+       - Comms per micro-step: 1.94 ms / 4 = 0.485 ms.
+       - Compute per micro-step: 4 ms / 4 = 1.0 ms.
+       - Startup bubble: 0.485 ms.
+       - Total time: 0.485 ms + 4.0 ms = 4.485 ms.
+    3. **Conclusion & Interpretation:**
+       - **Overlap is achieved, but the 0.485 ms startup bubble cannot be perfectly hidden.**
+       - **Result: Pipeline-Bound by Startup Bubble**
 status: published
 provenance: llm-draft
 expected_time_minutes: 10

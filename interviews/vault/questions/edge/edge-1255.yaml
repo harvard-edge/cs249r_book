@@ -11,17 +11,23 @@ title: On-Device Fine-Tuning Checkpoint Architecture for Jetson Orin
 scenario: Your team is designing a continuous learning system for an autonomous drone using an NVIDIA Jetson Orin module. The system must fine-tune a large Vision Transformer locally to adapt to new environments. The Orin is constrained by its 32 GB LPDDR5 unified memory and a strict 60W TDP.
 question: How would you architect a gradient checkpointing strategy to fine-tune the ViT within the 32 GB memory and 60W TDP constraints?
 details:
-  realistic_solution: A robust L5 design implements selective gradient checkpointing, targeting only the memory-heavy attention layers while bypassing lightweight layers like MLPs. The candidate should propose a dynamic memory manager that monitors the unified 32 GB LPDDR5 pool, adjusting the checkpointing interval based on available system memory. They should also evaluate shifting static inference tasks to the DLA accelerator to reserve the Ampere GPU's compute and power budget for the recomputation overhead.
+  realistic_solution: Adopt Selective Gradient Checkpointing. Naively caching all activations triggers OOM (36 GB > 32 GB). Instead, checkpoint only the structurally critical attention layers (e.g., every 4th block) and discard intermediate MLP states. During the backward pass, recompute the missing forward states on-the-fly. To offset the ~33% FLOP overhead and respect the 60W TDP, dynamically shift static background inferences to the low-power DLA core.
   common_mistake: |
     **The Pitfall:** Proposing simplistic checkpoint-every-layer strategies.
     **The Rationale:** Candidates focus only on minimizing memory footprint without considering the power cost of recomputation.
     **The Consequence:** The device throttles or exceeds the 60W TDP. They also forget the 32 GB memory is shared with the OS, CPU, and DLA.
   napkin_math: |
-    1. Full activations for 24 transformer layers at 1.5 GB each = 36 GB (exceeds 32 GB shared LPDDR5).
-    2. Checkpointing every 4th layer stores 6 checkpoints (6 * 1.5 GB = 9.0 GB).
-    3. Recomputing up to 3 intermediate layers temporarily requires (3 * 1.5 GB = 4.5 GB).
-    4. **Peak activation memory drops from 36 GB to 13.5 GB, safely fitting the constraint.**
-    5. Recomputation adds ~33% compute overhead, but the 275 TOPS GPU easily handles this within the 60W TDP.
+    1. **Assumptions & Constraints:**
+       - 24 transformer layers, 1.5 GB activations per layer.
+       - Memory limit: 32 GB shared LPDDR5.
+       - Checkpoint interval: Every 4th layer.
+    2. **Calculations:**
+       - Full activation memory: 24 layers * 1.5 GB = 36 GB (OOM).
+       - Checkpointed memory (6 stored layers): 6 * 1.5 GB = 9.0 GB.
+       - Recomputation scratchpad: 3 * 1.5 GB = 4.5 GB.
+       - Total peak memory: 9.0 GB + 4.5 GB = 13.5 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 13.5 GB peak footprint.** Selective gradient checkpointing comfortably fits the fine-tuning workload into memory at the expense of ~33% compute overhead.
 status: published
 provenance: imported
 requires_explanation: true

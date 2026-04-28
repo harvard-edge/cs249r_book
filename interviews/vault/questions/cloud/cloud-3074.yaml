@@ -8,24 +8,29 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: 'Queueing Theory Implement: Erlang-C for Inference Cluster Sizing'
-scenario: An inference cluster must handle λ=200 req/s with a P99 < 500ms SLO. Each H100 serves Mistral-7B at μ=100 req/s (10ms mean service time). You are modeling this as an M/M/c queue.
-question: Using Erlang-C with λ=200 req/s and μ=100 req/s per H100, how many servers are needed for P99 < 500ms and what is P(wait>0)?
+scenario: An inference cluster must handle λ=200 req/s with a P99 < 500ms SLO. Each server serves Mistral-7B at μ=100 req/s (10ms mean service time). You are modeling this as an M/M/c queue.
+question: Using Erlang-C with λ=200 req/s and μ=100 req/s per server, how many servers are needed for P99 < 500ms and what is P(wait>0)?
 details:
-  realistic_solution: 'a = λ/μ = 200/100 = 2 Erlangs. Minimum c must satisfy c > a=2, so c≥3. At c=3: ρ=a/c=2/3=0.667. Erlang-C P0 = [sum(a^n/n!, n=0 to c-1) + a^c/(c!*(1-ρ))]^-1. P0 = [1 + 2 + 2 + 8/(6*0.333)]^-1 = [5 + 4]^-1 = 1/9 = 0.111. P(wait>0) = Erlang-C(a,c) = (a^c * P0)/(c! * (1-ρ)) = (8 * 0.111)/(6 * 0.333) = 0.889/2 = 0.444. Mean wait: Wq = P(wait>0) / (c*μ - λ) = 0.444/(300-200) = 4.44ms. P99 ≈ 10ms + 4.44ms mean queue ≈ way under 500ms. c=3 H100s is sufficient.'
+  realistic_solution: 'a = λ/μ = 200/100 = 2 Erlangs. Minimum c must satisfy c > a=2, so c≥3. At c=3: ρ=a/c=2/3=0.667. Erlang-C P0 = [sum(a^n/n!, n=0 to c-1) + a^c/(c!*(1-ρ))]^-1. P0 = [1 + 2 + 2 + 8/(6*0.333)]^-1 = [5 + 4]^-1 = 1/9 = 0.111. P(wait>0) = Erlang-C(a,c) = (a^c * P0)/(c! * (1-ρ)) = (8 * 0.111)/(6 * 0.333) = 0.889/2 = 0.444. Mean wait: Wq = P(wait>0) / (c*μ - λ) = 0.444/(300-200) = 4.44ms. P99 ≈ 10ms + 4.44ms mean queue ≈ way under 500ms. c=3 servers is sufficient.'
   common_mistake: |
-    **The Pitfall:** Using M/M/1 queuing logic and modeling c servers as one fast server.
+    **The Pitfall:** Using M/M/1 queueing logic and modeling c servers as one fast server.
     **The Rationale:** It simplifies the math by treating aggregate compute as a single processing unit.
     **The Consequence:** This ignores the statistical multiplexing benefits of M/M/c with multiple independent servers, leading to wildly inaccurate tail latency predictions and over-provisioning.
   napkin_math: |
-    - **Traffic Intensity (a):** λ / μ = 200 / 100 = 2 Erlangs.
-    - **Minimum Servers (c):** c must be > a, so let's try c=3.
-    - **Utilization (ρ):** a / c = 2 / 3 = 0.667.
-    - **Probability of zero queue (P0):** Denominator = 1 + 2 + (2^2 / 2!) + (2^3 / 3!) / (1 - 0.667) = 1 + 2 + 2 + (1.333 / 0.333) = 5 + 4 = 9. P0 = 1 / 9 = 0.111.
-    - **Probability of Waiting P(wait>0):** (2^3 × 0.111) / (6 × 0.333) = 0.889 / 2 = **0.444**.
-    - **Mean Queue Wait (Wq):** P(wait>0) / (c×μ - λ) = 0.444 / (300 - 200) = 0.0044s = 4.4ms.
-    - **Total Mean Time (W):** 4.4ms + 10ms = 14.4ms.
-    - **P99 Estimate:** ≈ 4.6 × 14.4ms = 66ms.
-    - **Conclusion:** 66ms << 500ms. **c=3 H100s** is sufficient.
+    1. **Assumptions & Constraints:**
+       - Arrival rate (λ) = 200 req/s.
+       - Service rate (μ) = 100 req/s per server.
+       - Mean service time = 10ms.
+    2. **Calculations:**
+       - Traffic Intensity (a) = λ / μ = 200 / 100 = 2 Erlangs.
+       - Minimum Servers (c) = 3 (must be > a).
+       - Utilization (ρ) = a / c = 2 / 3 ≈ 0.667.
+       - P0 = [1 + 2 + (2^2 / 2!) + (2^3 / 3!) / (1 - 0.667)]^-1 = [1 + 2 + 2 + 4]^-1 = 1/9 ≈ 0.111.
+       - P(wait>0) = (2^3 * 0.111) / (6 * 0.333) = 0.889 / 2 ≈ 0.444.
+       - Mean Queue Wait = P(wait>0) / (c*μ - λ) = 0.444 / (300 - 200) = 4.4ms.
+       - Total Mean Time = 4.4ms + 10ms = 14.4ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 3 servers sufficient for P99 < 500ms.** Erlang-C accurately models the multiplexing benefits, showing a mean wait of only 4.4ms.
 status: published
 provenance: imported
 requires_explanation: false

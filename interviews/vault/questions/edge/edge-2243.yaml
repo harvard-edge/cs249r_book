@@ -8,20 +8,25 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: both
 title: Fairness Degradation from Quantization on Edge
-scenario: A face verification model (FP32) passes your fairness audit: FPR gap between skin tone groups (Fitzpatrick scale 1-2 vs 5-6) is 1.8%, within the 2% SLA. After PTQ to INT8 for edge deployment on a Hailo-8, the FPR gap widens to 6.2%. Overall accuracy drops only 0.4%.
+scenario: 'A face verification model (FP32) passes your fairness audit: FPR gap between skin tone groups is 1.8%, within the 2% SLA. After PTQ to INT8 for edge deployment, the FPR gap widens to 6.2%. Overall accuracy drops only 0.4%.'
 question: Why did INT8 PTQ widen the skin-tone FPR gap from 1.8% to 6.2%, and how would you fix the calibration process?
 details:
-  realistic_solution: 'The root cause is calibration set bias in PTQ. INT8 quantization clips activations at [min_calib, max_calib] derived from the calibration set. If the calibration set is 90% lighter skin tones, the activation range is calibrated for that distribution. Darker skin tone images activate different feature detectors with different dynamic ranges — those activations are more likely to be clipped or saturated under the lighter-calibrated quantization scheme, increasing FPR for that group. Fix: (1) Stratify the PTQ calibration set with equal representation across Fitzpatrick groups (100 images per group, 600 total minimum). (2) Use per-layer per-subgroup activation range analysis: log activations for each Fitzpatrick group separately and choose calibration range that minimizes worst-case quantization error across groups, not average error. (3) Evaluate fairness metrics on INT8 model before deployment — treat quantization as a model change requiring re-audit.'
+  realistic_solution: Post-Training Quantization uses a calibration dataset to set clipping boundaries. If the calibration dataset represents a skewed demographic distribution, the resulting quantization scheme will clip and destroy subtle activation ranges utilized by underrepresented groups. The architectural fix requires rigorous stratified sampling across the PTQ calibration dataset to balance activation range capture and strictly preserve demographic parity.
   common_mistake: |
     **The Pitfall:** Assuming overall accuracy is a sufficient proxy for fairness during quantization calibration.
     **The Rationale:** Engineers often use standard PTQ calibration which minimizes average quantization error across the entire calibration set.
     **The Consequence:** If minority subgroups are underrepresented, their specific feature activations are clipped, disproportionately degrading fairness metrics while overall accuracy barely moves.
   napkin_math: |
-    1. Standard calibration set: 128 images.
-    2. Biased distribution (90% light skin): 115 light, 13 dark.
-    3. Clipping at light-skin percentile: ~15% of dark-skin activations get saturated.
-    4. Result: Zero gradient/signal for affected features, causing 3-4x higher FPR.
-    5. Fix: 600 stratified images (100 per Fitzpatrick level) = 4.7x more data, still completes in **<30 seconds** on CPU.
+    1. **Assumptions & Constraints:**
+       - Standard calibration: 128 images
+       - Biased dataset: 90% light skin (115 light, 13 dark)
+       - Proposed calibration: 600 stratified images (100 per Fitzpatrick scale)
+    2. **Calculations:**
+       - Dark skin samples in standard calib: 13 / 128 ≈ 10%
+       - Saturation rate: ~15% of dark-skin specific activations clipped
+       - CPU calibration latency overhead: 600 images / 128 images ≈ 4.7x longer
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound Fairness Degradation.** Biased calibration clips activations specific to minority subgroups. Stratified PTQ calibration restores fairness with minimal CPU time cost (<30s).
 status: published
 provenance: imported
 requires_explanation: false

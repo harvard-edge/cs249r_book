@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: 'Real-Time Gesture Recognition on Nordic nRF5340: Meeting 30ms Latency Budgets'
-scenario: 'You are developing a wearable device for continuous gesture recognition using a Nordic nRF5340 SoC (dual-core Arm Cortex-M33, 128 MHz, 256 KB SRAM, 1 MB flash). The system needs to infer a gesture every 30ms to ensure a jank-free user experience. The pre-trained ML model requires 50KB of SRAM for its weights and intermediate activations and occupies 200KB of flash. Concurrently, BLE communication for data logging is active, triggered by an interrupt-driven pipeline every 10ms.'
+scenario: You are developing a wearable device for continuous gesture recognition. The system needs to infer a gesture every 30ms to ensure a jank-free user experience. The pre-trained ML model requires 50KB of SRAM for its weights and intermediate activations and occupies 200KB of flash. Concurrently, BLE communication for data logging is active, triggered by an interrupt-driven pipeline every 10ms.
 question: If the initial WCET analysis reveals that the inference frequently exceeds 30ms, what architectural, algorithmic, or software-level changes would you propose to bring it within budget?
 details:
   realistic_solution: "1.  **WCET Analysis:** Use on-target profiling with high-resolution timers and GPIO toggling for critical sections. Instrument the code to measure specific layers. Employ static timing analysis tools if available for Cortex-M33, or manual analysis considering cache behavior (instruction/data) and branch prediction. Account for CPU stalls. Use hardware performance counters for detailed insights.\n2.  **Interrupt/Scheduling Management:** Implement a real-time operating system (RTOS) like Zephyr (common on nRF5340). Assign higher priority to the BLE interrupt handler to ensure data integrity, but keep its critical section minimal. Defer longer BLE processing to a lower-priority task using message queues or semaphores. The ML inference task should run as a high-priority, compute-bound task, but allow preemption by BLE. Utilize fixed-priority scheduling (e.g., Rate Monotonic Scheduling if tasks are truly periodic) and analyze for schedulability.\n3.  **Memory Management:** Employ techniques like model quantization (e.g., to int8) to reduce the 50KB model footprint. Use static memory allocation for critical buffers (input/output, intermediate activations) to avoid heap fragmentation. Minimize RTOS and BLE stack memory configuration. Overlap buffer usage where possible (e.g., input buffer for current inference can be used for output of previous if pipeline supports). Verify total memory usage with a memory map analysis at link time and runtime profiling.\n4.  **Optimization Strategies:**\n    *   **Algorithmic:** Aggressive model quantization (int8/int4), pruning, neural architecture search for more efficient models tailored to the nRF5340's M33. Reduce input sensor resolution if feasible.\n    *   **Software:** Highly optimized inference engine (e.g., CMSIS-NN or custom kernels leveraging SIMD instructions on Cortex-M33), loop unrolling, efficient data layouts. Implement double buffering for sensor data to decouple acquisition from processing. Optimize data transfers.\n    *   **Architectural:** If possible, consider distributing compute across the nRF5340's dual Cortex-M33 cores (e.g., one for ML, one for BLE/system, with inter-core communication)."
@@ -17,10 +17,17 @@ details:
     **The Rationale:** Candidates focus on average execution time and model-level optimizations without considering system-level constraints, memory fragmentation, or the impact of BLE stack preemptions on the M33.
     **The Consequence:** Missing the hard 30ms real-time deadline due to unpredictable system jitter and overheads.
   napkin_math: |
-    - **Baseline WCET**: 5M cycles / 128 MHz = 39.06 ms (exceeds 30ms budget).
-    - **Memory Constraint**: 256 KB - 100 KB (System) = 156 KB remaining. Model needs 50 KB.
-    - **Quantization Impact**: INT8 reduces cycles by ~2x-4x. Time drops to **~19.53 ms**.
-    - **Effective Budget**: 30ms - 5ms (BLE interrupt) = 25 ms. **19.53 ms fits within the 25 ms budget**.
+    1. **Assumptions & Constraints:**
+       - Clock Speed: 128 MHz.
+       - Baseline model MACs/cycles: 5M cycles.
+       - Memory limits: 256 KB SRAM (100 KB used by system).
+       - BLE Interrupt duration: ~5ms.
+    2. **Calculations:**
+       - Baseline WCET: 5M cycles / 128 MHz = 39.06 ms (exceeds 30ms budget).
+       - INT8 Quantization impact: reduces cycles by ~2x. New cycles = 2.5M. Time = 19.53 ms.
+       - Effective Latency Budget: 30ms - 5ms (BLE interrupt) = 25 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound Resolved**. 19.53 ms fits within the effective 25 ms budget after aggressive INT8 quantization.
 status: published
 provenance: imported
 requires_explanation: true

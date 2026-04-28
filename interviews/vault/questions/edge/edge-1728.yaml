@@ -8,22 +8,26 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: Sizing Dynamic Batching for LLM Prefill on Edge
-scenario: You are deploying an 8B parameter LLM (INT8) for a real-time smart factory monitoring application on an on-premise Qualcomm Cloud AI 100 accelerator. The SLA strictly mandates a P99 Time-To-First-Token (TTFT) of under 200ms. Incoming alerts have an average prompt length of 500 tokens. The chip provides 400 TOPS INT8 and has 32 GB of LPDDR4x memory within a 75W envelope.
+scenario: You are deploying an 8B parameter LLM (INT8) for a real-time smart factory monitoring application on a Qualcomm Cloud AI 100 accelerator. The SLA strictly mandates a P99 Time-To-First-Token (TTFT) of under 200ms. Incoming alerts have an average prompt length of 500 tokens.
 question: Is the Cloud AI 100 compute-bound or memory-bound during prefill, and what dynamic-batching limit meets the 200ms TTFT SLA?
 details:
-  realistic_solution: The candidate must calculate the compute latency for the prefill phase and use it to constrain the maximum batch size. Given the 200ms TTFT requirement, the batch size must be strictly limited by the accelerator's effective compute throughput rather than its memory capacity. To maintain latency, the system should employ dynamic batching capped at a maximum token threshold per forward pass.
+  realistic_solution: During the prefill phase (processing the input prompt), LLM inference is highly compute-bound because the system performs large dense matrix multiplications (batch size * prompt length * hidden dimension). To guarantee the 200ms TTFT SLA, dynamic batching must be strictly clamped by the accelerator's effective INT8 compute throughput, not by its large 32 GB memory capacity. Saturating the VRAM with a massive batch would catastrophically violate the TTFT latency constraint.
   common_mistake: |
-    **The Pitfall:** Assuming the bottleneck on edge devices is solely memory capacity and maximizing batch size up to the 32 GB limit.
-    **The Rationale:** Candidates focus on throughput optimization (filling the KV cache) without calculating the prefill compute latency.
-    **The Consequence:** The system will violate the strict 200ms TTFT constraint long before memory runs out, failing the SLA.
+    **The Pitfall:** Assuming the edge LLM bottleneck is always memory capacity and maximizing the batch size to fill VRAM.
+    **The Rationale:** Candidates conflate the memory-bound nature of token generation (decode phase) with the compute-bound nature of prompt processing (prefill phase).
+    **The Consequence:** The system batches too many requests simultaneously, taking >1000ms to process the prefill, fatally violating the strict 200ms TTFT SLA.
   napkin_math: |
-    1. Calculate effective compute capability: 400 TOPS INT8 * ~50% utilization = 200 effective TOPS (200 TeraOPs/s).
-    2. Calculate max operations allowed within 200ms SLA: 200 TeraOPs/s * 0.2s = 40 TeraOPs.
-    3. Calculate prefill compute per token for 8B model: ~2 * 8B parameters = 16 GigaOPs/token.
-    4. Calculate max tokens processed within SLA: 40 TeraOPs / 16 GigaOPs/token = 2,500 tokens.
-    5. Calculate max prefill batch size for 500-token prompts: 2,500 tokens / 500 tokens/prompt = 5.
-    6. Memory check: 8 GB model + KV cache for 5 requests is well under the 32 GB limit.
-    **The system is strictly compute-bound for latency, dictating a maximum batch size of 5.**
+    1. **Assumptions & Constraints:**
+       - Accelerator: 400 TOPS INT8 (~200 effective TOPS at 50% utilization).
+       - TTFT SLA: 200ms (0.2s).
+       - Model: 8B parameters, 500 tokens per prompt.
+       - Ops per token: ~2 * 8B = 16 GigaOps/token.
+    2. **Calculations:**
+       - Max operations allowed in 200ms: 200 TeraOps/s * 0.2s = 40 TeraOps.
+       - Max total tokens processed within 200ms SLA: 40 TeraOps / 16 GigaOps/token = 2,500 tokens.
+       - Max prefill batch size for 500-token prompts: 2,500 total tokens / 500 tokens/prompt = 5 requests.
+    3. **Conclusion & Interpretation:**
+       - **Result: Maximum batch size of 5. The prefill phase is strictly Compute-Bound; attempting to batch more requests to utilize the remaining memory will violate the TTFT SLA.**
 status: published
 provenance: imported
 requires_explanation: false

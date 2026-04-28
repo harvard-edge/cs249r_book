@@ -8,33 +8,20 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Gradient Synchronization Under Stragglers
-scenario: 'In your 1024-H100 synchronous training job, 3 GPUs consistently finish their backward pass 15ms later than the other 1021 GPUs. This 15ms straggler delay adds to every iteration because AllReduce is a barrier. Over a 24-hour training run with 200ms iterations, quantify the total wasted GPU-hours and propose a mitigation that doesn''t sacrifice gradient quality.'
-question: 'How many GPU-hours are wasted by the 15ms stragglers over 24 hours, and how would you mitigate this without hurting gradient quality?'
+scenario: 'In a 1024-GPU synchronous training job, 3 GPUs finish their backward pass 15ms later than the rest. Iterations take 200ms.'
+question: 'How many GPU-hours are wasted over 24 hours, and how would you mitigate this without hurting gradient quality?'
 details:
-  realistic_solution: 'Impact: 15ms straggler delay per 200ms iteration = 7.5% overhead. Mitigations: (1) Bounded staleness (BSP): allow the 3 stragglers to contribute their gradients from the previous iteration (staleness=1) while the majority proceed. This bounds the wait to 0ms with negligible convergence impact for τ=1. (2) Gradient predicting: the 3 straggler GPUs use their momentum buffer to estimate the current gradient (gradient = previous_gradient + momentum_correction). Error < 5% for τ=1. (3) Root cause fix: investigate why 3 GPUs are slow — common causes: thermal throttling (check GPU temp > 83°C), ECC memory remapping (check nvidia-smi -q | grep Remapped), or PCIe bandwidth degradation. Often, simply replacing the 3 GPUs eliminates 1843 GPU-hours of waste.'
+  realistic_solution: '15ms straggler delay forces 1021 GPUs to wait at the AllReduce barrier. Mitigations: Bounded staleness (BSP) allowing tau=1 staleness, gradient predicting via momentum buffers, or simply hardware replacement.'
   common_mistake: |
-    **The Pitfall:** Accepting the straggler penalty as an unavoidable cost of synchronous training.
-    **The Rationale:** Candidates assume that because AllReduce is a strict barrier, the cluster has no choice but to wait.
-    **The Consequence:** Wasting thousands of dollars a day instead of applying bounded staleness or simply replacing the 3 faulty GPUs.
+    **The Pitfall:** Accepting the straggler penalty as unavoidable.
+    **The Rationale:** Candidates assume AllReduce barriers cannot be optimized or bypassed.
+    **The Consequence:** Wasting thousands of dollars daily instead of isolating faulty hardware or applying BSP.
   napkin_math: |
-    - **Idle GPUs per Step:** 1024 GPUs × (15ms / 200ms) = 76.8 GPUs effectively sitting idle during every step.
-    - **Wasted Time:** 76.8 GPUs × 24 hours = **1,843.2 GPU-hours wasted per day**.
-    - **Cost:** 1843.2 hr × $3/hr = **$5,529/day**.
-    - **Result:** Buying 3 replacement GPUs ($90K) pays for itself in just 16 days.
-status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-opus-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - 1024 GPUs, 200ms iteration, 15ms wait.
+    2. **Calculations:**
+       - Idle GPUs per step: 1024 * (15 / 200) = 76.8.
+       - Wasted Time: 76.8 GPUs * 24 hours = 1,843.2 GPU-hours/day.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1,843 GPU-hours wasted daily.**
+       - **Conclusion: Sync-Bound; strict barrier completely amplifies minor local delays into massive global waste.**

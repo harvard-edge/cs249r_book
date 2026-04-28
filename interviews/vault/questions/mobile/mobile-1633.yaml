@@ -8,20 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing Knowledge Distillation Deployment Issues on Google Tensor G3 for Mobile ML
-scenario: You are deploying a distilled Student vision model onto a Tensor G3 (7.5 TOPS, 12 GB RAM) for 30 FPS object detection. Offline benchmarks show 20ms inference. On-device, inference intermittently spikes to 100ms, causing frame drops, alongside higher-than-expected memory usage.
+scenario: You deploy a distilled Student vision model onto a Tensor G3 for 30 FPS object detection. Offline validation shows 20ms inference times. On-device, inference intermittently spikes to 100ms, causing severe frame drops alongside heavy memory paging.
 question: How would you diagnose intermittent latency spikes and high memory use in a distilled student model on Tensor G3?
 details:
-  realistic_solution: 'Use device profiling tools to capture real-time inference traces and memory usage. Investigate if logit matching caused overly complex feature maps that thrash the LPDDR5X memory. Consider re-evaluating distillation vs. pruning for this specific memory-bandwidth constraint.'
+  realistic_solution: 'Capture execution traces via `nsys` or device-specific profiling to analyze memory access patterns. Investigate if aggressive KD logit matching forced the student network to learn overly complex, high-frequency feature maps. These dense activations routinely exceed the NPU''s local SRAM capacity, thrashing the much slower LPDDR5X bus. Consider re-evaluating distillation versus pure structural pruning.'
   common_mistake: |
-    **The Pitfall:** Assuming offline latency benchmarks translate directly to on-device performance.
-    **The Rationale:** Ignoring device-specific memory access patterns and TPU utilization bottlenecks.
-    **The Consequence:** Deploying a model that thrashes memory and drops frames in production despite passing CI tests.
+    **The Pitfall:** Assuming offline clean-state latency benchmarks linearly translate to real-world continuous device performance.
+    **The Rationale:** Ignoring explicit hardware constraints like SRAM capacity limits and NPU memory-bus saturation points.
+    **The Consequence:** Pushing a model to production that passes CI validation but routinely thrashes memory, drastically degrading the user camera experience.
   napkin_math: |
-    - Frame budget (30 FPS): 1000 ms / 30 = 33.3 ms.
-    - Required compute per frame: (7.5 T-Ops) / 30 = 250 G-Ops.
-    - Spike duration: 100 ms (achieves only 10 FPS).
-    - High memory usage indicates logit matching created overly complex feature maps that exceed local cache, causing LPDDR5X thrashing.
-    - **Spikes to 100ms indicate the TPU is severely memory-bound by bloated intermediate activations, missing the 33.3ms budget.**
+    1. **Assumptions & Constraints:**
+       - Target SLA: 30 FPS. Frame budget: 1000 ms / 30 = 33.3 ms.
+       - NPU capability limit: 7.5 TOPS.
+    2. **Calculations:**
+       - Maximum available compute per frame: 7.5 T-Ops / 30 frames = 250 G-Ops.
+       - Observed latency spike: 100 ms per frame (dropping framerate to 10 FPS).
+       - The 100ms stall against a 250 GOP allowance indicates severe memory paging, as the TPU cores idle waiting for LPDDR5X data delivery.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bound (Bandwidth Thrashing). The 100ms spikes confirm the NPU is starved by bloated intermediate activations spilling from SRAM into LPDDR5X, violating the 33.3ms budget.**
 status: published
 provenance: imported
 requires_explanation: false

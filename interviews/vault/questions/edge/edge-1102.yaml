@@ -2,27 +2,33 @@ schema_version: '1.0'
 id: edge-1102
 track: edge
 level: L4
-zone: evaluation
+zone: design
 topic: queueing-theory
 competency_area: latency
 bloom_level: create
 phase: inference
 title: 'Edge Queueing Theory Design: Burst Traffic Handling with Jetson Buffer'
-scenario: Design a burst buffer for a Jetson Orin (32GB LPDDR5, 275 TOPS INT8) security camera system that handles periodic bursts: normal traffic 10 events/s, burst traffic 80 events/s for 5-second windows every 5 minutes. Inference time is 20ms each.
+scenario: 'Design a burst buffer for a Jetson Orin security camera system that handles periodic bursts: normal traffic 10 events/s, burst traffic 80 events/s for 5-second windows every 5 minutes. Inference time is 20ms each.'
 question: How large should the burst buffer be, what overflow policy should it use, and what maximum queue latency occurs during the 80 events/s bursts?
 details:
-  realistic_solution: 'Jetson Orin capacity: μ=1/0.02=50 events/s. During burst: λ=80 > μ=50, so ρ=1.6 > 1 → queue grows. Queue growth rate during burst: (λ-μ)=30 events/s for 5 seconds = 150 events queued. Buffer needed: 150 events. After burst: λ=10, drain rate = μ-λ = 40 events/s. Drain time: 150/40 = 3.75 seconds. Max queue latency at end of burst: 150 events / μ = 150/50 = 3 seconds additional. Peak latency: 3s + 20ms service = 3.02s. Overflow policy: drop events > 150 queued (about 0.1% of 5-minute traffic).'
+  realistic_solution: Model the system using deterministic queuing theory. The Orin's service rate (μ) is 50 events/s. During the burst (λ = 80 events/s), the arrival rate exceeds the service rate, causing linear queue growth. The buffer must be sized to absorb the exact delta between arrival and service rates over the 5-second window. The overflow policy should drop subsequent events (tail drop) to preserve system stability, and max latency is observed at the exact end of the burst window.
   common_mistake: |
-    **The Pitfall:** Sizing the buffer purely for steady-state traffic or failing to calculate the post-burst drain time.
-    **The Rationale:** Candidates look at average throughput rather than modeling the queue growth dynamics during the burst window.
-    **The Consequence:** The system silently drops critical security events during the 5-second burst because the buffer size is drastically underestimated.
+    **The Pitfall:** Sizing the buffer based on the average arrival rate across the 5-minute window rather than calculating peak accumulation.
+    **The Rationale:** Engineers apply steady-state averages instead of calculating the dynamic integral of the burst window (Accumulation = (Arrival - Service) * Time).
+    **The Consequence:** The queue silently overflows during every 5-second burst, resulting in critical security events being permanently dropped.
   napkin_math: |
-    1. Calculate Orin processing capacity (μ): 1 / 0.02s = 50 events/s.
-    2. Calculate burst accumulation rate: Burst (λ=80) - Capacity (μ=50) = 30 events/s added to queue.
-    3. Calculate buffer size required: 30 events/s * 5 seconds = 150 events. (At ~1MB/frame, 150MB easily fits in 32GB RAM).
-    4. Calculate max queue latency at end of burst: 150 events / 50 events/s = 3 seconds wait time.
-    5. Calculate post-burst drain time: Normal (λ=10). Drain rate = 50 - 10 = 40 events/s. Drain time = 150 / 40 = 3.75 seconds.
-    **The buffer must hold 150 events. Maximum queue latency reaches 3.02s (3s wait + 20ms processing), and the system recovers 3.75 seconds after the burst ends.**
+    1. **Assumptions & Constraints:**
+       - Inference time: 20ms = 50 events/s service rate (μ).
+       - Burst arrival rate (λ): 80 events/s.
+       - Burst duration: 5 seconds.
+    2. **Calculations:**
+       - Queue accumulation rate = λ - μ = 80 - 50 = 30 events/s.
+       - Required Buffer Size = 30 events/s * 5 seconds = 150 events.
+       - Max queue latency (at t=5s) = 150 events in queue / 50 events/s service rate = 3.0 seconds.
+       - Post-burst drain rate = μ - normal_λ = 50 - 10 = 40 events/s.
+       - Drain time = 150 events / 40 events/s = 3.75 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 150-event buffer, 3.0s max wait time. The system is temporarily Queue-Bound during the burst but remains mathematically stable and recovers in 3.75s.**
 status: published
 provenance: imported
 requires_explanation: true

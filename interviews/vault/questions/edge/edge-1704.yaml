@@ -8,22 +8,24 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Resolving Concurrent OOM on Jetson Orin
-scenario: You are deploying a multi-model pipeline on an NVIDIA Jetson Orin containing a 7B parameter LLM for text generation and a high-resolution vision model for object detection. The Orin has 32 GB of unified LPDDR5 memory shared between the CPU, Ampere GPU, and DLA. Under peak load, concurrent requests to both models cause sudden Out-Of-Memory (OOM) crashes and system instability.
+scenario: You are deploying a multi-model pipeline on an NVIDIA Jetson Orin containing a 7B parameter LLM for text generation and a high-resolution vision model for object detection. The Orin has 32 GB of unified LPDDR5 memory shared between the CPU, Ampere GPU, and DLA. Under peak load, concurrent requests to both models cause sudden Out-Of-Memory crashes and system instability.
 question: How do you diagnose the memory bottleneck and quantify a structural fix to prevent OOM without exceeding the 60W TDP limit?
 details:
-  realistic_solution: The Orin's unified memory means all components compete for the same 32 GB pool. The bottleneck is the combined peak memory of the LLM's KV cache and the vision model's FP16 activations. By quantizing the vision model to INT8 and offloading it to the DLA, we significantly reduce its memory footprint and free up GPU resources. We then implement a strict KV cache budget (e.g., via PagedAttention) to guarantee the LLM cannot exceed the newly available memory buffer, ensuring stable operation.
+  realistic_solution: Mitigate memory overlap by shifting the computer vision stream directly to the internal DLA, completely releasing shared unified VRAM bounds back to the LLM's dynamic KV Cache.
   common_mistake: |
     **The Pitfall:** Suggesting naive fixes like reducing global batch size without analyzing unified memory.
     **The Rationale:** Candidates fail to utilize the DLA to offload the vision model, and overlook the predictable memory scaling of the LLM's KV cache.
     **The Consequence:** The system continues to crash under concurrent load because the core structural memory contention remains unresolved.
   napkin_math: |
-    - **Current Budget:** 32 GB total - 4 GB OS = 28 GB available.
-    - **Current Models:** 14 GB LLM + 7 GB Vision (FP16 weights/acts) = 21 GB.
-    - **Available for KV Cache:** 28 GB - 21 GB = 7 GB.
-    - **OOM Cause:** 512 KB/token -> 7 GB supports ~14,000 tokens. A burst of 10 concurrent 2048-token requests needs ~10 GB. 10 GB > 7 GB, causing OOM.
-    - **Fix:** Quantize vision model to INT8 on DLA. New footprint = 1.5 GB weights + 2 GB acts = 3.5 GB.
-    - **New Budget:** 28 GB - 14 GB (LLM) - 3.5 GB (Vision) = **10.5 GB available for KV cache**.
-    - **Result:** 10.5 GB supports ~21,000 tokens, **safely accommodating the 10 GB burst requirement**.
+    1. **Assumptions & Constraints:**
+       - Budget: 32GB Total (28GB VRAM after OS limit)
+       - Current: 14GB (LLM) + 7GB Vision = 21GB allocated, 7GB KV Cache bound
+    2. **Calculations:**
+       - Burst limit 10 queries (2048 tokens each) = 10GB KV required (10GB > 7GB bound -> OOM)
+       - Fix: DLA + INT8 quant drops vision from 7GB -> 3.5GB
+       - New Bound: 28GB - 14GB - 3.5GB = 10.5GB KV Cache bound
+    3. **Conclusion & Interpretation:**
+       - **Result: DLA Offload guarantees 10.5 GB KV margin, safely resolving 10 GB bursts.**
 status: published
 provenance: imported
 requires_explanation: false

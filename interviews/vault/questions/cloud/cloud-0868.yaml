@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Evaluating Flat vs. Hierarchical AllReduce
-scenario: You are designing the gradient synchronization topology for a distributed training cluster of 1024 A100 GPUs configured as 128 nodes with 8 GPUs per node, connected via intra-node NVLink and inter-node NDR InfiniBand (50 GB/s). You must choose between a flat Ring AllReduce across all 1024 GPUs and a Hierarchical AllReduce for a 2GB gradient payload, accounting for a 2-microsecond inter-node hop latency.
+scenario: You are designing the gradient synchronization topology for a distributed training cluster of 1024 A100 GPUs configured as 128 nodes with 8 GPUs per node, connected via intra-node NVLink and inter-node NDR InfiniBand. You must choose between a flat Ring AllReduce across all 1024 GPUs and a Hierarchical AllReduce for a 2GB gradient payload, accounting for a 2-microsecond inter-node hop latency.
 question: Which AllReduce topology minimizes latency for a 2GB gradient payload on 1024 A100s, and why?
 details:
   realistic_solution: Implement a Hierarchical AllReduce (intra-node ReduceScatter over NVLink, inter-node AllReduce over InfiniBand, intra-node AllGather over NVLink). This isolates the slower InfiniBand network to a 128-node ring, drastically reducing hop latency and allowing intra-node synchronization to operate at the full 600 GB/s NVLink bandwidth.
@@ -17,11 +17,20 @@ details:
     **The Rationale:** Candidates fail to recognize the severe bottleneck when forcing ultra-fast NVLink to throttle down to the speed of the slowest link (InfiniBand).
     **The Consequence:** The system incurs massive accumulated hop latency and severely underutilizes the intra-node bandwidth, reducing overall training throughput.
   napkin_math: |
-    * **Flat Ring Latency:** 1023 hops × 2µs = 2.04ms latency overhead.
-    * **Flat Ring Transfer:** Bottlenecked by IB: 2 × (1023/1024) × 2GB / 50GB/s ≈ 80ms.
-    * **Hierarchical Latency:** Inter-node ring is 127 hops × 2µs = 0.25ms latency overhead.
-    * **Hierarchical Transfer:** Intra-node NVLink steps take roughly 2 × (7/8) × 2GB / 600GB/s ≈ 5.8ms.
-    * **Conclusion:** Hierarchical AllReduce is significantly faster by preventing NVLink from throttling to IB speeds.
+    1. **Assumptions & Constraints:**
+       - 1024 A100 GPUs, 128 nodes, 8 GPUs/node.
+       - InfiniBand bottleneck: 50 GB/s, 2µs hop latency.
+       - NVLink: ~600 GB/s.
+       - Payload: 2 GB.
+    2. **Calculations:**
+       - Flat Ring Latency: 1023 hops * 2µs = 2.04ms overhead.
+       - Flat Ring Transfer: 2 * (1023/1024) * 2 GB / 50 GB/s ≈ 80 ms.
+       - Hierarchical Latency: Inter-node ring is 127 hops * 2µs = 0.25ms overhead.
+       - Hierarchical Intra-node Transfer: NVLink takes roughly 2 * (7/8) * 2 GB / 600 GB/s ≈ 5.8 ms.
+       - Hierarchical Inter-node Transfer: 2 * (127/128) * 0.25 GB / 50 GB/s ≈ 10 ms.
+    3. **Conclusion & Interpretation:**
+       - Hierarchical AllReduce is significantly faster by avoiding throttling NVLink to InfiniBand speeds.
+       - **Result: Hierarchical Topology is Optimal**
 status: published
 provenance: imported
 requires_explanation: true

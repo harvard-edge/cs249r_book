@@ -8,30 +8,22 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnose NaN losses during EfficientNet training with aggressive augmentation
-scenario: You are training EfficientNet-B5 (30M params) on A100 with BF16 mixed precision,
-  RandAugment magnitude=20, Mixup α=0.4, and CutMix. After 8,000 steps training diverges
-  with NaN losses. The SE (squeeze-excitation) blocks are suspected. Diagnose the
-  failure chain and implement fixes.
-question: What failure chain could make EfficientNet-B5 with BF16, RandAugment, Mixup,
-  and CutMix diverge at SE blocks, and how would you fix it?
+scenario: You are training EfficientNet-B5 with BF16 mixed precision, RandAugment, and Mixup. After 8,000 steps training diverges with NaN losses. The Squeeze-Excitation (SE) blocks are suspected.
+question: What failure chain could make EfficientNet-B5 with BF16 and Mixup diverge at SE blocks, and how would you fix it?
 details:
-  realistic_solution: 'SE blocks apply sigmoid to a global average pool output. With
-    aggressive Mixup (α=0.4) and CutMix, input activations can be very small or large,
-    causing sigmoid(x) to saturate. In BF16, the reduced mantissa bits (7 vs 23 for
-    FP32) can cause overflow in the large pre-sigmoid values. Fix: (1) clamp SE pre-activation
-    to [-20, 20] before sigmoid; (2) keep SE blocks in FP32 with autocast(enabled=False)
-    context; (3) reduce RandAugment magnitude to 15; (4) add gradient clipping at
-    1.0. These targeted fixes preserve BF16 throughput for 95% of the model.'
-  common_mistake: Immediately switching to FP32 training, which quadruples memory
-    and halves throughput, rather than diagnosing the specific numerical instability
-    point which is usually the sigmoid in SE blocks with BF16.
-  napkin_math: 'BF16 range: ±3.4×10³⁸ (same as FP32) but mantissa precision: 7 bits
-    → relative error ~0.8%. SE squeeze: GAP over 14×14 spatial dims (EfficientNet-B5
-    last stage). Excitation: two FC layers with sigmoid. If FC pre-activation reaches
-    ~500 (feasible with Mixup), sigmoid(500)=1.0 exactly in BF16, gradient=0. Gradient
-    clipping at 1.0 norm: typical SE gradient ~0.01 → no issue. The problem is vanishing
-    gradients from saturated sigmoid, not exploding. FP32 SE: +200MB memory for 30M-param
-    model = negligible. Overhead: SE blocks are ~2% of total FLOPs.'
+  realistic_solution: With aggressive Mixup, input activations can be very large. In BF16, reduced mantissa bits cause sigmoid to saturate exactly to 1.0, leading to zero gradients or instability. Fix by keeping SE blocks in FP32 or clamping pre-activations.
+  common_mistake: |
+    **The Pitfall:** Immediately switching the entire model to FP32 training.
+    **The Rationale:** Treating all NaN losses as requiring global full precision.
+    **The Consequence:** Halved training throughput and quadrupled memory usage for an issue isolated to 2% of the FLOPs.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - BF16 has 7 mantissa bits. SE blocks use sigmoid.
+    2. **Calculations:**
+       - If FC pre-activation reaches ~500, sigmoid(500) = 1.0 exactly in BF16.
+       - Gradient becomes exactly 0.
+    3. **Conclusion & Interpretation:**
+       - **Result: The issue is vanishing gradients from saturated sigmoid in BF16. FP32 overhead for SE is negligible.**
 status: published
 provenance: imported
 requires_explanation: true

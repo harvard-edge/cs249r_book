@@ -9,17 +9,22 @@ bloom_level: understand
 phase: both
 title: BSP vs Streaming Dataflow for Feature Computation
 scenario: Your team needs to compute 500 features for a recommendation model. Some features are recomputed nightly, while others update within seconds. A junior engineer proposes running everything in a single Apache Flink streaming job to simplify the architecture.
-question: "Why is a pure streaming approach problematic for the historical batch features, and what execution model mismatch is at play?"
+question: Why is a pure streaming approach problematic for the historical batch features, and what execution model mismatch is at play?
 details:
-  realistic_solution: 'BSP (batch) systems like Spark process bounded datasets in synchronized stages: shuffle all data, then aggregate, then output. This is efficient for full-dataset scans because it can sort-merge join and use disk spill efficiently. Streaming systems process unbounded data record-by-record with local state. Maintaining a 30-day rolling window in a streaming system requires holding 30 days of state per user in RocksDB. The correct architecture is a Lambda or Kappa variant: batch (BSP) for historical features, streaming for session-level features, with a feature store unifying both paths.'
+  realistic_solution: 'BSP (batch) systems like Spark process bounded datasets in synchronized stages, which is highly efficient for full-dataset scans via sort-merge joins and disk spills. Streaming systems process unbounded data record-by-record with local state. Maintaining a 30-day rolling window in a streaming system requires holding 30 days of state per user in RocksDB. The correct architecture is a Lambda or Kappa variant: batch (BSP) for historical features, streaming for session-level features.'
   common_mistake: |
-    **The Pitfall:** Assuming streaming is strictly better because it's lower latency.
-    **The Rationale:** Desiring a unified architecture and misunderstanding how stateful streaming engines maintain historical windows.
-    **The Consequence:** Unmanageable terabytes of RocksDB state, endless checkpointing failures, and astronomical infrastructure costs compared to simple batch processing.
+    **The Pitfall:** Assuming streaming is universally superior because it offers lower latency.
+    **The Rationale:** Prioritizing architectural purity and a single codebase over understanding stateful storage constraints.
+    **The Consequence:** Generating unmanageable terabytes of RocksDB state, resulting in endless checkpoint failures and astronomical infrastructure costs compared to batch execution.
   napkin_math: |
-    - **State Size:** 100M users × 30-day window × 50 events/day × 200 bytes = 30 TB of managed streaming state.
-    - **Checkpoint Impact:** A Flink checkpoint writing 30 TB to S3 at 100 GB/s takes ~300 seconds (longer than a standard 1-minute interval).
-    - **Conclusion:** **A Spark BSP job reads the 30 TB once, aggregates it in memory, and completes in ~20 minutes with zero long-term state overhead.**
+    1. **Assumptions & Constraints:**
+       - Users: 100M. Window: 30 days. Activity: 50 events/day (200 bytes each).
+       - Infrastructure: Apache Flink (Streaming) vs Apache Spark (Batch).
+    2. **Calculations:**
+       - Streaming State Size: 100M * 30 days * 50 events/day * 200 bytes = 30 TB of managed state.
+       - Streaming Checkpoint Write Time (at 100 GB/s): 30 TB / 100 GB/s = ~300 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: State-Management Bound.** Maintaining 30 TB of persistent state in a streaming engine breaks SLA due to massive checkpointing times. A batch BSP job handles this efficiently in memory in minutes.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,8 +8,8 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Optimize SwiGLU Fusion for Mobile LLM on Tensor G3'
-scenario: Your 1B LLM on Tensor G3 (7.5 TOPS, 12GB) uses SwiGLU activation. Profiling shows the SwiGLU activation takes 8ms out of 50ms per token. The activation operates on a 4096-element vector.
-question: Why is an 8ms SwiGLU activation on Tensor G3 unrealistic, and what fusion fix should remove the overhead?
+scenario: Your 1B LLM on a mobile NPU uses SwiGLU activation. Profiling shows the SwiGLU activation takes 8ms out of 50ms per token. The activation operates on a 4096-element vector.
+question: Why is an 8ms SwiGLU activation unrealistic, and what fusion fix should remove the overhead?
 details:
   realistic_solution: '8ms for SwiGLU on 4096 elements is clearly wrong computationally (4096 × 10 FLOPs = 41K FLOPs / 7.5 TOPS = 5.5ns). Root cause: the 8ms must be kernel dispatch overhead, CPU-GPU sync, or format conversion, not actual compute.'
   common_mistake: |
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Candidates assume profiling output directly reflects computation time, missing that 8ms for 4K elements on an NPU indicates framework or transfer overhead.
     **The Consequence:** Spending time optimizing math that takes nanoseconds instead of fixing the micro-architecture dispatch bottlenecks.
   napkin_math: |
-    1. **Compute Required:** SwiGLU on 4096 elements is ~30 FLOPs/element = 123K FLOPs.
-    2. **Compute Time:** 123K FLOPs / 7.5 TOPS = 0.016 μs.
-    3. **Memory Time:** 4096 * 2 bytes * 3 tensors = 24 KB. 24 KB / 51 GB/s = 0.47 μs.
-    4. **Total Theoretical Time:** 0.49 μs.
-    5. **Conclusion:** **The reported 8ms is ~16,000x slower than theoretical, indicating CPU-GPU synchronization overhead. Fusing SwiGLU with the adjacent Linear layer fixes this.**
+    1. **Assumptions & Constraints:**
+       - Vector size = 4096 elements.
+       - SwiGLU compute = ~30 FLOPs/element.
+       - NPU Compute = ~7.5 TOPS. Memory Bandwidth = ~50 GB/s.
+    2. **Calculations:**
+       - Total Compute = 4096 * 30 = 122,880 FLOPs.
+       - Compute Time = 122.8 KFLOPs / 7.5 TOPS = 0.000016 ms.
+       - Memory Access = 4096 elements * 2 bytes * 3 tensors = 24 KB.
+       - Memory Time = 24 KB / 50 GB/s = 0.00048 ms.
+       - Total Theoretical Time ≈ 0.0005 ms.
+    3. **Conclusion & Interpretation:** **The reported 8ms is ~16,000x slower than the theoretical limit, indicating massive CPU-GPU synchronization overhead that must be fused.** Dispatch-overhead-bound latency.
 status: published
 provenance: imported
 requires_explanation: false

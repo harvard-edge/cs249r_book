@@ -11,23 +11,26 @@ title: The Mobile App's Server-Side Stall
 scenario: You are a mobile ML engineer optimizing a new AI Photo Editor feature. The feature sends a user's photo to a cloud-hosted H100 GPU for processing and streams the result back.
 question: What server-side data ingress bottleneck explains the AI Photo Editor's missing 105ms of latency?
 details:
-  realistic_solution: The primary bottleneck is the inefficient data ingress path from the server's network card to the GPU's memory. The standard web server process receives the 16MB payload into CPU RAM, and then explicitly copies it over the PCIe bus to the GPU's HBM. This CPU-mediated transfer involves multiple memory copies (NIC -> kernel -> user space -> GPU) and context switches, which incurs significant latency overhead, even if the PCIe bus itself has high theoretical bandwidth. The correct architectural solution is to bypass the CPU entirely using a technology like GPUDirect RDMA (Remote Direct Memory Access), which allows the network card to write data directly into the GPU's memory.
+  realistic_solution: The primary bottleneck is the inefficient data ingress path from the server's network card to the GPU's memory. Bypassing the CPU entirely using a technology like GPUDirect RDMA allows the network card to write data directly into the GPU's memory.
   common_mistake: |
     **The Pitfall:** Fixating on domain-specific bottlenecks.
-    **The Rationale:** A mobile engineer might instinctively blame the mobile network, while an ML engineer might blame the model architecture, missing the server-side data ingress bottleneck (CPU-mediated copy).
+    **The Rationale:** A mobile engineer might instinctively blame the mobile network, while an ML engineer might blame the model architecture, missing the server-side CPU-mediated copy bottleneck.
     **The Consequence:** Wasted time optimizing the wrong part of the stack while the actual latency remains.
   napkin_math: |
-    - **Network RTT (Mobile to edge):** ~40ms
-    - **GPU Inference time (H100):** ~15ms
-    - **Total expected latency:** 40ms + 15ms = 55ms
-    - **Observed Latency:** 160ms
-    - **Missing overhead:** 160ms - 55ms = **105ms**
-    - This >100ms overhead corresponds to the software-mediated PCIe explicit memory write.
+    1. **Assumptions & Constraints:**
+       - Network RTT (Mobile to edge): ~40ms.
+       - GPU Inference time (H100): ~15ms.
+       - Observed Latency: 160ms.
+    2. **Calculations:**
+       - Total expected theoretical latency: 40ms + 15ms = 55ms.
+       - Missing overhead: 160ms - 55ms = 105ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: PCIe Transfer Bottleneck**. The >100ms overhead corresponds directly to the software-mediated PCIe explicit memory write transferring data between CPU RAM and GPU HBM.
   options:
-  - The mobile device's 5G uplink has high packet loss for large uploads, forcing numerous retries that are not captured by the simple 'time-to-send' metric.
-  - Data transfer over the server's PCIe bus from CPU RAM to GPU HBM is the bottleneck. The CPU-mediated copy introduces significant software and kernel overhead not present in a direct-path solution like RDMA.
-  - The H100 server uses InfiniBand to connect to storage, and the network is saturated from other jobs, delaying the initial data read before processing can begin.
-  - The server's GPUs are interconnected with NVLink for model parallelism. This high-traffic interconnect is creating contention with the PCIe bus, slowing down the host-to-device data copy.
+  - The mobile device's 5G uplink has 105ms of high packet loss, forcing numerous retries.
+  - Data transfer over the server's PCIe bus from CPU RAM to GPU HBM adds ~105ms due to software-mediated copies.
+  - The H100 server uses InfiniBand to connect to storage, adding 105ms of latency.
+  - The server's NVLink interconnects are saturated, adding 105ms to the data copy.
   correct_index: 1
 status: published
 provenance: imported
@@ -43,6 +46,3 @@ math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
-  by: null
-  date: null
-  notes: null

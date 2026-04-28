@@ -8,9 +8,7 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The Tale of Two Latencies
-scenario: You are serving a 70B LLM on H100s. Users have two main complaints:
-  1. 'When I submit a long document (8k tokens) for summarization, it takes many seconds before the first word appears.' (High prefill latency)
-  2. 'When I use the chatbot for conversation, the time between each generated word is too long.' (High time-per-token)
+scenario: You are serving a 70B LLM. Users have two main complaints. 1) When submitting a long document (8k tokens) for summarization, it takes many seconds before the first word appears. 2) When using the chatbot for conversation, the time between each generated word is too long.
 question: Which optimizations address the 8k-token prefill latency and the chatbot time-per-token latency for the 70B LLM?
 details:
   realistic_solution: 'The two problems map directly to the two main phases of LLM inference.
@@ -23,10 +21,15 @@ details:
     **The Rationale:** Engineers assume an optimization like FlashAttention speeds up the entire model, or that Speculative Decoding helps process initial prompts.
     **The Consequence:** They apply the wrong architectural fix, failing to resolve the user's specific latency complaint because decoding remains memory-bound and prefill remains compute/IO-bound.
   napkin_math: |
-    1. **Prefill Problem:** With sequence N=8192, attention matrix has N^2 ≈ 67M elements. For 64 heads × 80 layers, reading/writing materialized matrices takes ~686 GB of HBM traffic. At 3.35 TB/s, this is ~205ms of pure memory I/O latency for attention alone. **FlashAttention solves this via SRAM tiling.**
-    2. **Decode Problem:** Each generated token reads 140 GB of weights. 140 GB / 3.35 TB/s = 42ms per token.
-    3. **Speculative Decoding Fix:** A 1B draft model takes ~0.6ms/token. Predicting 4 tokens takes 2.4ms, plus one 70B verification pass (42ms). If 3 are accepted: 44.4ms / 3 tokens = 14.8ms/token.
-    4. **Conclusion:** **Speculative Decoding yields a ~2.8x speedup for generation latency.**
+    1. **Assumptions & Constraints:**
+       - N=8192 sequence length. Memory bandwidth is ~3.35 TB/s.
+       - 70B model requires 140GB of weights read per token.
+    2. **Calculations:**
+       - Prefill: Matrix has N^2 elements. Pure I/O latency for attention is ~205ms.
+       - Decode: 140 GB / 3.35 TB/s = 42ms per token.
+       - Speculative Decoding: Predicting 4 tokens takes 2.4ms. One 70B verification pass = 42ms. If 3 accepted: 44.4ms / 3 = 14.8ms/token.
+    3. **Conclusion & Interpretation:**
+       - **Result: FlashAttention fixes prefill I/O limits, while Speculative Decoding yields a ~2.8x speedup for generation latency. Phase-Specific-Bound**
   options:
   - Apply FlashAttention to the chatbot to reduce per-token time, and Speculative Decoding to the summarizer to handle the long context.
   - Apply FlashAttention to the summarizer to fix prefill latency, and Speculative Decoding to the chatbot to reduce per-token latency.

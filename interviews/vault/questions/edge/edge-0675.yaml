@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: The Edge LLM Memory Wall
-scenario: You're deploying a 3B parameter small language model (Phi-3-mini) on a Jetson Orin NX with 8 GB DRAM. The model weights in INT4 are 1.5 GB. Your colleague says 'plenty of room — we have 6.5 GB free.' The first few conversation turns work fine, but at turn 15 the system crashes with an OOM error.
+scenario: You're deploying a 3B parameter small language model (Phi-3-mini) on a Jetson Orin NX. The model weights in INT4 are 1.5 GB. Your colleague says 'plenty of room — we have 6.5 GB free.' The first few conversation turns work fine, but at turn 15 the system crashes with an OOM error.
 question: What's consuming the memory?
 details:
   realistic_solution: 'The KV-cache. During autoregressive generation, the model stores the key and value tensors for every token generated so far, across every layer. For Phi-3-mini (32 layers, 32 heads, head_dim=96): KV-cache per token = 2 (K+V) × 32 layers × 32 heads × 96 dim × 2 bytes (FP16) = 393 KB per token. At turn 15 of a conversation with ~2000 tokens of context: 2000 × 393 KB = 786 MB. Add the model weights (1.5 GB), OS and sensor overhead (~3.5 GB on the 8 GB Orin NX), and you''re at 5.8 GB — dangerously close to the 8 GB limit. By turn 20 (~3000 tokens): KV-cache = 1.15 GB, total = 6.2 GB. A spike in OS memory usage (camera ISP burst) pushes you over the edge.'
@@ -17,10 +17,14 @@ details:
     **The Rationale:** Engineers used to CNNs assume memory usage is static once the model is loaded, forgetting autoregressive state.
     **The Consequence:** They waste time looking for memory leaks or shrinking the batch size instead of implementing KV-cache quantization or limiting the context window.
   napkin_math: |
-    1. **Phi-3-mini KV-cache size**: 393 KB per token.
-    2. **Memory Budget on 8 GB Orin NX**: 8 GB - 3.5 GB (OS) - 1.5 GB (INT4 weights) = 3 GB remaining for KV-cache.
-    3. **Context Limit without Quantization**: 3 GB / 393 KB = **~7,800 tokens maximum**.
-    4. **Context Limit with INT4 KV**: 3 GB / (393 KB / 4) = **~31,000 tokens**.
+    1. **Assumptions & Constraints:**
+       - Phi-3-mini KV-cache size: 393 KB per token.
+       - Memory Budget: 8 GB - 3.5 GB (OS) - 1.5 GB (INT4 weights) = 3 GB remaining for KV-cache.
+    2. **Calculations:**
+       - Context Limit without Quantization: 3 GB / 393 KB = ~7,800 tokens maximum.
+       - Context Limit with INT4 KV: 3 GB / (393 KB / 4) = ~31,000 tokens.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound**. The unquantized KV-cache grows linearly with sequence length and quickly exhausts the 3GB free space, causing the OOM.
   options:
   - The model is leaking memory. or "Activations are too large." The weights are static and activations are small for a single-token decode step.
   - 'The KV-cache. During autoregressive generation, the model stores the key and value tensors for every token generated so far, across every layer. For Phi-3-mini (32 layers, 32 heads, head_dim=96): KV-cache per token = 2 (K+V) × 32 layers × 32 heads × 96 dim × 2 bytes (FP16) = 393 KB per token.'

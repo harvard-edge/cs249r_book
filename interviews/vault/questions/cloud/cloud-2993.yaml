@@ -8,21 +8,23 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Mastery — Fusion Impact Analysis for Autoregressive Decode'
-scenario: 'You are analyzing kernel fusion impact for 7B LLM autoregressive decode on H100 (80GB HBM3, 3.35 TB/s). Decode is batch=1, seq=1 (single token generation). Profile shows 60% of decode time is in elementwise ops (LayerNorm, GELU, residuals, rotary embeddings).'
-question: For 7B batch=1 decode on H100, what fusion strategy is useful, and are the gains from bandwidth reduction or kernel-launch overhead?
+scenario: You are analyzing kernel fusion impact for 7B LLM autoregressive decode on an 80GB HBM3 GPU (3.35 TB/s). Decode is batch=1, seq=1 (single token generation). Profile shows 60% of decode time is in elementwise ops (LayerNorm, GELU, residuals, rotary embeddings).
+question: "For 7B batch=1 decode, what fusion strategy is useful, and are the gains from bandwidth reduction or kernel-launch overhead?"
 details:
-  realistic_solution: 'Decode bottleneck: loading 7B × 2B = 14GB model weights per forward pass. At H100 3.35 TB/s: 14GB / 3.35TB/s = 4.2ms minimum. Elementwise ops run on the tiny (1 × hidden_dim) activation tensors — their memory bandwidth is negligible. However, they execute so fast that the GPU starves waiting for the CPU to launch the next kernel. Fusion helps by eliminating exposed kernel launch overhead, allowing the system to approach the 4.2ms bandwidth limit.'
+  realistic_solution: 'Decode bottleneck: loading 7B * 2B = 14GB model weights per forward pass. At 3.35 TB/s: 14GB / 3.35TB/s = 4.2ms minimum. Elementwise ops run on the tiny activation tensors — their memory bandwidth is negligible. However, they execute so fast that the GPU starves waiting for the CPU to launch the next kernel. Fusion helps by eliminating exposed kernel launch overhead, allowing the system to approach the 4.2ms bandwidth limit.'
   common_mistake: |
     **The Pitfall:** Applying prefill-optimized fusion strategies directly to decode mode.
-    
     **The Rationale:** Candidates treat all phases of LLM execution the same, missing the crucial detail that decode is strictly memory-bound (weight loading) whereas prefill is compute-bound.
-    
     **The Consequence:** Wasting engineering effort on compute optimizations that yield zero performance gain.
   napkin_math: |
-    * **Weight Loading Minimum:** 14 GB loaded at 3.35 TB/s = 4.18 ms per token
-    * **Elementwise Memory Traffic:** 32 layers × 6 ops × 8 KB = 1.5 MB total (0.45 µs at 3.35 TB/s)
-    * **CPU Kernel Launch Overhead:** 192 launches × 3 µs = 576 µs (0.58 ms)
-    * **Result:** **Fusing elementwise ops removes 0.58 ms of launch overhead, decreasing total decode time from 4.76 ms to 4.18 ms (a 14% throughput gain).**
+    1. **Assumptions & Constraints:**
+       * 14 GB model weights, 3.35 TB/s Bandwidth.
+       * CPU Kernel Launch Overhead: 192 launches * 3 µs.
+    2. **Calculations:**
+       * Weight Loading Minimum: 14 GB / 3.35 TB/s = 4.18 ms.
+       * Elementwise Memory Traffic: 32 layers * 6 ops * 8 KB = 1.5 MB total (negligible).
+       * Kernel Launch Overhead: 192 * 3 µs = 576 µs = 0.58 ms.
+    3. **Conclusion & Interpretation:** **Result: 0.58 ms Saved (Latency-Bound)**. Fusing elementwise ops removes launch overhead, decreasing decode time from 4.76 ms to 4.18 ms.
 status: published
 provenance: imported
 requires_explanation: true

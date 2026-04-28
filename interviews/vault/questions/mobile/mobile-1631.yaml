@@ -11,17 +11,23 @@ title: Optimizing Large Language Model Inference with Structured Sparsity on Goo
 scenario: You are deploying an LLM for on-device inference on the Google Tensor G3 (7.5 TOPS, 12 GB LPDDR5X). The current model exceeds latency and power constraints. You must implement pruning and sparsity techniques to meet performance targets.
 question: How would you design a pruning and sparsity strategy for a Tensor G3 LLM that balances accuracy, latency, and power?
 details:
-  realistic_solution: An L6+ engineer would propose a hybrid pruning strategy. They would start by analyzing the model's sensitivity to pruning at different layers and applying structured pruning techniques (e.g., block sparsity, filter pruning, or channel pruning) that generate patterns directly optimizable by the Tensor G3's TPU tensor cores. This approach minimizes memory fetches for sparse weights and allows for predictable performance gains. For layers less sensitive to structured pruning or where higher sparsity is needed, they might apply unstructured pruning followed by re-training with sparsity-aware optimization, potentially leveraging an INT8-aware retraining loop. The engineer would rigorously benchmark various structured sparsity patterns (e.g., 2:4 or 4:8 sparsity if supported by the hardware, or block sizes relevant to the TPU's compute units) to identify those that offer the best accelerator alignment. They would also develop a clear methodology for evaluating accuracy-speedup-power tradeoffs, using metrics beyond just FLOPs (e.g., actual latency, memory bandwidth utilization, energy per inference) to select the optimal pruned model configuration for the Tensor G3, ensuring memory access patterns are cache-friendly.
+  realistic_solution: Design a structured sparsity regime (like 2:4 or 4:8 block sparsity) directly compatible with the TPU's matrix math units. Unstructured pruning yields zero practical speedup due to memory fragmentation and pointer indexing overhead. By enforcing structured patterns, you cut exact memory bandwidth requirements, minimizing physical fetches over the LPDDR5X bus and lowering the energy footprint per token.
   common_mistake: |
-    **The Pitfall:** Applying naive unstructured pruning and expecting proportional speedups.
-    **The Rationale:** Candidates assume any reduction in FLOPs directly translates to lower latency.
-    **The Consequence:** Irregular sparsity patterns fail to map to TPU matrix cores, resulting in poor memory access, indexing overhead, and zero practical speedup.
+    **The Pitfall:** Applying naive unstructured pruning and expecting proportional end-to-end speedups.
+    **The Rationale:** Candidates assume that purely reducing theoretical FLOPs directly translates to lower latency on physical hardware.
+    **The Consequence:** Irregular sparse matrices cause cache thrashing and dynamic indexing overhead, nullifying matrix-multiply acceleration and resulting in worse latency.
   napkin_math: |
-    - **Dense Memory Access:** N parameters require 2N bytes (FP16).
-    - **Unstructured Sparsity (50%):** Requires masking and dynamic indexing; memory access remains ~2N bytes.
-    - **Structured Sparsity (50%):** Physical channel/block removal reduces memory access to exactly N bytes.
-    - **Load Time Savings:** For a 2GB model, reducing to 1GB saves ~20ms in load time over a 50 GB/s bus.
-    - **Final Result:** **Structured pruning cuts exact memory bandwidth requirements in half, directly accelerating memory-bound LLM generation.**
+    1. **Assumptions & Constraints:**
+       - Unpruned Model: 2GB (FP16).
+       - Memory Bus: 50 GB/s.
+       - Sparsity Level: 50%.
+    2. **Calculations:**
+       - Unstructured Loads: Still requires ~2GB scan (masking overhead cancels benefits).
+       - Structured Loads: Exactly 1GB physical fetch.
+       - Dense Load Time: 2GB / 50 GB/s = 40ms.
+       - Structured Load Time: 1GB / 50 GB/s = 20ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound.** Structured sparsity linearly cuts memory fetches, saving 20ms per pass and avoiding hardware indexing penalties.
 status: published
 provenance: imported
 requires_explanation: true
@@ -30,8 +36,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Napkin Math section ends abruptly with an incomplete sentence.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -11,17 +11,23 @@ title: Tensor Parallel Communication Spec
 scenario: A team wants to tensor-parallel a 30B model across 4 GPUs. The model fits only with sharding, but they have not measured activation size, layer count, interconnect bandwidth, or overlap.
 question: What communication and model-shape data do you need before approving 4-way tensor parallelism for a 30B model?
 details:
-  realistic_solution: You need per-layer activation tensor sizes, number of synchronized layers, all-reduce/all-gather pattern, interconnect bandwidth and latency, overlap capability, batch and sequence length, and memory headroom. Tensor parallelism solves capacity but can fail latency if activation collectives dominate.
+  realistic_solution: |
+    You rigorously need per-layer activation tensor sizes, number of synchronized layers, All-Reduce/All-Gather patterns, interconnect bandwidth and latency, sequence lengths, and memory headroom. Tensor parallelism solves capacity but can catastrophically fail on latency if activation collectives dominate the critical path.
   common_mistake: |
     **The Pitfall:** Approving tensor parallelism simply because the partitioned weights fit into memory.
-    
-    **The Rationale:** Engineers often view model parallelism solely as a memory capacity solution, ignoring that tensor parallelism slices the matrix math such that high-frequency activation communication occurs within the critical path of every single forward and backward pass layer.
-    
+    **The Rationale:** Engineers often view model parallelism solely as a memory capacity solution, ignoring that tensor parallelism slices the matrix math such that high-frequency activation communication occurs within the critical path of every single layer.
     **The Consequence:** The model is deployed but grinds to a halt due to interconnect latency, resulting in throughput far worse than pipeline parallelism or alternative sharding schemes.
   napkin_math: |
-    - **Example Payload Scale**: If a model has 80 layers, and each layer requires two 64 MB collectives (All-Reduce).
-    - **Raw Data Moved**: 80 layers * 2 collectives * 64 MB = 10.24 GB per forward pass.
-    - **Result**: The activation collective payload alone is **10.24 GB** before accounting for algorithmic overhead or overlap. Interconnect bandwidth must support this per-step to avoid severe bottlenecking.
+    1. **Assumptions & Constraints:**
+       - Model: 30B parameters (~80 layers).
+       - Interconnect: PCIe or NVLink.
+       - Activation Tensor: 64 MB per collective operation.
+    2. **Calculations:**
+       - Collectives per layer: 2 All-Reduce ops.
+       - Data transferred per layer: 2 * 64 MB = 128 MB.
+       - Total Data Moved per step: 80 layers * 128 MB = 10.24 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** Tensor Parallelism injects an immediate 10.24 GB network payload into the critical path of every forward pass. Without an ultra-fast intra-node interconnect (like NVLink), this communication overhead will absolutely destroy training throughput.
 status: draft
 provenance: llm-then-human-edited
 requires_explanation: true

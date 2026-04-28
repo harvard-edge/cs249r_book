@@ -11,16 +11,21 @@ title: The Shared Bus Arbitration Lock
 scenario: Your edge gateway runs a 4K camera feed into an NPU. You also have an external Gigabit Ethernet controller on the same physical PCIe bus. The NPU requires 3 GB/s of memory bandwidth to run the model at 30 FPS. The Ethernet controller uses 100 MB/s. The PCIe bus supports 4 GB/s. Theoretically, there is plenty of bandwidth, but when Ethernet traffic spikes, the NPU frame rate drops to 15 FPS.
 question: Why does the NPU frame rate drop to 15 FPS when Ethernet traffic spikes, despite theoretical bandwidth sufficiency?
 details:
-  realistic_solution: You're experiencing PCIe bus arbitration starvation. The NPU and Ethernet controller share a single PCIe bus. Although total bandwidth (3 + 0.1 = 3.1 GB/s) is under the 4 GB/s limit, the Ethernet controller sends large burst packets that lock the bus arbiter for ~25 microseconds each. The NPU needs fresh data every ~10 microseconds for its MAC array pipeline. During each Ethernet burst, the NPU misses 2 data deadlines, causing its compute arrays to stall. Over one second, these stalls accumulate to hundreds of milliseconds of idle time, halving the frame rate. The fix: implement QoS-based bus arbitration, use traffic shaping on the Ethernet controller, or place the NIC on a separate PCIe root port.
+  realistic_solution: You're experiencing PCIe bus arbitration starvation. The NPU and Ethernet controller share a single PCIe bus. Although total bandwidth is under the 4 GB/s limit, the Ethernet controller sends large burst packets that lock the bus arbiter for ~25 microseconds each. The NPU needs fresh data every ~10 microseconds for its MAC array pipeline. The fix is implementing QoS-based bus arbitration or isolating the NIC on a separate root port.
   common_mistake: |
     **The Pitfall:** Assuming the CPU is overwhelmed by network interrupts.
     **The Rationale:** Engineers default to OS-level software bottlenecks when facing network spikes.
-    **The Consequence:** Debugging software when the starvation is physically happening at the hardware bus arbiter level.
+    **The Consequence:** Debugging software endlessly when the starvation is physically happening at the hardware bus arbiter level.
   napkin_math: |
-    1. **NPU Deadline:** NPU needs data every 10μs.
-    2. **Network Lock:** Ethernet bursts 100KB packets, holding the bus arbiter for 25μs.
-    3. **Starvation:** The NPU misses 2 data deadlines per burst, causing MAC arrays to sit idle for 15μs.
-    4. **Accumulation:** Over 1 second, these micro-stalls accumulate to hundreds of milliseconds of physical idle time, directly halving the frame rate.
+    1. **Assumptions & Constraints:**
+       - NPU data deadline: ~10µs.
+       - Ethernet lock time: ~25µs per burst.
+       - PCIe Limit: 4 GB/s. Utilization: 3.1 GB/s.
+    2. **Calculations:**
+       - During a 25µs Ethernet lock, the NPU misses at least 2 data deadlines (25µs / 10µs).
+       - Over 1 second, these micro-stalls accumulate to hundreds of milliseconds of physical idle time for the NPU's MAC array.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O Starvation**. Despite having sufficient raw bandwidth, the NPU suffers catastrophic pipeline stalls due to PCIe bus lock contention, halving the frame rate.
 status: published
 provenance: imported
 requires_explanation: false

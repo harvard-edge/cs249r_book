@@ -11,17 +11,23 @@ title: The 10K-GPU Training Instability
 scenario: You are leading pre-training of a 405B model on 16,384 H100 GPUs. At step 80K (out of 300K total), the training loss suddenly diverges. You roll back to the step-79K checkpoint and resume, but the divergence happens again at approximately the same step. This is not a hardware failure (the cluster is healthy).
 question: How would you systematically diagnose and recover from this reproducible loss divergence around step 80K?
 details:
-  realistic_solution: This is a loss landscape instability at a specific training phase — the model has entered a sharp region of the loss landscape. Systematic diagnosis: (1) **Characterize the instability**: log per-layer gradient norms, activation norms, and attention entropy around step 78K-82K. Look for which layers spike first — typically attention logits or embedding norms. (2) **Data investigation**: extract the exact data batches at steps 79K-81K. Check for distribution shifts in the data curriculum that coincide with the spike. (3) **Targeted interventions** (in order of disruption): (a) Reduce LR by 10-30% starting at step 78K and re-warmup, (b) Apply z-loss regularization to attention logits (forces logits to stay near zero, preventing the exponential blowup), (c) Increase gradient clipping threshold monitoring — if gradient norms are growing exponentially, add per-layer adaptive clipping, (d) Nuclear option: shrink batch size temporarily to increase gradient noise, which can help escape sharp minima. (4) **Prevention for future runs**: implement automatic loss spike detection with rollback-and-reduce-LR policy, use QK-norm (normalize query and key vectors) to prevent attention entropy collapse.
+  realistic_solution: 'This is a loss landscape instability. Systematically diagnose by logging per-layer gradient norms and activation norms around step 78K-82K. Implement targeted interventions: apply z-loss regularization to attention logits to prevent exponential blowup, or increase gradient clipping threshold monitoring. Shrink batch size temporarily to increase gradient noise to escape sharp minima.'
   common_mistake: |
     **The Pitfall:** Simply reducing the learning rate globally or skipping the offending data batch.
     **The Rationale:** Engineers treat the symptom (the spike) with a band-aid rather than diagnosing the underlying gradient explosion or representation collapse.
     **The Consequence:** The instability likely masks deeper representation issues and will recur later, costing millions of dollars in wasted compute.
   napkin_math: |
-    *   **Cluster Cost:** 16,384 GPUs × $3/hr = $49,152/hour.
-    *   **Rollback Cost:** Rolling back from step 80K to 79K = 1,000 steps lost.
-    *   **Time Lost:** At ~12s/step = 12,000s = 3.33 hours.
-    *   **Financial Waste per Rollback:** 3.33 hours × $49,152/hr = ~$164,000.
-    *   **Total Waste:** 3 rollbacks to diagnose = **~$492,000 wasted.**
+    1. **Assumptions & Constraints:**
+       - 16,384 GPUs costing $3/hr.
+       - Rollback from 80K to 79K loses 1,000 steps.
+       - Training speed: ~12s/step.
+    2. **Calculations:**
+       - Cluster cost rate: 16,384 * $3/hr = $49,152/hr.
+       - Time lost per rollback: 1,000 steps * 12s/step = 12,000s = 3.33 hours.
+       - Financial waste per rollback: 3.33 hours * $49,152/hr = $163,674.
+       - Total waste for 3 diagnostic rollbacks: 3 * $163,674 = $491,022.
+    3. **Conclusion & Interpretation:**
+       - **Result: Cost-Bound. Trial-and-error diagnosis via rollback wastes ~$500K, necessitating automated spike detection, z-loss regularization, or gradient clipping.**
 status: published
 provenance: imported
 requires_explanation: true

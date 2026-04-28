@@ -8,35 +8,24 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: 'The Camera Preview Stutter: Real-Time Deadlines'
-scenario: Your photo app runs a real-time beauty filter using an on-device segmentation model on the MediaTek Dimensity 9300. The model runs in 8 ms — well within the 33 ms budget for 30 FPS. Users report the camera preview stutters every 2-3 seconds, dropping to ~10 FPS momentarily.
-question: Why does a MediaTek Dimensity 9300 beauty filter stutter every 2-3s when inference is a stable 8ms?
+scenario: Your photo app runs a real-time beauty filter using an on-device segmentation model on a flagship SoC. The model runs in 8 ms, well within the 33 ms budget for 30 FPS. Users report the camera preview stutters every 2-3 seconds, dropping to ~10 FPS momentarily.
+question: Why does the beauty filter stutter every 2-3s when inference is a stable 8ms?
 details:
-  realistic_solution: 'GC stutter, not ML. Naive pipeline allocates 13.8 MB/frame (RGBA + RGB). At 30 FPS: 414 MB/s garbage. GC triggers every 2-3s with 15-30ms pauses, exceeding the 25ms remaining budget. Fix: (1) pre-allocate a ring buffer of 3 ByteBuffers (zero-copy). (2) Use Camera2 ImageReader writing directly to pre-allocated Surface. (3) Pass hardware buffer handles directly to the ML delegate. Result: 0 MB/s garbage, no GC pauses, stutter eliminated.'
+  realistic_solution: "The anomaly is caused by aggressive memory allocation triggering stop-the-world Garbage Collection (GC) pauses. The naive implementation allocates new heavy `ByteBuffer` or byte arrays for every 1080p camera frame. At 30 FPS, this generates hundreds of megabytes of memory trash per second. When the JVM/ART heap hits its threshold, it halts all execution threads to run a synchronous GC sweep. The architectural fix is to implement zero-copy memory management: utilize a pre-allocated ring buffer of `AHardwareBuffer` or `Surface` textures and pass hardware buffer handles directly to the ML delegate, eliminating frame-by-frame heap allocations."
   common_mistake: |
     **The Pitfall:** Concluding that the model is too slow and trying to optimize it further.
     **The Rationale:** Engineers default to blaming the ML model for performance drops when the inference time is actually well within the budget.
     **The Consequence:** Effort is wasted on model compression while the actual system bottleneck (garbage collection) remains unfixed.
   napkin_math: |
-    * Per-frame allocation (naive): 1080×1920×4 (RGBA) = 7.9 MB + 1080×1920×3 (RGB) = 5.9 MB. Total = 13.8 MB/frame.
-    * At 30 FPS: 13.8 MB × 30 = 414 MB/sec of garbage.
-    * Frame budget: 33 ms. ML inference: 8 ms. Available for GC: 25 ms.
-    * GC pause takes 15-30 ms every 2-3 sec, frequently exceeding the 25 ms budget and dropping frames.
-    * **With zero-copy (0 MB/sec garbage), GC pauses are eliminated, and stutter disappears.**
+    1. **Assumptions & Constraints:**
+       - Frame allocation: 1080x1920x4 (RGBA, 7.9 MB) + 1080x1920x3 (RGB, 5.9 MB) = 13.8 MB/frame.
+       - Framerate: 30 FPS.
+       - Frame budget: 33 ms. ML inference: 8 ms.
+       - Remaining budget: 25 ms.
+    2. **Calculations:**
+       - Trash generation rate: 13.8 MB/frame * 30 FPS = 414 MB/sec.
+       - GC pause duration: ~15-30 ms every 2-3 seconds.
+       - Frame time during GC: 8 ms (ML) + 30 ms (GC) = 38 ms (> 33ms budget).
+    3. **Conclusion & Interpretation:**
+       - **Result: Garbage Collection-Bound.** Generating 414 MB/s of trash forces frequent 30ms GC pauses that exceed the 25ms remaining frame budget. Implementing a zero-copy ring buffer completely eliminates this stutter.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-chains:
-- id: mobile-chain-048
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

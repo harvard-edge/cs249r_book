@@ -11,18 +11,23 @@ title: Cross-Compiling CUDA Kernels for Jetson's Ampere GPU vs Cloud Ampere
 scenario: Your custom CUDA kernel is compiled for sm_80 (A100, cloud). You deploy the same binary on an edge SoC GPU (sm_87, Ampere-based). The kernel runs but achieves 25% lower throughput than expected.
 question: Why does the sm_80 CUDA kernel achieve 25% lower throughput than expected on the sm_87 edge GPU despite both being Ampere architectures?
 details:
-  realistic_solution: 'The 25% throughput drop is due to a drop in Streaming Multiprocessor (SM) occupancy caused by the architectural differences between A100 (GA100, sm_80) and Jetson Orin (GA10B, sm_87). A100 supports up to 2048 resident threads per SM, whereas Orin supports a maximum of 1536 resident threads per SM. If the kernel was tuned for A100 to use 512 threads per block, A100 can fit 4 blocks per SM (2048 threads). When this same kernel runs on Orin, it can only fit 3 blocks per SM (1536 threads). This results in a 25% reduction in active waves per SM, lowering the hardware''s ability to hide memory latency and resulting in the observed 25% throughput drop.'
+  realistic_solution: |
+    The performance degradation stems from a hard reduction in Streaming Multiprocessor (SM) Occupancy. Although both are Ampere architectures, the GA100 (sm_80) supports up to 2048 resident threads per SM, while the GA10B (sm_87) strictly limits residency to 1536 threads per SM. A kernel hard-coded with a block size of 512 threads will launch 4 blocks per SM on the cloud GPU, but only 3 blocks on the edge GPU. This 25% drop in active warps cripples the hardware's ability to hide memory latency via context switching.
   common_mistake: |
     **The Pitfall:** Assuming all GPUs within the same architectural generation have identical Streaming Multiprocessor (SM) limits.
     **The Rationale:** Blaming memory bandwidth limits or JIT compilation overhead for the performance gap.
     **The Consequence:** Wasting time tuning memory access patterns when the kernel configuration itself is hitting a hard, die-specific occupancy wall.
   napkin_math: |
-    * **Cloud GPU (sm_80) Limit**: 2048 threads per SM.
-    * **Edge GPU (sm_87) Limit**: 1536 threads per SM.
-    * **Kernel Block Size**: 512 threads.
-    * **Cloud Occupancy**: 2048 / 512 = 4 blocks per SM.
-    * **Edge Occupancy**: 1536 / 512 = 3 blocks per SM.
-    * **Conclusion**: Occupancy ratio is 3/4 (75%). The **25% drop** in resident warps directly causes the proportional loss in throughput.
+    1. **Assumptions & Constraints:**
+       - Cloud GPU (sm_80): 2048 max threads/SM.
+       - Edge GPU (sm_87): 1536 max threads/SM.
+       - Kernel Block Size: 512 threads.
+    2. **Calculations:**
+       - Cloud Occupancy: 2048 / 512 = 4 blocks per SM.
+       - Edge Occupancy: 1536 / 512 = 3 blocks per SM.
+       - Occupancy Ratio: 3 / 4 = 75%.
+    3. **Conclusion & Interpretation:**
+       - **Result: 25% reduction in resident warps. Bottleneck: Compute-Bound (SM Occupancy Wall).**
 status: published
 provenance: imported
 requires_explanation: false

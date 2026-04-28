@@ -8,7 +8,7 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Cascading KV Cache OOMs in Stateful LLM Serving
-scenario: Your team operates a stateful LLM chat service (using a 13B parameter model) on a cluster of 16x 8-GPU H100 nodes. To minimize Time To First Token (TTFT) for multi-turn conversations, user sessions are pinned to specific nodes to reuse the KV cache in GPU HBM. Average context length is 4K tokens. During a single-node hardware failure, the load balancer's naive hash ring (modulo N) rebalances, rerouting nearly all of the cluster's 2,000 active sessions to new surviving nodes. Within seconds, three surviving nodes crash due to Out-Of-Memory (OOM) errors, and the P99 TTFT for the entire cluster spikes from 200ms to over 15 seconds.
+scenario: Your team operates a stateful LLM chat service on a cluster of 16x 8-GPU H100 nodes. To minimize Time To First Token (TTFT) for multi-turn conversations, user sessions are pinned to specific nodes to reuse the KV cache in GPU HBM. Average context length is 4K tokens. During a single-node hardware failure, the load balancer's naive hash ring rebalances, rerouting nearly all of the cluster's 2,000 active sessions to new surviving nodes. Within seconds, three surviving nodes crash due to Out-Of-Memory errors, and the P99 TTFT for the entire cluster spikes from 200ms to over 15 seconds.
 question: "Why did reshuffling 2,000 stateful LLM sessions cause OOMs and 15s P99 TTFT, and how should failover be redesigned?"
 details:
   realistic_solution: Implement consistent hashing in the load balancer to prevent massive reshuffling during a node failure, and use disaggregated KV caching with asynchronous checkpointing. Coupling this with strict admission control ensures that during failover, the system bounds the concurrent prefill rate and gracefully queues recovered sessions instead of OOMing.
@@ -17,14 +17,18 @@ details:
     **The Rationale:** Engineers accustomed to standard web services assume that traffic can just be trivially re-routed.
     **The Consequence:** They fail to recognize the massive memory and prefill compute shock required to simultaneously reconstruct thousands of discarded KV caches without consistent hashing, leading to cascading OOMs.
   napkin_math: |
-    - KV cache per session at 4K tokens: 2 * 40 layers * 40 heads * 128 dim * 4096 seq * 2 bytes = 3.13 GB.
-    - Total KV state for 2,000 sessions = 6.26 TB.
-    - Free memory per node: 640 GB (HBM) - 26 GB (weights) - 391 GB (existing sessions) = 223 GB free.
-    - Without consistent hashing, N=16 to N=15 remapping moves 15/16th of sessions. Rerouted sessions per node: ~125.
-    - KV to rebuild per node: 125 * 3.13 GB = 391 GB, far exceeding the 223 GB free HBM and guaranteeing OOM.
-    - Tokens to prefill per node: 125 * 4,096 = 512,000 tokens. FLOPs per token: 2 * 13*10^9 = 26 GFLOPs.
-    - Total compute per node: 512K * 26 GFLOPs = 13.3 PFLOPs. H100 node at 50% MFU: ~3.96 PFLOPS.
-    - **Time to reconstruct sessions is 13.3 / 3.96 = 3.36 seconds of pure compute, driving queue latencies to 15s+.**
+    1. **Assumptions & Constraints:**
+       - 13B model, 4K context, 2000 sessions.
+       - KV cache per session: 2 * 40 layers * 40 heads * 128 dim * 4096 seq * 2 bytes = 3.13 GB.
+       - Free HBM per node: 640 GB - 26 GB (weights) - 391 GB (existing) = 223 GB.
+       - H100 node throughput: ~3.96 PFLOPS.
+    2. **Calculations:**
+       - Remapping N=16 to N=15 reroutes ~125 sessions per node.
+       - KV to rebuild per node: 125 * 3.13 GB = 391 GB (> 223 GB free, causing OOM).
+       - Compute required: 125 * 4096 tokens * (2 * 13B) = 13.3 PFLOPs.
+       - Rebuild time: 13.3 PFLOPs / 3.96 PFLOPS = 3.36 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity-Bound & Compute-Bound. Time to reconstruct sessions takes 3.36 seconds of pure compute, driving queue latencies to 15s+, and immediately OOMing nodes.**
 status: published
 provenance: imported
 requires_explanation: false

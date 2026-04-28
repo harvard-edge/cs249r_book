@@ -8,25 +8,29 @@ competency_area: optimization
 bloom_level: create
 phase: both
 title: Orin DMA and Inference Pipelining
-scenario: An autonomous tractor uses a Jetson AGX Orin to process uncompressed 4K
-  camera frames sent over PCIe. Frame transfer takes 10ms, and INT8 GPU inference
-  takes 12ms.
-question: Design an overlapping execution schedule using CUDA streams and DMA engines
-  to maximize total system frames-per-second.
+scenario: An autonomous tractor processes uncompressed 4K camera frames sent over PCIe. Frame transfer takes 10ms, and INT8 GPU inference takes 12ms.
+question: Design an overlapping execution schedule using CUDA streams and DMA engines to maximize total system frames-per-second.
 details:
-  realistic_solution: The solution requires allocating pinned memory on the host and
-    using asynchronous DMA transfers mapped to one CUDA stream, while inference runs
-    on another. In steady state, while the GPU executes inference on Frame N (taking
-    12ms), the DMA engine simultaneously copies Frame N+1 (taking 10ms). The pipeline
-    bottleneck becomes the maximum of the two stages (12ms), resulting in a throughput
-    of 1/0.012 = 83.3 FPS, fully hiding the communication cost.
-  common_mistake: Adding the times together sequentially (22ms, ~45 FPS) or failing
-    to specify pinned host memory which is required for async DMA.
-  napkin_math: 1000ms / max(10ms, 12ms) = 83.3 FPS.
+  realistic_solution: Architect a dual-stage execution pipeline leveraging explicit CUDA streams and asynchronous memory copies mapped to pinned (page-locked) host memory. By explicitly separating the H2D (Host-to-Device) copy into a dedicated stream, the hardware DMA engine handles the 10ms transfer of Frame N+1 completely in parallel with the GPU executing the 12ms inference on Frame N, masking the communication latency.
+  common_mistake: |
+    **The Pitfall:** Executing memory transfers and inference synchronously, or failing to use pinned memory.
+    **The Rationale:** Candidates write standard synchronous code (e.g., `cudaMemcpy`) without configuring the OS to lock memory pages, preventing the DMA hardware from operating asynchronously.
+    **The Consequence:** The pipeline operates sequentially, adding the transfer and compute times together, slashing overall throughput by nearly 50%.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Transfer Time (H2D): 10 ms
+       - Inference Time: 12 ms
+    2. **Calculations:**
+       - Synchronous execution time = 10 ms + 12 ms = 22 ms per frame
+       - Synchronous FPS = 1000 / 22 = 45.4 FPS
+       - Pipelined execution time = max(10 ms, 12 ms) = 12 ms per frame
+       - Pipelined FPS = 1000 / 12 = 83.3 FPS
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (Pipelined). Utilizing asynchronous DMA increases throughput from 45 FPS to 83 FPS.**
 status: published
 provenance: llm-draft
-expected_time_minutes: 15
 requires_explanation: true
+expected_time_minutes: 15
 validated: true
 math_verified: true
 human_reviewed:
@@ -34,13 +38,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-tags:
-- gemini-generated
-- target-implement-L6+
-created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

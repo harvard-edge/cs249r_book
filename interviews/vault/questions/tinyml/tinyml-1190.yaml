@@ -8,19 +8,25 @@ competency_area: reliability
 bloom_level: create
 phase: inference
 title: Asymmetric Dual-Model Degradation on ESP32-S3
-scenario: You are designing an always-on acoustic anomaly detection system for an industrial sensor using an ESP32-S3. Under normal conditions, the system runs a highly accurate 3 MB INT8 CNN streamed from the 8 MB PSRAM to classify specific machinery faults. However, when the device's battery drops below 10% or the PSRAM interface experiences thermal throttling, the system must shed power and memory bandwidth while maintaining fail-operational status.
+scenario: You are designing an always-on acoustic anomaly detection system for an industrial sensor using an ESP32-S3. Under normal conditions, the system streams a 3 MB INT8 CNN from PSRAM to classify faults. However, when the battery drops below 10% or the PSRAM interface experiences thermal throttling, the system must shed power while maintaining fail-operational status.
 question: How should ESP32-S3 degrade from a PSRAM-streamed CNN to an SRAM-resident anomaly model under low battery or PSRAM throttling?
 details:
-  realistic_solution: Design an architecture where a tiny, sub-100 KB temporal convolutional network (TCN) is permanently pinned in the 512 KB internal SRAM alongside the OS. Normally, this SRAM model acts as a low-power gatekeeper, waking the second core and triggering the 3 MB PSRAM model only on suspicious noise. During degradation, the PSRAM is powered down and the second core is halted; the system simply stops triggering the large model and relies entirely on the SRAM-resident TCN to flag basic threshold anomalies, achieving instant, zero-cost quality-of-service shedding.
+  realistic_solution: Architect a hard fallback regime utilizing an asymmetric dual-model strategy. Pin a tiny, sub-100 KB temporal convolutional network (TCN) permanently in the 512 KB internal SRAM alongside the OS kernel. During deep degradation, forcibly power-collapse the PSRAM controller and halt the secondary core, routing all continuous telemetry strictly through the sub-100 KB SRAM gatekeeper to preserve zero-cost QoS baseline monitoring.
   common_mistake: |
-    **The Pitfall:** Dynamically loading a smaller fallback model from flash memory into SRAM during low-battery states.
-    **The Rationale:** Candidates often assume that pulling from flash on-demand is energy efficient.
-    **The Consequence:** This incurs a massive energy spike and latency penalty during a low-power critical event, potentially causing brownouts or missed audio frames.
+    **The Pitfall:** Attempting to dynamically page a fallback model from cold non-volatile Flash into SRAM strictly upon hitting a low-battery state.
+    **The Rationale:** Candidates conventionally assume that "lazy loading" from Flash on demand provides elegant memory efficiency.
+    **The Consequence:** Pulling megabytes from Flash generates a monstrous I/O energy spike, triggering battery brownout voltage drops precisely when the system is weakest.
   napkin_math: |
-    - **SRAM Budget:** 512 KB (Total) - 200 KB (FreeRTOS/Network) = **312 KB**.
-    - **Fallback Model Allocation:** 100 KB for weights + 100 KB for activations = **200 KB**.
-    - **Compute Inference:** 2M MAC inference / (240 MHz * 1 MAC/cycle) = **~8.33 milliseconds**.
-    - **Conclusion:** Running this once per second consumes <1% of the single core's compute, perfectly suiting the low-power state.
+    1. **Assumptions & Constraints:**
+       - ESP32-S3 @ 240 MHz. SRAM: 512 KB.
+       - OS/Network stack: ~200 KB.
+       - Fallback Model: 2M MAC inference, 100 KB weights + 100 KB arena.
+    2. **Calculations:**
+       - Usable SRAM = 512 KB - 200 KB = 312 KB.
+       - Fallback Footprint = 200 KB. (200 KB < 312 KB).
+       - Compute Execution = 2M MACs / (240 MHz * 1 MAC/cycle) = ~8.33 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Verified Graceful Shedding**. The model executes smoothly inside native SRAM, consuming just 8.33 ms and completely severing the PSRAM power drain.
 status: published
 provenance: imported
 requires_explanation: true

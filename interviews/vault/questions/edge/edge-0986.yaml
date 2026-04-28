@@ -11,16 +11,22 @@ title: Multi-Stream Video Ingestion PCIe Bandwidth
 scenario: An edge security appliance uses a Hailo-8 accelerator to process 4 concurrent 1080p video streams at 30 FPS. The host CPU decodes the streams and copies uncompressed frames to the Hailo-8 over a PCIe Gen3 x4 link.
 question: Design the data ingestion pipeline and calculate the exact data payload rate in MB/s required for the uncompressed RGB888 transfers.
 details:
-  realistic_solution: Each 1080p frame at RGB888 format is 1920 * 1080 * 3 bytes, or approximately 6.22 MB. At 30 FPS, a single stream requires 186.6 MB/s. Transferring 4 concurrent streams requires 4 * 186.6 MB/s = 746.5 MB/s of raw bandwidth from the host to the accelerator.
+  realistic_solution: The ingestion pipeline must decode the H.264 streams on the host CPU/GPU, convert the YUV frames to RGB888 format in contiguous memory, and utilize PCIe Direct Memory Access (DMA) to stream the raw tensors into the Hailo-8. Each uncompressed frame is massive; multiplying the frame size by the framerate and the number of streams reveals the intense stress placed on the host-to-accelerator interconnect.
   common_mistake: |
-    **The Pitfall:** Calculating bandwidth based on the compressed H.264 bitrate rather than the uncompressed RGB tensor size.
-    **The Rationale:** Candidates confuse network transmission requirements with the raw memory bandwidth required by the NPU to process pixel data.
-    **The Consequence:** The internal PCIe link or memory bus is grossly undersized, resulting in severe data starvation and failure to meet frame rate targets.
+    **The Pitfall:** Calculating interconnect bandwidth based on the highly compressed H.264 network bitrate (e.g., 5 Mbps) rather than the raw, uncompressed tensor size.
+    **The Rationale:** Candidates conflate the external network transmission requirement with the internal memory bandwidth required by the NPU's spatial architecture.
+    **The Consequence:** The internal PCIe link or memory bus is grossly undersized, leading to severe data starvation, dropped frames, and system stalling despite having a powerful NPU.
   napkin_math: |
-    1. Calculate size of a single 1080p RGB888 frame: 1920 * 1080 * 3 bytes = 6,220,800 bytes (~6.22 MB).
-    2. Calculate bandwidth for one stream at 30 FPS: 6.22 MB * 30 = 186.6 MB/s.
-    3. Calculate bandwidth for 4 concurrent streams: 186.6 MB/s * 4 = 746.5 MB/s.
-    **Transferring 4 concurrent streams requires 746.5 MB/s of raw bandwidth from the host to the accelerator.**
+    1. **Assumptions & Constraints:**
+       - Video specs: 4 streams, 1080p (1920x1080), 30 FPS.
+       - Tensor format: RGB888 (3 bytes per pixel).
+       - Transfer link: PCIe Gen3 x4.
+    2. **Calculations:**
+       - Single frame size = 1920 * 1080 * 3 bytes = 6,220,800 bytes (~6.22 MB).
+       - Single stream bandwidth = 6.22 MB/frame * 30 FPS = 186.6 MB/s.
+       - Total pipeline bandwidth = 186.6 MB/s * 4 streams = 746.4 MB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 746.4 MB/s raw payload rate. The system is critically dependent on PCIe Bandwidth to prevent starving the NPU.**
 status: draft
 provenance: llm-draft
 expected_time_minutes: 6

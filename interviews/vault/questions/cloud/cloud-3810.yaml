@@ -7,21 +7,25 @@ topic: mixture-of-experts
 competency_area: architecture
 bloom_level: analyze
 phase: both
-title: MoE Batch Size Scaling: Sparsity Advantage Vanishes
+title: 'MoE Batch Size Scaling: Sparsity Advantage Vanishes'
 scenario: You serve Mixtral 8x7B (46.7B params, top-2) on 2 H100s with TP=2. At batch size 1, you achieve 45 tok/s. At batch size 64, throughput is 900 tok/s but per-token latency increases to 71ms (from 22ms at BS=1). A dense 13B model on the same hardware shows only 30% latency increase from BS=1 to BS=64.
 question: Why does MoE's latency scale worse with batch size?
 details:
-  realistic_solution: At batch size 1 with top-2, only 2 of 8 experts are activated. At batch size 64, statistical coverage means all 8 experts are needed per layer, destroying the MoE's memory bandwidth advantage.
+  realistic_solution: 'At batch size 1 with top-2, only 2 of 8 experts are activated. At batch size 64, statistical coverage means all 8 experts are needed per layer, destroying the MoE''s memory bandwidth advantage.'
   common_mistake: |
     **The Pitfall:** Blaming the router computation scaling for the latency degradation.
     **The Rationale:** Engineers focus on the added MoE routing complexity, ignoring the fact that routing computation is negligible compared to memory bandwidth limits.
     **The Consequence:** Wasting time optimizing the routing algorithm instead of addressing the fundamental memory bandwidth bottleneck caused by high expert activation.
   napkin_math: |
-    1. **Calculate BS=1 Weight Reads:** Top-2 activates 2 experts. Reads = shared attention + 2 MLPs ≈ 13B params = 26 GB.
-    2. **Calculate BS=64 Weight Reads:** With 128 assignments, all 8 experts are activated. Reads = 46.7B params = 93.4 GB.
-    3. **Evaluate Impact:** MoE reads 3.6x more weights (93.4 GB vs 26 GB) at BS=64.
-    4. **Calculate Latency Gap:** At 6.7 TB/s total bandwidth, MoE read time = 93.4 / 6.7 = 13.9ms. Dense read time = 26 / 6.7 = 3.9ms.
-    **Final Result: MoE loses its sparsity advantage at high batch sizes, reading 3.6x more data from HBM and resulting in a fundamental latency gap.**
+    1. **Assumptions & Constraints:**
+       - Mixtral 8x7B (46.7B parameters total).
+       - Top-2 gating (~13B active params per token).
+       - Hardware: 2x H100 (6.7 TB/s total bandwidth).
+    2. **Calculations:**
+       - BS=1 Weight Reads: 2 experts active per layer ≈ 13B params = 26 GB total. Read time = 26 GB / 6.7 TB/s = 3.9 ms.
+       - BS=64 Weight Reads: With 128 assignments per layer, statistical probability forces all 8 experts to load = 46.7B params = 93.4 GB total. Read time = 93.4 GB / 6.7 TB/s = 13.9 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 3.6x Latency Increase (Memory-Bound).** MoE loses its sparsity advantage at high batch sizes because all experts must be fetched from HBM, fundamentally bottlenecking the system.
 status: published
 provenance: imported
 requires_explanation: false

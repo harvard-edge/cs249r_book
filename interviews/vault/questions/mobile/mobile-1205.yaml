@@ -8,21 +8,25 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: CoreML ANE Fallback Latency Analysis
-scenario: A vision transformer model converted to CoreML for the Apple A17 Pro runs slower than expected. The A17 Pro features a 16-core Neural Engine sharing 8 GB unified memory. Profiling shows that an unsupported dynamic reshape operator causes CoreML to delegate the reshaping to the CPU, while surrounding layers run on the ANE.
+scenario: A vision transformer model converted to CoreML for an NPU runs slower than expected. Profiling shows that an unsupported dynamic reshape operator causes CoreML to delegate the reshaping to the CPU, while surrounding layers run on the NPU.
 question: Why does this specific operator gap cause a massive latency degradation despite the fast unified memory?
 details:
-  realistic_solution: The primary issue is the synchronization and memory transfer overhead caused by context switching. When the execution pipeline breaks due to the fallback, the ANE must flush its intermediate activations to the 8 GB shared unified memory. The CPU then reads these activations, performs the reshape, and writes them back out so the ANE can resume execution. This constant shuttling of data breaks ANE pipeline parallelism and introduces memory bandwidth bottlenecks that heavily negate the 35 TOPS theoretical throughput.
+  realistic_solution: The primary issue is the synchronization and memory transfer overhead caused by context switching. The NPU must flush its intermediate activations to shared memory, where the CPU reads, reshapes, and writes them back.
   common_mistake: |
     **The Pitfall:** Focusing only on the compute cost of the fallback operator.
     **The Rationale:** Candidates assume the latency penalty is just the CPU's time to compute the reshape, ignoring memory bandwidth and synchronization costs.
-    **The Consequence:** They severely underestimate the impact of ANE-CPU context switching, failing to optimize the model for full ANE execution.
+    **The Consequence:** They severely underestimate the impact of NPU-CPU context switching, failing to optimize the model for full NPU execution.
   napkin_math: |
-    - **ANE Compute time:** 70 GOPS / 35 TOPS = 2ms
-    - **Memory transfer size:** 20MB
-    - **Memory bandwidth:** 40 GB/s
-    - **Transfer time (Read + Write):** (20MB / 40 GB/s) * 2 = 1ms per fallback
-    - **Total fallback penalty:** 4 fallbacks * 1ms = 4ms
-    - **Total latency:** 2ms + 4ms = **6ms** (a 3x increase)
+    1. **Assumptions & Constraints:**
+       - NPU Compute time for layer: 2ms.
+       - Memory transfer size: 20MB.
+       - Memory bandwidth: 40 GB/s.
+    2. **Calculations:**
+       - Transfer time (Read + Write): (20MB / 40 GB/s) * 2 = 1ms per fallback.
+       - Total fallback penalty: 4 fallbacks * 1ms = 4ms.
+       - Total latency: 2ms + 4ms = 6ms (a 3x increase).
+    3. **Conclusion & Interpretation:**
+       - **Result: Synchronization-Bound**. The constant shuttling of data breaks pipeline parallelism and introduces memory bandwidth bottlenecks that negate theoretical throughput.
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,6 +41,3 @@ math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
-  by: null
-  date: null
-  notes: null

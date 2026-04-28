@@ -8,19 +8,24 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: Tensor Contiguity Memory Overhead
-scenario: You are profiling a custom Transformer attention mechanism running on a GPU. The code prepares a query tensor of shape `[batch=64, seq_len=1024, num_heads=16, head_dim=128]` via a `.transpose(1, 2)` operation, followed immediately by a `.contiguous()` call to feed it into a legacy CUDA kernel. Assume FP16 precision.
+scenario: You are profiling a custom Transformer attention mechanism running on a GPU. The code prepares a query tensor via a `.transpose(1, 2)` operation, followed immediately by a `.contiguous()` call to feed it into a legacy CUDA kernel.
 question: Calculate the exact High Bandwidth Memory (HBM) traffic (in MiB) generated strictly by this `.contiguous()` operation.
 details:
-  realistic_solution: The `.transpose()` operation merely creates a non-contiguous view by modifying tensor strides in O(1) time. However, calling `.contiguous()` on this strided view forces a physical deep copy in GPU HBM to enforce a sequential memory layout. This operation requires reading the entire fragmented tensor and writing it to a newly allocated buffer. The total traffic is 1x Read + 1x Write of the tensor's size. Modern kernels (like FlashAttention) support strided memory layouts natively, avoiding this massive overhead.
+  realistic_solution: The `.transpose()` operation merely creates a non-contiguous view by modifying tensor strides in O(1) time. However, calling `.contiguous()` on this strided view forces a physical deep copy in GPU HBM to enforce a sequential memory layout. This operation requires reading the entire fragmented tensor and writing it to a newly allocated buffer. The total traffic is 1x Read + 1x Write of the tensor's size. Modern kernels (like FlashAttention-2) support strided memory layouts natively, avoiding this massive overhead.
   common_mistake: |
     **The Pitfall:** Assuming `.contiguous()` only updates metadata or calculating only the memory read.
     **The Rationale:** Candidates confuse `.contiguous()` with `.view()` or forget that creating a new physical memory layout requires both reading the old tensor and writing the new one.
     **The Consequence:** Underestimating the memory traffic by 100% or more, missing a major source of latency.
   napkin_math: |
-    1. **Element Count:** $64 * 1024 * 16 * 128 = 134,217,728$ elements.
-    2. **Size in Bytes:** $134,217,728 * 2\text{ bytes (FP16)} = 268,435,456\text{ bytes}$.
-    3. **Size in MiB:** $268,435,456 / (1024^2) = 256\text{ MiB}$.
-    4. **Total Traffic:** `.contiguous()` requires 1 Read + 1 Write. $256\text{ MiB} + 256\text{ MiB} =$ **512 MiB**.
+    1. **Assumptions & Constraints:**
+       - Tensor Shape: [batch=64, seq_len=1024, num_heads=16, head_dim=128].
+       - Precision: FP16 (2 bytes/element).
+    2. **Calculations:**
+       - Element Count: 64 × 1024 × 16 × 128 = 134,217,728 elements.
+       - Size in Bytes: 134,217,728 × 2 = 268,435,456 bytes.
+       - Size in MiB: 268,435,456 / (1024^2) = 256 MiB.
+       - Total Traffic: `.contiguous()` requires 1 Read + 1 Write = 256 MiB + 256 MiB = 512 MiB.
+    3. **Conclusion & Interpretation:** **The `.contiguous()` call creates a physical copy, generating 512 MiB of unnecessary HBM traffic. Result: Memory-Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

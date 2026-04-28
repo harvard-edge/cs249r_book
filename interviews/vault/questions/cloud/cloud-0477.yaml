@@ -8,24 +8,28 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Tensor Parallelism Scaling Trap
-scenario: You are an ML Systems Engineer at a major cloud provider diagnosing a customer's scaling issue. They are training a large language model using 8-way tensor parallelism. Their job runs efficiently on a single DGX H100 server with 8 GPUs connected with an all-to-all NVLink fabric. To scale further, they try running the same job on two servers, each with 4 H100 GPUs connected via PCIe, linked together with InfiniBand NDR. They report that the two-node (8 GPU) performance is significantly worse than the single-node (8 GPU) performance.
-question: Why is the two-server PCIe/InfiniBand setup slower than a single DGX H100 for 8-way tensor parallelism?
+scenario: You are an ML Systems Engineer at a major cloud provider diagnosing a customer's scaling issue. They are training a large language model using 8-way tensor parallelism. Their job runs efficiently on a single DGX server with 8 GPUs connected with an all-to-all NVLink fabric. To scale further, they try running the same job on two servers, each with 4 GPUs connected via PCIe, linked together with InfiniBand NDR. They report that the two-node performance is significantly worse than the single-node performance.
+question: Why is the two-server PCIe/InfiniBand setup slower than a single DGX for 8-way tensor parallelism?
 details:
-  realistic_solution: The single DGX H100 server uses an NVLink 4.0 fabric to connect all 8 GPUs, providing 900 GB/s of all-to-all bandwidth. Tensor parallelism relies on this extremely high-speed link for collective communication primitives (like All-Reduce). In the two-node setup, any communication between GPUs on different servers must traverse the PCIe bus (~64 GB/s), the CPU, and the InfiniBand network (50 GB/s). The bottleneck becomes the ~50 GB/s InfiniBand link, which is over 18x slower than the 900 GB/s NVLink fabric. This massive communication overhead stalls the GPUs, leading to worse performance despite using the same total number of GPUs.
+  realistic_solution: |
+    The single DGX server uses an NVLink 4.0 fabric connecting all 8 GPUs at 900 GB/s. Tensor parallelism relies on this extremely high-speed link for frequent collective communication (All-Reduce) per layer. In the two-node setup, any communication between GPUs on different servers must traverse the InfiniBand network (50 GB/s). The bottleneck becomes the 50 GB/s InfiniBand link, drastically starving the GPUs.
   common_mistake: |
     **The Pitfall:** Underestimating the massive bandwidth hierarchy gap between intra-node and inter-node networks.
     **The Rationale:** Engineers see "InfiniBand" and assume it's a perfectly fast network comparable to on-server interconnects, ignoring that for tightly coupled TP operations, the interconnect IS the computer.
     **The Consequence:** Customers incorrectly provision multi-node clusters for Tensor Parallelism, suffering catastrophic performance collapse and wasting millions in cloud compute spend.
   napkin_math: |
-    - **Single Node (NVLink 4.0):** Provides 900 GB/s of all-to-all bandwidth.
-    - **Two Node (InfiniBand NDR):** Provides 50 GB/s bandwidth.
-    - **Bandwidth Gap:** 900 GB/s / 50 GB/s = **18× slower**.
-    - **Result:** TP demands massive layer-wise synchronization. Forcing this over a link 18× slower completely bottlenecks the GPUs.
+    1. **Assumptions & Constraints:**
+       - Single Node (NVLink 4.0): 900 GB/s all-to-all bandwidth.
+       - Two Node (InfiniBand NDR): 50 GB/s bandwidth.
+    2. **Calculations:**
+       - Bandwidth Gap: 900 GB/s / 50 GB/s = 18x slower.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network Bandwidth-Bound.** TP demands massive layer-wise synchronization. Forcing this over a link 18x slower completely bottlenecks the GPUs.
   options:
-  - The software overhead from the distributed training framework is likely misconfigured, causing synchronization delays.
-  - The PCIe bus within each 4-GPU server is saturated, as it cannot handle the traffic from 4 H100s simultaneously.
-  - The all-to-all communication required by tensor parallelism is now bottlenecked by the 50 GB/s InfiniBand network, which is over 18x slower than the 900 GB/s NVLink fabric in the single node.
-  - InfiniBand uses RDMA, which has higher latency than on-server PCIe, introducing a critical delay.
+  - "The 64 GB/s PCIe bus is saturated, creating a 14x bottleneck compared to NVLink."
+  - "The RDMA latency overhead of ~5 microseconds per hop exceeds the 100ms timeout."
+  - "InfiniBand caps at 50 GB/s, creating an 18x bandwidth bottleneck compared to the 900 GB/s NVLink fabric."
+  - "The 400 Gbps InfiniBand link provides 400 GB/s, leaving a 2.25x performance gap versus NVLink."
   correct_index: 2
 status: deleted
 provenance: imported

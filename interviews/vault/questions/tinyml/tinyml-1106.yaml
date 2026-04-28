@@ -8,36 +8,26 @@ competency_area: power
 bloom_level: analyze
 phase: inference
 title: Diagnosing Power Drain from Memory Access
-scenario: You deploy two different neural network architectures on an ARM Cortex-M4
-  (STM32F4) running at 168 MHz for a sensor monitoring task. Both models execute exactly
-  5 million INT8 MAC operations per inference and fit comfortably within the 1 MB
-  flash and 256 KB SRAM. However, power profiling reveals that Model A (composed mostly
-  of fully connected layers) consumes significantly more energy per inference than
-  Model B (composed of standard convolutional layers). Identify the architectural
-  root cause for this energy discrepancy.
-question: Why does a fully connected Cortex-M4 model use more energy than a convolutional
-  model with the same 5M MACs?
+scenario: You deploy two different neural network architectures on an ARM Cortex-M4 (STM32F4) running at 168 MHz for a sensor monitoring task. Both models execute exactly 5 million INT8 MAC operations per inference and fit comfortably within the 1 MB flash and 256 KB SRAM. However, power profiling reveals that Model A (composed mostly of fully connected layers) consumes significantly more energy per inference than Model B (composed of standard convolutional layers).
+question: Why does a fully connected Cortex-M4 model use more energy than a convolutional model with the same 5M MACs?
 details:
-  realistic_solution: The discrepancy is caused by the vastly different memory access
-    patterns between the two architectures, exploiting the principle that memory access
-    costs significantly more energy than compute. In Model A (fully connected), each
-    weight is loaded from memory and used exactly once per inference (for batch size
-    1), leading to a high memory-to-compute ratio. In Model B (convolutional), weights
-    are loaded into registers and reused across the spatial dimensions of the input
-    feature map. Because fetching data from the 256 KB SRAM or 1 MB Flash dominates
-    the energy profile, Model A's lack of weight reuse drives up the total energy
-    per operation.
-  common_mistake: Candidates often assume that energy consumption is strictly proportional
-    to the total number of MAC operations, ignoring the memory hierarchy. They might
-    incorrectly guess that the CMSIS-NN SIMD instructions (2x INT8 MACs/cycle) are
-    failing to engage for Model A, or that the clock speed is somehow fluctuating.
-  napkin_math: 'Assume an INT8 MAC operation on the Cortex-M4 ALU costs ~0.1 pJ, while
-    a 32-bit read from SRAM costs ~5 pJ. For Model A (FC), every 4 INT8 MACs require
-    fetching a new 32-bit weight word from memory: (4 * 0.1 pJ) + 5 pJ = 5.4 pJ per
-    4 MACs, or 1.35 pJ/MAC. For Model B (Conv), if a weight word is reused 16 times
-    spatially in registers, the memory cost is amortized: (4 * 16 * 0.1 pJ) + 5 pJ
-    = 11.4 pJ per 64 MACs, or ~0.18 pJ/MAC. Model A consumes roughly 7.5x more energy
-    per MAC due to memory bandwidth dominance.'
+  realistic_solution: The discrepancy is caused by the vastly different memory access patterns between the two architectures, exploiting the principle that memory access costs significantly more energy than compute. In Model A, each weight is loaded from memory and used exactly once per inference. In Model B, weights are reused across the spatial dimensions of the input feature map, dramatically lowering SRAM fetches.
+  common_mistake: |
+    **The Pitfall:** Assuming energy scales purely with MAC count.
+    **The Rationale:** Candidates ignore the memory hierarchy and assume all ALU instructions consume uniform power regardless of data movement.
+    **The Consequence:** They deploy fully-connected layers that rapidly drain the battery due to excessive SRAM fetches.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Models: 5M MACs each.
+       - INT8 MAC ≈ 0.1 pJ. 32-bit SRAM read ≈ 5 pJ.
+       - Model A (FC): 1 fetch per 4 MACs.
+       - Model B (Conv): 16x spatial weight reuse (1 fetch per 64 MACs).
+    2. **Calculations:**
+       - FC Energy: (4 * 0.1 pJ) + 5 pJ = 5.4 pJ per 4 MACs -> 1.35 pJ/MAC.
+       - Conv Energy: (64 * 0.1 pJ) + 5 pJ = 11.4 pJ per 64 MACs -> 0.18 pJ/MAC.
+       - Ratio: 1.35 / 0.18 = 7.5x.
+    3. **Conclusion & Interpretation:**
+       - **Result: 7.5x more energy.** Model A is fundamentally **Memory-Bound** for energy, as continuous memory fetches dominate the core logic cost.
 status: published
 provenance: imported
 requires_explanation: false
@@ -46,9 +36,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- RC, KA, and Mode are all set to None; these should be explicitly classified for
-  a Staff-level question.
 math_verified: true
 math_status: UNCHECKED
 human_reviewed:

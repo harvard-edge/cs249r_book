@@ -8,20 +8,26 @@ competency_area: optimization
 bloom_level: apply
 phase: training
 title: Distilled Model Memory Contention
-scenario: We distilled a large teacher model into a compact 25MB student model targeted for the Samsung Exynos 2400 NPU. The platform provides 34.7 TOPS via a dual-core NPU, but its 12 GB LPDDR5X memory pool is shared with the CPU, GPU, and ISP. The student model requires 2.5 GOPS per frame. During a live camera feed, the actual inference latency spikes to 12 ms.
-question: Why this happens given the shared memory architecture, and calculate the effective memory bandwidth available to the NPU assuming the entire 25MB model must be loaded from main memory per frame?
+scenario: We distilled a large teacher model into a compact 25MB student model requiring 2.5 GOPS per frame. During a live camera feed using a shared unified memory architecture, actual inference latency spikes to 12 ms.
+question: Why does latency spike during a live feed, and what is the effective memory bandwidth for loading the 25MB model?
 details:
   realistic_solution: |
-    The system behavior occurs because the dual-core NPU is starved for memory bandwidth. During a live camera feed, the ISP and GPU heavily utilize the shared 12 GB LPDDR5X memory pool, creating contention. Even though the distilled model is small, the NPU stalls while waiting to read the 25MB of weights and activations, overriding the benefits of distillation. To fix this, we would need to leverage NPU-local SRAM to pin weights or fuse operations to minimize LPDDR5X roundtrips.
+    The latency anomaly is caused by severe memory bus contention. Although the distilled 25MB model is highly compact, the unified memory architecture requires the NPU, ISP, CPU, and GPU to multiplex data across the same LPDDR5X bus. During a live camera feed, the ISP saturates the bus writing high-resolution video frames. The NPU stalls waiting to fetch its weights and activations, completely overriding the theoretical compute speed. To resolve this, weights must be pinned directly into the NPU's local SRAM, or layers must be aggressively fused to minimize DRAM round-trips.
   common_mistake: |
-    **The Pitfall:** Focusing solely on the 34.7 TOPS compute capacity and suggesting further model distillation.
+    **The Pitfall:** Focusing solely on the NPU's TOPS capability and suggesting further model distillation.
     **The Rationale:** Candidates see a latency spike and immediately assume the model has too many parameters.
     **The Consequence:** They fail to recognize that the shared memory architecture is the actual bottleneck when the ISP and GPU are active.
   napkin_math: |
-    - Theoretical Compute Latency = 2.5 GOPS / 34.7 TOPS = 0.072 ms.
-    - Since actual latency is 12 ms, the model is completely memory-bound.
-    - Effective Memory Bandwidth = 25 MB / 12 ms = **2.08 GB/s**.
-    - The NPU is heavily starved due to contention with the ISP and GPU.
+    1. **Assumptions & Constraints:**
+       - Model footprint: 25 MB. Model compute: 2.5 GOPS.
+       - NPU Peak: 34.7 TOPS (34,700 GOPS).
+       - Observed latency: 12 ms.
+    2. **Calculations:**
+       - Theoretical pure compute latency = 2.5 GOPS / 34,700 GOPS/sec = 0.000072 sec = 0.072 ms.
+       - Discrepancy: 12 ms actual vs 0.072 ms ideal implies a 99.4% stall.
+       - Effective Memory Bandwidth utilized = 25 MB / 0.012 sec = 2083.3 MB/s = ~2.08 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bus-Bound.** The NPU is starved for data. Achieving only ~2.08 GB/s indicates massive interference from the active ISP, rendering the compute reduction from distillation entirely moot.
 status: published
 provenance: imported
 requires_explanation: false

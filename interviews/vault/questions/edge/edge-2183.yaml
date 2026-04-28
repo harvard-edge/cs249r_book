@@ -8,20 +8,26 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: Priority Preemption for Real-Time Edge Inference
-scenario: Your Jetson Orin runs two models concurrently: a safety-critical pedestrian detector (must complete in 15ms) and a comfort feature (lane marking detection, 50ms budget). Both share the GPU. Under load, the pedestrian detector's P99 spikes to 35ms because it waits for the lane model's CUDA kernels.
+scenario: "Your Jetson Orin runs two models concurrently: a safety-critical pedestrian detector (must complete in 15ms) and a comfort feature (lane marking detection, 50ms budget). Both share the GPU. Under load, the pedestrian detector's P99 spikes to 35ms because it waits for the lane model's CUDA kernels."
 question: How would you prevent the lane model from pushing the pedestrian detector past 15ms while staying within the 60W envelope?
 details:
-  realistic_solution: 'CUDA compute preemption (since Pascal) allows context switching, but with 50-200µs overhead. Strategy: (1) Assign pedestrian detector to a high-priority CUDA stream with CUDA_MPS or explicit stream priorities. (2) Split the lane model''s convolutions into smaller tiled kernels (max 2ms each) so preemption points occur frequently. (3) Use Orin''s DLA for the lane model entirely, freeing the GPU exclusively for the pedestrian detector — DLAs have separate compute paths and don''t contend with GPU streams. (4) Time-slice: dedicate GPU to pedestrian model for the first 15ms of each 33ms frame period, then lane model gets remaining 18ms. Result: pedestrian P99 = 12ms, lane model P99 = 42ms, total power = 45W.'
+  realistic_solution: NVIDIA GPUs utilize cooperative, rather than fully preemptive, scheduling; long-running kernels block high-priority work. To resolve this, offload the non-critical lane model completely to the Jetson Orin's Deep Learning Accelerator (DLA). The DLA provides physically separate silicon compute paths, ensuring zero interference with the safety-critical pedestrian detector on the Ampere GPU and guaranteeing the 15ms latency SLA.
   common_mistake: |
     **The Pitfall:** Assuming standard CUDA supports true preemptive scheduling for individual kernels.
     **The Rationale:** Candidates assume GPUs context switch as freely as CPUs do with threads.
     **The Consequence:** NVIDIA GPUs use cooperative preemption; a long-running kernel will block high-priority work for milliseconds until it reaches a preemption point.
   napkin_math: |
-    1. Shared GPU: pedestrian waits up to 20ms for a long lane kernel to finish → P99 = 35ms (Fails 15ms deadline).
-    2. DLA offload: lane model on DLA = 25ms (dedicated path, no GPU contention).
-    3. GPU free for pedestrian: P99 = 12ms.
-    4. Power: GPU at 35W + DLA at 10W = 45W.
-    5. **Total power 45W < 60W limit, and pedestrian P99 is reduced to 12ms, meeting the safety-critical deadline.**
+    1. **Assumptions & Constraints:**
+       - Pedestrian deadline: 15 ms.
+       - Shared GPU total latency: 35 ms.
+       - Available accelerators: GPU, DLA (Deep Learning Accelerator).
+       - Power limit: 60W.
+    2. **Calculations:**
+       - DLA Offload (lane model): 25 ms execution time on DLA.
+       - GPU execution (pedestrian): 12 ms P99.
+       - Power draw: 35W (GPU) + 10W (DLA) = 45W.
+    3. **Conclusion & Interpretation:**
+       - **Result: 12 ms P99 at 45W.** Offloading the non-critical model to the distinct DLA silicon path perfectly resolves GPU contention while remaining safely within the thermal envelope.
 status: published
 provenance: imported
 requires_explanation: true

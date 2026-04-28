@@ -8,27 +8,30 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: 'KV-Cache: Specification — KV Cache Constraints for Latency SLA on Tensor G3'
-scenario: A 1B LLM chat assistant runs on a Tensor G3, targeting an SLA of 30 tokens/sec (33.3ms per token).
+scenario: A 1B LLM chat assistant runs on a Tensor G3, targeting an SLA of 30 tokens/sec.
 question: What maximum KV cache size, required quantization, and context limit are necessary to meet the latency SLA given bandwidth constraints?
 details:
-  realistic_solution: 'Work backward from latency SLA. Budget: 33.3ms total per token. Allocate: ~20ms for weight loading, ~10ms for KV reading, ~3ms overhead. From 10ms KV budget, derive max KV size.'
+  realistic_solution: 'Apply Roofline modeling to derive KV capacity from the memory-bandwidth SLA. Allocate a 33.3ms end-to-end token latency budget: ~20ms for autoregressive weight loading, ~10ms for KV cache fetch, ~3ms for kernel launch overhead. Utilize the 10ms KV fetch window to calculate the maximum permissible KV cache footprint.'
   common_mistake: |
     **The Pitfall:** Specifying KV cache size without verifying it against bandwidth.
-
     **The Rationale:** Candidates fail to derive KV constraints directly from the latency SLA and target hardware's lower bandwidth.
-
     **The Consequence:** The proposed specification cannot meet the required 30 tokens/sec SLA on the Tensor G3.
   napkin_math: |
-    *   Latency Budget: 33.3ms per token.
-    *   Weight load: 1B * INT4 (0.5B/param) = 500MB.
-    *   Tensor G3 Bandwidth (~51 GB/s): 500MB / 51 GB/s = 9.8ms.
-    *   Remaining for KV: 33.3ms - 9.8ms - 3ms (overhead) = 20.5ms.
-    *   Max KV size budget: 20.5ms * 51 GB/s = 1.045 GB.
-    *   KV per token (FP16/BF16): 24 layers * 2 (K,V) * 8 heads * 128 dim * 2 bytes = 98.3 KB.
-    *   Max context (BF16): 1.045 GB / 98.3 KB = ~10,633 tokens.
-    *   KV per token (INT8): 24 * 2 * 8 * 128 * 1 byte = 49.15 KB.
-    *   Max context (INT8): 1.045 GB / 49.15 KB = ~21,260 tokens.
-    *   **Result:** Specify max 16K context with INT8 KV to maintain the SLA with a safety margin.
+    1. **Assumptions & Constraints:**
+       - Latency Budget: 33.3ms per token.
+       - Tensor G3 Bandwidth: ~51 GB/s.
+       - Overhead: ~3ms.
+    2. **Calculations:**
+       - Weight load: 1B * INT4 (0.5B/param) = 500MB.
+       - Fetch latency: 500MB / 51 GB/s = 9.8ms.
+       - Remaining for KV: 33.3ms - 9.8ms - 3ms = 20.5ms.
+       - Max KV size budget: 20.5ms * 51 GB/s = 1.045 GB.
+       - KV per token (FP16/BF16): 24 layers * 2 * 8 * 128 * 2 bytes = 98.3 KB.
+       - Max context (BF16): 1.045 GB / 98.3 KB = ~10,633 tokens.
+       - KV per token (INT8): 24 * 2 * 8 * 128 * 1 byte = 49.15 KB.
+       - Max context (INT8): 1.045 GB / 49.15 KB = ~21,260 tokens.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound.** Specify max 16K context with INT8 KV to maintain the SLA with a safety margin.
 status: published
 provenance: imported
 requires_explanation: true

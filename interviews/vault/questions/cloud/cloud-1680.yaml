@@ -8,20 +8,29 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: KV Cache Fragmentation Bottleneck
-scenario: You are deploying a 30B parameter LLM (FP16, ~60GB weights and workspace) on a single 80GB GPU. The current serving engine uses static contiguous memory allocation for the KV cache, reserving memory for the maximum sequence length (8192 tokens) upfront for every request. You observe that the server OOMs when concurrent requests exceed 4, even though the average actual request sequence length (prompt + completion) is only 512 tokens. Assume the KV cache requires 0.5MB per token.
+scenario: You are deploying a 30B parameter LLM on a single GPU. The current serving engine uses static contiguous memory allocation for the KV cache, reserving memory for the maximum sequence length (8192 tokens) upfront for every request. You observe that the server OOMs when concurrent requests exceed 4, even though the average actual request sequence length is only 512 tokens. Assume the KV cache requires 0.5MB per token.
 question: "What is causing the OOMs above 4 requests, and what concurrency should 16-token paged KV allocation support?"
 details:
-  realistic_solution: Diagnose the issue as internal memory fragmentation (over-allocation) and external fragmentation. Static allocation wastes memory on unused tokens up to the max length. Paged Memory Management dynamically allocates memory in non-contiguous fixed-size blocks (pages), perfectly fitting the actual sequence length and eliminating fragmentation, which dramatically increases max batch size.
+  realistic_solution: Diagnose the issue as internal memory fragmentation caused by over-allocation. Static allocation wastes memory on unused tokens up to the max length. Paged Memory Management (e.g. vLLM) dynamically allocates memory in non-contiguous blocks, perfectly fitting the actual sequence length and eliminating fragmentation, dramatically increasing max batch size.
   common_mistake: |
     **The Pitfall:** Proposing model compression techniques (like quantization) instead of fixing memory management.
     **The Rationale:** Candidates assume the OOM is due to raw model weight size, completely missing the catastrophic internal fragmentation caused by static pre-allocation.
     **The Consequence:** The team wastes time degrading model quality via quantization, only to gain a marginal bump of 1 or 2 batch slots.
   napkin_math: |
-    1. Available memory for KV cache: 80GB (Total) - 60GB (Weights) = 20GB.
-    2. Static allocation cost per request (for max 8192 tokens): 8192 * 0.5MB = 4GB. Max static requests = 20GB / 4GB = 5 requests.
-    3. Paged Memory cost for the actual average sequence (512 tokens): 512 * 0.5MB = 256MB.
-    4. New theoretical concurrency limit: 20GB / 256MB = 80 requests.
-    5. **Conclusion:** **Paged KV cache allocation dramatically increases serving capacity from 5 concurrent requests to 80.**
+    1. **Assumptions & Constraints:**
+       - Total GPU memory: 80 GB.
+       - Model weights: ~60 GB.
+       - Static allocation: 8192 tokens/request.
+       - Average actual sequence: 512 tokens/request.
+       - KV cache size: 0.5 MB/token.
+    2. **Calculations:**
+       - Available memory for KV cache: 80 GB - 60 GB = 20 GB.
+       - Static allocation cost per request: 8192 * 0.5 MB = 4 GB.
+       - Max static requests: 20 GB / 4 GB = 5 requests.
+       - Paged Memory cost for average sequence: 512 * 0.5 MB = 256 MB.
+       - New theoretical concurrency limit: 20 GB / 256 MB = 80 requests.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Fragmentation.** Paged KV cache allocation dynamically fits actual sequence lengths, dramatically increasing serving capacity from 5 concurrent requests to 80.
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,9 +46,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-created_at: '2026-03-24T00:13:43.766757'

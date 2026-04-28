@@ -11,16 +11,23 @@ title: Diagnosing On-Device Drift Detection OOM on Hexagon NPU
 scenario: A background drift detection process on a Snapdragon 8 Gen 3 calculates the Population Stability Index (PSI) between local INT8 inference inputs and a global baseline. Users are reporting sudden OOM crashes during this background phase, despite the device having 16 GB of shared memory.
 question: Why does background PSI drift detection cause OOM on Snapdragon 8 Gen 3 despite stable INT8 inference?
 details:
-  realistic_solution: The root cause is that while the NPU efficiently handles the 45 TOPS INT8 inference, the drift detection module (calculating PSI) likely pulls the high-dimensional feature vectors back to the CPU in FP32 format for statistical binning. The Hexagon NPU is highly optimized for quantized execution, but aggregating thousands of unquantized vectors on the CPU causes a massive memory spike in the shared LPDDR5X pool. The solution is to push the binning logic or a simplified drift proxy metric into the INT8 NPU execution graph, or sub-sample the distributions heavily before transferring them to the CPU.
+  realistic_solution: The root cause is data unquantization during aggregation. While the Hexagon NPU efficiently executes the INT8 forward pass, the PSI module pulls thousands of high-dimensional vectors back to the CPU in FP32 format for statistical binning. This creates a massive memory spike in the shared LPDDR5X pool, violating Android's background app memory limits. The fix is pushing binning logic into the INT8 NPU graph or employing heavy reservoir sampling before CPU transfer.
   common_mistake: |
-    **The Pitfall:** Blaming general memory leaks while ignoring data format inflation.
-    **The Rationale:** Candidates fail to realize that background statistical processes typically unquantize NPU data back into FP32 arrays on the CPU for binning.
-    **The Consequence:** They suggest irrelevant fixes (like reducing NPU batch size) instead of fixing the massive FP32 memory spike during aggregation.
+    **The Pitfall:** Blaming generic memory leaks while ignoring the format inflation of unquantized CPU transfers.
+    **The Rationale:** Candidates assume post-processing memory footprints mimic NPU inference footprints.
+    **The Consequence:** They incorrectly advise reducing inference batch sizes instead of resolving the massive FP32 aggregation spike.
   napkin_math: |
-    - **INT8 Storage:** 1,000 embeddings of size 4,096 at 1 byte = ~4 MB on the NPU.
-    - **FP32 Conversion:** Pulling 24 hours (24,000 requests) to CPU as FP32 (4 bytes) = 24,000 * 4096 * 4 = ~393 MB.
-    - **Peak Memory:** Allocating multiple 393 MB buffers for sorting/binning quickly exceeds the Android OS ~500 MB background process limit.
-    - **Final Result:** **The application OOMs not from model size, but from unquantized CPU data accumulation.**
+    1. **Assumptions & Constraints:**
+       - Vectors: 24,000 requests per day.
+       - Dimension: 4,096 elements per vector.
+       - Formats: INT8 (1 byte) on NPU; FP32 (4 bytes) on CPU.
+       - OS Limit: ~500 MB background process limit.
+    2. **Calculations:**
+       - INT8 Size (single vector): 4 KB.
+       - FP32 Batch Size: 24,000 * 4,096 * 4 bytes = 393.2 MB.
+       - Peak CPU Memory: Multiple buffers during sort/binning = ~786 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** The 786 MB FP32 allocation instantly breaches the strict 500 MB Android background limit, guaranteeing an OS kill.
 status: published
 provenance: imported
 requires_explanation: false

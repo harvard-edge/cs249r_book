@@ -8,19 +8,26 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Diagnose Memory-Bandwidth-Bound Decode on H100 Serving Cluster
-scenario: An H100-based LLM serving system for a 70B parameter model (INT8, 70GB) achieves only 52 tokens/s per GPU during autoregressive decode at batch size 1. The theoretical peak from compute is 1,979 TFLOP/s FP16, and the 70B model requires 2 FLOPs/token = 140 GFLOP/token. The theoretical peak from memory bandwidth is 3.35 TB/s.
+scenario: An LLM serving system for a 70B parameter model (INT8) achieves only 52 tokens/s per GPU during autoregressive decode at batch size 1.
 question: Is batch-1 decode for the 70B INT8 model compute-bound or memory-bandwidth-bound, and why is throughput about 52 tokens/s?
 details:
   realistic_solution: 'Compute-bound throughput: 1,979 TFLOP/s / 140 GFLOP/token = 14,136 tokens/s. Memory-bound throughput: 3.35 TB/s / 70 GB = 47.9 loads/s = 47.9 tokens/s. Measured 52 tokens/s ≈ memory-bound prediction (slight overestimate suggests INT8 reduces weight size to 70GB but attention KV adds overhead). Diagnosis: memory-bandwidth-bound by 14,136/47.9 = 295× margin. Fix: increase batch size. At batch=64: KV cache adds 64×context×layers×dims×1B overhead but compute scales 64× while weight loads are shared → 52×64 = 3,328 tokens/s total, 52 tokens/s/request (same latency, 64× throughput).'
   common_mistake: |
     **The Pitfall:** Computing only compute-bound throughput and ignoring memory bandwidth.
     **The Rationale:** When evaluating hardware performance, peak TFLOP/s is often the most advertised metric.
-    **The Consequence:** Engineers overestimate single-batch throughput by nearly 300&times; because they fail to realize that autoregressive decode requires loading all model weights for every single generated token.
+    **The Consequence:** Engineers overestimate single-batch throughput by nearly 300x because they fail to realize autoregressive decode requires loading all model weights for every single token.
   napkin_math: |
-    - **Compute Bound:** 1,979 TFLOP/s / 0.140 TFLOP/token = 14,136 tokens/s.
-    - **Memory Bound:** 3.35 TB/s / 70 GB weights = 47.9 loads/s = 47.9 tokens/s.
-    - **Ratio:** 14,136 / 47.9 = **295&times; memory-bound**.
-    - **Batch=64 Extrapolation:** Weight reads are shared across requests. 64 requests &times; 47.9 tokens/s = **3,066 tokens/s total throughput**, while latency per request remains nearly identical.
+    1. **Assumptions & Constraints:**
+       - Model weights = 70 GB (INT8).
+       - FLOPs/token = 140 GFLOPs.
+       - H100 Bandwidth = 3.35 TB/s.
+       - H100 Compute = 1,979 TFLOP/s.
+    2. **Calculations:**
+       - Compute Bound: 1,979 TFLOP/s / 0.140 TFLOP/token ≈ 14,136 tokens/s.
+       - Memory Bound: 3.35 TB/s / 70 GB = 47.9 tokens/s.
+       - Ratio: 14,136 / 47.9 ≈ 295x.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound (295x ratio).** The 52 tokens/s throughput perfectly matches the memory-bound limit; batching is required.
 status: published
 provenance: imported
 requires_explanation: false

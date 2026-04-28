@@ -8,19 +8,24 @@ competency_area: architecture
 bloom_level: analyze
 phase: training
 title: Hardware-Aware NAS on ESP32-S3 for TinyML Vision
-scenario: You need to develop an efficient image classification model for a low-power, edge device using an ESP32-S3 microcontroller. The device has a 240 MHz dual-core processor, 512 KB of on-chip SRAM, and 8 MB of external PSRAM. The model must classify 32x32 grayscale images into 10 categories with an inference latency under 200ms and a peak SRAM usage below 400KB.
-question: How should ESP32-S3 hardware-aware NAS define search space and rewards for 32x32 image classification under SRAM and latency limits?
+scenario: You are developing a 32x32 grayscale image classification model for an ESP32-S3. The model must execute in under 200ms and peak SRAM usage must remain below 400KB.
+question: How should an ESP32-S3 hardware-aware NAS constrain its search space and construct its reward function to ensure the model satisfies the SRAM and latency targets?
 details:
-  realistic_solution: A realistic solution would involve defining a NAS search space heavily biased towards compact, mobile/tiny architectures (e.g., MobileNetV2, GhostNet variants, ShuffleNet) with a strong emphasis on extremely low-bit quantization (e.g., 8-bit or 4-bit integer quantization) and aggressive pruning. The NAS reward function would be multi-objective, explicitly balancing accuracy, on-device measured or accurately estimated latency, and SRAM footprint. Pre-calculating SRAM usage for candidate layers and using a memory-aware predictor during search to prune infeasible architectures early would be implemented. PSRAM would primarily be considered for storing the full model weights at boot-up.
+  realistic_solution: The NAS search space must be structurally constrained to low-bit quantization (e.g., INT8) and depthwise-separable architectures (e.g., MobileNet variants). The multi-objective reward function must aggressively penalize candidates breaching the 400KB SRAM constraint, analyzed via static tensor lifetime profiling. External PSRAM must be rigidly designated for boot-time weight storage only, never for intermediate activations during the critical execution path.
   common_mistake: |
-    **The Pitfall:** Confusing total memory with operational SRAM.
-    **The Rationale:** Candidates rely on the 8MB PSRAM for intermediate activations, misjudging the catastrophic latency hit of fetching data off-chip.
-    **The Consequence:** The NAS proposes structurally large models that mathematically fit in the 8MB pool but completely fail the 200ms latency requirement due to bus contention.
+    **The Pitfall:** Integrating external PSRAM into the active tensor pool.
+    **The Rationale:** Candidates assume the 8 MB PSRAM acts identically to internal SRAM, treating it as a large, homogeneous memory space.
+    **The Consequence:** The NAS proposes massively bloated models that fit mathematically but utterly fail the 200ms deadline due to the disastrous latency of continuously fetching intermediate tensors over the SPI bus.
   napkin_math: |
-    - SRAM Constraint: With 400KB limit, an FP32 model holds max 102,400 parameters.
-    - An INT8 quantized model holds 409,600 parameters, mandating aggressive quantization.
-    - Latency Constraint: 200ms at 240 MHz = 48 million cycles available.
-    - Assuming 1-2 cycles per MAC, absolute limit is **24-48 million MAC operations**, heavily restricting the search space to shallow, depthwise-separable networks.
+    1. **Assumptions & Constraints**:
+       - ESP32-S3 at 240 MHz. Deadline = 200ms.
+       - Peak SRAM = 400 KB.
+    2. **Calculations**:
+       - Available Clock Cycles: 240,000,000 Hz * 0.200 seconds = 48,000,000 cycles.
+       - Max FP32 Parameters in SRAM: 400 KB / 4 bytes = 102,400 parameters.
+       - Max INT8 Parameters in SRAM: 400 KB / 1 byte = 409,600 parameters.
+    3. **Conclusion & Interpretation**:
+       - **Result: Compute-Bound Execution**. The 200ms strict deadline provides a maximum of 48 million operations, mandating that the NAS restrict the search space heavily toward heavily quantized, sub-100K parameter topologies.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,19 +7,27 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: apply
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Implement Flash-Attention BW Reduction for Mobile Inference'
-scenario: 'Calculate the memory bandwidth savings from using Flash-Attention vs. standard attention for a 3B LLM prefill on Snapdragon 8 Gen 3 (77 GB/s). Prefill: 1024 tokens, 32 heads, 128 head_dim, 32 layers.'
-question: How would you calculate the memory bandwidth savings from using Flash-Attention vs. standard attention for a 3B LLM prefill on Snapdragon 8 Gen 3 (77 GB/s)?
+title: 'Network Bandwidth Bottlenecks: Implement Flash-Attention BW Reduction'
+scenario: Calculate the memory bandwidth savings from using Flash-Attention vs. standard attention for a 3B LLM prefill on a mobile SoC (77 GB/s). The prefill uses 1024 tokens, 32 heads, 128 head_dim, and 32 layers.
+question: How would you calculate the memory bandwidth savings from using Flash-Attention vs. standard attention for a 3B LLM prefill?
 details:
-  realistic_solution: 'Standard attention materializes the Q×K^T matrix. For sequence length 1024, this is 1024×1024 elements per head. With 32 heads and 2 bytes per element (FP16), this is 32 × 1024 × 1024 × 2B = 64MB per layer. Reading and writing this matrix, plus the softmax outputs, adds significant memory bandwidth overhead (~2GB total across 32 layers). Flash-Attention tiles the computation and never materializes the full attention matrix to LPDDR5X. BW reduction: ~64MB/layer × 32 = 2GB saved. At 77GB/s, time saved = 2GB / 77GB/s ≈ 26ms. For a prefill that normally takes ~27ms compute-bound, saving 26ms of memory overhead is a massive reduction.'
+  realistic_solution: Standard attention materializes the massive QxK^T matrix to LPDDR RAM. Flash-Attention-2 mitigates this via loop tiling and kernel fusion, maintaining the intermediate Softmax denominators entirely in NPU SRAM. This avoids reading and writing the 67MB matrix per layer back to main memory. Across 32 layers, this rescues 2.14GB of redundant memory IO, saving roughly 27ms of latency on a 77GB/s bus.
   common_mistake: |
     **The Pitfall:** Applying Flash-Attention bandwidth savings to the decode phase.
     **The Rationale:** Candidates recognize Flash-Attention reduces memory I/O but misapply it to autoregressive decoding.
-    **The Consequence:** They overestimate decode speedups, failing to realize that during decode, only one new token attends to the KV cache, making the materialized QK^T matrix trivially small.
+    **The Consequence:** They overestimate decode speedups, failing to realize that during decode, only one new token attends to the KV cache, making the materialized QK^T matrix trivially small and strictly memory-bandwidth bound anyway.
   napkin_math: |
-    - Matrix size per layer: [batch=1, heads=32, seq=1024, seq=1024] × 2 bytes = 32 × 1048576 × 2B = 67.1 MB/layer.
-    - Total across 32 layers: 67.1 MB * 32 = 2.14 GB (≈ 2 GB).
-    - Bandwidth time saved: 2.14 GB / 77 GB/s ≈ 0.027 seconds (**27 ms**).
+    1. **Assumptions & Constraints:**
+       - Batch: 1. Heads: 32. Seq Length: 1024.
+       - Precision: FP16 (2 bytes).
+       - Layers: 32.
+       - Memory Bandwidth: 77 GB/s.
+    2. **Calculations:**
+       - Matrix size per layer: [1, 32, 1024, 1024] * 2 bytes = 32 * 1,048,576 * 2B = 67.1 MB/layer.
+       - Total across 32 layers: 67.1 MB * 32 = 2,147 MB ≈ 2.14 GB.
+       - Bandwidth time saved: 2.14 GB / 77 GB/s ≈ 0.027 seconds (27 ms).
+    3. **Conclusion & Interpretation:**
+       - **Result: 2.14 GB / 27 ms saved.** The standard attention prefill is unnecessarily **Memory-Bandwidth-Bound**; Flash-Attention shifts it back to compute-bound.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,23 +8,26 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The Multi-Tenant Edge Scheduler
-scenario: 'You manage a fleet of 1,000 edge AI gateways at retail stores, each with a Jetson AGX Orin (275 TOPS, 64 GB RAM). Each gateway runs AI workloads for 4 different internal teams: loss prevention (real-time, safety-critical), inventory tracking (near-real-time), customer analytics (best-effort), and digital signage (background). During Black Friday, all four teams demand peak resources simultaneously. The loss prevention team reports missed detections.'
-question: "How would you design a multi-tenant scheduler so loss prevention meets its deadlines during Black Friday?"
+scenario: 'You manage a fleet of 1,000 edge AI gateways at retail stores, each with a Jetson AGX Orin. Each gateway runs AI workloads for 4 different internal teams: loss prevention (real-time, safety-critical), inventory tracking (near-real-time), customer analytics (best-effort), and digital signage (background). During Black Friday, all four teams demand peak resources simultaneously. The loss prevention team reports missed detections.'
+question: How would you design a multi-tenant scheduler so loss prevention meets its deadlines during Black Friday?
 details:
-  realistic_solution: 'Edge multi-tenancy requires a hierarchical resource scheduler with three mechanisms:
-    1. Resource partitioning with guaranteed minimums: Assign each tenant a guaranteed minimum GPU allocation (using NVIDIA MPS or MIG on Orin): loss prevention = 40% guaranteed (110 TOPS), inventory = 25% (69 TOPS), analytics = 20% (55 TOPS), signage = 15% (41 TOPS). These are *minimums*, not caps.
-    2. Burst scheduling with preemption: When a tenant is idle, its allocation is available to others. During Black Friday, analytics and signage burst into each other''s slack. But when loss prevention needs more than its 40%, it can preempt lower-priority tenants'' burst allocations (not their guarantees). Preemption order: signage -> analytics -> inventory. Loss prevention is never preempted.
-    3. Deadline-aware admission control: Each inference request carries a deadline. The scheduler admits requests only if it can meet the deadline given current load. If loss prevention''s queue depth exceeds the capacity to meet all deadlines, the scheduler sheds the oldest analytics requests (they can tolerate staleness) to free GPU cycles. The key metric is not utilization but deadline miss rate per tenant: loss prevention must be 0%, inventory <1%, analytics <10%, signage <50%.'
+  realistic_solution: 'Edge multi-tenancy requires a hierarchical resource scheduler using NVIDIA MPS or MIG. 1. Resource partitioning with guaranteed minimums (e.g. loss prevention=40%, inventory=25%, analytics=20%, signage=15%). 2. Burst scheduling with preemption: Idle allocation is shared. Loss prevention can preempt lower-priority tenants burst allocations, and is never preempted. 3. Deadline-aware admission control: Requests carry deadlines. If the queue depth exceeds capacity to meet all deadlines, shed the oldest analytics requests (tolerate staleness). Pin the loss prevention model in memory to prevent page faults.'
   common_mistake: |
     **The Pitfall:** Proposing equal shares ("Give each team 25% of the GPU") or pure priority queues ("Highest priority gets everything").
     **The Rationale:** Candidates rely on standard OS scheduling paradigms without considering edge multi-tenancy requirements.
     **The Consequence:** Equal shares waste resources during off-peak, while pure priority causes starvation for background tasks and fails to guarantee strict deadlines under burst contention.
   napkin_math: |
-    1. **Compute Requirements:** Loss prevention (YOLOv8-L): 43 GOPS x 30 FPS = 1.29 TOPS sustained. Inventory: 0.5 TOPS. Analytics: 0.3 TOPS. Signage: 0.1 TOPS.
-    2. **Total Sustained Load:** 2.19 TOPS (only 0.8% of 275 TOPS).
-    3. **Burst Contention:** During Black Friday, loss prevention spikes to 60 FPS (2.58 TOPS) and inventory spikes to 10x (5 TOPS). Combined burst: 7.98 TOPS (still only 2.9% of compute).
-    4. **The Real Bottleneck (Memory):** Loading all four models takes 12 GB + 8 GB + 6 GB + 4 GB = 30 GB. With activations, this reaches ~45 GB of the 64 GB limit.
-    **Memory pressure causes model swapping, adding 200-500ms latency spikes that lead to missed detections. The fix must pin the loss prevention model in memory.**
+    1. **Assumptions & Constraints:**
+       - Jetson AGX Orin: 275 TOPS, 64 GB RAM.
+       - Compute sustained load: 2.19 TOPS (0.8% of capacity).
+       - Burst compute load: 7.98 TOPS (2.9% of capacity).
+       - Model memory footprint: 12 GB + 8 GB + 6 GB + 4 GB = 30 GB (weights alone).
+       - Total memory with activations: ~45 GB.
+    2. **Calculations:**
+       - Compute utilization is well under 5%.
+       - Memory pressure reaches 45 GB / 64 GB under peak load. Additional system/OS overhead can cause paging.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Capacity-Bound**. The real bottleneck is memory swapping, not compute. Model swapping adds 200-500ms latency spikes that lead to missed detections. The fix must pin the loss prevention model in memory.
 status: published
 provenance: imported
 requires_explanation: true

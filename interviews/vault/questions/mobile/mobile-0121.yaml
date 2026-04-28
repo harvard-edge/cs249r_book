@@ -8,22 +8,27 @@ competency_area: reliability
 bloom_level: apply
 phase: inference
 title: The Profiling Tool Blind Spot
-scenario: You profile your ML inference pipeline on a Pixel 7 (Tensor G2) using Android's Systrace. The trace shows your inference function takes 12ms. You then profile with TFLite's built-in benchmark tool, which reports 8ms. Finally, you use Perfetto and see 15ms.
-question: Why do TFLite benchmark, Systrace, and Perfetto report 8ms, 12ms, and 15ms for the same Pixel 7 inference?
+scenario: You profile an ML inference pipeline using Android's Systrace, which reports 12ms. A TFLite benchmark tool reports 8ms. Finally, Perfetto reports 15ms.
+question: Why do TFLite benchmark, Systrace, and Perfetto report 8ms, 12ms, and 15ms for the same inference?
 details:
   realistic_solution: |
-    All three are correct for their scope. TFLite benchmark (8ms): pure compute. Systrace (12ms): +4ms app overhead (JNI, allocation, copies). Perfetto (15ms): +system interference (scheduler, memory pressure, GC). For production: use Perfetto P95/P99. At 16.7ms frame budget, 8ms benchmark says 'headroom' but P99=20ms means dropping 1 in 100 frames. Rule of thumb: multiply benchmark by 1.5-2x for production P95 on mobile.
+    All three profiling tools measure different scopes of the pipeline. The TFLite benchmark (8ms) measures pure isolated NPU compute without OS interference. Systrace (12ms) includes application-level overhead such as JNI bridge crossings, tensor memory allocations, and data marshaling. Perfetto (15ms) captures the holistic system state, integrating stochastic interference like thread scheduling, thermal throttling, L3 cache contention, and JVM Garbage Collection. For production deployment SLAs, you must architect against the Perfetto P99 latency (often 1.5-2x the pure compute benchmark) to prevent frame drops.
   common_mistake: |
     **The Pitfall:** Always trusting the lowest latency number reported by the benchmark tool.
     **The Rationale:** Candidates assume the benchmark tool is the most accurate because it's closest to the inference engine.
     **The Consequence:** They deploy to production expecting 8ms, but end up dropping frames because they ignored system interference and app overhead.
   napkin_math: |
-    - TFLite benchmark: 8ms (compute only).
-    - App overhead: +4ms (copies, JNI, allocation).
-    - System interference P50: +1ms, P95: +3ms, P99: +8ms.
-    - Production P50: 13ms. Production P95: 15ms. Production P99: 20ms.
-    - If frame budget is 16.7ms (60 FPS), the 8ms benchmark says "plenty of headroom".
-    - The P99 of 20ms says **you'll drop 1 in 100 frames**.
+    1. **Assumptions & Constraints:**
+       - Pure compute (TFLite benchmark): 8 ms.
+       - App overhead (JNI, copies): +4 ms.
+       - System interference (OS scheduler, GC): +3 ms (P95) to +8 ms (P99).
+       - SLA: 60 FPS (16.6 ms frame budget).
+    2. **Calculations:**
+       - Systrace (App Level) = 8 ms + 4 ms = 12 ms.
+       - Perfetto (System Level P95) = 12 ms + 3 ms = 15 ms.
+       - Production P99 = 12 ms + 8 ms = 20 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduling/JNI-Bound.** The 8ms benchmark creates a false sense of security. The true P99 of 20ms severely violates the 16.6ms frame budget, guaranteeing that 1 in 100 frames will drop unless app-level marshaling overhead is reduced.
 status: published
 provenance: imported
 requires_explanation: false

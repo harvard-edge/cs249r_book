@@ -8,22 +8,26 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: The Multi-LoRA Serving
-scenario: We run a multi-tenant LLM platform. Each of our 100 enterprise customers has a fine-tuned LoRA
-  adapter for a shared Llama-70B base model. We need to serve all 100 adapters from the same GPU cluster.
-  Walk me through the memory math, the adapter swapping cost, and how to batch requests across different
-  adapters.
+scenario: We run a multi-tenant LLM platform. Each of our 100 enterprise customers has a fine-tuned LoRA adapter for a shared Llama-70B base model. We need to serve all 100 adapters from the same GPU cluster.
 question: "How would you serve 100 LoRA adapters for a shared Llama-70B base model, including memory, swapping, and batching across adapters?"
 details:
-  realistic_solution: 'LoRA adapters are small individually (rank-16 adapter for 70B ≈ 160 MB) but 100
-    of them = 16 GB, which competes with KV-cache for VRAM. The key insight is that LoRA is a low-rank
-    additive decomposition: $W'' = W + BA$. The base model weights $W$ are shared; only $B$ and $A$ differ
-    per adapter. You can batch the base model computation across all requests, then apply per-adapter
-    corrections using a batched SGMV (Segmented Gather Matrix-Vector) kernel that applies different $BA$
-    products to different requests within the same batch. This is how S-LoRA and Punica work.'
-  common_mistake: '"Load all 100 LoRA adapters into GPU memory — they''re small." Even small adapters
-    add up, and the real bottleneck is batching: you can''t batch requests across different adapters naively
-    because each adapter produces different weight matrices.'
-  napkin_math: 'Llama-70B base model = 140 GB (FP16), needs 2x H100 (160GB total). 100 LoRA adapters (rank-16, ~160MB each) = 16 GB. Total weights = 156 GB. This leaves very little room (4 GB) for KV cache if only using 2x H100s, meaning batch sizes would be tiny. The solution is either 4x H100s to allow a large KV cache for batching, or offloading inactive adapters to CPU RAM.'
+  realistic_solution: 'Batch the base model computation across all requests, then apply per-adapter corrections using a batched SGMV (Segmented Gather Matrix-Vector) kernel like in S-LoRA or Punica. The base model weights W are shared; only B and A differ per adapter.'
+  common_mistake: |
+    **The Pitfall:** Assuming 100 small LoRA adapters can be naively loaded and batched together.
+    **The Rationale:** Candidates forget that standard batching requires identical weights across all requests.
+    **The Consequence:** Drastically reduced throughput due to unbatched sequential processing or OOM from memory fragmentation.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Llama-70B base model = 140 GB (FP16).
+       - 100 LoRA adapters (rank-16, ~160MB each).
+       - Total VRAM available = 160 GB (2x H100 80GB).
+    2. **Calculations:**
+       - Base model memory = 140 GB.
+       - Total adapters memory = 100 * 160 MB = 16 GB.
+       - Total weights memory = 156 GB.
+       - Remaining VRAM for KV cache = 160 GB - 156 GB = 4 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 4 GB KV cache remaining.** The bottleneck is **VRAM Capacity-Bound**. Requires 4x H100s or CPU offloading.
 status: published
 provenance: imported
 requires_explanation: false

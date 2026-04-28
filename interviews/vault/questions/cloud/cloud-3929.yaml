@@ -8,19 +8,18 @@ competency_area: parallelism
 bloom_level: apply
 phase: both
 title: Prefetching Activations in Pipeline Parallelism Across Nodes
-scenario: In a 4-node pipeline-parallel setup with GPUs connected via 400 Gbps InfiniBand, each pipeline stage sends activation tensors (256MB per micro-batch) to the next stage. Without prefetching, each stage waits for the activation transfer before starting compute.
+scenario: In a 4-node pipeline-parallel setup with GPUs connected via 400 Gbps InfiniBand, each pipeline stage sends activation tensors (256MB per micro-batch) to the next stage.
 question: How would you design an activation prefetching scheme to overlap 256MB activation transfers over 400 Gbps InfiniBand with compute?
 details:
   realistic_solution: 'Multi-level prefetching: (1) Stage i starts transferring micro-batch N+1''s activations to stage i+1 as soon as micro-batch N''s forward pass completes. (2) Use a ring buffer of 2-3 activation slots per stage to allow multiple in-flight transfers. (3) Record CUDA events after each forward pass to trigger the next prefetch. (4) Key optimization: overlap the activation send with the current micro-batch''s backward pass (which doesn''t need the sent activations).'
   common_mistake: |
     **The Pitfall:** Only prefetching one micro-batch ahead.
-    **The Rationale:** With 4 pipeline stages and network latency, a single prefetch may not fully hide the transfer time.
-    **The Consequence:** The pipeline stages still experience stalls, leading to sub-optimal utilization.
+    **The Rationale:** With multiple pipeline stages and high network latency, a single-slot prefetch buffer cannot fully absorb the network transit time.
+    **The Consequence:** The pipeline stages still experience stalls waiting for network I/O, leading to sub-optimal GPU utilization and lower MFU.
   napkin_math: |
-    - 1. **Transfer Time:** 256MB / 50GB/s (400 Gbps) = 5.1ms.
-    - 2. **Without Prefetch:** 50ms compute + 5.1ms transfer = 55.1ms per stage per micro-batch. For 4 stages × 8 micro-batches: 4 × 8 × 55.1 = 1763.2ms.
-    - 3. **With Prefetch:** 50ms compute (transfer hidden). For 4 stages × 8 micro-batches: 4 × 8 × 50 = 1600ms.
-    - 4. **Speedup:** (1763.2 - 1600) / 1763.2 = **~9.3% speedup**.
+    1. **Assumptions & Constraints:** 4 pipeline stages, 400 Gbps (50 GB/s) InfiniBand, 256MB activations per micro-batch, 50ms compute time per stage.
+    2. **Calculations:** Transfer Time = 256 MB / 50 GB/s = 5.12 ms. Without prefetch, total time per stage = 50ms compute + 5.12ms transfer = 55.12 ms. With prefetch, transfer is hidden, total time = 50 ms. Speedup = (55.12 - 50) / 55.12 = 9.29%.
+    3. **Conclusion & Interpretation:** **Result: ~9.3% speedup per step. Network-Latency-Bound if not overlapped.**
 status: published
 provenance: imported
 requires_explanation: true

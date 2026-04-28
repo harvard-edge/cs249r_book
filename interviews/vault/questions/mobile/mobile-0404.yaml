@@ -17,19 +17,21 @@ details:
     **The Rationale:** Engineers assume the operator's execution time is the bottleneck, failing to realize that the repeated context switching and data transfer to/from the NPU (the "fallback tax") dominates the latency.
     **The Consequence:** Engineering effort is wasted on a custom kernel that still fails to meet the 16ms budget because the fixed fallback tax remains.
   napkin_math: |
-    * Latency with 10 CPU fallbacks = 25 ms
-    * Latency fully delegated to ANE = 12 ms
-    * Total penalty for 10 fallbacks = 25 ms - 12 ms = 13 ms
-    * Penalty per fallback = 13 ms / 10 = 1.3 ms (mostly context switch/transfer overhead).
-    * If CPU execution takes 0.5 ms and is optimized by 4x: new execution time = 0.125 ms.
-    * New penalty per fallback = 1.3 ms - (0.5 ms - 0.125 ms) = 0.925 ms.
-    * New total latency = 12 ms (base) + 10 * 0.925 ms = 21.25 ms.
-    * **21.25 ms still misses the 16 ms budget. Eliminating the fallback is the only path.**
+    1. **Assumptions & Constraints:**
+       - Total latency (10 fallbacks) = 25 ms
+       - Total latency (0 fallbacks) = 12 ms
+       - Jank budget = 16 ms
+    2. **Calculations:**
+       - Total fallback penalty = 25 ms - 12 ms = 13 ms
+       - Context switch overhead per fallback = 13 ms / 10 = 1.3 ms
+       - Best-case CPU op optimization (4x speedup, saving 0.375ms per op) = 10 * (1.3 ms - 0.375 ms) = 9.25 ms overhead. Total latency = 21.25 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Context Switch Bottleneck. Even perfectly optimizing the CPU operation fails the 16 ms budget because the fixed data transfer/context-switch penalty (13 ms) dominates.**
   options:
   - Implement a custom Metal GPU kernel for `FancyReLU` to accelerate its execution compared to the CPU.
   - Apply INT8 quantization to the whole model to reduce the data size and speed up the CPU execution of `FancyReLU`.
   - Replace `FancyReLU` with a similar, ANE-supported activation like `SiLU` (Swish) and retrain the model to recover the accuracy.
-  - Increase the number of CPU threads available to the app to parallelize the execution of the ten `FancyReLU` fallbacks.
+  - Distribute the `FancyReLU` fallbacks across 10 threads to execute them concurrently, bringing total execution time under 1ms.
   correct_index: 2
 status: published
 provenance: imported

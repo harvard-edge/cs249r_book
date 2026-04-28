@@ -8,26 +8,24 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: KV-Cache Aware Request Scheduling
-scenario: Your serving cluster runs 4 replicas of Llama 3 70B on H100 nodes. A load
-  balancer routes requests via round-robin. Replica 1 has 90% KV-cache utilization
-  (many long-context requests), while replicas 2-4 are at 30%. New long-context requests
-  sent to replica 1 are rejected. Specify a KV-cache-aware routing policy.
-question: How should the load balancer be modified to prevent replica 1 from rejecting
-  requests while replicas 2-4 remain underutilized?
+scenario: Your serving cluster runs 4 replicas of Llama 3 70B. A load balancer currently routes requests via round-robin. Replica 1 has 90% KV-cache utilization due to many long-context requests, while replicas 2-4 are at 30%. New long-context requests sent to replica 1 are being rejected.
+question: How should the load balancer be modified to prevent replica 1 from rejecting requests while replicas 2-4 remain underutilized?
 details:
-  realistic_solution: 'Implement KV-cache-aware routing (e.g., using a least-outstanding-requests
-    or least-KV-cache-used policy) where replicas continuously report their current
-    KV-cache utilization to the load balancer. The load balancer then routes new requests,
-    especially long-context ones, to the replica with the most available KV-cache
-    blocks, preventing OOM rejections on heavily loaded nodes.'
-  common_mistake: Adding a simple 'reject-and-retry' mechanism that sends rejected
-    requests to another replica. This creates cascading retries and does not prevent
-    the imbalance from recurring.
-  napkin_math: 'With round-robin, a 32k-token request has a 25% chance of hitting
-    replica 1. If replica 1 has 90% KV usage, it rejects it. With KV-aware routing,
-    the load balancer checks replica 1 (90%), replica 2 (30%), replica 3 (30%), replica
-    4 (30%), and deterministically routes the 32k request to replica 2, 3, or 4, ensuring
-    0% rejection rate.'
+  realistic_solution: 'Implement stateful KV-cache-aware routing where replicas continuously report their current KV-cache utilization to the load balancer. The load balancer then routes new requests, especially long-context ones, to the replica with the most available KV-cache blocks, preventing OOM rejections.'
+  common_mistake: |
+    **The Pitfall:** Adding a simple 'reject-and-retry' mechanism that sends rejected requests to another replica.
+    **The Rationale:** Engineers often treat OOM or rejection as a transient failure to be retried, rather than a stateful load imbalance.
+    **The Consequence:** This creates cascading retries, increases tail latency, and does not prevent the fundamental utilization imbalance from recurring.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 4 replicas with round-robin routing.
+       - Replica 1 at 90% KV usage, Replicas 2-4 at 30%.
+    2. **Calculations:**
+       - With round-robin, a new 32k-token request has a 25% chance of hitting replica 1.
+       - If it hits replica 1, it is rejected (25% systemic rejection rate for long requests).
+       - With KV-aware routing, the load balancer checks state and deterministically routes to replicas 2, 3, or 4.
+    3. **Conclusion & Interpretation:**
+       - **Result: Stateful Routing Required.** KV-aware routing ensures a 0% rejection rate by actively balancing the KV-cache allocation across the fleet.
 status: published
 provenance: imported
 requires_explanation: true

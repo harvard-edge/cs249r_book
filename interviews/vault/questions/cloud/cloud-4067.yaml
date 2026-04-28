@@ -8,8 +8,8 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: RDMA Completion Queue Polling vs Interrupts
-scenario: RDMA provides two mechanisms for detecting transfer completion: polling the Completion Queue (CQ) or waiting for an interrupt. NCCL uses dedicated progress threads that continuously poll the CQ. A 64-GPU A100 cluster runs AllReduce with 1024 chunks per iteration at 1000 iterations per second. The CPU runs at 3GHz, a CQ poll takes 300 cycles, and an interrupt takes 6000 cycles.
-question: "For 1000 AllReduce iterations per second on 64 A100s, what CPU-cycle overhead does CQ polling use versus interrupts?"
+scenario: 'RDMA provides two mechanisms for detecting transfer completion: polling the Completion Queue (CQ) or waiting for an interrupt. NCCL uses dedicated progress threads that continuously poll the CQ. A 64-GPU cluster runs AllReduce with 1024 chunks per iteration at 1000 iterations per second. The CPU runs at 3GHz, a CQ poll takes 300 cycles, and an interrupt takes 6000 cycles.'
+question: "For 1000 AllReduce iterations per second on 64 GPUs, what CPU-cycle overhead does CQ polling use versus interrupts?"
 details:
   realistic_solution: '3GHz = 3×10^9 cycles/sec = 3 billion cycles/sec. Polling: 65.5M polls/s (64 GPUs × 1024 chunks × 1000) × 300 cycles = 19.65B cycles/s = 6.55 cores. Interrupt: 65.5M × 6,000 cycles = 393B cycles/s = 131 cores.'
   common_mistake: |
@@ -17,13 +17,16 @@ details:
     **The Rationale:** Engineers used to standard web servers think busy-waiting is always bad, ignoring the context of ML training where low latency is critical and spare CPU cores exist.
     **The Consequence:** Attempting to force interrupt-based completions, which would bottleneck the CPU and drastically increase collective communication latency.
   napkin_math: |
-    - Total completion events: 64 GPUs × 1024 chunks × 1000 iterations = 65.5M events/sec.
-    - CPU capacity: 3GHz = 3 billion cycles/sec per core.
-    - Polling overhead: 65.5M × 300 cycles = 19.65B cycles/sec.
-    - Cores used by polling: 19.65B / 3B = 6.55 cores.
-    - Interrupt overhead: 65.5M × 6000 cycles = 393B cycles/sec.
-    - Cores used by interrupts: 393B / 3B = 131 cores.
-    - **Interrupts would bottleneck the CPU (requiring 131 cores), while polling only uses 6.55 cores of actual work.**
+    1. **Assumptions & Constraints:**
+       - 64 GPUs, 1024 chunks, 1000 iterations/sec = 65.5M events/sec.
+       - CPU capacity: 3GHz = 3 billion cycles/sec per core.
+       - Polling overhead: 300 cycles. Interrupt overhead: 6000 cycles.
+    2. **Calculations:**
+       - Polling cycles: 65.5M * 300 = 19.65B cycles/sec.
+       - Cores used by polling: 19.65B / 3B = 6.55 cores.
+       - Interrupt cycles: 65.5M * 6000 = 393B cycles/sec.
+       - Cores used by interrupts: 393B / 3B = 131 cores.
+    3. **Conclusion & Interpretation:** **Result: CPU-Bound**. Interrupts would vastly bottleneck the CPU (requiring 131 cores), while polling only uses 6.55 cores of actual work.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,7 +8,7 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: SLA-Aware Request Routing Between Prefill and Decode Pools
-scenario: A disaggregated serving gateway receives requests with two SLA tiers: premium (P99 TTFT < 100ms) and standard (P99 TTFT < 500ms). The prefill pool has 10 GPUs.
+scenario: 'A disaggregated serving gateway receives requests with two SLA tiers: premium (P99 TTFT < 100ms) and standard (P99 TTFT < 500ms). The prefill pool has 10 GPUs.'
 question: How would you route premium and standard requests across 10 prefill GPUs to meet 100ms and 500ms P99 TTFT SLAs?
 details:
   realistic_solution: 'Priority-aware routing: (1) Dedicated pool partition: reserve 3/10 GPUs for premium-only traffic. Remaining 7 for standard + overflow premium. Premium queue: FIFO with preemption. Standard queue: FIFO. (2) Admission control: premium requests bypass the standard queue. When premium pool is full (>90% utilization), route premium overflow to standard pool with priority interrupt. (3) Work-stealing: when premium pool is idle, it processes standard queue to avoid GPU waste. (4) Queue depth monitoring: premium queue target depth < 2 requests (to ensure <100ms wait). Standard queue can have depth up to 20 (SLA allows 500ms wait = 10 * 50ms avg service time). (5) Load shedding: when standard queue > 50 requests, return HTTP 503 to standard tier clients with retry-after header. Premium tier never load-sheds.'
@@ -17,11 +17,15 @@ details:
     **The Rationale:** Engineers assume first-come-first-served is the most efficient packing strategy.
     **The Consequence:** Premium requests wait behind standard requests during traffic bursts, violating the P99 < 100ms SLA even when total load is within capacity.
   napkin_math: |
-    - **Premium SLA:** P99 TTFT < 100ms. Service time = 16.5ms. Queue wait budget = 83.5ms.
-    - **Premium queue limit:** M/D/1 requires ρ < 0.83 for 3 GPUs at 60 RPS = 180 RPS capacity. Sustainable < 149 RPS.
-    - **Standard SLA:** P99 < 500ms. Queue wait budget = 483.5ms.
-    - **Standard capacity:** 7 GPUs + 3 overflow = 420 RPS. Sustainable < 357 RPS.
-    - **Total capacity:** 149 premium + 357 standard = **506 RPS**.
+    1. **Assumptions & Constraints:**
+       - Premium SLA: P99 TTFT < 100ms. Service time = 16.5ms. Queue wait budget = 83.5ms.
+       - Standard SLA: P99 < 500ms. Queue wait budget = 483.5ms.
+    2. **Calculations:**
+       - Premium queue limit: M/D/1 requires ρ < 0.83 for 3 GPUs at 60 RPS = 180 RPS capacity. Sustainable < 149 RPS.
+       - Standard capacity: 7 GPUs + 3 overflow = 420 RPS. Sustainable < 357 RPS.
+       - Total capacity: 149 premium + 357 standard = 506 RPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: SLA-Bound Routing**. Priority-aware routing supports 506 RPS while strictly meeting dual SLAs.
 status: published
 provenance: imported
 requires_explanation: true

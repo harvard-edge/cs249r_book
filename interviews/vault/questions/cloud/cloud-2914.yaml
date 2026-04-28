@@ -8,23 +8,27 @@ competency_area: architecture
 bloom_level: apply
 phase: both
 title: Realize end-to-end EfficientNet-B4 serving with DALI preprocessing on H100
-scenario: You need to deploy EfficientNet-B4 (19M params, 4.2 GFLOPs, 380×380 input) for a medical imaging API that must process 2,000 QPS of 1920×1080 JPEG images on a single H100 node. The current CPU preprocessing pipeline (JPEG decode + resize + normalize) takes 12ms per image.
+scenario: You need to deploy EfficientNet-B4 for a medical imaging API that must process 2,000 QPS of 1920x1080 JPEG images on a single H100 node. The current CPU preprocessing pipeline (JPEG decode + resize + normalize) takes 12ms per image.
 question: How would you build the GPU preprocessing and inference pipeline for EfficientNet-B4 to serve 2,000 QPS of 1080p JPEGs on one H100 node?
 details:
-  realistic_solution: 'DALI pipeline: GPU JPEG decode (nvjpeg) + resize (480→380 with bilinear) + normalize. Run on CUDA stream 1. TensorRT engine on CUDA stream 2. Double-buffer: while batch N is on GPU for inference, batch N+1 is being preprocessed. DALI GPU pipeline: ~0.5ms per image on H100 vs 12ms CPU. At batch=64: 32ms CPU preprocessing eliminated, ~1ms DALI. Pipeline: DALI batch fills 64 images in ~1ms, TRT inference in ~2ms (4.2G×64=269G FLOPs, at 494 TFLOPS 50% util = 0.54ms + overhead). Total: ~3ms/batch = 64/3ms = 21K QPS — exceeds 2K QPS requirement.'
+  realistic_solution: 'Utilize an asynchronous NVIDIA DALI pipeline employing nvjpeg for GPU-accelerated JPEG decode, followed by bilinear resize and normalization. To ensure overlap, execute DALI on CUDA stream 1 and the TensorRT FP16 inference engine on CUDA stream 2, implementing double-buffering.'
   common_mistake: |
     **The Pitfall:** Using DALI without pinned memory buffers or using a single CUDA stream.
     **The Rationale:** Candidates might offload work to the GPU without optimizing the data transfer and execution concurrency.
     **The Consequence:** D2H/H2D copies block the preprocessing stream, or a single stream prevents overlap, failing to reach the throughput target.
   napkin_math: |
-    - Target: 2,000 QPS.
-    - CPU preprocessing: 12ms/image → max 83 QPS on 1 CPU core, need 24 cores for 2K QPS.
-    - DALI GPU (nvjpeg decode): ~2ms for batch=64 (32 img/ms).
-    - Resize (bilinear): ~0.3ms batch=64.
-    - Normalize: ~0.1ms.
-    - Total DALI: ~2.4ms/64 images = 37µs/image.
-    - EfficientNet-B4 TRT FP16 at batch=64: ~2ms.
-    - Pipeline latency: max(2.4, 2) = 2.4ms/batch = **26,667 QPS** (>> 2,000 target).
+    1. **Assumptions & Constraints:**
+       - Target is 2,000 QPS.
+       - CPU preprocessing takes 12ms/image.
+       - DALI GPU (nvjpeg decode) takes ~2ms for batch=64.
+       - Resize (bilinear) takes ~0.3ms for batch=64. Normalize takes ~0.1ms.
+       - EfficientNet-B4 TRT FP16 at batch=64 takes ~2ms.
+    2. **Calculations:**
+       - Total DALI preprocessing time per batch: 2ms + 0.3ms + 0.1ms = 2.4ms.
+       - Pipeline bottleneck: max(2.4ms preprocessing, 2.0ms inference) = 2.4ms per batch of 64.
+       - Throughput: 64 images / 2.4ms = 26,667 QPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: 26,667 QPS. The system is Preprocessing-Bound but easily meets the SLA.**
 status: published
 provenance: imported
 requires_explanation: true

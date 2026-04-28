@@ -8,20 +8,26 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: 'Edge Queueing Theory Optimization: Reduce Jetson Orin P99 by Model Cascading'
-scenario: A Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W) serving smart home voice commands shows P99=800ms at ρ=0.85 (M/M/1, μ=100 req/s, λ=85 req/s). A two-stage cascade is proposed: Stage 1 (small model, 10ms, handles 80% of requests), Stage 2 (large model, 80ms, handles remaining 20%).
+scenario: 'An edge device serving smart home voice commands shows P99=800ms at ρ=0.85 (M/M/1, μ=100 req/s, λ=85 req/s). A two-stage cascade is proposed: Stage 1 (small model, 10ms, handles 80% of requests), Stage 2 (large model, 80ms, handles remaining 20%).'
 question: How much can the two-stage small/large model cascade reduce P99 latency, and is Stage 2 stable without adding hardware?
 details:
-  realistic_solution: 'Stage 1: λ=85, μ=100 (same server, small model takes 10ms). ρ_s1=85/100=0.85. Wq_s1=0.85/(100*0.15)=56.7ms. W_s1=56.7+10=66.7ms. 80% exit here: P99_short = 4.6*66.7=307ms. Stage 2 (20% of 85=17 req/s routed to large model): μ_s2=100/8=12.5 req/s (same server, 80ms service). ρ_s2=17/12.5=1.36 > 1 — unstable! Fix: separate the two models on different inference threads with resource partitioning. With 2 CUDA streams: μ_s2=50 req/s, ρ=0.34, Wq=0.34/(50*0.66)=10.3ms, W=90.3ms, P99=415ms. Cascade P99 (worst path) = 307ms (short) or 415ms (long). Better than 800ms.'
+  realistic_solution: Utilize fundamental M/M/1 queueing analysis. While Stage 1 clears the majority of traffic with radically lower wait times, Stage 2 instantly breaches stability (ρ > 1) if processed on the same unpartitioned thread. Remediate this by explicitly provisioning dedicated CUDA streams or partitioning SMs (via MPS) to grant Stage 2 its own queue, lowering total P99 without hardware upgrades.
   common_mistake: |
-    **The Pitfall:** Not accounting for the waterfall routing cost and assuming a single queueing model for the cascade.
-    **The Rationale:** Candidates treat the cascade as isolated independent systems instead of a series path where 20% of requests experience both Stage 1 and Stage 2 latency.
-    **The Consequence:** Drastically underestimating the P99 latency for the worst-case path and missing queue instability.
+    **The Pitfall:** Overlooking the cascading queue buildup and assuming isolated service times.
+    **The Rationale:** Candidates assess the models individually, failing to apply the mathematical reality that 20% of requests suffer the accumulated wait times of both stages simultaneously.
+    **The Consequence:** Deploying an architecture that instantly spirals into queue instability (ρ > 1), resulting in infinite latency spikes for edge users.
   napkin_math: |
-    - **Baseline:** P99=800ms implies W=800/4.6=174ms, Wq=165ms, $\rho$/(100*(1-$\rho$))=1.65 $\rightarrow \rho=0.94$.
-    - **Stage 1 (Small Model):** $\rho=0.85$, P99_short = 307ms.
-    - **Stage 2 (Large Model):** 20% of 85 = 17 req/s at 80ms/req, $\mu=12.5/s \rightarrow \rho > 1$ (unstable).
-    - **Optimization:** Use INT8 optimization to get $\mu_{s2}=25 \rightarrow \rho=0.68$, Wq=85ms, P99_long=770ms.
-    - **Improvement:** For 80% of requests, latency drops from 800ms to 307ms, a **2.6x reduction in P99**.
+    1. **Assumptions & Constraints:**
+       - Baseline System: P99=800ms at ρ=0.85
+       - Cascade Stage 1: 10ms, handles 80% of volume
+       - Cascade Stage 2: 80ms, handles 20% of volume (17 req/s)
+    2. **Calculations:**
+       - Stage 1 execution: ρ=0.85, Yields P99 = ~307ms
+       - Stage 2 baseline μ = 12.5/s. Load (λ) = 17/s.
+       - Stage 2 load ratio (ρ) = 17 / 12.5 = 1.36 (ρ > 1 -> Unstable)
+       - Optimization via streams pushes μ to 25/s, dropping ρ to 0.68, yielding max P99 ~770ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Queue-Bound. Proper stream isolation stabilizes the system and drops primary P99 by 2.6x (from 800ms to 307ms).**
 status: published
 provenance: imported
 requires_explanation: false
@@ -34,8 +40,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

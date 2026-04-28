@@ -8,20 +8,26 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: P99 vs P50 Divergence Under Load
-scenario: Your LLM inference service on H100s reports a healthy P50 latency of 45ms but a P99 of 820ms — an 18× ratio. The team proposes adding more replicas.
+scenario: Your LLM inference service reports a healthy P50 latency of 45ms but a P99 of 820ms — an 18x ratio. The team proposes adding more replicas.
 question: Why is P50-to-P99 divergence a poor signal for capacity planning, and what root causes should you investigate before scaling out?
 details:
-  realistic_solution: 'The 18× ratio signals a multi-modal latency distribution, not simple overload. Investigate: (1) JIT recompilation — torch.compile graph breaks on rare input shapes cause 200-500ms spikes; (2) CUDA context switches when multiple models share a GPU; (3) PCIe contention from KV cache spills to host memory; (4) OS-level jitter — context switches, THP defragmentation, or NUMA-remote allocations. Profile with NVIDIA Nsight to correlate tail events with system interrupts. The fix is usually pinning CUDA contexts, pre-warming all input shapes, and disabling THP — not adding replicas.'
+  realistic_solution: 'An 18x ratio signals a multi-modal latency distribution rooted in system jitter, not simple queueing overload. Investigate execution stalling events: (1) `torch.compile` JIT recompilation graph breaks on rare input shapes; (2) PCIe contention from KV cache spilling to host RAM; (3) OS-level Transparent Huge Page (THP) defragmentation stalls; or (4) NUMA-remote allocations. Utilize `nsys` profiling to correlate latency spikes with system interrupts. Adding replicas is useless as the same execution paths will trigger on new nodes.'
   common_mistake: |
-    **The Pitfall:** Assuming the P99 tail is caused by insufficient capacity or queueing.
-    **The Rationale:** In standard web services, high P99 usually implies CPU starvation or queue buildup.
-    **The Consequence:** Adding expensive replicas that do not solve the tail latency, because the outliers are caused by JIT compilation, GC pauses, or NUMA accesses, not hardware scarcity.
+    **The Pitfall:** Assuming the P99 tail is strictly caused by insufficient compute capacity or request queueing.
+    **The Rationale:** In standard REST web services, a high P99 usually implies CPU starvation or request backlog.
+    **The Consequence:** Blindly provisioning expensive GPU replicas that do absolutely nothing to solve the tail latency, because the outliers are caused by JIT compilation or GC pauses.
   napkin_math: |
-    - **Current Latency:** P50 = 45ms, P99 = 820ms.
-    - **Outlier 1:** If 1% of requests hit a `torch.compile` recompilation (~500ms), total = 545ms.
-    - **Outlier 2:** If 0.5% hit NUMA-remote allocation (adding 300ms), blended P99 is ~820ms.
-    - **Scaling Out:** Adding 2× replicas leaves P99 at ~820ms because the exact same code paths trigger on the new replicas.
-    - **Root Cause Fix:** Fixing JIT warmup and NUMA drops P99 to ~120ms (nearly 7× improvement with zero hardware cost).
+    1. **Assumptions & Constraints:**
+       - P50 Latency: 45ms.
+       - P99 Latency: 820ms.
+       - Architecture: Fixed GPU allocation, no queue metrics indicated.
+    2. **Calculations:**
+       - JIT Outlier Penalty: 45ms base + 500ms compile stall = 545ms.
+       - NUMA Outlier Penalty: 45ms base + 300ms remote access = 345ms.
+       - Combined Outliers: Can easily stack to the 820ms tail.
+       - Scaling Impact: 2x Replicas = P99 remains 820ms (code executes identical stalls).
+    3. **Conclusion & Interpretation:**
+       - **Fixing JIT warmup and NUMA drops P99 to ~120ms with zero hardware cost. Result: System-Jitter Bound (Not Capacity Bound).**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,33 +8,25 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: inference
 title: Floating-Point Emulation Overhead in Safety Guardrails
-scenario: To comply with Responsible AI guidelines, your team added an out-of-distribution
-  (OOD) detection guardrail to an anomaly detection system running on an ARM Cortex-M4
-  (STM32F4). The main INT8 neural network executes in 5ms, comfortably beating the
-  20ms real-time deadline. However, after adding the guardrail to compute Mahalanobis
-  distances for three safety constraints on 128-dimensional embeddings, the execution
-  time spiked to over 60ms. You are tasked with diagnosing the root cause of this
-  latency regression without access to a profiler.
-question: Why does the Cortex-M4 OOD guardrail push latency past 60 ms, and how should
-  the distance computation be changed?
+scenario: To comply with Responsible AI guidelines, your team added an out-of-distribution (OOD) detection guardrail to an anomaly detection system running on an ARM Cortex-M4 (STM32F4). The main INT8 neural network executes in 5ms. However, after adding the guardrail to compute Mahalanobis distances for three safety constraints on 128-dimensional embeddings, the execution time spiked to over 60ms.
+question: Why does the Cortex-M4 OOD guardrail push latency past 60 ms, and how should the distance computation be changed?
 details:
-  realistic_solution: The root cause is that the OOD guardrail was implemented using
-    FP32 math. Because this specific Cortex-M4 configuration lacks a hardware FPU,
-    all floating-point operations must be emulated in software via a soft-float library,
-    taking hundreds of cycles per instruction. Meanwhile, the main model runs fast
-    because it leverages CMSIS-NN SIMD instructions capable of executing 2x INT8 MACs
-    per cycle. The solution is to quantize the guardrail logic to integer arithmetic
-    or switch to a computationally cheaper integer-based distance metric.
-  common_mistake: Candidates often blame memory bandwidth bottlenecks, suggesting
-    the 256 KB SRAM is thrashing during the covariance matrix lookups. Others might
-    incorrectly assume the 1 MB flash memory is too slow for loading the guardrail
-    parameters, completely missing the architectural compute limitations.
-  napkin_math: 'CPU Clock: 168 MHz (168,000 cycles/ms). The guardrail computes 3 covariance
-    matrix multiplications (128x128), totaling 49,152 FP32 MACs. With no FPU, a soft-float
-    MAC (multiply + add) takes roughly 200 cycles. Total compute cycles: 49,152 MACs
-    * 200 cycles = 9,830,400 cycles. Guardrail execution time: 9,830,400 cycles /
-    168,000 cycles/ms = ~58.5ms. Total inference time: 5ms (main NN) + 58.5ms (guardrail)
-    = 63.5ms, violating the 20ms deadline.'
+  realistic_solution: The root cause is that the OOD guardrail was implemented using FP32 math. Because this specific Cortex-M4 configuration lacks a hardware FPU, all floating-point operations must be emulated in software via a soft-float library, taking hundreds of cycles per instruction. The solution is to quantize the guardrail logic to integer arithmetic.
+  common_mistake: |
+    **The Pitfall:** Blaming memory bandwidth for compute overhead.
+    **The Rationale:** Candidates assume the 256 KB SRAM is thrashing during the covariance matrix lookups, ignoring the lack of an FPU.
+    **The Consequence:** They miss the massive cycle penalty of software floating-point emulation, failing to correctly solve the latency regression.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - CPU Clock: 168 MHz (168,000 cycles/ms).
+       - 3 covariance matrix mults (128x128) = 49,152 FP32 MACs.
+       - Soft-float emulation: ~200 cycles per MAC.
+    2. **Calculations:**
+       - Emulation Compute Cycles: 49,152 * 200 = 9,830,400 cycles.
+       - Guardrail Latency: 9,830,400 / 168,000 = 58.5 ms.
+       - Total Latency: 5 ms (Main NN) + 58.5 ms = 63.5 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 63.5 ms Total.** Soft-float emulation makes the guardrail severely **Compute-Bound**, necessitating INT8 quantization.
 status: published
 provenance: imported
 requires_explanation: false

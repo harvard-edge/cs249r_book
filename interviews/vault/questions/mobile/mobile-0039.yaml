@@ -8,32 +8,23 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The Multi-Model Orchestration Nightmare
-scenario: Your team is building a sophisticated AR application that requires running three ML models concurrently: a body pose estimation (high-res video input, GPU/NPU), a small speech recognition (audio input, CPU), and a gesture classifier (low-res video region, NPU). All must run in real-time.
+scenario: 'Your team is building a sophisticated AR application that requires running three ML models concurrently: a body pose estimation (high-res video input, GPU/NPU), a small speech recognition (audio input, CPU), and a gesture classifier (low-res video region, NPU). All must run in real-time.'
 question: How would you orchestrate pose, speech, and gesture models concurrently on one mobile SoC without missing real-time budgets?
 details:
-  realistic_solution: "Designing such a pipeline requires sophisticated orchestration and resource management:\n  1.  **Task Prioritization & Scheduling:**\n    *   **Prioritize Critical Paths:** Identify the most latency-sensitive model (e.g., pose estimation for visual feedback). Assign higher OS thread priorities for its pre/post-processing and accelerator dispatch threads.\n    *   **Asynchronous Execution:** All models should ideally run asynchronously. Use separate threads for each model's pre-processing, inference submission, and post-processing.\n    *   **OS Scheduler Hints:** Utilize Android's `setThreadPerfPolicy` or `setThreadScheduler` (if available/permitted) to give hints to the OS scheduler for critical threads.\n  2.  **Accelerator Allocation & Contention Management:**\n    *   **Dedicated Accelerators (where possible):** Speech recognition is CPU-bound; it should run on dedicated \"big\" CPU cores. Body pose (large CNN) and gesture (small CNN) should ideally target the NPU.\n    *   **NPU Time Slicing:** If two NPU-bound models (pose and gesture) run concurrently, the NPU driver will time-slice them. This introduces latency. Consider:\n        *   **Sequential Execution:** If the gesture model is very small, run it sequentially *after* pose estimation if its total latency fits the budget.\n        *   **Dynamic Prioritization:** If one model is more critical at a given moment, dynamically adjust its priority with the NPU driver (if API supports it) or suspend the less critical one.\n        *   **Batching (if applicable):** If gesture uses a sub-region of the pose model's output, consider fusing them or batching if input frames align.\n    *   **GPU as Fallback/Alternative:** If NPU contention is too high, one model (e.g., gesture classifier) could be delegated to the GPU, leveraging its independent execution units, but this might increase power consumption.\n  3.  **Memory Bandwidth Management:**\n    *   **Minimize Data Copies:** Reduce transfers between CPU, GPU, and NPU. Use shared memory buffers (e.g., `AHardwareBuffer` on Android) when passing tensors between components.\n    *   **Data Locality:** Design models to access data efficiently from caches.\n    *   **Pre-fetching:** Proactively load model weights or upcoming input data into memory if possible.\n  4.  **Power & Thermal Management:**\n    *   **DVFS Awareness:** Monitor SoC temperature and clock frequencies. If throttling occurs, dynamically reduce model complexity (e.g., lower resolution, smaller model variant) or drop frames for less critical models.\n    *   **Power Gating:** Ensure accelerators are power-gated when idle.\n  5.  **Synchronization & Communication:** Use efficient inter-thread communication mechanisms (e.g., lock-free queues, condition variables) to pass data between pipeline stages."
+  realistic_solution: "A robust pipeline requires sophisticated hardware-aware scheduling:\n1. **Task Prioritization & Scheduling:** Identify the latency-sensitive model. Assign higher OS thread priorities for its pre/post-processing and accelerator dispatch. Use asynchronous dispatch for all models.\n2. **Accelerator Allocation & Contention Management:** Speech is CPU-bound and targets big cores. Pose and gesture target the NPU. Since NPU drivers time-slice concurrent graphs, sequence gesture after pose, or offload gesture to the GPU to prevent NPU pipeline thrashing.\n3. **Memory Bandwidth Management:** Minimize copies via zero-copy shared memory buffers (`AHardwareBuffer`).\n4. **Power & Thermal Management:** Implement DVFS awareness to monitor SoC temperature."
   common_mistake: |
     **The Pitfall:** Simply dispatching all models in parallel on different threads and hoping the OS resolves the contention.
     **The Rationale:** Developers rely on default abstractions without manually configuring OS thread priorities, NPU time-slicing, and memory bus traffic control.
     **The Consequence:** Severe accelerator contention, context-switching overhead, and missed real-time latency deadlines (jank).
   napkin_math: |
-    - **Pose Latency (NPU):** 30ms inference + 20ms pre/post.
-    - **Gesture Latency (NPU):** 10ms inference.
-    - **Contention Penalty:** If both hit the NPU, driver context switching can inflate total NPU execution from 40ms to 60-80ms.
-    - **Memory Contention:** Pose requires ~20 GB/s, Speech ~5 GB/s, Gesture ~5 GB/s. A 60 GB/s LPDDR5 bus is dangerously close to saturation.
-    - **Conclusion:** Speech must map to CPU big cores, Pose to the NPU, and Gesture sequenced *after* Pose or offloaded to the GPU to avoid catastrophic NPU pipeline thrashing.
+    1. **Assumptions & Constraints:**
+       - 3 models: Pose (NPU), Speech (CPU), Gesture (NPU).
+       - Pose latency: 30ms inference + 20ms pre/post.
+       - Gesture latency: 10ms inference.
+       - Shared LPDDR5 bus bandwidth: 60 GB/s.
+    2. **Calculations:**
+       - NPU contention penalty: Context switching inflates total NPU execution from 40ms to 60-80ms.
+       - Memory contention: Pose (20 GB/s) + Speech (5 GB/s) + Gesture (5 GB/s) = 30 GB/s (high jitter risk).
+    3. **Conclusion & Interpretation:**
+       - **Result: Accelerator Contention-Bound.** Speech must map to CPU big cores, Pose to the NPU, and Gesture sequenced after Pose or offloaded to the GPU to avoid catastrophic NPU pipeline thrashing.
 status: published
-provenance: imported
-requires_explanation: true
-expected_time_minutes: 20
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: UNCHECKED
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

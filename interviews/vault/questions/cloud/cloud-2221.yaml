@@ -11,18 +11,23 @@ title: The GPU Fragmentation Death Spiral
 scenario: Your 1,000-GPU cluster shows 85% allocation but only 55% actual compute utilization. Investigation reveals that many jobs requested 8 GPUs but only use 4 at any given time (the other 4 idle during data loading or preprocessing). Meanwhile, a queue of 4-GPU jobs is growing because the scheduler cannot find 4 contiguous free GPUs — they are scattered as single idle GPUs across half-allocated nodes.
 question: What is causing the GPU fragmentation death spiral, and what multi-level fixes would you apply?
 details:
-  realistic_solution: 'This is resource fragmentation — the GPU equivalent of memory fragmentation. Three-level fix: (1) **Admission control with right-sizing**: monitor actual GPU utilization per job and provide feedback (''Your job used 4.2 of 8 GPUs on average — consider requesting 5''). Reject grossly over-provisioned requests. (2) **Compaction/defragmentation**: periodically migrate (checkpoint → reschedule) jobs to consolidate free GPUs onto whole nodes. This is expensive (~5-10 min per migration) but creates large contiguous blocks. (3) **Topology-aware packing**: modify the scheduler to prefer filling nodes completely before starting new ones (bin-packing). Use a scoring function: score = (GPUs_used_after / GPUs_total_on_node) — prefer nodes that would become full or near-full. This prevents the scattered allocation pattern from developing. Google''s Borg and Meta''s scheduling systems both implement these strategies.'
+  realistic_solution: |
+    This is cluster resource fragmentation. The solution is multi-tier: 1) Admission control right-sizing (deny over-provisioned 8-GPU requests if telemetry shows only 4 active). 2) Topology-aware bin-packing (modify the Kubernetes scheduler scoring function to prefer filling nodes completely rather than spreading pods). 3) Active Defragmentation (periodically checkpoint, migrate, and reschedule jobs to consolidate free GPUs onto whole nodes).
   common_mistake: |
     **The Pitfall:** Blaming users for over-requesting resources without addressing the underlying scheduler flaws.
-    
     **The Rationale:** Administrators often point to user behavior rather than recognizing that simple first-fit scheduling naturally degrades into severe fragmentation as workloads cycle.
-    
     **The Consequence:** Queues stall, compute goes wasted, and users get frustrated, while buying more GPUs only temporarily masks the structural scheduling defect.
   napkin_math: |
-    - **Current State**: 1,000 GPUs at 85% allocation = 850 allocated, 150 free.
-    - **Fragmentation**: 150 free GPUs are scattered as 1-2 per node across 100 nodes. 0 blocks of 4 contiguous GPUs exist.
-    - **After Defragmentation**: Consolidate to 37 fully-free 4-GPU blocks (150/4 = 37.5), clearing the queue.
-    - **Cost of Fragmentation**: 150 idle GPUs × $2/hr = $300/hr = $7,200/day = **$2.6M/year wasted**.
+    1. **Assumptions & Constraints:**
+       - Cluster: 1,000 GPUs at 85% allocation.
+       - Available: 150 GPUs.
+       - Issue: Users requesting 8-GPU nodes but only utilizing 4, leaving 4 scattered idle GPUs per node.
+    2. **Calculations:**
+       - Scattered State: 150 free GPUs distributed across 100 nodes (1-2 per node). 0 blocks of 4 contiguous GPUs available.
+       - Defragmented State: Compacting jobs consolidates the 150 GPUs into 37 fully free 4-GPU blocks (150 / 4 = 37.5).
+       - Cost of Waste: 150 GPUs * $2/hr = $300/hr = $2.6M/year.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduler-Bound.** Simple first-fit scheduling leads to severe GPU fragmentation. Implementing topology-aware bin-packing and periodic defragmentation reclaims millions of dollars in stalled compute.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Choosing Micro-Batch Count for an 8-Stage A100 Pipeline
-scenario: A 100B-parameter transformer is split into 8 pipeline stages on 8 A100 GPUs. Per-stage forward+backward for one micro-batch is ~200 ms. Stage-to-stage activation transfer per micro-batch is 240 MB at NVLink speeds. The team's compute budget is 1 hour per global step at most. Weights, gradients, and optimizer shards already consume 60 GB per stage.
+scenario: A 100B-parameter transformer is split into 8 pipeline stages on 8 GPUs. Per-stage forward+backward for one micro-batch is ~200 ms. Stage-to-stage activation transfer per micro-batch is 240 MB. The team's compute budget is 1 hour per global step at most. Weights, gradients, and optimizer shards already consume 60 GB per stage.
 question: What micro-batch count m brings the bubble fraction below 10% while keeping the 1F1B activation memory footprint inside the 80 GB HBM budget?
 details:
   realistic_solution: 'Under 1F1B, peak activation memory is O(k) — at most k = 8 in-flight micro-batches of activations per stage. With 80 GB HBM and 60 GB consumed by weights+gradients+optimizer, the activation budget per stage is 20 GB, so per-micro-batch activation must stay under 20/8 = 2.5 GB. Sizing the micro-batch to hit ~2.5 GB of activations sets the per-stage compute time. To drive bubble below 10%, solve (k-1)/(m + k-1) ≤ 0.1 → m ≥ 9*(k-1) = 63. Choose m = 64 (round to power of 2). Bubble fraction = 7/71 ≈ 9.86%. Activation transfer time per micro-batch on NVLink: 240 MB / 300 GB/s ≈ 0.8 ms — negligible vs the 200 ms per-stage compute. Total step time = (m + k - 1) * 200 ms = 71 * 200 ms = 14.2 s, well inside the 1 h budget.'
@@ -17,27 +17,20 @@ details:
     **The Rationale:** Candidates often focus purely on the pipeline efficiency formula without recognizing that 1F1B strictly limits in-flight micro-batches to k, requiring a memory check.
     **The Consequence:** The proposed micro-batch size causes an Out-of-Memory (OOM) error on the GPUs, or they incorrectly over-optimize for a negligible 0.8 ms transfer delay.
   napkin_math: |
-    - **Bubble Target:** $(k-1)/(m + k-1) \le 0.1 \rightarrow m \ge 63 \rightarrow \text{choose } m = 64$.
-    - **Activation Budget:** 80 GB - 60 GB = 20 GB per stage.
-    - **1F1B Constraint:** At most $k = 8$ in-flight activation tensors $\rightarrow$ per-micro-batch activation $\le 2.5$ GB.
-    - **Step Time:** $71 \times 200\text{ ms} = 14.2\text{ s}$.
-    - **Bubble Fraction:** $7 / 71 \approx 9.86\%$.
-    - **Activation Transfer Cost:** $240\text{ MB} / 300\text{ GB/s} = 0.8\text{ ms}$ per micro-batch on NVLink.
-    - **Conclusion:** **m = 64 safely meets all constraints.**
+    1. **Assumptions & Constraints:**
+       - 8 pipeline stages (k=8).
+       - 80 GB HBM budget, with 60 GB consumed by weights/gradients.
+       - Bubble target < 10%.
+    2. **Calculations:**
+       - Activation Budget = 80 GB - 60 GB = 20 GB per stage.
+       - 1F1B limits in-flight activations to k=8 -> max 2.5 GB per micro-batch.
+       - Bubble Target: (k-1)/(m + k-1) <= 0.1 -> m >= 63. Choose m=64.
+       - Step Time = (64 + 8 - 1) * 200ms = 14.2s.
+       - Bubble Fraction = 7 / 71 = 9.86%.
+       - Activation Transfer = 240 MB / 300 GB/s = 0.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: m = 64 safely meets all constraints with a 9.86% bubble. Activation-Memory-Bound**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 4
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

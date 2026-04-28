@@ -8,21 +8,26 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Memory Controller Contention on Edge SoCs
-scenario: Your Jetson Orin runs inference with P50 = 10ms but P99 = 40ms. The Orin has unified LPDDR5 memory shared between CPU, GPU, and DLA. Profiling shows that CPU data preprocessing (image decode + resize) runs concurrently with GPU inference, causing memory controller contention.
+scenario: Your edge device runs inference with P50 = 10ms but P99 = 40ms. The SoC has unified LPDDR5 memory shared between CPU, GPU, and DLA. Profiling shows that CPU data preprocessing (image decode + resize) runs concurrently with GPU inference, causing memory controller contention.
 question: How much LPDDR5 bandwidth contention is causing the 40 ms P99 spikes, and how would you restructure preprocessing to reduce them?
 details:
-  realistic_solution: 'Orin''s LPDDR5 provides 204.8 GB/s total bandwidth across 256-bit channels. GPU inference needs ~160 GB/s for model weight streaming. CPU image decode needs ~53 GB/s. Total demand: 213 GB/s — exceeding practical limits. Memory controller arbitration adds 30% overhead when multiple clients compete. Actual effective bandwidth drops to ~143 GB/s shared. The GPU only gets ~107 GB/s (67% of needed), stretching inference time. The contention causes massive OS scheduler and memory jitter, driving P99 to 40ms. Fix: pipeline CPU and GPU temporally — decode frame N on CPU while GPU runs inference on frame N-1. This serializes memory access patterns: CPU burst then GPU burst, eliminating contention. P99 drops to 13ms. Alternative: use VIC (Video Image Compositor) hardware for decode, freeing CPU entirely.'
+  realistic_solution: Unified SoC topologies strictly share LPDDR5 pathways between all IP blocks. Heavy concurrent bursts trigger catastrophic queue thrashing within the memory arbitration logic, severely throttling net effective bandwidth. Architectural resolution requires temporal sequence pipelining (Decode N whilst Inferencing N-1) to isolate memory controller utilization exclusively into strictly sequential, mutually-exclusive DMA phases.
   common_mistake: |
     **The Pitfall:** Treating CPU and GPU memory accesses as independent.
     **The Rationale:** Candidates forget that on unified memory SoCs like Orin, all compute units share the same memory controllers.
     **The Consequence:** Concurrent access from CPU and GPU halves effective bandwidth, leading to massive jitter and missed P99 latency targets.
   napkin_math: |
-    1. Orin LPDDR5 peak bandwidth: 204.8 GB/s.
-    2. GPU requires 160 GB/s for 10ms inference. CPU decode requires 53 GB/s. Total demand: 213 GB/s.
-    3. Contention overhead reduces effective bandwidth by ~30% to ~143 GB/s.
-    4. GPU fair share: (160/213) * 143 GB/s = 107 GB/s.
-    5. GPU inference time: 1.6 GB / 107 GB/s = 15ms. Remaining 25ms is OS jitter.
-    6. Sequential pipelining separates access, restoring 204.8 GB/s and dropping P99 to **~13ms**.
+    1. **Assumptions & Constraints:**
+       - Target LPDDR5 Bandwidth: 204.8 GB/s
+       - CPU demand (decode): ~53 GB/s
+       - GPU demand (inference): ~160 GB/s
+    2. **Calculations:**
+       - Total demand: 160 GB/s + 53 GB/s = 213 GB/s
+       - Contention overhead: 30% reduction -> Effective bandwidth ~143 GB/s
+       - Fair-share GPU bandwidth: (160 / 213) * 143 GB/s ≈ 107 GB/s
+       - GPU time extension: 160 GB/s desired vs 107 GB/s provided stretches inference to 15+ ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Contention.** Concurrent CPU/GPU access slashes effective bandwidth. Temporal pipelining (serialize decoding and inference) restores P99 to ~13 ms.
 status: published
 provenance: imported
 requires_explanation: false

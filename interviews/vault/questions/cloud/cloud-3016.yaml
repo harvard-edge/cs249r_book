@@ -11,16 +11,21 @@ title: 'Latency Decomposition: Full-Stack E2E Latency Budget for LLM API on H100
 scenario: "You own the latency SLA for a production LLM API backed by H100 nodes. The SLA is P99 < 2 seconds for a 512-token prompt generating 128 tokens."
 question: "How would you budget the P99 latency components, identify the dominant term, and optimize to fix an SLA miss?"
 details:
-  realistic_solution: "Budget: network ingress 5ms, tokenization 1ms, queue wait P99 50ms, prefill (512 tokens, 70B model) ≈ 512×2×70B×2/989TFLOPS ≈ 144ms, decode (128 tokens × 20ms/token) ≈ 2560ms — this alone blows the SLA. Fix: reduce model size to 13B (decode ≈ 4ms/token → 512ms total), or enable speculative decoding to cut decode latency 2–3x."
+  realistic_solution: "Budget: network ingress 5ms, tokenization 1ms, queue wait P99 50ms, prefill (512 tokens, 70B model) \u2248 512*2*70B*2/989TFLOPS \u2248 144ms, decode (128 tokens * 42ms/token) \u2248 5350ms \u2014 this alone blows the SLA. Fix: reduce model size to 13B (decode \u2248 8ms/token -> ~1000ms total), or enable speculative decoding to cut decode latency 2\u20133x."
   common_mistake: |
     **The Pitfall:** Accounting only for model compute FLOPs and ignoring memory bandwidth limits during decode.
     **The Rationale:** Not realizing that auto-regressive decode is entirely memory-bandwidth bound, while prefill is compute-bound.
     **The Consequence:** Selecting a massive model that mathematically cannot meet latency SLAs due to physical HBM transfer speeds.
   napkin_math: |
-    *   **70B Model Decode:** 140GB weights / 3.35TB/s ≈ 41.8ms/token. For 128 tokens: 128 × 41.8ms = 5.3s (fails SLA).
-    *   **13B Model Decode:** 26GB weights / 3.35TB/s ≈ 7.8ms/token. For 128 tokens: 128 × 7.8ms = 998ms.
-    *   **13B Model Prefill:** 512 tokens × 2 × 13B × 2 FLOPs = 26.6T FLOPs. Time = 26.6T / 989TFLOPS ≈ 27ms.
-    *   **Result:** **The 70B decode alone takes 5.3s, blowing the 2s SLA. A 13B model drops total time to ~1s.**
+    1. **Assumptions & Constraints:**
+       - H100 3.35 TB/s bandwidth, 989 TFLOPS compute.
+       - 70B vs 13B models.
+    2. **Calculations:**
+       - 70B Decode: 140GB weights / 3.35TB/s = 41.8ms/token. 128 tokens * 41.8ms = 5.35s.
+       - 13B Decode: 26GB weights / 3.35TB/s = 7.76ms/token. 128 tokens * 7.76ms = 993ms.
+       - 13B Prefill: 512 tokens * 2 * 13B * 2 FLOPs = 26.6T FLOPs. Time = 26.6T / 989TFLOPS = 26.9ms.
+    3. **Conclusion & Interpretation:**
+       **The 70B decode alone takes 5.3s, blowing the 2s SLA. Result: Memory-Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

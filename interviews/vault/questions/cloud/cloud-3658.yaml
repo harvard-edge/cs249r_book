@@ -8,27 +8,25 @@ competency_area: reliability
 bloom_level: apply
 phase: inference
 title: Resource Quota and GPU Memory Oversubscription in Kubernetes
-scenario: 'A multi-tenant Kubernetes cluster with MI300X (192GB HBM3) GPUs has 5 teams
-  sharing 10 GPUs. Each team requests limits.nvidia.com/gpu: 1 but actual models range
-  from 7B (14GB) to 70B (140GB). Teams with 70B models frequently OOM-kill other tenants''
-  pods sharing the same GPU device.'
-question: How would you prevent 70B MI300X workloads from OOM-killing other tenants
-  when Kubernetes only tracks GPU count?
+scenario: "A multi-tenant Kubernetes cluster with MI300X (192GB HBM3) GPUs has 5 teams sharing 10 GPUs. Each team requests `limits.nvidia.com/gpu: 1` but actual models range from 7B (14GB) to 70B (140GB). Teams with 70B models frequently OOM-kill other tenants' pods sharing the same GPU device."
+question: How would you prevent 70B MI300X workloads from OOM-killing other tenants when Kubernetes only tracks GPU count?
 details:
-  realistic_solution: Use NVIDIA's GPU Memory Manager or MPS (Multi-Process Service)
-    with memory limits. For MI300X with 192GB, use MIG where supported, or implement
-    memory-aware scheduling via extended resources (nvidia.com/gpu.memory). Create
-    separate node pools per model size tier and use namespace resource quotas with
-    node affinity to isolate tenants by GPU memory requirement.
-  common_mistake: Trusting GPU memory limits in Kubernetes resource requests. Standard
-    Kubernetes GPU resource accounting tracks GPU device count, not GPU memory. Two
-    pods can both be assigned the same GPU (if memory-based scheduling isn't used),
-    leading to OOM conflicts.
-  napkin_math: 'MI300X 192GB HBM3. 70B model at FP16 = 140GB — uses 73% of one GPU.
-    7B model = 14GB = 7.3%. Two 70B models: 280GB > 192GB → OOM inevitable. Correct
-    tenant isolation: tier-1 (>100GB) → dedicated GPU. tier-2 (10-100GB) → MIG 3g.64gb
-    (64GB slice). tier-3 (<10GB) → MIG 1g.24gb. MI300X MIG support: 8 slices of 1g.24gb
-    or 3 slices of 3g.64gb per GPU. Reduces OOM conflicts to zero with proper tiering.'
+  realistic_solution: 'Use NVIDIA''s GPU Memory Manager or MPS (Multi-Process Service) with memory limits. For MI300X with 192GB, use MIG where supported, or implement memory-aware scheduling via extended resources (nvidia.com/gpu.memory). Create separate node pools per model size tier and use namespace resource quotas with node affinity to isolate tenants by GPU memory requirement.'
+  common_mistake: |
+    **The Pitfall:** Trusting standard Kubernetes GPU resource requests to isolate workloads.
+    **The Rationale:** Engineers assume `nvidia.com/gpu: 1` enforces memory boundaries, not realizing Kubernetes only tracks integer device counts, leaving memory completely unmanaged.
+    **The Consequence:** Constant, unpredictable OOM-kills across tenants, leading to massive instability in the serving fleet.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - MI300X HBM3 memory: 192 GB
+       - 70B model at FP16 = 140 GB
+       - 7B model at FP16 = 14 GB
+    2. **Calculations:**
+       - Two 70B models = 140 GB + 140 GB = 280 GB
+       - 280 GB > 192 GB (OOM inevitable)
+       - Correct partitioning (MIG/MPS): Tier-1 (>100GB) gets 1 GPU. Tier-2 (10-100GB) gets MIG 3g.64gb. Tier-3 (<10GB) gets MIG 1g.24gb.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (OOM)**. Standard Kubernetes only schedules by device count, meaning two 140GB models assigned to a 192GB device will instantly crash.
 status: published
 provenance: imported
 requires_explanation: false

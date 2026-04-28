@@ -11,29 +11,19 @@ title: The WebView WebGL Throttle
 scenario: You deploy a TensorFlow.js model inside a React Native app wrapped in a mobile WebView. The model uses WebGL to run on the mobile GPU. On a desktop browser, it runs at 60 FPS. On the mobile WebView, it runs at 15 FPS, even though the mobile GPU is mathematically powerful enough.
 question: What OS-level security mechanism is strangling the WebGL performance within the mobile WebView?
 details:
-  realistic_solution: 'Mobile WebViews run in a sandboxed process separate from the app''s GPU context. WebGL calls must cross a process boundary via IPC to reach the GPU compositor, adding ~5-10ms per gl.readPixels synchronization. With 10 intermediate tensor readbacks, you lose 50-100ms/frame. Additionally, iOS WKWebView throttles background WebGL to 30 FPS max and limits GPU memory. The fix: use TensorFlow.js with the WebGPU backend (eliminates readPixels), or better, bypass the WebView entirely by running inference natively via Core ML or TFLite delegates and passing only results to JavaScript.'
+  realistic_solution: "Mobile WebViews enforce strict security boundaries, operating in isolated sandboxed processes entirely separate from the host application's GPU compositor context. Consequently, every WebGL `gl.readPixels` call required to retrieve intermediate tensor outputs must cross an expensive inter-process communication (IPC) boundary. This synchronization aggressively stalls the rendering thread. The architectural fix is to migrate to the TensorFlow.js WebGPU backend, which mitigates synchronous readbacks via asynchronous mapped buffers, or to bypass the WebView entirely by compiling the model to a native format (Core ML or TFLite) and passing only final JSON results across the JavaScript bridge."
   common_mistake: |
     **The Pitfall:** Assuming mobile GPUs are simply too computationally weak compared to desktop GPUs.
     **The Rationale:** Developers don't understand that WebViews operate in isolated sandboxed processes that require inter-process communication (IPC) for GPU access.
     **The Consequence:** Attempting to prune or quantize the model pointlessly, failing to recognize a structural synchronization bottleneck.
   napkin_math: |
-    - **IPC Synchronization Penalty:** `gl.readPixels` across process boundaries blocks the thread for ~5-10ms.
-    - **Total Overhead:** A model with 10 synchronization layers loses 10 * 10ms = **100ms** per frame.
-    - **Conclusion:** The massive 100ms overhead inherently limits the frame rate to ~10 FPS regardless of the GPU's raw TFLOPS capability.
+    1. **Assumptions & Constraints:**
+       - Target framerate: 60 FPS (16.6ms budget).
+       - IPC synchronization penalty for `gl.readPixels`: ~5-10ms.
+       - Intermediate tensor readbacks per frame: 10.
+    2. **Calculations:**
+       - Total IPC overhead per frame: 10 readbacks * 10ms = 100ms.
+       - Maximum theoretical framerate: 1000ms / 100ms = 10 FPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: IPC Synchronization-Bound.** The massive 100ms overhead inherently limits the frame rate to ~10-15 FPS regardless of the GPU's raw TFLOPS capability.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

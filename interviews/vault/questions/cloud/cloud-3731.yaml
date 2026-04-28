@@ -11,18 +11,21 @@ title: Multi-Level Memory Hierarchy Specification for 405B LLM Inference
 scenario: You are designing a tiered memory hierarchy system for serving Llama-3-405B (FP8 = 405GB) on a production cluster with H100s, NVMe SSDs, and DRAM. The model must serve 500 concurrent users with an 8192 token context.
 question: What tiered memory strategy or limits are required to serve 500 concurrent 8192-token users for Llama-3-405B FP8 on H100s?
 details:
-  realistic_solution: 'Model: 405GB FP8. Single H100: 80GB — only 20% of model fits. Strategy: tensor parallelism across 8 H100s = 640GB HBM total > 405GB. Full model in HBM. KV cache: per token per layer KV (GQA with 8 KV heads) = 2×8×128×1B = 2048 bytes. 126 layers: 258,048 bytes/token. 500 users × 8192 tokens = 4,096,000 tokens × 258,048 bytes ≈ 1057GB — impossible on 8 GPUs. Fix: must limit concurrency or context, or use CPU offload. Realistic limit: 100 concurrent, 8192 context, FP8 KV. KV: 100×8192×258,048 bytes ≈ 211GB. Total memory needed: 405GB (model) + 211GB (KV) = 616GB. This requires 8×H100s (640GB) to fit entirely in HBM.'
+  realistic_solution: 'Model: 405GB FP8. Single H100: 80GB — only 20% of model fits. Strategy: tensor parallelism across 8 H100s = 640GB HBM total > 405GB. Full model in HBM. KV cache: per token per layer KV (GQA with 8 KV heads) = 2\times8\times128\times1B = 2048 bytes. 126 layers: 258,048 bytes/token. 500 users \times 8192 tokens = 4,096,000 tokens \times 258,048 bytes ≈ 1057GB — impossible on 8 GPUs. Fix: must limit concurrency or context, or use CPU offload. Realistic limit: 100 concurrent, 8192 context, FP8 KV. KV: 100\times8192\times258,048 bytes ≈ 211GB. Total memory needed: 405GB (model) + 211GB (KV) = 616GB. This requires 8\timesH100s (640GB) to fit entirely in HBM.'
   common_mistake: |
     **The Pitfall:** Trying to fit the full model and all KV caches in GPU HBM without concurrency limits or CPU offload.
     **The Rationale:** Candidates size the cluster purely based on model weights and underestimate the massive KV cache required for 500 users at 8K context.
     **The Consequence:** Out-of-memory errors in production or severe thrashing as the system attempts to page massive KV caches to slow storage.
   napkin_math: |
-    - Model FP8 size: 405GB.
-    - Per-token KV cache (FP8, 126 layers, 8 heads, 128 dim): 2 (K+V) * 126 * 8 * 128 * 1B = 258,048 bytes/token.
-    - Original goal (500 users): 500 users * 8192 tokens = 4,096,000 tokens. 4,096,000 * 258,048 bytes = ~1057GB KV cache.
-    - Total memory (500 users): 405GB (model) + 1057GB (KV) = 1462GB (exceeds 8x H100 640GB limit).
-    - Revised goal (100 users): 100 users * 8192 tokens * 258,048 bytes = ~211GB KV cache.
-    - **Total memory (100 users): 405GB + 211GB = 616GB, which successfully fits in an 8x H100 node.**
+    1. **Assumptions & Constraints:**
+       - 405GB FP8 model, 126 layers, 8 heads, 128 dim.
+    2. **Calculations:**
+       - Per-token KV cache: 2 * 126 * 8 * 128 * 1B = 258,048 bytes.
+       - 500 users * 8192 tokens * 258,048 = ~1057GB KV cache.
+       - Total (500 users) = 1462GB (Exceeds 8x H100 640GB limit).
+       - Total (100 users) = 405GB + 211GB KV = 616GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 100 concurrent users at 8K context fits exactly in 616GB across an 8x H100 node.**
 status: published
 provenance: imported
 requires_explanation: true

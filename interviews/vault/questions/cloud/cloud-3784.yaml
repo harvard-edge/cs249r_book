@@ -8,20 +8,24 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: FlashAttention Memory Savings Enable Longer Training Contexts
-scenario: You train a 13B model on an A100 (80 GB HBM2e). Weights in BF16 = 26 GB. Optimizer states (AdamW, mixed precision) = 52 GB. Remaining HBM for activations = 2 GB.
-question: With only 2 GB left for activations, what max sequence length can standard attention support on the A100, and how does FlashAttention change it?
+scenario: You train a 13B model on a GPU. Weights in BF16 = 26 GiB. Optimizer states (AdamW, mixed precision) = 52 GiB. Remaining HBM for activations = 2 GiB.
+question: With only 2 GiB left for activations, what max sequence length can standard attention support, and how does FlashAttention change it?
 details:
-  realistic_solution: 'Standard attention activation per layer per micro-batch for the attention matrix alone: N² × num_heads × 2 bytes = N² × 40 × 2 = 80N² bytes (assuming 40 heads for 13B). For the largest single-layer allocation (dominating term): 80N² ≤ 2 GB = 2,147,483,648 bytes. N² ≤ 26,843,545. N ≤ 5181 tokens. Accounting for other activations (MLP, etc.), practical max ≈ 3000-4000 tokens. With FlashAttention: no attention matrix stored in HBM. Activation memory per layer becomes O(N×d) = N × 128 × 40 × 2 = 10,240N bytes. For 2 GB: N ≤ 209,715 tokens. However, gradient checkpointing is needed to avoid storing all layers simultaneously. With checkpointing + FlashAttention: practical max sequence length = 16K-32K tokens with the same 2 GB activation budget. FlashAttention enables 4-8× longer contexts in the same memory.'
+  realistic_solution: 'Standard attention activation per layer per micro-batch for the attention matrix alone: N² × num_heads × 2 bytes = N² × 40 × 2 = 80N² bytes (assuming 40 heads for 13B). For the largest single-layer allocation (dominating term): 80N² ≤ 2 GiB = 2,147,483,648 bytes. N² ≤ 26,843,545. N ≤ 5181 tokens. Accounting for other activations (MLP, etc.), practical max ≈ 3000-4000 tokens. With FlashAttention: no attention matrix stored in HBM. Activation memory per layer becomes O(N×d) = N × 128 × 40 × 2 = 10,240N bytes. For 2 GiB: N ≤ 209,715 tokens. However, gradient checkpointing is needed to avoid storing all layers simultaneously. With checkpointing + FlashAttention: practical max sequence length = 16K-32K tokens with the same 2 GiB activation budget. FlashAttention enables 4-8× longer contexts in the same memory.'
   common_mistake: |
     **The Pitfall:** Forgetting that activation memory includes more than just the attention matrix.
     **The Rationale:** Candidates focus solely on the O(N²) attention bottleneck and ignore MLP and layer norm activations.
     **The Consequence:** Overestimating the maximum possible sequence length even with standard attention.
   napkin_math: |
-    - 1. Standard attention memory for 1 layer (40 heads): N² * 40 heads * 2 bytes = 80N² bytes.
-    - 2. Solve for N with 2 GB limit: 80N² <= 2,147,483,648 bytes -> N² <= 26,843,545 -> N <= 5181 tokens.
-    - 3. FlashAttention memory for 1 layer: O(N) = N * 128 (head dim) * 40 heads * 2 bytes = 10,240N bytes.
-    - 4. Solve for N with 2 GB limit: 10,240N <= 2,147,483,648 bytes -> N <= 209,715 tokens.
-    - 5. Conclusion: FlashAttention with gradient checkpointing practically enables **16K-32K tokens** within the 2 GB budget.
+    1. **Assumptions & Constraints:**
+       - 13B model (approx. 40 heads, 128 head dim).
+       - 2 GiB available for activations.
+    2. **Calculations:**
+       - Standard attention memory (1 layer): N^2 * 40 heads * 2 bytes = 80N^2 bytes.
+       - Solve for N with 2 GiB limit: 80N^2 <= 2,147,483,648 bytes -> N^2 <= 26,843,545 -> N <= 5,181 tokens.
+       - FlashAttention memory (1 layer): O(N) = N * 128 (head dim) * 40 heads * 2 bytes = 10,240N bytes.
+       - Solve for N with 2 GiB limit: 10,240N <= 2,147,483,648 bytes -> N <= 209,715 tokens.
+    3. **Conclusion & Interpretation:** **FlashAttention with gradient checkpointing enables 16K-32K tokens** within the 2 GiB budget. Result: **Memory-Bound**.
 status: published
 provenance: imported
 requires_explanation: false

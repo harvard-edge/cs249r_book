@@ -8,19 +8,22 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: TPU v5e Graph Compilation Performance Analysis
-scenario: You are deploying a large language model (LLM) on a Google TPU v5e. The model uses a custom activation function that requires a complex operator. After initial compilation and execution, you observe that the actual throughput is significantly lower than expected, even though the on-device memory utilization is low. The profiler indicates a bottleneck related to frequent host-device communication and unexpected stalls in the execution pipeline, despite the graph compiler attempting operator fusion and constant folding.
-question: Why might a custom activation underperform on TPU v5e despite low HBM use, and how should operator lowering be fixed?
+scenario: You are deploying a large language model (LLM) on an accelerator. The model uses a custom activation function that requires a complex operator. After initial compilation and execution, you observe that the actual throughput is significantly lower than expected, even though the on-device memory utilization is low. The profiler indicates a bottleneck related to frequent host-device communication and unexpected stalls in the execution pipeline, despite the graph compiler attempting operator fusion and constant folding.
+question: Why might a custom activation underperform on this accelerator despite low HBM use, and how should operator lowering be fixed?
 details:
-  realistic_solution: A realistic solution involves investigating the generated HLO (High-Level Optimizer) graph to understand how the custom operator was lowered. If it's lowered to many small, non-fusable primitives or involves frequent host calls, the solution would be to implement a custom HLO kernel (e.g., using Triton or directly in MLIR) that is optimized for the TPU v5e's architecture. This custom kernel would ensure the operation leverages the 197 TFLOPS BF16 efficiently, minimizes host-device transfers that eat into the 1.6 TB/s bandwidth, and allows for better fusion opportunities with surrounding operations, thereby reducing execution stalls and improving data locality in the 16 GB HBM.
+  realistic_solution: A realistic solution involves investigating the generated HLO (High-Level Optimizer) graph to understand how the custom operator was lowered. If it's lowered to many small, non-fusable primitives or involves frequent host calls, the solution would be to implement a custom HLO kernel (e.g., using Triton or directly in MLIR) that is optimized for the accelerator's architecture. This custom kernel would ensure the operation leverages the BF16 efficiently, minimizes host-device transfers that eat into the memory bandwidth, and allows for better fusion opportunities with surrounding operations, thereby reducing execution stalls and improving data locality in the HBM.
   common_mistake: |
     **The Pitfall:** Assuming the compiler will always perfectly optimize custom operations automatically.
     **The Rationale:** Unoptimized operator lowering can result in non-contiguous memory access patterns and frequent fallback calls to the host CPU.
     **The Consequence:** The model suffers from severe host-device communication bottlenecks, wasting accelerator compute potential and severely degrading throughput.
   napkin_math: |
-    * If the custom activation requires 100 MB of intermediate data for each invocation.
-    * Called 1000 times per second.
-    * Round trip to host memory required: 100 MB * 1000 = 100,000 MB/s = 100 GB/s.
-    * **This massive PCIe transfer stalls the pipeline and prevents the hardware from effectively utilizing its 1.6 TB/s internal memory bandwidth.**
+    1. **Assumptions & Constraints:**
+       * Custom activation requires 100 MB of intermediate data for each invocation.
+       * Called 1000 times per second.
+    2. **Calculations:**
+       * Round trip to host memory required: 100 MB * 1000 = 100,000 MB/s = 100 GB/s.
+    3. **Conclusion & Interpretation:**
+       * **Result: PCIe Bottleneck.** This massive PCIe transfer stalls the pipeline and prevents the hardware from effectively utilizing its internal memory bandwidth.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,33 +8,24 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Diagnosing Stragglers in Synchronous Training
-scenario: Your 128-GPU synchronous data parallel training shows step times oscillating between 350ms and 800ms with no pattern. Average GPU utilization is 91% but the slowest GPU per step varies randomly. The cluster is homogeneous (same GPU model, same network).
+scenario: Your 128-node synchronous data parallel training shows step times oscillating between 350ms and 800ms with no pattern. Average GPU utilization is 91% but the slowest GPU per step varies randomly. The cluster is homogeneous.
 question: What is causing the intermittent stragglers across random GPUs in synchronous training?
 details:
-  realistic_solution: 'This is the straggler problem caused by OS-level interference (jitter). In synchronous training, all GPUs must synchronize at the AllReduce barrier — the slowest GPU determines step time. With 128 GPUs, the probability of at least one experiencing a delay (context switch, page fault, network interrupt, ECC memory scrub, GPU thermal throttling) is high. A single GPU delayed by 200ms delays all 128. Root causes: (1) CPU interrupts during data loading. (2) NUMA memory access misalignment. (3) GPU thermal throttling (one GPU in a hot spot). (4) ECC error detection/correction pauses. Fixes: CPU pinning, NUMA-aware allocation, disabling hyperthreading, using NCCL ASYNC_ERROR_HANDLING, and setting cudaDeviceScheduleBlockingSync.'
+  realistic_solution: 'This is the straggler problem caused by OS-level interference (jitter). In synchronous training, all GPUs must synchronize at the AllReduce barrier — the slowest GPU determines step time. With 128 GPUs, the probability of at least one experiencing a delay (context switch, page fault, network interrupt, ECC memory scrub, thermal throttling) is high. A single GPU delayed by 200ms delays all 128. Fixes: CPU pinning, NUMA-aware allocation, disabling hyperthreading, using NCCL ASYNC_ERROR_HANDLING, and setting cudaDeviceScheduleBlockingSync.'
   common_mistake: |
-    **The Pitfall:** Blaming network congestion or attempting to replace a single "faulty" GPU.
+    **The Pitfall:** Blaming network congestion or attempting to replace a single faulty GPU.
     **The Rationale:** Assuming performance drops are localized hardware failures rather than systemic OS/software jitter.
     **The Consequence:** Chasing hardware ghosts while ignoring easily fixable OS-level CPU pinning or NUMA alignment issues.
   napkin_math: |
-    - **Straggler Probability Formula:** P(any GPU delayed) = 1 - (1 - p)^N
-    - **Example (p=0.5%):** If a single GPU has a 0.5% chance of being delayed (jitter) on any given step.
-    - **Cluster Probability (N=128):** 1 - (0.995)^128 ≈ **47%**
-    - **Conclusion:** Nearly every other training step will experience a 800ms stall, destroying overall throughput.
+    1. **Assumptions & Constraints:**
+       - N = 128 GPUs.
+       - Probability of OS jitter per GPU per step (p): 0.5%.
+    2. **Calculations:**
+       - P(no delay on any GPU) = (1 - p)^N = (0.995)^128 ≈ 52.6%.
+       - P(at least one delayed) = 1 - 0.526 = 47.4%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Systemic OS Jitter.** Nearly 50% of training steps experience a straggler stall (e.g. 800ms), severely impacting overall throughput.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

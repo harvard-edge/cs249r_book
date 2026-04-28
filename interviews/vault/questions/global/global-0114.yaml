@@ -8,38 +8,23 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: DLRM Heterogeneous Bottlenecks
-scenario: Your massive click-through rate (CTR) model processes 15,000 QPS. It consists of 600GB of sparse embedding tables and a dense 6-layer MLP. To scale to 30,000 QPS, you must choose between upgrading to GPUs with 3.2 TB/s HBM (but only 80GB capacity per GPU), or moving to dual-socket CPUs with 12 channels of DDR5 (300 GB/s) and 2TB of capacity.
+scenario: Your massive click-through rate (CTR) model processes 15,000 QPS. It consists of 600GB of sparse embedding tables and a dense 6-layer MLP. To scale to 30,000 QPS, you must choose between upgrading to GPUs with 3.2 TB/s HBM, or moving to dual-socket CPUs with 12 channels of DDR5 (300 GB/s) and 2TB of capacity.
 question: For the 600GB CTR model at 30,000 QPS, should you use high-bandwidth GPUs, high-capacity CPUs, or a hybrid architecture?
 details:
-  realistic_solution: 'DLRMs exhibit a split-personality Roofline profile. The MLP layers are dense matrix multiplications with high arithmetic intensity, placing them firmly in the compute-bound regime where GPUs excel. Conversely, the embedding lookups are highly sparse, requiring random memory accesses. They have an arithmetic intensity of practically zero (just a gather/sum operation) and are bound by memory capacity and memory latency/transaction rate, not peak sequential bandwidth. Upgrading to 80GB GPUs requires sharding the 600GB tables across 8+ GPUs, incurring massive PCIe/NVLink all-to-all communication overheads that will bottleneck the 30k QPS target. The optimal L6+ architecture is heterogeneous: host the 600GB embedding tables on the high-capacity CPU memory (which has sufficient transaction rate for sparse lookups), and pipeline the gathered dense vectors over PCIe to the GPU to execute the compute-bound MLP.'
+  realistic_solution: 'DLRMs exhibit a split-personality Roofline profile. The MLP layers are dense matrix multiplications with high arithmetic intensity, firmly compute-bound where GPUs excel. Embedding lookups are highly sparse, requiring random memory accesses, bound by memory capacity and latency, not peak sequential bandwidth. Upgrading to 80GB GPUs requires sharding the 600GB tables across 8+ GPUs, incurring massive PCIe/NVLink all-to-all communication overheads. The optimal L6+ architecture is heterogeneous: host the 600GB embedding tables on the high-capacity CPU memory, and pipeline the gathered dense vectors over PCIe to the GPU to execute the compute-bound MLP.'
   common_mistake: |
     **The Pitfall:** Assuming GPUs are always better due to higher peak bandwidth.
     **The Rationale:** Failing to distinguish between sequential bandwidth (HBM) and memory capacity/random transaction rates required for sparse embeddings.
     **The Consequence:** Wasting money on massive GPU clusters just for VRAM capacity, while incurring heavy NVLink communication overhead.
   napkin_math: |
-    - Embedding lookups: 200 features/query × 15,000 QPS = 3M lookups/sec.
-    - Bandwidth required: 3M × 128 bytes = 384 MB/s.
-    - Capacity required: 600 GB.
-    - CPU fits capacity; PCIe Gen4 (32 GB/s) easily handles the **384 MB/s** vector transfer.
-    - GPU MLP compute: 15,000 QPS × 50M FLOPs = **750 GFLOPs** (ideal for GPU).
+    1. **Assumptions & Constraints:**
+       - 15,000 QPS scaling to 30,000 QPS.
+       - Embedding lookups: 200 features/query.
+       - Capacity required: 600 GB.
+    2. **Calculations:**
+       - Embedding lookups: 200 features/query * 15,000 QPS = 3M lookups/sec.
+       - Bandwidth required: 3M * 128 bytes = 384 MB/s.
+       - GPU MLP compute: 15,000 QPS * 50M FLOPs = 750 GFLOPs.
+    3. **Conclusion & Interpretation:**
+       - **Result: PCIe-Bound Hybrid.** CPU fits capacity; PCIe Gen4 (32 GB/s) easily handles the 384 MB/s vector transfer.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 15
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-tags:
-- dlrm
-- recommendation
-- memory-capacity

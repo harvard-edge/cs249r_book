@@ -11,16 +11,23 @@ title: Edge Quantization Calibration Plan
 scenario: An edge detector works in a lab but fails in rain and night scenes after INT8 quantization.
 question: How would you design a calibration and validation plan for an INT8 edge detector that fails in rain and night scenes?
 details:
-  realistic_solution: The calibration set must include rain, night, glare, sensor noise, and representative camera hardware. Validation should report per-condition accuracy and activation clipping statistics. If night activations exceed calibration ranges, use better calibration data or quantization-aware training.
+  realistic_solution: The failure stems from catastrophic activation clipping. You must implement a dynamic calibration dataset that enforces a strict distribution matching real-world edge cases (rain, night glare, sensor noise). Utilize KL-Divergence or MinMax calibration specifically tuned for high-variance activations rather than simple entropy calibration. If out-of-distribution spikes still exceed the INT8 dynamic range, transition the training pipeline to Quantization-Aware Training (QAT) to force the network to learn robust INT8 scale factors during backpropagation.
   common_mistake: |
-    **The Pitfall:** Calibrating only on clean daytime lab data.
-    **The Rationale:** Assuming that the distribution of activations during INT8 calibration will naturally transfer to field conditions like rain or night glare.
-    **The Consequence:** Extreme activation spikes in edge cases are clipped during INT8 inference, causing catastrophic failure and "blindness" in critical real-world conditions.
+    **The Pitfall:** Using a random, uniform subset of daytime lab data for Post-Training Quantization (PTQ) calibration.
+    **The Rationale:** Candidates assume that a generic subset of training data represents the full dynamic range of activations needed to calculate the INT8 scaling factors.
+    **The Consequence:** Real-world phenomena like night glare produce activation spikes that exceed the static scaling factor, clipping critical features to 127 (INT8 max) and blinding the model.
   napkin_math: |
-    1. Identify maximum lab activation: Let's say max activation in lab data is X.
-    2. Identify field activation: Night scenes/glare can cause max activation to be 2X.
-    3. Calculate quantization scale: Scale factor calculated on lab data clips any value > X.
-    **If night activation maxima are 2x lab maxima, lab-derived scales will clip real field activations, destroying the signal.**
+    1. **Assumptions & Constraints:**
+       - Lab maximum FP32 activation: 15.0.
+       - Field (Night Glare) maximum FP32 activation: 60.0.
+       - INT8 range limit: 127.
+    2. **Calculations:**
+       - PTQ Scale Factor calculated from lab data: 127 / 15.0 = 8.47.
+       - Night glare activation mapped to INT8: 60.0 * 8.47 = 508.
+       - Hardware clipping application: 508 is hard-clipped to 127.
+       - De-quantized value observed by next layer: 127 / 8.47 = 15.0.
+    3. **Conclusion & Interpretation:**
+       - **Result: A critical 60.0 signal is irreversibly truncated to 15.0. The model is conceptually Precision-Bound, requiring QAT or better calibration sets to accommodate the full dynamic range.**
 status: draft
 provenance: llm-draft
 requires_explanation: true

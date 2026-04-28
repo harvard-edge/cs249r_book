@@ -8,7 +8,7 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: both
 title: Orin Ring AllReduce
-scenario: Four Jetson AGX Orins aggregate gradients for a 100 MB model via a tree switch. Same-rack pairs see ~125 MB/s bandwidth, while cross-rack pairs see only ~62 MB/s due to a contended uplink.
+scenario: Four edge compute nodes aggregate gradients for a 100 MB model via a tree switch. Same-rack pairs see ~125 MB/s bandwidth, while cross-rack pairs see only ~62 MB/s due to a contended uplink.
 question: Evaluate the realistic Ring AllReduce time given the asymmetric tree topology, and identify whether a 2-D hierarchical AllReduce would beat a flat 4-node ring across the contended cross-rack link.
 visual:
   kind: svg
@@ -16,17 +16,22 @@ visual:
   alt: Four Jetson Orin nodes arranged in a logical ring topology.
   caption: Ring AllReduce logical topology across four Orin nodes.
 details:
-  realistic_solution: 'Flat ring at 62 MB/s (cross-rack link is the slowest hop): 1.5 * 100 / 62 = 2.42 s. 2-D hierarchical: intra-rack ring on 2 nodes is 100 * 1/2 / 125 = 0.4 s; inter-rack reduce-broadcast over the slow link sends 100 MB up + 100 MB back = 200 / 62 = 3.23 s; total = 0.4 + 3.23 = 3.63 s. Hierarchical is WORSE here because it serializes 200 MB through the slow link. The right move is gradient compression to 25% (25 MB) BEFORE the AllReduce.'
+  realistic_solution: "The flat ring completely dominates the hierarchical approach, clocking at 2.42s versus 3.63s. Hierarchical AllReduce on asymmetric uplinks inherently forces massive gradient payloads to squeeze through the heavily bottlenecked cross-rack link twice (up and down). Optimizing demands a flat ring combined with aggressive offline gradient sparsification/compression to minimize payload traversal across the 62 MB/s chokepoint."
   common_mistake: |
     **The Pitfall:** Applying standard ring-allreduce formulas using the fastest link bandwidth.
     **The Rationale:** Candidates fail to realize that an asymmetric topology pins the ring's performance to the single slowest hop.
     **The Consequence:** Expected aggregation times are wildly optimistic, leading to stalled training and misconfigured cluster timeouts.
   napkin_math: |
-    - Flat ring bottleneck: Cross-rack link at 62 MB/s.
-    - Flat ring time: 1.5 * 100 MB / 62 MB/s = 2.42s.
-    - 2-D Hierarchical time: 0.4s (intra) + 200 MB / 62 MB/s (inter) = 3.63s.
-    - Result: Hierarchical is **worse** due to serialization on the slow link.
-    - With 4x Gradient Compression (25 MB): 1.5 * 25 / 62 = **0.6s flat ring time**.
+    1. **Assumptions & Constraints:**
+       - Topologies: 4-node ring vs. 2-D hierarchical.
+       - Cross-rack link: 62 MB/s. Intra-rack link: 125 MB/s.
+       - Payload: 100 MB model.
+    2. **Calculations:**
+       - Flat ring bottleneck: 62 MB/s. Time = (1.5 * 100) / 62 = 2.42s.
+       - Hierarchical Time = 0.4s (intra) + (200 / 62) (inter) = 3.63s.
+       - Gradient Compression (4x, 25MB) with Flat Ring = (1.5 * 25) / 62 = 0.6s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Flat Ring is faster (2.42s vs 3.63s).** Hierarchical serialization severely penalizes asymmetric networks.
 status: published
 provenance: llm-draft
 expected_time_minutes: 8

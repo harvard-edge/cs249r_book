@@ -8,19 +8,26 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Optimizing Prefill Latency via Prompt Compression on Snapdragon 8 Gen 3
-scenario: A Snapdragon 8 Gen 3 (45 TOPS, 16GB) RAG app uses 800-token retrieved context (4 chunks of 200 tokens each) + 300-token system prompt + 100-token query = 1200-token prefill. Prefill of 1200 tokens with a 1B INT8 model takes 890ms. A prompt compression model (LLMLingua-style, 50M params) can compress the retrieved context to 40% of original size in 120ms.
+scenario: A RAG app uses 800-token retrieved context + 300-token system prompt + 100-token query. Prefill of 1200 tokens with a 1B INT8 model takes 890ms. A prompt compression model can compress the retrieved context to 40% of original size in 120ms.
 question: How would you calculate the net latency improvement and decide whether prompt compression is worthwhile?
 details:
-  realistic_solution: 'After compression: retrieved context = 800*0.4=320 tokens. New prefill: 320+300+100=720 tokens. Prefill scales approximately linearly with tokens (for transformer attention: O(n^2) but for inference with KV cache build: O(n) per layer). 720/1200 * 890ms = 534ms prefill. Add compression model: 50M INT8 = 50MB, runs on NPU at ~500ms for processing 800 tokens (50M * 800 * 2 ops / (45e12 * 0.3) = 2.37ms... that''s too fast — LLMLingua processes tokens with attention, closer to 120ms as stated). Net: compression(120ms) + prefill(534ms) = 654ms vs baseline 890ms. Savings: 236ms (26.5%). Worthwhile if accuracy loss < 3%.'
+  realistic_solution: |
+    Calculate prefill latency scaling dynamically. After Top-K compression: retrieved context = 800 * 0.4 = 320 tokens. New total prefill context = 320 + 300 + 100 = 720 tokens. Prefill scales linearly with tokens for KV cache generation (O(n) per layer). 720/1200 * 890ms = 534ms. Overhead of compression model: 120ms. Net latency = 120ms + 534ms = 654ms vs 890ms baseline. Net savings = 236ms. Worthwhile if semantic degradation is acceptable.
   common_mistake: |
     **The Pitfall:** Ignoring the latency overhead of the compression model itself.
     **The Rationale:** Teams often calculate the prefill savings but forget that the compression model also requires its own compute and prefill on the mobile NPU.
     **The Consequence:** Overestimating performance gains and potentially degrading user experience if the compression process is too slow.
   napkin_math: |
-    1. **Compression Output:** 800 * 0.4 = 320 tokens. New total prefill = 320 + 300 + 100 = 720 tokens.
-    2. **New Prefill Time:** 890 ms * (720 / 1200) = 534 ms.
-    3. **Total Latency:** Compression (120 ms) + New Prefill (534 ms) = 654 ms.
-    4. **Conclusion:** **Net savings is 890 - 654 = 236 ms (26.5% reduction). It is worthwhile if accuracy loss is acceptable.**
+    1. **Assumptions & Constraints:**
+       - Original Prefill: 1200 tokens at 890ms
+       - Compression Output: 800 * 0.4 = 320 tokens
+       - Compression Overhead: 120ms
+    2. **Calculations:**
+       - New total prefill context: 320 + 300 + 100 = 720 tokens
+       - New Prefill Time: 890 ms * (720 / 1200) = 534 ms
+       - Total Latency: 120 ms + 534 ms = 654 ms
+       - Net savings: 890 - 654 = 236 ms
+    3. **Conclusion & Interpretation:** **Net savings is 236 ms (26.5% reduction). Result: Compute-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

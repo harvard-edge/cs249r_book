@@ -8,7 +8,7 @@ competency_area: compute
 bloom_level: apply
 phase: inference
 title: Inference Cycles on Cortex-M4
-scenario: You're running a keyword spotting model (DS-CNN, 6M INT8 MACs) on a Cortex-M4 at 168 MHz. The M4 has no SIMD/DSP extensions (unlike M4F or M7). It executes one 8-bit multiply-accumulate per cycle using the standard MUL instruction.
+scenario: You're running a keyword spotting model (6M INT8 MACs). The hardware has no SIMD/DSP extensions. It executes one 8-bit multiply-accumulate per cycle using the standard MUL instruction.
 question: "How long should a 6M-MAC DS-CNN take on a 168 MHz scalar Cortex-M4 versus CMSIS-NN on Cortex-M4F?"
 details:
   realistic_solution: 'Base M4 without SIMD: the compiler generates load-multiply-accumulate-store sequences with loop control, achieving roughly 1 useful MAC every 5 clock cycles. This is the baseline: 6M MACs / (168 MHz / 5) = 178 ms. CMSIS-NN on M4F exploits the SMLAD instruction (dual 16-bit signed MAC) and optimized memory access patterns with pointer arithmetic. Peak is 2 MACs/cycle but sustained throughput is ~1.2 MACs/cycle due to pipeline stalls when accessing non-sequential memory. Result: ~30 ms (6x speedup). Cortex-M7 at 480 MHz adds: dual-issue pipeline, branch prediction, and tightly-coupled memory (TCM) that eliminates flash wait states. With CMSIS-NN: ~1.5 MACs/cycle sustained, giving 8.3 ms (21x over base M4). Key insight: the SIMD instruction alone gives ~6x, the faster clock adds another ~3.5x.'
@@ -17,12 +17,17 @@ details:
     **The Rationale:** Engineers read the "1 cycle multiplier" spec and assume every MAC operation in their network will take exactly one cycle.
     **The Consequence:** This ignores that a scalar MAC requires multiple instructions: load operand A, load operand B, multiply, accumulate, increment pointers, and check the loop counter, leading to a massive underestimation of latency.
   napkin_math: |
-    - Base Cortex-M4 (scalar C, no SIMD): effective throughput is ~5 cycles/MAC due to loop overhead.
-    - Base inference time: 6M MACs / (168M / 5) = **178 ms**.
-    - M4F with CMSIS-NN (SMLAD dual-MAC SIMD): ~2 MACs/cycle peak, ~1.2 MACs/cycle sustained.
-    - M4F inference time: 6M MACs / (168M × 1.2) = **29.8 ms** (Speedup: 178/29.8 = **6x**).
-    - Cortex-M7 at 480 MHz with CMSIS-NN: ~1.5 MACs/cycle sustained.
-    - M7 inference time: 6M / (480M × 1.5) = **8.3 ms** (Speedup over base M4: 178/8.3 = **21x**).
+    1. **Assumptions & Constraints:**
+       - Target Compute: 6M INT8 MACs.
+       - Scalar CPU: 168 MHz, ~5 cycles/MAC (load, MUL, store, loop).
+       - SIMD CPU: 168 MHz, ~1.2 MACs/cycle sustained.
+       - Advanced SIMD CPU: 480 MHz, ~1.5 MACs/cycle sustained.
+    2. **Calculations:**
+       - Base Scalar Latency: 6M MACs / (168 MHz / 5 cycles/MAC) = 178 ms.
+       - SIMD CPU Latency: 6M MACs / (168 MHz * 1.2 MACs/cycle) = 29.8 ms (6x speedup).
+       - Advanced SIMD Latency: 6M MACs / (480 MHz * 1.5 MACs/cycle) = 8.3 ms (21x speedup).
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** Missing SIMD instructions drastically inflates the cycles per MAC, exploding latency from ~30ms up to 178ms on identically clocked hardware.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The CMSIS-NN Transpose Overhead
-scenario: You are running a CNN on a Cortex-M4. The model was trained in PyTorch (which defaults to NCHW memory layout). You convert it to TFLite Micro and use the CMSIS-NN kernels. The model runs, but the profiler shows that between every single convolution layer, the CPU spends 30% of the total inference time executing a `Transpose` operation.
+scenario: You are running a CNN on a Cortex-M4. The model was trained in PyTorch. You convert it to TFLite Micro and use the CMSIS-NN kernels. The model runs, but the profiler shows that between every single convolution layer, the CPU spends 30% of the total inference time executing a `Transpose` operation.
 question: Why does a PyTorch NCHW CNN spend 30% of Cortex-M4 inference time in TFLite Micro Transpose ops?
 details:
   realistic_solution: 'PyTorch uses NCHW (batch, channels, height, width) memory layout. TFLite Micro and CMSIS-NN require NHWC (batch, height, width, channels). When the converter detects the mismatch, it inserts Transpose ops between layers. Transposing a 32x32x64 INT8 tensor requires moving 65,536 bytes via strided reads — ~500K cycles on M4 without data cache. With 10 transpose ops: 10M wasted cycles (60ms at 168MHz). Fix: export the PyTorch model in NHWC format from the start (use channels_last memory format), or use ONNX with explicit layout conversion before TFLite export. This eliminates all runtime transpose ops.'
@@ -17,10 +17,9 @@ details:
     **The Rationale:** Candidates do not realize the framework is dutifully executing layout conversions because the input graph explicitly requested them due to NCHW vs NHWC mismatches.
     **The Consequence:** Wasting engineering effort rewriting kernels instead of simply exporting the model with a `channels_last` (NHWC) format.
   napkin_math: |
-    - Transposing a 32x32x64 INT8 tensor requires moving 65,536 bytes via strided reads.
-    - On M4 (no data cache), this takes ~500,000 cycles.
-    - Doing this before and after 10 layers: 10 * 2 * 500,000 = 10,000,000 wasted CPU cycles.
-    - 10M cycles at 168 MHz = **~60 ms wasted purely on rearranging data**.
+    1. **Assumptions & Constraints:** PyTorch NCHW converted to TFLite NHWC. 32x32x64 INT8 tensor. Cortex-M4 at 168 MHz (no data cache).
+    2. **Calculations:** Tensor size = 32 * 32 * 64 = 65,536 bytes. Strided reads for Transpose take ~500,000 cycles. 10 layers * 2 transposes (in/out) = 20 transposes. Wasted cycles = 20 * 500,000 = 10,000,000 cycles. Latency penalty = 10,000,000 / 168,000,000 = 59.5 ms.
+    3. **Conclusion & Interpretation:** **~60 ms wasted pure layout transformation latency** (Memory-Bandwidth-Bound Framework Overhead).
   options:
   - TFLite Micro is inserting unnecessary Transpose ops due to a framework bug. Filing a bug report and rebuilding TFLite Micro from the latest source will eliminate the overhead.
   - 'PyTorch uses NCHW layout; TFLite Micro/CMSIS-NN requires NHWC. The converter inserts Transpose ops between every layer to convert. Transposing 32x32x64 INT8 via strided reads: ~500K cycles per op (no data cache on M4). With 10 layers: ~10M wasted cycles (60ms at 168 MHz). Fix: export from PyTorch in NHWC (channels_last memory format) or convert layouts in ONNX before TFLite export, eliminating all runtime transpose ops.'

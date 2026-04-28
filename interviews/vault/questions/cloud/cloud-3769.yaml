@@ -8,31 +8,26 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Shared mmap for Multi-Tenant GPU Inference
-scenario: 'You run a multi-tenant inference platform where 8 worker processes on one
-  H100 server each serve the same 13B model (26 GB FP16). Without mmap, each process
-  loads its own copy in host memory: 8 × 26 GB = 208 GB host RAM, exceeding your 256
-  GB system memory. Design a memory-efficient architecture using mmap and describe
-  how GPU memory is managed.'
-question: How would you use mmap to share the 26 GB model across 8 workers, and how
-  would you manage GPU memory?
+scenario: You run a multi-tenant inference platform where 8 worker processes on one server each serve the same 13B model (26 GB FP16). Without mmap, each process loads its own copy in host memory (208 GB), exceeding your 256 GB system memory.
+question: "How would you design a memory-efficient architecture using mmap to share the 26 GB model across 8 workers, and how would you manage the GPU memory?"
 details:
-  realistic_solution: 'Host side: All 8 processes mmap the same safetensors file.
-    The OS shares physical pages via copy-on-write, using 26 GB host RAM (not 208
-    GB). GPU side: Option A — one process loads weights to GPU, others access via
-    CUDA IPC (cudaIpcGetMemHandle/cudaIpcOpenMemHandle). All 8 processes share one
-    26 GB GPU allocation. Option B — use NVIDIA MPS (Multi-Process Service) with a
-    single GPU context. Weights loaded once, shared across all processes. Option C
-    — use a serving framework like vLLM or TensorRT-LLM that manages a single weight
-    copy with multiple request streams. Architecture: mmap safetensors → single cudaMemcpy
-    → CUDA IPC handles distributed to workers. Host RAM: 26 GB (shared). GPU RAM:
-    26 GB weights + 8 × KV cache per worker. Remaining 80 - 26 = 54 GB for KV caches
-    and activations.'
-  common_mistake: Assuming mmap automatically shares GPU memory too. mmap shares host
-    memory pages between processes, but each process that calls cudaMemcpy creates
-    a separate GPU memory allocation. You need CUDA IPC or a shared GPU memory pool.
-  napkin_math: 'Without mmap: 8 × 26 GB = 208 GB host RAM (OOM on 256 GB). With mmap:
-    26 GB shared. Savings: 182 GB. GPU without sharing: 8 × 26 GB = 208 GB (impossible
-    on 80 GB). With CUDA IPC: 26 GB shared + 8 × ~6 GB KV cache = 74 GB. Fits on H100.'
+  realistic_solution: On the host side, all 8 processes memory-map (`mmap`) the same safetensors file. The OS physical page cache ensures copy-on-write sharing, consuming only 26GB of host RAM. On the GPU side, `mmap` does not natively share memory. You must load the weights to the GPU exactly once and use CUDA IPC (`cudaIpcGetMemHandle`) to share the physical device pointer across the 8 processes, or utilize a unified serving framework like vLLM/TensorRT-LLM to multiplex requests against a single weight allocation.
+  common_mistake: |
+    **The Pitfall:** Assuming host-side `mmap` automatically shares GPU memory allocations.
+    **The Rationale:** Engineers conflate OS virtual memory page sharing with physical PCIe/GPU allocations, assuming `cudaMemcpy` from an mmap'd file behaves magically.
+    **The Consequence:** Each worker process invokes its own `cudaMemcpy`, duplicating the 26GB model 8 times on the GPU, immediately causing a hardware Out-Of-Memory (OOM) crash.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 8 worker processes, 13B model (26 GB).
+       - Host RAM: 256 GB.
+       - GPU VRAM: 80 GB.
+    2. **Calculations:**
+       - Naive Host RAM: 8 * 26 GB = 208 GB (Dangerously close to limit).
+       - mmap Host RAM: 1 * 26 GB = 26 GB (182 GB saved).
+       - Naive GPU VRAM: 8 * 26 GB = 208 GB (OOM on 80GB GPU).
+       - Shared GPU VRAM (IPC): 26 GB weights + (8 * 6 GB KV Cache) = 74 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 74 GB Total VRAM.** The architecture overcomes being strictly **Memory-Capacity-Bound** via OS page sharing and explicit CUDA IPC.
 status: published
 provenance: imported
 requires_explanation: true

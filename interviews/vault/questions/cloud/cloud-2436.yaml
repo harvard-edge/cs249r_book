@@ -8,27 +8,26 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: LLM Decoding Bandwidth Wall
-scenario: A team is deploying a 30B parameter LLM (FP16) on a single A100 80GB GPU (2 TB/s HBM bandwidth,
-  312 TFLOPS FP16). They want to achieve a strict SLA of 100 tokens/sec at batch size 1. They calculate
-  that 30B parameters require roughly 60 GFLOPs per token. 60 GFLOPs * 100 tokens = 6 TFLOPS. Since the
-  A100 has 312 TFLOPS, they assume this SLA is trivial and guarantee it to the client. In production,
-  they only achieve roughly 25 tokens/sec.
+scenario: 'A team is deploying a 30B parameter LLM (FP16) on a single A100 80GB GPU. They want to achieve a strict SLA of 100 tokens/sec at batch size 1. They calculate that 30B parameters require roughly 60 GFLOPs per token, so 100 tokens/sec needs 6 TFLOPS. Since the A100 has 312 TFLOPS, they guarantee the SLA. In production, they only achieve roughly 25 tokens/sec.'
 question: "Why is 100 tokens/sec at batch size 1 impossible for the 30B FP16 model on one A100 despite needing only 6 TFLOPS?"
 details:
-  realistic_solution: The team failed to analyze the workload using the roofline model. The arithmetic
-    intensity of generating a single token (batch size 1) is roughly 1 FLOP per byte of weights loaded
-    (60 GFLOPs / 60 GB = 1 FLOP/Byte). The A100 roofline ridge point is 312 TFLOPS / 2 TB/s = 156 FLOPs/Byte
-    (or 208 FLOPs/Byte depending on exact achieved bandwidth vs peak). At 1 FLOP/Byte, the workload is
-    extremely deep in the memory-bound regime. The attainable compute is dictated entirely by memory bandwidth,
-    not the ALUs. To fix this, they must either use a GPU with higher memory bandwidth, quantize the model
-    to reduce bytes read, or utilize speculative decoding.
-  common_mistake: Confusing peak TFLOPS with attainable throughput, completely ignoring that decoding
-    is severely memory-bandwidth bound.
-  napkin_math: 30B parameters in FP16 consume 60 GB of memory. For batch size 1 generation, every single
-    token generation requires streaming all 60 GB of weights from HBM. A100 HBM2e bandwidth is 2.0 TB/s.
-    Theoretical max throughput = 2,000 GB/s / 60 GB/token = 33 tokens/sec. Reaching 100 tokens/sec is
-    physically impossible on 1 GPU. You are strictly memory bandwidth bound, leaving the 312 TFLOPS compute
-    >95% idle.
+  realistic_solution: 'The team failed to analyze the workload using the roofline model. The arithmetic intensity of generating a single token (batch size 1) is roughly 1 FLOP per byte of weights loaded (60 GFLOPs / 60 GB = 1 FLOP/Byte). The A100 roofline ridge point is 312 TFLOPS / 2 TB/s = 156 FLOPs/Byte (or 208 FLOPs/Byte depending on exact achieved bandwidth vs peak). At 1 FLOP/Byte, the workload is extremely deep in the memory-bound regime. The attainable compute is dictated entirely by memory bandwidth, not the ALUs. To fix this, they must either use a GPU with higher memory bandwidth, quantize the model to reduce bytes read, or utilize speculative decoding.'
+  common_mistake: |
+    **The Pitfall:** Confusing peak theoretical TFLOPS with attainable throughput and entirely ignoring the Roofline memory wall.
+    **The Rationale:** The team performed a pure FLOP-based calculation, fundamentally misunderstanding that generating a single token requires streaming the entire model weight matrix from HBM into the SMs.
+    **The Consequence:** Severe breach of production SLA guarantees, leading to failing applications, irate clients, and forced emergency hardware over-provisioning.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 30B params (FP16) = 60 GB weight size.
+       - SLA requirement: 100 tokens/sec at batch size 1.
+       - Hardware: A100 with 2.0 TB/s HBM bandwidth.
+    2. **Calculations:**
+       - Arithmetic Intensity = 60 GFLOPs / 60 GB = 1 FLOP/Byte.
+       - A100 Ridge Point = 312 TFLOPS / 2.0 TB/s = 156 FLOPs/Byte.
+       - 1 FLOP/B << 156 FLOPs/B, therefore deeply memory-bound.
+       - Theoretical max throughput = 2,000 GB/s / 60 GB/token = 33.3 tokens/sec.
+    3. **Conclusion & Interpretation:**
+       - **Result: Strictly Memory-Bandwidth Bound**. The physics of the memory bus limit the system to ~33 tokens/sec. Achieving 100 tokens/sec on one GPU is an architectural impossibility without aggressive quantization.
 status: published
 provenance: imported
 requires_explanation: false

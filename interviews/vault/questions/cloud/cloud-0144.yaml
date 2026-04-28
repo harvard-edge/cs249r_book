@@ -8,19 +8,25 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: The ROI of Heterogeneity
-scenario: Your company runs many LLM services on H100s with a bimodal workload: 95% of requests are short (100 prompt/100 completion tokens), but 5% are long-context 'power user' requests (4k prompt/4k completion). All services use static batching, causing inefficient partitioning of the expensive H100 fleet. A platform team proposes a 3-month project to build a central continuous batching service. You must calculate the potential throughput gain to build a business case for the project.
+scenario: 'Your company runs many LLM services on H100s with a bimodal workload: 95% of requests are short (100 prompt/100 completion tokens), but 5% are long-context ''power user'' requests (4k prompt/4k completion). All services use static batching, causing inefficient partitioning of the expensive H100 fleet. A platform team proposes a 3-month project to build a central continuous batching service. You must calculate the potential throughput gain to build a business case for the project.'
 question: How much throughput could continuous batching recover over static batching for a workload with 95% short and 5% 4k/4k long requests?
 details:
   realistic_solution: The business case is extremely strong. Static batching is pathologically bad for heterogeneous workloads. When a single long-context (8k total tokens) request enters a batch, all other short-context requests (200 tokens) in that batch are padded to the 8k length. This creates massive memory and compute waste. The KV cache allocation is based on the 8k length for all requests, meaning a batch with just one power user can fit almost no one else. In practice, this leads to de-facto batch size 1 for all power users, leaving the GPU idle most of the time.
   common_mistake: |
     **The Pitfall:** Averaging the workload to estimate throughput.
     **The Rationale:** Calculating the average sequence length and assuming the system behaves according to the average.
-    **The Consequence:** This completely misses the point that in static batching, the *maximum* length in the batch dictates performance, leading to massive memory and compute waste.
+    **The Consequence:** Completely misses that static batching performance is dictated by the maximum length in a batch, masking severe compute waste.
   napkin_math: |
-    - In static batching, an 8k-token request paired with seven 100-token requests forces the whole batch to run for 8k steps.
-    - The 7 short requests pad 7900 tokens. 7 × 7900 = 55,300 wasted token generations.
-    - At an H100 TPOT of 10ms for this batch, the GPU spends 79 seconds computing padding.
-    - **Continuous batching evicts finished requests, reclaiming 99% of wasted compute by filling the slots with new requests.**
+    1. **Assumptions & Constraints:**
+       - Workload: 95% short (200 total tokens), 5% long (8,000 total tokens).
+       - Static batching pads all requests in a batch to the maximum sequence length.
+       - H100 Time Per Output Token (TPOT): 10 ms.
+    2. **Calculations:**
+       - One 8k request paired with seven 200-token requests forces padding.
+       - Padding per short request: 8,000 - 200 = 7,800 tokens.
+       - Total wasted tokens: 7 × 7,800 = 54,600 wasted generations.
+       - Time wasted: 54,600 tokens × 10 ms = 546 seconds (compute stall).
+    3. **Conclusion & Interpretation:** **Result: Compute-Bound (Waste).** Static batching causes immense arithmetic waste due to padding; continuous batching evicts finished requests and reclaims 99% of this compute.
 status: published
 provenance: imported
 requires_explanation: false

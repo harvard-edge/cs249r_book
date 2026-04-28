@@ -8,20 +8,26 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: KV Cache Eviction Policy for Decode Pool Memory Management
-scenario: A decode pool running vLLM shows increasing preemptions when long-context requests arrive (>4K tokens). KV cache utilization is at 95% when preemptions begin. The nodes use 80GB H100 GPUs.
+scenario: A decode pool running vLLM shows increasing preemptions when long-context requests arrive (>4K tokens). KV cache utilization is at 95% when preemptions begin.
 question: Why do >4K-token arrivals trigger vLLM preemption cascades at 95% KV utilization, and how would you fix it?
 details:
-  realistic_solution: 'vLLM KV cache preemption analysis: KV cache is paged (PagedAttention). Each page = 16 tokens. At 95% utilization with 4K token requests arriving: the new request needs 4K/16 = 256 pages for prefill KV. Plus existing requests are generating tokens and consuming more pages. The preemption cascade: (1) New long request pre-allocated 256 pages; (2) Existing decode requests'' page tables overflow; (3) vLLM preempts lowest-priority decode request, swaps KV pages to CPU DRAM. Preemption cost: swap 70B model KV for a 2K-token request (assuming 64 heads for worst-case MHA) = 2*80*64*128*2048*2B = 5.36GB. At PCIe 32 GB/s: 0.17 seconds of disruption per preemption. Fix: (1) Implement admission control: reject new requests when GPU memory is above 85% to prevent cascade. (2) Reserve 10% of KV pages for existing request growth: only admit new request if remaining_pages > request_max_output_tokens * pages_per_token. (3) Use KV cache compression (INT8) to effectively double cache size.'
+  realistic_solution: 'vLLM KV cache is paged (PagedAttention). At 95% utilization with 4K token requests arriving, the new request needs 256 pages for prefill. Existing requests are also generating tokens and consuming more pages. The preemption cascade: new long request pre-allocates pages -> existing decode requests overflow -> vLLM preempts lowest-priority decode request. Fix: Implement admission control (reject new requests above 85% memory) and reserve 10% of KV pages for existing request growth.'
   common_mistake: |
     **The Pitfall:** Reducing the maximum context length to avoid preemptions.
     **The Rationale:** Engineers view hard limits as the easiest way to prevent memory exhaustion.
     **The Consequence:** This artificially limits the product's capabilities and does not address the root cause: the KV cache allocator fails to reserve headroom for token generation in existing requests.
   napkin_math: |
-    - **Analyze Memory Availability:** H100 80GB running an 8B model (16GB BF16). Available for KV cache: 80 - 16 - 4 (overhead) = **60 GB**.
-    - **Calculate KV per token:** 2 (K+V) * 32 layers * 32 heads * 128 dim * 2 bytes = **524 KB/token**.
-    - **Calculate Total Token Capacity:** 60 GB / 524 KB = **~114,500 tokens**.
-    - **Analyze Preemption cascade:** At 95% utilization with a new 4K token request, existing requests generating tokens overflow the page tables. vLLM swaps KV pages to CPU.
-    - **Calculate Preemption Cost:** Swapping KV for a 2K-context request takes `2048 * 524 KB = 1 GB`. Over PCIe Gen4 (32 GB/s), this causes noticeable disruption.
+    1. **Assumptions & Constraints:**
+       - GPU: H100 80GB. Model: 8B (16GB BF16 weights). Overhead: 4GB.
+       - KV Cache Available Memory: 80 - 16 - 4 = 60 GB.
+       - Attention shape: 32 layers, 32 heads, 128 dim. BF16 (2 bytes).
+       - Paged KV block size: 16 tokens.
+    2. **Calculations:**
+       - KV memory per token: 2 (K+V) * 32 layers * 32 heads * 128 dim * 2 bytes = 524 KB.
+       - Total token capacity: 60 GB / 524 KB = ~114,500 tokens.
+       - Preemption swap cost (for 2K token request): 2048 tokens * 524 KB = 1.07 GB.
+       - PCIe Gen4 swap time: 1.07 GB / 32 GB/s = 33 ms disruption per preemption.
+    3. **Conclusion & Interpretation:** **High KV utilization paired with long-context bursts causes catastrophic Memory-Bound Preemption Cascades.**
 status: published
 provenance: imported
 requires_explanation: false

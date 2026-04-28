@@ -14,14 +14,19 @@ details:
   realistic_solution: 'Two approaches: (1) Pre-sharded checkpoints (Megatron default): During training with TP=8, each rank saves its own shard as a separate file (e.g., model_tp0.pt through model_tp7.pt). Each file is ~17.5 GB. At inference, each GPU loads only its file — fast, memory-efficient, but checkpoint is TP-degree-specific. Changing TP requires a resharding script. (2) Consolidated checkpoint with lazy loading: Store one full checkpoint. Use torch.load with mmap=True (PyTorch 2.1+) or safetensors memory mapping. Each GPU memory-maps the full file but only materializes its shard into GPU memory by slicing the relevant rows/columns. OS page cache means only accessed pages are loaded from disk. Memory efficient but requires the filesystem to handle random reads well. Modern practice: store consolidated safetensors checkpoints (compatible with any TP degree) and shard on-the-fly using tensor_parallel metadata that records split dimensions.'
   common_mistake: |
     **The Pitfall:** Loading the full checkpoint on every GPU and then slicing.
-    **The Rationale:** Using naive `torch.load` without understanding the memory implications in a multi-process environment.
-    **The Consequence:** This requires 140 GB of CPU memory per process (over 1 TB total) and is extremely slow, often crashing the system before inference even starts.
+    **The Rationale:** Using naive `torch.load` without understanding the host RAM implications in a multi-process environment.
+    **The Consequence:** Requires over 1 TB of CPU memory, often triggering OOM crashes before inference even begins.
   napkin_math: |
-    - Full load approach: 140 GB × 8 processes = 1.12 TB CPU RAM.
-    - Pre-sharded approach: 17.5 GB × 1 process = 17.5 GB per GPU.
-    - Loading time at PCIe 5.0 (64 GB/s): 17.5 / 64 = 0.27 s.
-    - Loading time for full load: 140 / 64 = 2.2 s.
-    - **Pre-sharding is memory-efficient but requires a resharding script; lazy loading of consolidated checkpoints requires fast random reads but is TP-agnostic.**
+    1. **Assumptions & Constraints:**
+       - Model size: 70B parameters, FP16 (140 GB).
+       - TP=8. Shard size: 140 GB / 8 = 17.5 GB.
+       - PCIe 5.0 loading bandwidth: ~64 GB/s.
+    2. **Calculations:**
+       - Full load approach CPU memory: 140 GB × 8 processes = 1.12 TB RAM.
+       - Full load time per GPU: 140 GB / 64 GB/s = 2.18 seconds.
+       - Pre-sharded approach CPU memory: 17.5 GB per process.
+       - Pre-sharded load time: 17.5 GB / 64 GB/s = 0.27 seconds.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bound (Host).** Loading the full checkpoint on every GPU exhausts terabytes of host RAM; pre-sharding or lazy memory-mapping saves massive overhead.
 status: published
 provenance: imported
 requires_explanation: false

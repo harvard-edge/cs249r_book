@@ -9,20 +9,27 @@ bloom_level: analyze
 phase: inference
 title: Mobile New 0006
 scenario: You are running a 200KB INT8 model on a Cortex-M4 with 256KB SRAM. Inference normally takes 50ms, but suddenly spikes to 500ms on a specific high-resolution input. Flash memory read counters show massive spikes.
-question: "Why does a high-resolution input make the Cortex-M4 model spike from 50ms to 500ms?"
+question: Why does a high-resolution input make the Cortex-M4 model spike from 50ms to 500ms?
 details:
   realistic_solution: |
-    The 10x latency spike and flash read surge are symptoms of activation spilling. The 200KB model leaves only 56KB of SRAM for the OS, stack, and intermediate activations. The higher resolution input produces a larger intermediate tensor that overflows the remaining SRAM. The system is forced to swap activations to external flash memory, which is orders of magnitude slower than SRAM.
+    The 10x latency spike and flash read surge are direct symptoms of activation spilling. The 200KB model leaves only a thin slice of SRAM for the OS, stack, and intermediate feature maps. The higher resolution input produces a larger intermediate activation tensor that physically overflows the remaining SRAM bounds. The system is forced to dynamically swap activations to external flash memory, which is orders of magnitude slower than native SRAM, completely destroying the timing budget.
   common_mistake: |
-    **The Pitfall:** Sizing microcontrollers based only on model weight size.
-    **The Rationale:** Engineers fail to account for the peak activation footprint of the network.
-    **The Consequence:** Out-of-memory errors or massive latency spikes due to activation spilling to slow flash storage.
+    **The Pitfall:** Sizing microcontrollers based exclusively on model weight size.
+    **The Rationale:** Engineers assume that if the weights fit in memory, the model fits, completely ignoring the dynamic footprint of intermediate activations.
+    **The Consequence:** Out-of-memory crashes or catastrophic latency spikes due to activation spilling to slow flash storage during inference.
   napkin_math: |
-    - **Available SRAM:** 256KB. Weights use 200KB, OS uses 16KB. Remaining = 40KB.
-    - **Activation Size:** High-res input creates a 64KB activation.
-    - **Spill Size:** 64KB - 40KB = 24KB spilled to flash.
-    - **Latency Impact:** SRAM latency is 1 cycle; Flash latency is ~15 cycles.
-    - **Result:** **Fetching 24KB repeatedly from flash causes a 10x-15x latency spike.**
+    1. **Assumptions & Constraints:**
+       - Total SRAM: 256 KB.
+       - Model Weights: 200 KB.
+       - OS/Stack Overhead: 16 KB.
+       - High-Res Activation Tensor: 64 KB.
+       - Storage Latency: SRAM (1 cycle) vs Flash (~15 cycles).
+    2. **Calculations:**
+       - Available SRAM for Activations: 256 KB - 200 KB - 16 KB = 40 KB.
+       - Deficit / Spill Size: 64 KB (required) - 40 KB (available) = 24 KB.
+       - Penalty: 24 KB must be repeatedly written to and read from flash during layer execution.
+    3. **Conclusion & Interpretation:**
+       **Result: 10x latency spike (I/O-Bound due to Spilling).** Fetching the spilled 24KB repeatedly from 15-cycle flash storage obliterates the compute timing.
 status: published
 provenance: imported
 requires_explanation: false

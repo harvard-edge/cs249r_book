@@ -8,22 +8,23 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: The P99 Latency Volcano
-scenario: You are operating a fleet of GPUs serving a 70B parameter LLM using a static batching strategy with a batch size of 8. As your request volume approaches 50% of the theoretical maximum throughput, you notice that average GPU utilization is stable around 60%, but the P99 latency for end-users is exploding, leading to frequent timeouts. A team member suggests adding more GPUs to handle the load.
+scenario: Serving a 70B parameter LLM using static batch size 8. At 50% max throughput, P99 latency explodes despite 60% GPU utilization.
 question: Why is P99 latency exploding near 50% of max throughput with static batch size 8, and should you add GPUs or change batching?
 details:
-  realistic_solution: The root cause is head-of-line blocking exacerbated by high service time variance in a static batching system. An LLM request for a long generation (e.g., 2048 tokens) paired in a static batch with a request for a short generation (e.g., 32 tokens) forces the short request to wait for the entire long generation to complete. This disproportionately affects tail latency (P99). Adding more GPUs is a brute-force solution that reduces the probability of a short request getting stuck, but it's inefficient. The correct solution is to switch to a continuous batching (or 'dynamic batching') scheduler. This strategy decouples batching from request arrival. The server can continuously add new requests to a running batch as soon as space is available (i.e., another request in the batch finishes), dramatically reducing queueing delay for short requests and improving overall GPU utilization.
+  realistic_solution: The root cause is head-of-line blocking exacerbated by high service time variance. Short requests wait for long generations to finish. Implement continuous batching to decouple batching from arrival.
   common_mistake: |
     **The Pitfall:** Assuming latency problems at moderate utilization are due to insufficient hardware capacity.
-    **The Rationale:** Engineers default to scaling out (adding more GPUs) to reduce the arrival rate per machine.
-    **The Consequence:** This fails to solve the core issue of service time variance and head-of-line blocking, leading to inefficient resource usage and persistent tail latency spikes.
+    **The Rationale:** Engineers default to scaling out to reduce arrival rate rather than addressing the core variance problem.
+    **The Consequence:** Inefficient resource usage and persistent tail latency spikes due to head-of-line blocking.
   napkin_math: |
-    - **Hardware:** H100 with 3.35 TB/s memory bandwidth.
-    - **Model:** 70B parameters (140 GB in FP16).
-    - **Decode latency per token:** 140 GB / 3.35 TB/s ≈ 41.8 ms/token.
-    - **Long request (R1):** 2048 tokens * 41.8 ms = 85.6 seconds.
-    - **Short request (R2):** 32 tokens * 41.8 ms = 1.3 seconds.
-    - **Static batching penalty:** R2 finishes in 1.3s but must wait for R1 to finish.
-    - **Result:** **Wait time is 85.6s - 1.3s = 84.3 seconds of unnecessary queueing delay for the short request.**
+    1. **Assumptions & Constraints:**
+       - 70B model (140 GB). Bandwidth 3.35 TB/s. Decode = 41.8 ms/token.
+    2. **Calculations:**
+       - Long req (2048) = 85.6s.
+       - Short req (32) = 1.3s.
+       - Queue delay = 85.6 - 1.3 = 84.3s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Static batching forces 84.3s unnecessary delay; continuous batching avoids this.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -33,8 +34,6 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: WARN
-validation_issues_pro:
-- The Napkin Math section sets up a scenario with a long and short request but fails to perform the calculation to show how long the short request is forced to wait.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

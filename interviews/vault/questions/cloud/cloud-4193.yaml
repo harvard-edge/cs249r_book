@@ -8,20 +8,21 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Kernel Fusion Strategy for Transformer Blocks
-scenario: A single transformer block in a 70B model on MI300X executes 12 separate CUDA kernels. QKV projection, Q/K/V split, attention score, softmax, attention output, output projection, residual add, LayerNorm, FFN up-projection, GELU, FFN down-projection, residual add.
+scenario: A single transformer block in a 70B model executes 12 separate CUDA kernels. QKV projection, Q/K/V split, attention score, softmax, attention output, output projection, residual add, LayerNorm, FFN up-projection, GELU, FFN down-projection, residual add.
 question: How would you fuse the 12 transformer-block kernels to minimize HBM round-trips without breaking Tensor Core tile efficiency?
 details:
-  realistic_solution: 'Three fusion groups based on compute type: Group 1 (Attention fused): QKV projection (Tensor Core matmul) → fuse Q/K/V split (register-level reshape) → FlashAttention kernel (fused attention score + softmax + output in SRAM). 5 kernels → 2 launches (QKV matmul + FlashAttention). Saves 3 HBM round-trips of size seq×dim × 2 bytes each. Group 2 (Residual + Norm fused): Output projection (Tensor Core) → fused residual add + LayerNorm (single kernel reads projection output from shared memory, adds residual, computes mean/variance, normalizes). 3 kernels → 2 launches. Group 3 (FFN fused): FFN up-projection (Tensor Core) → fused GELU (applied in epilogue of matmul kernel using CUTLASS epilogue fusion) → FFN down-projection (Tensor Core) → fused residual add. 4 kernels → 2 launches (up+GELU, down+residual). Total: 12 kernels → 6 launches. HBM round-trips: 12 → 6, saving ~500 GB/s of wasted bandwidth.'
+  realistic_solution: 'Three fusion groups based on compute type: Group 1 (Attention fused): QKV projection (Tensor Core matmul) -> fuse Q/K/V split (register-level reshape) -> FlashAttention kernel (fused attention score + softmax + output in SRAM). 5 kernels -> 2 launches (QKV matmul + FlashAttention). Saves 3 HBM round-trips of size seq×dim × 2 bytes each. Group 2 (Residual + Norm fused): Output projection (Tensor Core) -> fused residual add + LayerNorm (single kernel reads projection output from shared memory, adds residual, computes mean/variance, normalizes). 3 kernels -> 2 launches. Group 3 (FFN fused): FFN up-projection (Tensor Core) -> fused GELU (applied in epilogue of matmul kernel using CUTLASS epilogue fusion) -> FFN down-projection (Tensor Core) -> fused residual add. 4 kernels -> 2 launches (up+GELU, down+residual). Total: 12 kernels -> 6 launches. HBM round-trips: 12 -> 6, saving ~500 GB/s of wasted bandwidth.'
   common_mistake: |
     **The Pitfall:** Fusing everything into one mega-kernel.
     **The Rationale:** Matmul kernels (QKV, FFN) need Tensor Cores and specific memory layouts, while element-wise ops (GELU, residual) use CUDA cores.
     **The Consequence:** Mixing them breaks Tensor Core scheduling and register allocation, degrading performance instead of improving it.
   napkin_math: |
-    - **Unfused Memory Traffic:** 12 kernels * 32 MB = 384 MB reads + 384 MB writes = 768 MB per block.
-    - **Unfused Memory Time:** 768 MB / 5.3 TB/s = 0.145ms.
-    - **Fused Memory Traffic:** 6 kernels = 192 MB reads + 192 MB writes = 384 MB.
-    - **Fused Memory Time:** 384 MB / 5.3 TB/s = 0.072ms.
-    - **Final Result:** **Saves 17.5ms per step during training.**
+    1. **Assumptions & Constraints:**
+       - 12 Kernels.
+    2. **Calculations:**
+       - Unfused Memory Traffic: 12 kernels * 32 MB = 384 MB reads + 384 MB writes = 768 MB per block.
+       - Fused Memory Traffic: 6 kernels = 192 MB reads + 192 MB writes = 384 MB.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bandwidth-Bound.** Saves 17.5ms per step during training.
 status: published
 provenance: imported
 requires_explanation: true

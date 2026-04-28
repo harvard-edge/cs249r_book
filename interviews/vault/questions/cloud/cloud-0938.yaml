@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: GPU L1 Cache Tiling for Attention
-scenario: You are optimizing a custom self-attention kernel for an NVIDIA A100 GPU, which features 192KB of L1/Shared Memory per Streaming Multiprocessor (SM) and a global 40MB L2 cache. Your sequence length is 2048 and head dimension is 128 (using FP16, 2 bytes per element). To minimize L2 and HBM round-trips, you must tile the Query, Key, and Value matrices into the L1 Shared Memory.
+scenario: You are optimizing a custom self-attention kernel for an NVIDIA GPU, which features 192KB of L1/Shared Memory per Streaming Multiprocessor and a global 40MB L2 cache. Your sequence length is 2048 and head dimension is 128. To minimize L2 and HBM round-trips, you must tile the Query, Key, and Value matrices into the L1 Shared Memory.
 question: What is the largest power-of-two square tile size B that fits Q, K, and V in shared memory after reserving 32KB?
 details:
   realistic_solution: 'First, calculate the available shared memory: 192KB - 32KB = 160KB. Each block of Q, K, and V has dimensions [B, 128]. In FP16, each row is 128 * 2 = 256 bytes. Therefore, each block requires B * 256 bytes. Since we need to load Q, K, and V, the total memory required is 3 * (B * 256) = 768 * B bytes. Setting 768 * B <= 160 * 1024 (163,840 bytes) gives B <= 213.3. The largest power-of-two size is B = 128. Using B=128 consumes 96KB of shared memory, easily fitting within the remaining 160KB limit.'
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Engineers frequently default to assuming elements are 1 byte or 4 bytes (FP32) out of habit.
     **The Consequence:** They miscalculate the memory layout, forgetting that Q, K, and V must all reside in shared memory concurrently, leading to immediate out-of-bounds memory access crashes.
   napkin_math: |
-    1. Available SMEM: 192KB - 32KB = 160KB = 163,840 bytes.
-    2. Memory per tile row (FP16): 128 cols * 2 bytes = 256 bytes.
-    3. Total SMEM for Q, K, V tiles: 3 * B * 256 = 768 * B bytes.
-    4. Max size constraint: 768 * B <= 163,840 -> B <= 213.3.
-    5. **The largest power of 2 is B = 128, which consumes 98,304 bytes (96KB) and safely fits.**
+    1. **Assumptions & Constraints:**
+       - Total SMEM: 192 KB. Reserved: 32 KB.
+       - Available SMEM: 160 KB = 163,840 bytes.
+       - Head dimension: 128 (FP16, 2 bytes/element).
+       - Q, K, V tiles of size [B, 128] must fit concurrently.
+    2. **Calculations:**
+       - Memory per tile row: 128 cols × 2 bytes = 256 bytes.
+       - Total SMEM for Q, K, V: 3 × B × 256 = 768 × B bytes.
+       - Max size constraint: 768 × B ≤ 163,840 → B ≤ 213.3.
+    3. **Conclusion & Interpretation:**
+       - **Result: SMEM-Capacity-Bound. The largest power of 2 is B=128, which consumes 98,304 bytes (96KB) and safely fits within the 160KB limit.**
 status: published
 provenance: imported
 requires_explanation: false

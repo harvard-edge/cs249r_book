@@ -8,8 +8,8 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing Staged Data Pipeline Starvation
-scenario: 'A team is training a multimodal vision model on an AWS P4d instance (8x A100 GPUs, 96 CPU cores). The PyTorch training loop yields a step time of 210ms. Profiling reveals the following distinct stage latencies per step: NVMe I/O and CPU JPEG decoding takes 90ms, PCIe Host-to-Device (HtoD) transfer takes 20ms, and GPU forward/backward compute takes 100ms. The GPU SM active time is hovering around ~47%. The pipeline is currently implemented as a sequential data loop without pinned memory.'
-question: "How would you remove the 210ms sequential data-pipeline stall and maximize utilization on the 8x A100 P4d node?"
+scenario: 'A team is training a multimodal vision model on an 8x GPU node. Profiling reveals a sequential pipeline: NVMe I/O takes 90ms, PCIe HtoD transfer takes 20ms, and GPU compute takes 100ms. The GPU is active ~47% of the time.'
+question: How would you remove the 210ms sequential data-pipeline stall and maximize utilization on the node?
 details:
   realistic_solution: Implement an asynchronous, overlapping pipeline using double buffering. Allocate page-locked (pinned) memory on the host and use non-blocking PCIe DMA transfers. This allows the CPU, PCIe bus, and GPU to work on batches N+2, N+1, and N simultaneously.
   common_mistake: |
@@ -17,10 +17,13 @@ details:
     **The Rationale:** Slow step times intuitively point to a lack of raw compute power.
     **The Consequence:** Increasing cloud infrastructure costs drastically without solving the fundamental sequential blocking of the pipeline.
   napkin_math: |
-    * Sequential Step Time = T_cpu + T_pcie + T_gpu = 90 ms + 20 ms + 100 ms = 210 ms.
-    * GPU Utilization = 100 ms compute / 210 ms total = ~47.6%.
-    * Pipelined Step Time (with overlapping double buffering) = max(T_cpu, T_pcie, T_gpu) = max(90, 20, 100) = 100 ms.
-    * **By overlapping operations, GPU utilization jumps to 100% and throughput more than doubles (210 ms -> 100 ms step time).**
+    1. **Assumptions & Constraints:**
+       - Sequential step time = 90ms (IO) + 20ms (PCIe) + 100ms (GPU) = 210ms.
+    2. **Calculations:**
+       - Current GPU utilization = 100ms / 210ms = 47.6%.
+       - Overlapping pipeline (double buffering) step time = max(90, 20, 100) = 100ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound Pipeline.** By overlapping operations using pinned memory and non-blocking transfers, GPU utilization hits 100% and throughput more than doubles (210ms -> 100ms).
 status: published
 provenance: imported
 requires_explanation: false

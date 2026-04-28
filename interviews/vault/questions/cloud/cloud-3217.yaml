@@ -8,19 +8,24 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: KV-Cache Quantization to INT8
-scenario: Your Llama 3 70B serving deployment on 4×H100 GPUs can handle 64 concurrent requests at 4K context with BF16 KV-cache. Your PM wants to double concurrency to 128 without adding GPUs. You propose quantizing the KV-cache from BF16 to INT8. Analyze the memory savings and quality impact.
+scenario: Your Llama 3 70B serving deployment on 4 GPUs can handle 64 concurrent requests at 4K context with BF16 KV-cache. Your PM wants to double concurrency to 128 without adding GPUs. You propose quantizing the KV-cache from BF16 to INT8. Analyze the memory savings and quality impact.
 question: Can INT8 KV-cache quantization double concurrency from 64 to 128 at 4K context, and what quality impact should you expect?
 details:
-  realistic_solution: 'Memory analysis: BF16 KV-cache per request at 4K context = 4096 × 320 KB = 1.31 GB. For 64 requests: 83.9 GB. With INT8: 4096 × 160 KB = 655 MB per request, 64 requests = 41.9 GB. Savings: 42 GB — enough to serve 128 requests (128 × 655 MB = 83.9 GB, same as the original BF16 budget). Quality impact: (1) Attention scores are computed as Q×K^T. INT8 keys introduce ±0.5 LSB error per element. For head_dim=128, the attention logit error is √128 × 0.5 = 5.66 LSB in expectation. Relative to typical attention logit range of ~10-50, this is 11-57% noise — significant. (2) Mitigation: use per-head dynamic quantization (compute scale/zero-point per head per layer) rather than per-tensor. This reduces relative error to <1% for most heads. (3) Empirical results: INT8 KV-cache with per-head quantization shows <0.3% perplexity degradation on short contexts (<4K) but 1-2% on long contexts (>16K) where errors accumulate through many attention steps. For 4K context: acceptable. For 128K: consider FP8 (E4M3) instead.'
+  realistic_solution: 'Memory analysis: BF16 KV-cache per request at 4K context = 4096 * 320 KB = 1.31 GB. For 64 requests: 83.9 GB. With INT8: 4096 * 160 KB = 655 MB per request, 64 requests = 41.9 GB. Savings: 42 GB — enough to serve 128 requests (128 * 655 MB = 83.9 GB, same as the original BF16 budget). Quality impact: (1) Attention scores are computed as Q*K^T. INT8 keys introduce ±0.5 LSB error per element. For head_dim=128, the attention logit error is √128 * 0.5 = 5.66 LSB in expectation. Relative to typical attention logit range of ~10-50, this is 11-57% noise — significant. (2) Mitigation: use per-head dynamic quantization (compute scale/zero-point per head per layer) rather than per-tensor. This reduces relative error to <1% for most heads. (3) Empirical results: INT8 KV-cache with per-head quantization shows <0.3% perplexity degradation on short contexts (<4K) but 1-2% on long contexts (>16K) where errors accumulate through many attention steps. For 4K context: acceptable. For 128K: consider FP8 (E4M3) instead.'
   common_mistake: |
     **The Pitfall:** Assuming KV-cache quantization is entirely lossless for all sequence lengths.
     **The Rationale:** Candidates equate KV-cache INT8 quantization with standard weight-only quantization techniques, overlooking the autoregressive accumulation of error.
     **The Consequence:** Degrading model perplexity on long-context tasks (>16K tokens) where the quantization noise accumulates through many attention steps.
   napkin_math: |
-    - **BF16 Cost:** 4096 tokens * 320 KB/token = 1.31 GB per request. 64 requests = 83.9 GB.
-    - **INT8 Cost:** 4096 tokens * 160 KB/token = 655 MB per request. 128 requests = 83.9 GB.
-    - **Memory Conclusion:** Concurrency can be successfully doubled within the same memory budget.
-    - **Quality Impact:** INT8 introduces ±0.5 LSB error. Over a 4K context, relative error with per-head quantization stays **<1%**.
+    1. **Assumptions & Constraints:**
+       - Context: 4096 tokens.
+       - BF16 Cost: 320 KB/token. INT8 Cost: 160 KB/token.
+    2. **Calculations:**
+       - BF16 Memory (64 req): 4096 * 320 KB * 64 = 83.9 GB.
+       - INT8 Memory (128 req): 4096 * 160 KB * 128 = 83.9 GB.
+       - Error Bound: INT8 ±0.5 LSB. Per-head dynamic relative error <1%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Capacity-Bound.** Concurrency exactly doubles within the same memory budget, with negligible degradation for short 4K contexts.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,22 +8,27 @@ competency_area: compute
 bloom_level: create
 phase: inference
 title: The 8K Sensor Upgrade Dilemma
-scenario: You are the lead ML Systems Architect for a self-driving car company. Your team is upgrading the main forward-facing camera from a 4K sensor to a new 8K sensor to improve long-range object detection. The perception stack runs on an edge SoC, and you have a hard real-time deadline of 33ms per frame (30 FPS).
+scenario: Your team is upgrading the main forward-facing camera from a 4K sensor to a new 8K sensor to improve long-range object detection. The perception stack runs on an edge SoC, and you have a hard real-time deadline of 33ms per frame (30 FPS).
 question: For 8K/30FPS on the edge SoC, should you launch DenseViT or FastFusion-CNN, and what roofline bottleneck drives the choice?
 details:
-  realistic_solution: The correct architectural decision is to choose **FastFusion-CNN** for the initial launch, as the system is severely memory-bandwidth bound, not compute-bound. The memory bandwidth is the hard physical constraint that makes DenseViT non-viable at 8K/30FPS.
+  realistic_solution: |
+    The architectural decision is to deploy **FastFusion-CNN**. High-resolution 8K processing on edge SoCs is fundamentally bottlenecked by memory bandwidth, not raw compute. A standard Vision Transformer (DenseViT) has low Arithmetic Intensity (Ops/Byte), heavily underutilizing the NPU's MACs while saturating the memory bus. FastFusion-CNN uses depthwise separable convolutions and optimized fusion kernels to drastically reduce memory reads/writes, allowing it to operate closer to the compute roofline and safely meet the 33ms real-time deadline.
   common_mistake: |
     **The Pitfall:** Relying on the theoretical peak TOPS and proposing software optimizations (CUDA graph tuning) to fix "underutilization."
     **The Rationale:** Engineers fixate on compute limits and assume 275 TOPS is enough to process 8K images quickly.
     **The Consequence:** Launching a model that misses hard real-time deadlines because the memory subsystem, not the compute units, is the physical bottleneck.
   napkin_math: |
-    * **8K Image Size**: 33.1 MP. FP16 input = 66.3 MB.
-    * **Hardware Limits**: Peak Compute = 275 TOPS INT8, Memory Bandwidth = 204.8 GB/s.
-    * **Ridge Point**: 275,000 GOPS / 204.8 GB/s = 1342 Ops/Byte.
-    * **Model Arithmetic Intensity (AI)**: Standard 3x3 conv AI ≈ 30 Ops/Byte.
-    * **Bottleneck**: AI (30) << Ridge Point (1342), meaning the system is severely memory-bandwidth bound.
-    * **Achieved Throughput**: 30 Ops/Byte × 204.8 GB/s = 6.14 TOPS.
-    * **Conclusion**: Processing a 500 GOPs 8K image takes 500G / 6.14T = **81 ms**, missing the 33ms deadline. FastFusion-CNN is required.
+    1. **Assumptions & Constraints:**
+       - 8K Image Size: 33.1 MP. FP16 input = 66.3 MB.
+       - Hardware: 275 TOPS INT8 compute, 204.8 GB/s memory bandwidth.
+       - Deadline: 33ms (30 FPS).
+    2. **Calculations:**
+       - Hardware Ridge Point: 275,000 GOPS / 204.8 GB/s = 1342 Ops/Byte.
+       - Standard CNN Arithmetic Intensity (AI): ~30 Ops/Byte.
+       - Achieved Throughput: 30 Ops/Byte * 204.8 GB/s = 6.14 TOPS.
+       - Inference Time (500 GOPs model): 500 / 6.14 = 81 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 81 ms inference time misses the 33ms deadline. Bottleneck: Memory Bandwidth-Bound (AI << Ridge Point).**
 status: published
 provenance: imported
 requires_explanation: true

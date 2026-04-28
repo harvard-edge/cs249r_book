@@ -8,19 +8,23 @@ competency_area: deployment
 bloom_level: analyze
 phase: both
 title: The Embedding Cache Hit Rate Cliff
-scenario: 'You add an embedding cache (Redis, 64 GB) to avoid re-computing embeddings for repeated queries. Initially the hit rate is 72%, saving significant GPU cost. After expanding to 10× more users (reaching 10K QPS), the hit rate drops to 8% even though total query volume increased 10×. The cache size hasn''t changed.'
-question: 'Why did scaling users destroy your cache economics?'
+scenario: 'You add an embedding cache (Redis, 64 GB) to avoid re-computing embeddings. Initially the hit rate is 72%. After expanding to 10x more users, the hit rate drops to 8% even though total query volume increased 10x. The cache size hasn''t changed.'
+question: 'Why did scaling users destroy your cache economics, and how do you fix the hit rate collapse?'
 details:
-  realistic_solution: 'The cache worked when a small user base had a Zipfian query distribution — a few hundred popular queries accounted for 72% of traffic. With 10× more users, the query distribution becomes much flatter (higher entropy): more unique queries, fewer repeats. The working set size grew superlinearly with user count because diverse users ask diverse questions. At 64 GB, the cache can hold ~10.7M cached embeddings (1536-dim FP32 ≈ 6KB each + key overhead). With 10× users generating 33M unique queries per hour (out of 36M total), the effective working set vastly exceeds cache capacity and eviction rate skyrockets. Fix: (1) cache at the semantic level — cluster similar queries and cache cluster centroids, (2) use locality-sensitive hashing to map similar queries to the same cache key, (3) implement tiered caching — hot queries in Redis, warm queries on SSD-backed cache, (4) accept that embedding compute ($0.0001/query on a shared GPU) may be cheaper than cache infrastructure at this scale.'
+  realistic_solution: 'A larger user base flattens the query distribution (higher entropy), destroying the Zipfian skew that made caching viable. The effective working set grows superlinearly with user count. Fixes include semantic caching (clustering similar queries via Locality-Sensitive Hashing) or tiered caching. At massive scale, native GPU embedding generation is often strictly cheaper than maintaining massive Redis clusters for poor hit rates.'
   common_mistake: |
-    **The Pitfall:** Thinking the cache is just too small and naive scaling ("10× users = 10× cache") is the answer.
+    **The Pitfall:** Thinking the cache is just too small and naive scaling ("10x users = 10x cache") is the answer.
     **The Rationale:** Candidates fail to understand distribution shifts; a larger user base flattens the query distribution, increasing the unique working set superlinearly.
-    **The Consequence:** Paying for massive cache infrastructure that continues to suffer high eviction rates and poor hit ratios.
+    **The Consequence:** Paying for massive cache infrastructure that continues to suffer high eviction rates and poor economic returns.
   napkin_math: |
-    * **Capacity:** 64 GB cache / 6 KB per embedding ≈ 10.7M entries.
-    * **Load:** At 10K QPS, unique queries/hour jump from 1M to 33M.
-    * **Thrashing:** 33M unique queries far exceeds the 10.7M capacity, causing extreme churn.
-    * **Result:** **With at most 3M hits out of 36M total queries, the effective hit rate crashes to ~8%.**
+    1. **Assumptions & Constraints:**
+       - 64 GB cache, 1536-dim FP32 embeddings (~6 KB each).
+       - Traffic: 10K QPS (36M queries/hour).
+    2. **Calculations:**
+       - Capacity: 64 GB / 6 KB = ~10.7M entries.
+       - At 10x scale, unique queries/hour jump from 1M to 33M.
+    3. **Conclusion & Interpretation:**
+       - **Result: 33M unique queries aggressively thrash the 10.7M capacity, crashing the hit rate to ~8% (Capacity-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

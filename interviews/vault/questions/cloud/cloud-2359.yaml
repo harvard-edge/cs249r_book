@@ -8,22 +8,27 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Root Causing Containerized IPC Fallback
-scenario: Moving a PyTorch DDP training job from bare metal to a Kubernetes Pod on the exact same 8x A100 node causes the per-iteration time to jump from 400ms to 1200ms. The pod has full access to all GPUs. NCCL logs indicate a fallback, and Nsight Systems shows intra-node bandwidth at ~20 GB/s instead of 300 GB/s.
-question: Why does moving the 8x A100 DDP job into Kubernetes raise iteration time from 400ms to 1200ms, and how would you fix the NCCL fallback?
+scenario: Moving a PyTorch DDP training job from bare metal to a Kubernetes Pod on the exact same 8x GPU node causes the per-iteration time to jump from 400ms to 1200ms. The pod has full access to all GPUs. NCCL logs indicate a fallback, and Nsight Systems shows intra-node bandwidth at ~20 GB/s instead of 300 GB/s.
+question: Why does moving the 8x GPU DDP job into Kubernetes raise iteration time from 400ms to 1200ms, and how would you fix the NCCL fallback?
 details:
-  realistic_solution: |
-    The root cause is the container's restricted shared memory size. By default, Docker/containerd limits `/dev/shm` to 64MB. NCCL relies on shared memory to establish IPC (Inter-Process Communication) and coordinate the fast NVLink transfers via memory-mapped ring buffers. When NCCL attempts to allocate its buffers and hits the 64MB limit, it silently falls back to extremely small chunk sizes or routes communication over standard network sockets (TCP over loopback), bypassing the high-bandwidth NVLink entirely. The solution is to mount `/dev/shm` as a `tmpfs` volume with adequate capacity (e.g., 16GB) or run the container with `--shm-size=16g`.
+  realistic_solution: 'The root cause is the container''s restricted shared memory size. By default, Docker/containerd limits `/dev/shm` to 64MB. NCCL relies on shared memory to establish IPC and coordinate fast NVLink transfers. When it hits the limit, it silently falls back to standard sockets, bypassing NVLink. The solution is to mount a larger `tmpfs` volume.'
   common_mistake: |
     **The Pitfall:** Assuming Kubernetes CPU limits are throttling the dataloader and increasing the CPU requests.
     **The Rationale:** CPU limits often cause performance drops when moving to Kubernetes, making it a common suspect.
     **The Consequence:** Wasting time tuning CPU requests while the network/GPU interconnect remains severely bottlenecked by SHM size.
   napkin_math: |
-    - **Model gradients:** 16 GB.
-    - **Default SHM:** 64 MB (8 MB per GPU for 8 GPUs).
-    - **Micro-transfers required:** 16 GB / 8 MB = 2,000 transfers.
-    - **Transfer time over NVLink (300 GB/s):** 16 GB / 300 GB/s ≈ 53 ms.
-    - **Transfer time over fallback (20 GB/s):** 16 GB / 20 GB/s = 800 ms.
-    - **Conclusion: The iteration time increases by ~747 ms, matching the ~800 ms jump observed (from 400 ms to 1,200 ms).**
+    1. **Assumptions & Constraints:**
+       - Model gradients: 16 GB.
+       - Default SHM: 64 MB (8 MB per GPU for 8 GPUs).
+       - NVLink bandwidth: 300 GB/s.
+       - Fallback bandwidth: 20 GB/s.
+    2. **Calculations:**
+       - Micro-transfers required: 16 GB / 8 MB = 2,000 transfers.
+       - Transfer time over NVLink: 16 GB / 300 GB/s ≈ 53 ms.
+       - Transfer time over fallback: 16 GB / 20 GB/s = 800 ms.
+       - Latency jump: 800 ms - 53 ms = 747 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Interconnect-Bound. The iteration time increases by ~747 ms, matching the exact ~800 ms jump observed due to the fallback.**
   options:
   - "The container is throttling CPU requests, slowing down the dataloader. Fix this by increasing CPU limits in the Pod spec."
   - "The container restricts PCIe bandwidth to the GPU. Fix this by adding the `nvidia.com/gpu` resource limit."

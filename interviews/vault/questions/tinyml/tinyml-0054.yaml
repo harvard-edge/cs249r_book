@@ -8,19 +8,25 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Model Versioning on MCU
-scenario: You manage a fleet of 500 RP2040 environmental sensors. After three OTA updates, your support team can't tell which model version a device is running. A customer reports false alarms, and you need to know if they're on model v1.2 or v1.4.
-question: How can 500 RP2040 sensors expose model v1.2 versus v1.4 without an OS or filesystem?
+scenario: You manage a fleet of 500 RP2040 environmental sensors. After three OTA updates, the support team cannot differentiate which model version a device is running. A customer reports false alarms, and you must verify if they are on model v1.2 or v1.4.
+question: How can a fleet of RP2040 sensors expose ML model versions remotely without an underlying OS or filesystem?
 details:
-  realistic_solution: 'Prepend a 64-byte structured header to the model binary in flash: magic bytes (4B), model version (semver, 12B), SHA-256 hash of weights (32B), input/output tensor specs (8B), training timestamp (8B). At boot, the bootloader reads and validates this header in <3ms. For remote queries: expose version via a BLE GATT characteristic (20-byte response, single packet, <10ms). Fleet management: the gateway aggregates version reports and flags mismatches. Header overhead: 64 / 2,097,152 bytes of flash = 0.003%. This decouples model versioning from firmware versioning — you can update models independently.'
+  realistic_solution: Prepend a 64-byte structured header to the model binary in flash containing magic bytes, semver string, SHA-256 weight hash, and tensor specs. At boot, the firmware reads and validates this header. For remote queries, the device exposes the version string via a BLE GATT characteristic, allowing the fleet management gateway to aggregate reports and flag mismatches without relying on a filesystem.
   common_mistake: |
-    **The Pitfall:** Storing the version in a global variable in firmware.
-    **The Rationale:** Candidates assume that the model version can be tracked identically to firmware versioning via code constants.
-    **The Consequence:** This ties the model version to the firmware version. If you update only the model, the version string is stale. Furthermore, global variables live in SRAM and are lost on reset.
+    **The Pitfall:** Hardcoding model versions as global firmware variables.
+    **The Rationale:** Candidates assume model versions can be tracked identically to firmware versions via C-code constants compiled into the binary.
+    **The Consequence:** This tight-couples the ML model to the firmware lifecycle. Updating the model binary dynamically without a full firmware re-flash leaves the hardcoded version string stale, destroying observability.
   napkin_math: |
-    - Header overhead: 64 bytes per model. On 2 MB flash: 64 / 2,097,152 = 0.003% — negligible.
-    - Boot-time header validation: read 64 bytes from flash (64 / 4 bytes per read × 2 cycles = 32 cycles) + CRC check of 114 KB model (114,000 × 3 cycles = 342,000 cycles at 133 MHz = 2.6 ms).
-    - Total boot overhead: **< 3 ms**.
-    - BLE version query: 20 bytes response, single BLE packet, **< 10 ms round-trip**.
+    1. **Assumptions & Constraints**:
+       - 64-byte metadata header per model.
+       - RP2040 (133 MHz) reading from 2 MB SPI flash.
+       - BLE version query payload is 20 bytes.
+    2. **Calculations**:
+       - Flash Overhead: 64 bytes / 2,097,152 bytes = 0.003%.
+       - Boot Validation: 64 bytes read (32 cycles) + CRC of 114 KB model (342,000 cycles) = 342,032 cycles.
+       - Boot Time: 342,032 cycles / 133,000,000 Hz = ~2.6 ms.
+    3. **Conclusion & Interpretation**:
+       - **Result: Compute-Bound Initialization**. The 64-byte structural header securely decouples model versions from firmware updates while adding negligible flash overhead and <3 ms boot latency.
 status: published
 provenance: imported
 requires_explanation: false

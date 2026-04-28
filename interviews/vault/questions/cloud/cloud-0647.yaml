@@ -8,35 +8,21 @@ competency_area: precision
 bloom_level: evaluate
 phase: both
 title: The FP8 Training Frontier
-scenario: Your team successfully trained a 13B parameter LLM in FP8 on H100s with no accuracy loss. Encouraged, you try FP8 training on a 125M parameter BERT model. The loss diverges within 200 steps. Both use the same FP8 recipe with per-tensor scaling.
+scenario: Your team successfully trained a 13B parameter LLM in FP8 with no accuracy loss. Encouraged, you try FP8 training on a 125M parameter BERT model. The loss diverges within 200 steps. Both use the same FP8 recipe with per-tensor scaling.
 question: Why does FP8 work for the large model but fail for the small one?
 details:
-  realistic_solution: 'Large models have a statistical advantage: with billions of parameters, the gradient distributions within each tensor are smooth and approximately Gaussian, making per-tensor scaling effective. A single scale factor can cover the dynamic range of the entire tensor. Small models have far fewer parameters per layer, leading to spiky, heavy-tailed gradient distributions where a few outlier values dominate. Per-tensor scaling must accommodate these outliers, crushing the majority of small gradients below FP8''s representable range. The fix for small models is per-channel or per-group scaling (finer granularity), or simply using BF16.'
+  realistic_solution: 'Large models have smooth gradient distributions, making per-tensor scaling effective. Small models have spiky, heavy-tailed gradient distributions where outlier values dominate. Per-tensor scaling crushes small gradients below FP8''s representable range. The mitigation is per-channel or per-group scaling, or leveraging BF16.'
   common_mistake: |
-    **The Pitfall:** Believing that "FP8 is FP8 — if it works for large models, it should work for small ones too."
-    **The Rationale:** Treating quantization as a purely hardware-level feature without considering how model size affects statistical properties of activations and gradients.
+    **The Pitfall:** Believing that FP8 universally applies to all model sizes with the same recipe.
+    **The Rationale:** Treating quantization as a purely hardware-level feature without considering statistical properties of activations and gradients.
     **The Consequence:** Applying the wrong quantization granularity, leading to catastrophic training divergence for smaller models.
   napkin_math: |
-    1. **13B Model FFN Layer:** Weight matrix is $5120 \times 20480$ = 104M elements.
-    2. **Large Model Distribution:** Smooth gradients; 99.9th percentile is ~3x the median. A single scale factor wastes $\log_2(3) \approx 1.6$ bits of range, which is acceptable with FP8's 4 exponent bits.
-    3. **125M BERT FFN Layer:** Weight matrix is $768 \times 3072$ = 2.3M elements.
-    4. **Small Model Distribution:** Outliers at 100x the median. Per-tensor scale wastes $\log_2(100) \approx 6.6$ bits, exceeding FP8 E4M3's 4-bit exponent range.
-    5. **Throughput Gain on H100:** FP8 Tensor Cores deliver 1,979 TFLOPS vs 989 TFLOPS FP16.
-    6. **Result:** **A 2x compute boost is available, but only if numerics converge using finer-grained scaling.**
+    1. **Assumptions & Constraints:**
+       - 13B model FFN: 104M elements. Smooth gradients (99.9th percentile ~3x median).
+       - 125M BERT FFN: 2.3M elements. Outliers at 100x median.
+    2. **Calculations:**
+       - Large model: wastes log2(3) ~ 1.6 bits. Fits in 4 exponent bits.
+       - Small model: wastes log2(100) ~ 6.6 bits. Exceeds FP8 E4M3 4-bit exponent range.
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound.** Small models have spiky gradients requiring finer-grained scaling.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 12
-validated: true
-validation_status: WARN
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

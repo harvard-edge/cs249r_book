@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: 'Expert Parallelism: All-to-All Communication Pattern'
-scenario: You train a 1T parameter MoE model with 64 experts across 64 H100 GPUs (one expert per GPU). Each token's top-2 routing requires sending tokens to the GPUs hosting the selected experts.
+scenario: You train a 1T parameter MoE model with 64 experts across 64 GPUs. Each token's top-2 routing requires sending tokens to the GPUs hosting the selected experts.
 question: What is the MoE All-to-All communication volume, and why is All-to-All the expert-parallel collective instead of AllReduce?
 details:
   realistic_solution: 'In expert parallelism, each GPU processes a shard of the batch (e.g., 64 tokens) and must route each token to 2 of the 64 expert GPUs. All-to-All step: each GPU sends 2 tokens'' hidden states to 2 other GPUs and receives tokens routed to its expert. Communication volume per GPU: sends 64 × 2 × hidden_dim × 2 bytes (tokens × top-k × dim × BF16). For hidden_dim=8192: 64 × 2 × 8192 × 2 = 2 MB outgoing per GPU. But total across all 64 GPUs: 64 × 2 MB = 128 MB aggregate. This happens twice per MoE layer (dispatch tokens, then collect results). With 16 MoE layers: 128 MB × 2 × 16 = 4.1 GB per step. At 400 Gbps InfiniBand: 4.1 GB / 50 GB/s = 82ms. This is significant — comparable to the compute time. Key difference from AllReduce: All-to-All traffic is irregular (depends on routing), making it harder to optimize. Solutions: use expert capacity buffers with fixed-size All-to-All (pad to capacity factor), and overlap All-to-All with MLP computation of non-MoE layers.'
@@ -17,12 +17,17 @@ details:
     **The Rationale:** Assuming all distributed training simply averages gradients across all nodes.
     **The Consequence:** Failing to implement expert capacity buffers or dynamic load balancing, resulting in catastrophic stragglers when popular experts receive disproportionate traffic.
   napkin_math: |
-    - **Routing Volume**: Each GPU routes 64 tokens to 2 experts. `64 × 2 × 8192 (dim) × 2B` = ~2 MB outgoing per GPU.
-    - **Total Volume**: 64 GPUs × 2 MB = 128 MB aggregate per phase.
-    - **Per Layer**: 128 MB × 2 (dispatch + collect) = 256 MB.
-    - **Total Step**: 16 MoE layers = **4.1 GB** per step.
-    - **Latency**: At 50 GB/s InfiniBand, 4.1 GB takes 82ms. Compared to ~200ms compute, overhead is ~41%.
-    - **Result**: All-to-All redistributes tokens based on dynamic routing, making traffic highly irregular.
+    1. **Assumptions & Constraints:**
+       - 64 GPUs, 1 expert/GPU. Hidden dimension = 8192 (BF16, 2 bytes/element).
+       - Each GPU processes 64 tokens, routing each to 2 experts.
+       - Network: 400 Gbps (50 GB/s) InfiniBand. 16 MoE layers per step.
+    2. **Calculations:**
+       - Routing Volume: 64 tokens × 2 experts × 8192 dim × 2B = ~2 MB outgoing per GPU.
+       - Total Volume: 64 GPUs × 2 MB = 128 MB aggregate per phase.
+       - Per Layer: 128 MB × 2 (dispatch + collect) = 256 MB.
+       - Total Step: 16 MoE layers × 256 MB = 4.096 GB per step.
+       - Latency: 4.096 GB / 50 GB/s = ~82ms.
+    3. **Conclusion & Interpretation:** **All-to-All redistributes tokens moving ~4.1 GB per step (82ms overhead), creating highly irregular network traffic. Result: Network-Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

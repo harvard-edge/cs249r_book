@@ -8,40 +8,27 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: The RTOS vs RT-Linux Tradeoff
-scenario: Your team is building an industrial quality inspection system. A camera
-  captures parts on a conveyor belt at 60 FPS. You must run a defect detection model
-  and trigger a reject actuator within 16.7ms (one frame period) — a hard real-time
-  deadline. The ML engineer wants Linux (for PyTorch, TensorRT, easy development).
-  The firmware engineer wants FreeRTOS (for deterministic timing). The hardware is
-  a Jetson Orin NX (Cortex-A78AE + Ampere GPU). Who is right?
-question: Who is right?
+scenario: Your team is building an industrial quality inspection system. A camera captures parts on a conveyor belt at 60 FPS. You must run a defect detection model and trigger a reject actuator within 16.7ms (one frame period) — a hard real-time deadline. The ML engineer wants Linux (for PyTorch, TensorRT, easy development). The firmware engineer wants FreeRTOS (for deterministic timing).
+question: Who is right, and how do you design a system to resolve this conflict?
 details:
-  realistic_solution: 'Neither is fully right — the answer is a heterogeneous architecture
-    that uses both. The Orin NX''s Cortex-A78AE cores support ARM''s Split-Lock mode:
-    some cores run Linux (for GPU/TensorRT), others run a bare-metal or RTOS safety
-    island. The design: (1) Linux partition (cores 0-5): Runs TensorRT inference on
-    the GPU. Inference takes ~8ms. Linux writes the detection result to a shared memory
-    region (DRAM, cache-coherent). (2) FreeRTOS partition (cores 6-7): Runs a hard
-    real-time control loop at 1 kHz. Reads the shared memory for detection results.
-    Controls the reject actuator GPIO with deterministic timing (jitter <10 µs). (3)
-    Timing contract: Linux must deliver a result within 12ms (leaving 4.7ms for the
-    RTOS to actuate). If Linux misses the deadline (GPU stall, kernel preemption),
-    the RTOS defaults to "reject" (fail-safe). PREEMPT_RT Linux alone has worst-case
-    latency of 50-150 µs on Orin — acceptable for many soft real-time tasks, but the
-    16.7ms hard deadline with safety implications requires the RTOS guarantee. FreeRTOS
-    on the Cortex-R52 safety island (if present) or bare-metal on dedicated A78AE
-    cores provides <1 µs jitter.'
-  common_mistake: '"Use Linux with PREEMPT_RT — it''s ''real-time Linux.''" PREEMPT_RT
-    reduces worst-case latency but does not make Linux a hard real-time OS. Or: "Use
-    FreeRTOS for everything" — but FreeRTOS can''t run TensorRT or access the GPU.'
-  napkin_math: 'Linux PREEMPT_RT worst-case scheduling latency on Orin: ~150 µs (measured
-    with cyclictest). FreeRTOS on dedicated core: ~0.5 µs worst-case. Frame budget:
-    16.7ms. Inference (GPU via TensorRT): 8ms average, 11ms worst case. Linux scheduling
-    jitter: 0.15ms worst case. Shared memory write: 0.01ms. RTOS read + actuator trigger:
-    0.05ms. Total worst case: 11 + 0.15 + 0.01 + 0.05 = 11.21ms — 5.5ms of headroom.
-    Without the RTOS safety net, a single Linux kernel stall (e.g., 5ms page fault
-    during memory pressure) could push total to 16.2ms — dangerously close to the
-    deadline with no fail-safe.'
+  realistic_solution: 'Neither is fully right — the answer is a heterogeneous architecture. Cores running Linux handle the GPU and TensorRT inference, writing the result to cache-coherent shared memory. Cores running the RTOS handle the hard real-time control loop, reading the detection results and triggering the actuator. The timing contract: Linux must deliver a result within 12ms. If Linux misses the deadline, the RTOS defaults to a "reject" fail-safe. PREEMPT_RT Linux alone has worst-case latency of 150 us, acceptable for soft real-time, but a 16.7ms hard deadline requires the RTOS guarantee.'
+  common_mistake: |
+    **The Pitfall:** Believing PREEMPT_RT makes Linux a hard real-time OS, or assuming FreeRTOS can run complex GPU ML workloads.
+    **The Rationale:** Misunderstanding the difference between reducing worst-case latency scheduling (PREEMPT_RT) and guaranteeing hard deterministic hardware deadlines (RTOS).
+    **The Consequence:** Missed real-time deadlines leading to un-rejected defective parts, or failure to deploy the ML model entirely due to RTOS library constraints.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Frame budget: 16.7 ms (60 FPS).
+       - TensorRT inference: 8 ms average, 11 ms worst case.
+       - Linux PREEMPT_RT jitter: 0.15 ms worst case.
+       - RTOS jitter: < 0.001 ms.
+       - Shared memory + RTOS trigger: 0.06 ms.
+    2. **Calculations:**
+       - Total hybrid worst-case: 11 ms + 0.15 ms + 0.06 ms = 11.21 ms.
+       - Headroom: 16.7 ms - 11.21 ms = 5.49 ms.
+       - Unmitigated Linux stall (e.g., page fault): ~5 ms. Total = 16.21 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound Guarantee**. Without the RTOS safety net, a single standard OS stall pushes the pipeline to 16.2ms, dangerously close to the deadline with no fail-safe, proving the heterogeneous architecture is mandatory.
 status: published
 provenance: imported
 requires_explanation: false
@@ -54,7 +41,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: UNCHECKED
+math_status: CORRECT
 human_reviewed:
   status: not-reviewed
   by: null

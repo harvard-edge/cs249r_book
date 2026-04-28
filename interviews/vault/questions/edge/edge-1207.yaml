@@ -8,31 +8,24 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: N-Gram Draft for Zero-Overhead Edge Speculation
-scenario: On Jetson Orin running a 3B INT8 model, you cannot afford a neural draft
-  model's memory or compute. Implement a prompt-lookup (n-gram) draft strategy that
-  proposes K=8 tokens by finding n-gram matches within the existing prompt. The prompt
-  is 4096 tokens. Calculate the expected acceptance rate and memory cost.
-question: How would you implement K=8 prompt-lookup drafting for a 4096-token prompt
-  on Orin, and what acceptance rates and memory cost should you expect?
+scenario: On Jetson Orin running a 3B INT8 model, you cannot afford a neural draft model's memory footprint. You must implement a prompt-lookup (n-gram) draft strategy for a 4096-token prompt.
+question: How would you implement K=8 prompt-lookup drafting for a 4096-token prompt on Orin, and what acceptance rates and memory cost should you expect?
 details:
-  realistic_solution: 'Algorithm: at decode position t, take the last 3 generated
-    tokens (trigram). Scan the prompt for matching trigrams. If found at position
-    j, propose tokens [j+3, j+4, ..., j+10] as draft (K=8). Implementation: build
-    a trigram hash table of the prompt: 4096 entries, key = hash(token[i], token[i+1],
-    token[i+2]), value = position i. Hash table size: 4096 x 12 bytes = 48KB (trivial
-    on Orin). Lookup: O(1) per decode step. Acceptance rate depends on prompt repetitiveness:
-    structured data (JSON, CSV): alpha ~ 0.65. Code with patterns: alpha ~ 0.55. Natural
-    language: alpha ~ 0.25 (too variable). For Orin at 3B INT8: target decode = 3B
-    / 102 GB/s = 29ms/token. N-gram draft: 0ms compute. Verify K+1=9 tokens: 29ms
-    (same weight read). At alpha=0.55, K=8: E[tok] = (1-0.55^9)/0.45 = 2.21. Effective:
-    29ms/2.21 = 13.1ms/tok. 2.21x speedup with zero memory cost. On structured data:
-    alpha=0.65, E=2.80, effective 10.4ms = 2.80x.'
-  common_mistake: Thinking n-gram lookup is too simple to work. For prompts containing
-    repeated patterns (code, structured data, templates), n-gram matching can achieve
-    alpha=0.5-0.7 with zero neural compute cost.
-  napkin_math: 'Hash table: 48KB. Lookup: O(1). Draft cost: 0ms. Verify: 29ms. Code
-    alpha=0.55: E=2.21, 2.21x. Structured data alpha=0.65: E=2.80, 2.80x. Natural
-    language alpha=0.25: E=1.33, 1.33x — barely worth it.'
+  realistic_solution: 'Build a trigram hash table of the 4096-token prompt (key: 3 tokens, value: position index). At decode time, use the last 3 generated tokens to query the hash table in O(1) time. If found, propose the subsequent K=8 tokens as a speculative draft. Verify them in a single batched forward pass through the main model. For highly repetitive structural data (JSON, code), n-gram matching achieves high acceptance rates with practically zero memory footprint compared to maintaining a secondary neural draft model.'
+  common_mistake: |
+    **The Pitfall:** Dismissing n-gram lookup as too simplistic for modern LLMs.
+    **The Rationale:** Assuming speculation requires continuous neural probability generation, ignoring the highly repetitive nature of structural prompts.
+    **The Consequence:** Suffering high latency on edge devices by either foregoing speculative decoding entirely or thrashing memory with a secondary neural draft model.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Prompt: 4096 tokens. Hash table entry: 12 bytes.
+       - Decode Time: 29ms/token. Alpha (acceptance): 0.55 (Code).
+    2. **Calculations:**
+       - Memory Cost: 4096 * 12 bytes = ~48 KB.
+       - Expected Draft Length (E): (1 - 0.55^9) / (1 - 0.55) = ~2.21 tokens per step.
+       - Effective Latency: 29 ms / 2.21 = 13.1 ms/token.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound. The 48KB hash table delivers a 2.21x speedup by bypassing sequential memory loads.**
 status: published
 provenance: imported
 requires_explanation: false

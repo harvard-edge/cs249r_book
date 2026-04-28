@@ -8,23 +8,27 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: Grouped Query Attention Memory Impact for Long Context on Snapdragon 8 Gen 3
-scenario: A mobile LLM (Mistral-7B-Instruct) with GQA (32 Q heads, 8 KV heads, head_dim=128) runs on Snapdragon 8 Gen 3. The model has 32 layers, deployed at INT4.
-question: What KV cache size does GQA use for a 16K-context Mistral-7B on Snapdragon, and how does it compare with MHA?
+scenario: A mobile LLM (Mistral-7B-Instruct) with GQA (32 Q heads, 8 KV heads, head_dim=128) runs on an NPU. The model has 32 layers, deployed at INT4.
+question: What KV cache size does GQA use for a 16K-context Mistral-7B, and how does it compare with MHA?
 details:
-  realistic_solution: 'GQA KV cache (8 heads) calculation reveals massive memory savings over traditional Multi-Head Attention (MHA). By reducing the KV heads from 32 down to 8, GQA reduces the KV cache size by a factor of 4. Furthermore, storing the KV cache in INT4 format reduces it by another factor of 4 compared to FP16. This allows a 16K context window to safely fit alongside the 3.5GB model weights within the 12GB RAM limit of the device.'
+  realistic_solution: GQA significantly mitigates the memory penalty of long context scaling. By collapsing KV heads from 32 down to 8, GQA cuts the fundamental KV footprint by a factor of 4. Furthermore, implementing INT4 KV quantization compresses the tensor by another factor of 4 vs FP16. This 16x multiplicative reduction allows expansive context windows to reside safely in the highly constrained device RAM alongside the base weights.
   common_mistake: |
-    **The Pitfall:** Quantizing only the KV cache values without quantizing the keys, or failing to properly account for the bit-width reduction.
-    **The Rationale:** Engineers often use standard FP16 KV cache formulas and forget to adjust for INT4 quantization across the full KV tensor.
-    **The Consequence:** This leads to vast overestimations of memory required, resulting in the rejection of feasible long-context use cases.
+    **The Pitfall:** Applying standard MHA FP16 formulas and failing to account for the multiplicative reduction of GQA paired with integer quantization.
+    **The Rationale:** Engineers mechanically apply default LLM formulas without tracing the architectural specifics of Grouped Query Attention or bit-width scaling.
+    **The Consequence:** Drastically overestimating memory requirements, falsely classifying a feasible 16K context deployment as impossible and rejecting a viable product feature.
   napkin_math: |
-    - **GQA KV per token:** 2 (K+V) × 8 heads × 128 dim = 2048 elements.
-    - **FP16 Size:** 2048 × 2 bytes = 4096 bytes/layer.
-    - **Total Layers:** 4096 × 32 layers = **131 KB/token**.
-    - **GQA 16K Context:** 131 KB × 16384 tokens = **2.1 GB** (FP16).
-    - **MHA Comparison:** 32 heads vs 8 heads = 4× more = **8.4 GB**.
-    - **INT4 Reduction:** INT4 is 4× smaller than FP16 (4 bits vs 16 bits).
-    - **INT4 GQA:** 2.1 GB / 4 = **0.525 GB**.
-    - **Total RAM:** 3.5 GB (model) + 0.525 GB (KV cache) + 4 GB (OS) = 8.025 GB < 12 GB.
+    1. **Assumptions & Constraints:**
+       - GQA Config: 8 KV heads, 128 dim, 32 layers.
+       - Context window: 16,384 tokens.
+       - Quantization: INT4 (0.5 bytes per parameter).
+    2. **Calculations:**
+       - Elements per token: 2 (K+V) * 8 heads * 128 dim = 2048 elements.
+       - FP16 bytes per token per layer: 2048 * 2 bytes = 4096 bytes.
+       - Total FP16 KV size per token: 4096 bytes * 32 layers = 131 KB.
+       - Total FP16 KV size (16K context): 131 KB * 16384 = 2.14 GB.
+       - Total INT4 KV size (16K context): 2.14 GB / 4 = 0.53 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Optimization.** GQA combined with INT4 quantization massively compresses the KV cache from ~8.5 GB (standard MHA FP16) down to ~0.53 GB, fitting safely into edge device RAM.
 status: published
 provenance: imported
 requires_explanation: false

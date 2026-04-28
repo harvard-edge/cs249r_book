@@ -8,20 +8,25 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Ethos-U55 Operator Offloading and Fallback Analysis
-scenario: You are deploying a custom CNN for keyword spotting on an ARM Corstone-300 subsystem (480 MHz Cortex-M7, Ethos-U55 NPU, 512 KB shared SRAM). During compilation, an unsupported custom activation function forces a fallback to the Cortex-M7.
+scenario: A custom CNN compiled for Cortex-M7 with Ethos-U55 triggers an unsupported activation fallback, forcing the subgraph back to the host CPU.
 question: "How would you analyze the system-level implications of this compilation outcome and specify a graph optimization strategy to satisfy strict latency constraints?"
 details:
-  realistic_solution: The optimal strategy is to use the compiler to perform operator substitution or constant folding prior to lowering. Specifically, the custom activation should be approximated with a framework-supported piecewise linear function (like HardSwish) that the Ethos-U55 compiler can map directly to its internal Look-Up Table (LUT) or native instructions, keeping the entire subgraph on the NPU and preserving SRAM.
+  realistic_solution: Execute graph-level operator substitution prior to compilation lowering. Replace the custom activation with native NPU-supported piecewise equivalents (HardSwish), directly targeting the Look-Up Table (LUT) to eliminate inter-processor memory bouncing.
   common_mistake: |
-    **The Pitfall:** Assuming the only penalty is the slower execution of the custom activation on the Cortex-M7.
-    **The Rationale:** Candidates miss the memory bandwidth penalty caused by transitioning execution domains.
-    **The Consequence:** They ignore SRAM fragmentation, broken operator fusion, and the massive I/O cost of materializing intermediate tensors.
+    **The Pitfall:** Assuming the only penalty is the slower localized execution of the custom activation on the Cortex-M7 CPU.
+    **The Rationale:** Candidates analyze computational FLOPs but miss the monolithic memory bandwidth penalty caused by bouncing execution domains.
+    **The Consequence:** They trigger massive SRAM fragmentation and totally destroy latency via repetitive full-tensor I/O bus materialization.
   napkin_math: |
-    1. Consider intermediate tensor size: 64 channels * 50 features * 1 byte = 3,200 bytes.
-    2. Calculate context switch memory traffic (NPU->M7->NPU): 4 reads/writes = 12.8 KB.
-    3. Calculate memory latency: At 4 bytes/cycle, memory transfers alone take 3,200 cycles.
-    4. Compare to NPU compute: NPU processing at 256 MACs/cycle might take tens of cycles.
-    5. **Final Result: The fallback latency is entirely dominated by the 3,200 cycle memory I/O bottleneck.**
+    1. **Assumptions & Constraints:**
+       - Hardware: Cortex-M7 with Ethos-U55 (512 KiB shared SRAM).
+       - Intermediate Tensor: 64 channels * 50 features * 1 byte = 3,200 bytes.
+       - Bus bandwidth: 4 bytes/cycle.
+    2. **Calculations:**
+       - Context switch traffic (NPU out -> M7 read -> M7 write -> NPU read): 4 full passes = 12.8 KB total traffic.
+       - Transfer penalty cycles: 12,800 bytes / 4 bytes/cycle = 3,200 cycles.
+       - Equivalent NPU internal compute footprint: < 100 cycles.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU fallback latency is exponentially dominated by 3,200 memory I/O transfer cycles rather than raw compute (Bandwidth-Bound).**
 status: published
 provenance: imported
 requires_explanation: true

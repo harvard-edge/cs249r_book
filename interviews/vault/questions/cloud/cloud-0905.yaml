@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnosing Small Batch Instability in 3D CNNs
-scenario: "You are training a 3D medical imaging CNN across a single node with 8x A100 GPUs. Due to the massive 512x512x512 voxel input size, you are forced to use a micro-batch size of 2 per GPU. Training appears to converge, but during deployment on a single T4 GPU for inference (where batch size is 1), the model produces highly erratic predictions and validation metrics plummet."
+scenario: "You are training a 3D medical imaging CNN across a single node with 8x GPUs. Due to the massive 512x512x512 voxel input size, you are forced to use a micro-batch size of 2 per GPU. Training appears to converge, but during deployment on a single inference GPU (where batch size is 1), the model produces highly erratic predictions and validation metrics plummet."
 question: "How do you diagnose and resolve this architectural bottleneck causing erratic inference?"
 details:
   realistic_solution: "Identify that standard BatchNorm computes independent statistics per GPU, making running mean/variance overwhelmingly noisy at batch size 2. Replace it with SyncBatchNorm to aggregate statistics across all 8 GPUs (effective batch size 16), or swap for Group Normalization which is batch-size independent."
@@ -17,11 +17,14 @@ details:
     **The Rationale:** Failing to recognize that standard Batch Normalization completely fails to estimate population statistics with a micro-batch size of 2.
     **The Consequence:** Endless hyperparameter tuning loops while the deployed model continues to hallucinate because its normalization running means are corrupted by noise.
   napkin_math: |
-    *   **Standard BN Effective Batch:** N = 2.
-    *   **SyncBN Effective Batch:** 8 GPUs × 2 = 16.
-    *   **Variance Scaling:** Variance of the sample variance scales as ~1/(N-1).
-    *   **Noise Reduction:** Moving from N=2 to N=16 reduces noise in running variance by 15x.
-    *   **Result:** **Standard BN at N=2 saves garbage statistics during training; SyncBN stabilizes them.**
+    1. **Assumptions & Constraints:**
+       - Standard BN Effective Batch: N = 2.
+       - SyncBN Effective Batch: 8 GPUs * 2 = 16.
+    2. **Calculations:**
+       - Variance Scaling: Variance of the sample variance scales as ~1/(N-1).
+       - Noise Reduction: Moving from N=2 to N=16 reduces noise in running variance by 15x.
+    3. **Conclusion & Interpretation:**
+       **Standard BN at N=2 saves garbage statistics; SyncBN stabilizes them. Result: Batch-Statistic-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

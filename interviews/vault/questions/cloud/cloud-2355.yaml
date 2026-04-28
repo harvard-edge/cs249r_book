@@ -12,18 +12,21 @@ scenario: A 4x GPU LLM inference node utilizing Tensor Parallelism (TP=4) exhibi
 question: Why are TP=4 AllGather ops capped near 24GB/s instead of 300GB/s NVLink on the 4-GPU node, and how would you restore P2P?
 details:
   realistic_solution: |
-    The root cause is that PCIe Access Control Services (ACS) or IOMMU is enabled in the host BIOS, which prevents true Peer-to-Peer (P2P) memory access over NVLink. When the GPU driver detects that P2P is blocked by the IOMMU/ACS, NCCL silently falls back to routing traffic through the CPU root complex over PCIe, or uses a slow shared-memory staging approach. To fix this, you must disable ACS in the server BIOS, ensure IOMMU is configured correctly (e.g., `iommu=pt` in GRUB), and verify the topology using `nvidia-smi topo -m` to confirm the NVLink connections show 'NV' instead of 'PHB' (PCIe Host Bridge).
+    The root cause is PCIe Access Control Services (ACS) or IOMMU enabled in the host BIOS, which prevents true Peer-to-Peer memory access. Disable ACS in the BIOS and verify the topology using `nvidia-smi topo -m`.
   common_mistake: |
     **The Pitfall:** Assuming NCCL is misconfigured and blindly setting `NCCL_P2P_DISABLE=1`.
-    **The Rationale:** Engineers often see slow transfers and guess that P2P is broken, attempting to manually disable it to force a "stable" state.
-    **The Consequence:** This forces slower communication over PCIe permanently instead of identifying and fixing the BIOS/IOMMU settings blocking true NVLink P2P.
+    **The Rationale:** Engineers guess that P2P is broken and disable it to force a stable state.
+    **The Consequence:** Forcing slower communication over PCIe permanently instead of fixing the BIOS settings blocking true NVLink P2P.
   napkin_math: |
-    - **NVLink Bandwidth:** 300 GB/s per GPU.
-    - **PCIe Fallback Bandwidth:** PCIe Gen4 x16 unidirectional is ~16 GB/s (bidirectional ~24-30 GB/s effective).
-    - **NVLink Transfer Time:** For a 1GB AllGather payload: 1GB / 300 GB/s = 3.3ms.
-    - **PCIe Transfer Time:** 1GB / 24 GB/s = 41.6ms.
-    - **Latency Difference:** 41.6ms - 3.3ms = 38.3ms.
-    - **Conclusion: This ~38ms penalty perfectly accounts for the latency jump from 15ms to ~50ms per token.**
+    1. **Assumptions & Constraints:**
+       - NVLink: 300 GB/s.
+       - PCIe fallback: ~24 GB/s.
+    2. **Calculations:**
+       - NVLink transfer (1GB): 1 / 300 = 3.3ms.
+       - PCIe transfer (1GB): 1 / 24 = 41.6ms.
+       - Difference: 41.6 - 3.3 = 38.3ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: The ~38ms penalty perfectly accounts for the latency jump, confirming PCIe fallback.**
 status: published
 provenance: imported
 requires_explanation: false

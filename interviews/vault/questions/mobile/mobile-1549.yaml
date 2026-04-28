@@ -8,19 +8,27 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Optimizing LLM Inference with Memory-Mapped Weights on Samsung Exynos 2400 NPU
-scenario: You are tasked with optimizing a large language model (LLM) for real-time inference on the Samsung Exynos 2400 NPU, which boasts 34.7 TOPS and 12 GB LPDDR5X. The model weights alone exceed the NPU's available on-chip memory but can fit within the LPDDR5X. To minimize load times and enable efficient sharing across multiple inference processes (e.g., for different user queries or model variants), you decide to leverage memory-mapped files for loading model weights.
+scenario: You are tasked with optimizing a large language model (LLM) for real-time inference on the Samsung Exynos 2400 NPU. The model weights alone exceed the NPU's available on-chip memory but can fit within the main memory. To minimize load times and enable efficient sharing across multiple inference processes, you decide to leverage memory-mapped files for loading model weights.
 question: How would you optimize memory-mapped LLM weights on Exynos 2400 to reduce cold-start latency and efficiently share memory across processes?
 details:
-  realistic_solution: The solution involves using `mmap` with `MAP_SHARED` to map the model weight file into the virtual address space. To minimize cold start latency, employ explicit pre-faulting strategies such as `madvise(MADV_WILLNEED)` or `mlock` on the entire mapped region immediately after `mmap`. This proactively loads the weight data into the 12 GB LPDDR5X, preventing on-demand page faults during the critical first inference. For shared memory across processes, the `MAP_SHARED` flag inherently allows multiple processes to share the same physical pages backing the mapped file, ensuring a single physical copy of the model weights. A centralized 'model server' process could load and `mmap` the model, then child processes can `mmap` the same file, inheriting the shared physical memory. Utilizing the Samsung Exynos 2400 NPU's dedicated APIs for zero-copy data transfer from LPDDR5X to NPU internal memory where available would further enhance efficiency.
+  realistic_solution: 'The solution involves using `mmap` with `MAP_SHARED` to map the model weight file into the virtual address space. To minimize cold start latency, employ explicit pre-faulting strategies such as `madvise(MADV_WILLNEED)` or `mlock` on the entire mapped region immediately after `mmap`. This proactively loads the weight data into memory, preventing on-demand page faults during the critical first inference. For shared memory across processes, the `MAP_SHARED` flag inherently allows multiple processes to share the same physical pages backing the mapped file, ensuring a single physical copy of the model weights.'
   common_mistake: |
     **The Pitfall:** Simply using `mmap` without proactive page fault management or `MAP_SHARED`.
     **The Rationale:** Unaware that OS demand-paging incurs massive latency overhead per page during the first inference pass, or ignoring cross-process duplication.
     **The Consequence:** Results in terrible cold-start latency (seconds to minutes) and out-of-memory errors when multiple processes load separate physical copies of the weights.
   napkin_math: |
-    - 8GB LLM sequential read at 68 GB/s (Exynos 2400 bandwidth): ~0.117 seconds.
-    - Cold start without pre-faulting involves individual 4KB page faults: 8GB = 2 million page faults.
-    - If 1 fault takes 50µs, total latency = 2,000,000 * 50µs = 100 seconds.
-    - **Shared Memory benefit:** 5 inference processes * 8GB = 40GB (OOM on 12GB device). Using `MAP_SHARED` collapses this to a single 8GB footprint, safely fitting in LPDDR5X.
+    1. **Assumptions & Constraints:**
+       - Weight size: 8 GiB.
+       - Sequential read bandwidth: 68 GB/s.
+       - Page size: 4 KB.
+       - Page fault latency: 50 µs/fault.
+    2. **Calculations:**
+       - Fast load: 8 GB / 68 GB/s = ~0.117 seconds.
+       - Number of pages: 8 GiB / 4 KB = 2,097,152 pages.
+       - Cold start fault time: 2,097,152 * 50 µs = 104.8 seconds.
+       - Shared memory footprint (5 processes): 5 * 8 GiB = 40 GiB (OOM). Using MAP_SHARED: collapses to 8 GiB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound. Cold start latency is effectively removed with pre-faulting, avoiding over 100 seconds of page fault delays.**
 status: published
 provenance: imported
 requires_explanation: false

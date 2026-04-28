@@ -8,21 +8,27 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: VRAM Budgeting for On-Device LLM Inference on Google Tensor G3
-scenario: You are tasked with deploying a 7-billion parameter Large Language Model (LLM) for on-device inference on a Google Pixel device powered by the Google Tensor G3. The device features 12 GB of LPDDR5X memory, with a maximum bandwidth of 68.26 GB/s, and a 7.5 TOPS on-device TPU. The LLM uses bfloat16 for weights and activations. The KV-cache will be stored in float16 during inference. You need to ensure the model, its intermediate activations, and the KV-cache can fit within the available 12 GB LPDDR5X memory, considering a maximum sequence length of 512 tokens and a batch size of 1.
+scenario: You are tasked with deploying a 7B LLM on an edge device with 12GB LPDDR5X. The LLM uses bfloat16 for weights and activations. The KV-cache will be stored in float16 during inference. You need to ensure the model, its intermediate activations, and the KV-cache can fit within the available memory, considering a maximum sequence length of 512 tokens and a batch size of 1.
 question: How would you outline your approach to estimate and manage the VRAM budget effectively?
 details:
-  realistic_solution: To realistically deploy such a model, several techniques must be combined. Firstly, aggressive quantization of model weights to 8-bit or even 4-bit integers (e.g., using GPTQ or AWQ) is essential. For the KV-cache, explore techniques like Paged Attention, which optimizes memory usage by storing KV entries in non-contiguous memory pages, or apply KV-cache quantization (e.g., to 8-bit integers). Dynamic batching or reducing the maximum sequence length based on available memory can also be crucial. Furthermore, investigate model architectures specifically designed for memory efficiency on edge devices (e.g., MobileLLMs) or consider techniques like speculative decoding to reduce the computational and memory load per token generation.
+  realistic_solution: |
+    Deploying an unmodified BF16 7B model is physically impossible under the strict 12GB constraint. The architectural priority mandates aggressive Post-Training Quantization (PTQ) to downcast weights to W8A16 or W4A16 schemas. After establishing a highly compressed weight footprint, calculate the precise geometry of the floating-point KV-cache. Even at FP16, a minimal 512 context fits comfortably, but adopting structured methodologies like PagedAttention averts unrecoverable memory fragmentation. Furthermore, optimizing context window topology via MobileLLMs fundamentally aligns mathematical capacity to physical RAM.
   common_mistake: |
-    **The Pitfall:** Underestimating the memory footprint of the KV-cache and intermediate activations.
-    **The Rationale:** Candidates often focus solely on the model weights and ignore the runtime memory costs that scale with sequence length and batch size.
-    **The Consequence:** Out-of-memory errors during deployment or forcing overly aggressive quantization that destroys model quality.
+    **The Pitfall:** Tunnel vision on the static weight parameters, severely underestimating or entirely omitting KV-cache scaling mechanics.
+    **The Rationale:** Candidates fixate exclusively on weight quantization algebra, completely ignoring that runtime memory bounds scale wildly based on context length, layer geometry, and precision matrices.
+    **The Consequence:** Unpredictable Out-Of-Memory (OOM) faults during execution, or destroying generation quality via overly aggressive weight compression when optimizing the KV-cache was the actual requirement.
   napkin_math: |
-    1. Model Weights (bfloat16): 7B parameters * 2 bytes/param = 14 GB (Exceeds 12 GB budget).
-    2. Quantized Weights (8-bit): 7B parameters * 1 byte/param = 7 GB.
-    3. Available memory for activations/KV-cache: 12 GB - 7 GB = 5 GB.
-    4. KV-Cache parameters (seq_len 512): 2 (K+V) * 512 (seq_len) * 32 (layers) * 32 (heads) * 128 (head_dim) = 134,217,728 params.
-    5. KV-Cache memory (float16): 134,217,728 params * 2 bytes = 268,435,456 bytes.
-    6. Total KV-Cache size: **~256 MB** (Fits comfortably in the remaining 5 GB).
+    1. **Assumptions & Constraints:**
+       - Target Memory Capacity: 12 GB (LPDDR5X).
+       - Model Parameters: 7 Billion.
+       - KV-Cache Config: Seq len 512, Batch 1, 32 layers, 32 heads, 128 head_dim, FP16 storage.
+    2. **Calculations:**
+       - Unmodified BF16 Weights: 7B * 2 bytes = 14 GB (Exceeds 12GB absolute budget).
+       - W8A16 Quantized Weights: 7B * 1 byte = 7 GB (Leaves a 5GB envelope).
+       - KV-Cache Params: 2 (K+V) * 512 (Seq) * 32 (Layers) * 32 (Heads) * 128 (Dim) = 134,217,728 params.
+       - KV-Cache Memory: 134,217,728 * 2 bytes (FP16) = ~268 MB.
+    3. **Conclusion & Interpretation:**
+       **Result: INT8 weights mandatory, saving 7GB (Memory-Capacity-Bound).** Bare metal deployment demands INT8 weight matrices to fit the ~268MB dynamic inference footprint securely within hardware bounds.
 status: published
 provenance: imported
 requires_explanation: false

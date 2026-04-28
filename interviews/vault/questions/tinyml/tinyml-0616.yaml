@@ -11,21 +11,28 @@ title: The Watchdog Flash Stall
 scenario: Your smart agriculture sensor uses an ESP32. It has a hardware watchdog timer set to 5 seconds. To save the 1 MB ML model permanently, you download it via Wi-Fi and write it to the internal SPI Flash using standard `esp_flash_write` commands. The download takes 10 seconds. Even though your download loop calls `vTaskDelay` to let other tasks run, the watchdog triggers and resets the chip mid-download.
 question: Why does writing a 1 MB model to ESP32 SPI flash trip a 5 s watchdog despite calling `vTaskDelay`?
 details:
-  realistic_solution: 'You triggered a **Flash Cache Disable Stall**. Erasing a 64 KB block of SPI Flash can take ~500ms. If your code calls `esp_flash_erase_region` for the entire 1MB partition before writing, it causes 8 seconds of continuous bus lockup. If your watchdog expects a ping every 5 seconds, the OS mathematically cannot ping it in time because the flash cache is disabled and the CPU is stalled.'
+  realistic_solution: |
+    You triggered a **Flash Cache Disable Stall**. Erasing a 64 KB block of SPI Flash can take ~500ms. If your code calls `esp_flash_erase_region` for the entire 1MB partition before writing, it causes 8 seconds of continuous bus lockup. If your watchdog expects a ping every 5 seconds, the OS mathematically cannot ping it in time because the flash cache is disabled and the CPU is stalled.
   common_mistake: |
     **The Pitfall:** Assuming the Wi-Fi task is blocking the CPU.
     **The Rationale:** Developers often blame network interrupt priority, failing to realize the physical SPI Flash memory erase operation is locking the bus.
     **The Consequence:** Time is wasted refactoring RTOS priorities rather than correctly chunking the flash erase operations.
   napkin_math: |
-    - **Step 1:** Erasing a 64 KB block of SPI Flash takes ~500ms.
-    - **Step 2:** Erasing a 1 MB partition all at once requires 16 blocks (1024 KB / 64 KB = 16).
-    - **Step 3:** Calculate total bus lockup: 16 blocks * 500ms = 8 seconds.
-    - **Result:** **The CPU is stalled for 8 seconds, completely preventing it from petting the 5-second watchdog.**
+    1. **Assumptions & Constraints:**
+       - Partition size: 1 MB (1024 KB).
+       - Erase block size: 64 KB.
+       - Block erase time: ~500ms.
+       - Hardware watchdog timeout: 5 seconds.
+    2. **Calculations:**
+       - Number of blocks to erase: 1024 KB / 64 KB = 16 blocks.
+       - Total bus lockup time: 16 blocks * 500ms = 8,000ms (8 seconds).
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound.** The CPU is stalled for 8 seconds during the synchronous erase, completely preventing it from petting the 5-second watchdog.
   options:
   - The Wi-Fi task runs at a higher priority than the watchdog, preventing the watchdog from being serviced.
   - Erasing a 1 MB SPI Flash partition all at once blocks the bus for ~8 seconds, causing a Flash Cache Disable Stall. The CPU is stalled and cannot run the idle task to pet the 5s watchdog.
   - The `esp_flash_write` command has a known memory leak that consumes all SRAM, causing the MCU to reset before the download finishes.
-  - `vTaskDelay` puts the CPU to sleep, which completely disables the watchdog timer circuitry, causing a spurious reset upon wakeup.
+  - '`vTaskDelay` puts the CPU to sleep, which completely disables the watchdog timer circuitry, causing a spurious reset upon wakeup.'
   correct_index: 1
 status: published
 provenance: imported

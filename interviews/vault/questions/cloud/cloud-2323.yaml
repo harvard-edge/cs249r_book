@@ -8,20 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: MoE Router Logit Overflow in FP16
-scenario: You are training an 8x22B Mixture of Experts (MoE) model using FP16. After 2,000 steps, the evaluation loss spikes, and profiling shows that all tokens are suddenly being routed uniformly to all experts, destroying the sparsity. The routing mechanism uses a standard linear layer followed by a Softmax over the 8 experts.
-question: "Why do all tokens suddenly route uniformly in the FP16 MoE, and what precision change should be made to the router?"
+scenario: 'You are training an 8x22B Mixture of Experts (MoE) model using FP16. After 2,000 steps, the evaluation loss spikes, and profiling shows that all tokens are suddenly being routed uniformly to all experts, destroying the sparsity. The routing mechanism uses a standard linear layer followed by a Softmax.'
+question: 'Why do all tokens suddenly route uniformly in the FP16 MoE, and what precision change should be made to the router?'
 details:
-  realistic_solution: |
-    The issue is FP16 numeric overflow in the router logits. As the network gains confidence, the magnitude of the router's pre-softmax logits grows. When a logit exceeds FP16's maximum representable value (65504), it overflows to Infinity. If multiple experts get an Infinity logit (or if the implementation subtracts the max, resulting in Inf - Inf = NaN), the resulting softmax outputs NaNs or uniform probabilities (if NaNs are masked to 1/N). The architectural requirement is to cast the input to the router layer to FP32 before the linear projection, ensuring the logits and subsequent softmax are computed in FP32, preventing overflow and preserving sharp routing decisions.
+  realistic_solution: 'The issue is FP16 numeric overflow in the router logits. As the network gains confidence, logit magnitude grows, overflowing the FP16 max value of 65504 to Infinity. The Softmax over Infinity returns NaNs or uniform probabilities, destroying sparsity. The architectural requirement is to cast the router inputs to FP32 before projection.'
   common_mistake: |
     **The Pitfall:** Assuming the load balancing auxiliary loss coefficient is too high.
     **The Rationale:** Load balancing loss is explicitly designed to force tokens toward a uniform distribution across experts.
     **The Consequence:** Wasting time tuning loss hyperparameters while the fundamental numerical stability issue remains, leading to repeated training collapse.
   napkin_math: |
-    1. **Router Compute:** Linear layer computes X * W.
-    2. **Overflow Condition:** If X ≈ 100 and W ≈ 700, X * W = 70,000.
-    3. **FP16 Limit:** The maximum representable value in FP16 is 65,504.
-    4. **Result:** **70,000 overflows to Inf. Softmax([Inf, Inf, 0, 0]) evaluates to [NaN, NaN, 0, 0], which is often masked to uniform probabilities (1/N) to avoid crashing, destroying routing sparsity. Cast the router input to FP32.**
+    1. **Assumptions & Constraints:**
+       - Routing layer precision: FP16.
+       - FP16 Maximum value: 65,504.
+    2. **Calculations:**
+       - Router Compute: Linear layer computes X * W.
+       - Overflow Condition: If X ≈ 100 and W ≈ 700, X * W = 70,000.
+       - Precision Failure: 70,000 > 65,504, causing an overflow to Inf.
+       - Softmax Evaluation: Softmax([Inf, Inf, 0, 0]) evaluates to [NaN, NaN, 0, 0] or uniform fallback [0.25, 0.25, 0.25, 0.25].
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (Precision). The FP16 limit is breached; casting the router strictly to FP32 prevents collapse.**
 status: published
 provenance: imported
 requires_explanation: false

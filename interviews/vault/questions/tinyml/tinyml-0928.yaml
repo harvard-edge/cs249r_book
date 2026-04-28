@@ -2,13 +2,13 @@ schema_version: '1.0'
 id: tinyml-0928
 track: tinyml
 level: L4
-zone: diagnosis
+zone: analyze
 topic: transformer-systems-cost
 competency_area: compute
 bloom_level: analyze
 phase: inference
 title: Diagnose Transformer Inference Latency Regression on ESP32-S3
-scenario: A production keyword-spotting transformer on ESP32-S3 at 240 MHz suddenly shows 340ms inference latency, up from 85ms baseline after a firmware update that increased context window from 32 to 128 tokens. The model is unchanged: 2 layers, 4 heads, 64-dim heads, INT8. The team suspects attention is O(n²) but profiling shows only 60% CPU utilization during inference.
+scenario: 'A production keyword-spotting transformer on ESP32-S3 at 240 MHz suddenly shows 340ms inference latency, up from 85ms baseline after a firmware update that increased context window from 32 to 128 tokens. The model is unchanged: 2 layers, 4 heads, 64-dim heads, INT8. The team suspects attention is O(n²) but profiling shows only 60% CPU utilization during inference.'
 question: Why did the ESP32-S3 transformer jump from 85 ms to 340 ms when context increased from 32 to 128 tokens?
 details:
   realistic_solution: 'Attention FLOPs scale 16×: 0.30 × 85ms × 16 = 408ms for attention alone if it were 100%... but it''s 30%. Non-attention ops scale 4×: 0.70 × 85ms × 4 = 238ms. Total predicted: 0.30×85×16 + 0.70×85×4 = 408+238 = 646ms. But actual is 340ms. Low CPU utilization (60%) suggests memory bandwidth saturation: KV cache at 128 tokens = 4×64×128×1B = 32KB, exceeding L1 cache (32KB on S3), causing cache thrashing. Fix: use tiled attention with 32-token tiles to stay in L1.'
@@ -17,14 +17,18 @@ details:
     **The Rationale:** Candidates know attention scales quadratically and hastily assume a 4x context increase directly causes the observed latency jump without doing the math.
     **The Consequence:** The team attempts to optimize compute (e.g., pruning) when the actual bottleneck is memory bandwidth and cache thrashing.
   napkin_math: |
-    - **KV Cache Size**: 2 layers × 4 heads × 64 dim × 128 tokens × 1 Byte = 65,536 Bytes = 64 KB.
-    - **L1 Cache Capacity**: 32 KB.
-    - **Thrashing Penalty**: 64 KB > 32 KB L1, causing cache evictions.
-    - **Expected Compute Scaling**: 
-      - Attention (30% of total): scales 16x (4²). 0.30 × 85ms × 16 = 408ms.
-      - Non-attention (70%): scales 4x. 0.70 × 85ms × 4 = 238ms.
-      - Total Expected: 646 ms.
-    - **Conclusion**: Low CPU util (60%) combined with actual latency (340 ms) proves the bottleneck is **memory bandwidth (cache thrashing)**, not purely compute. Tiling to 32-token windows restores efficiency.
+    1. **Assumptions & Constraints:**
+       - Hardware: ESP32-S3 (32 KB L1 Cache).
+       - Model: Transformer (2 layers, 4 heads, 64-dim).
+       - Context increase: 32 tokens to 128 tokens (4x increase).
+       - Profiling: 85 ms baseline -> 340 ms actual. CPU utilization at 60%.
+       - Baseline compute split: 30% attention (O(n²)), 70% non-attention (O(n)).
+    2. **Calculations:**
+       - KV Cache Size at 128 tokens: 2 layers × 4 heads × 64 dim × 128 tokens × 1 Byte = 65,536 Bytes = 64 KB.
+       - Expected Compute Latency: (0.30 × 85 ms × 16) + (0.70 × 85 ms × 4) = 408 ms + 238 ms = 646 ms.
+       - Cache vs Payload: 64 KB KV Cache > 32 KB L1 Cache (Thrashing occurs).
+    3. **Conclusion & Interpretation:**
+       - **Result: 64 KB KV Cache exceeds 32 KB L1, causing cache evictions.** **Result: Memory-Bandwidth Bound (Cache Thrashing).**
 status: published
 provenance: imported
 requires_explanation: false

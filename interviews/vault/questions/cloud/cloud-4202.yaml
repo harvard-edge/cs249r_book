@@ -11,17 +11,21 @@ title: Feature Store Serving Throughput Under Load
 scenario: Your ad ranking system serves 50,000 QPS, each request requiring 150 features for 100 candidate ads. The online feature store uses Redis.
 question: What total Redis operations per second does this ad ranking feature workload require, can one 300K ops/s instance handle it, and how would you scale?
 details:
-  realistic_solution: 'Break features into user-level (fetched once per request) and item-level (fetched per candidate). If 80 features are user-level and 70 are item-level: user fetches = 50K × 1 MGET = 50K ops. Item fetches = 50K × 100 candidates × 1 MGET (batched per candidate group) = 50K × ~10 MGET batches = 500K ops. Total: ~550K ops/s. A single Redis instance at 300K ops/s cannot handle this. Solution: Redis Cluster with 3 shards (550K / 300K = 1.8, round up), partitioned by entity type. User features on shard 1, item features hash-distributed across shards 2-3.'
+  realistic_solution: 'Break features into user-level (fetched once per request) and item-level (fetched per candidate). If 80 features are user-level and 70 are item-level: user fetches = 50K * 1 MGET = 50K ops. Item fetches = 50K * 100 candidates * 1 MGET (batched per candidate group) = 50K * ~10 MGET batches = 500K ops. Total: ~550K ops/s. A single Redis instance at 300K ops/s cannot handle this. Solution: Redis Cluster with 3 shards (550K / 300K = 1.8, round up), partitioned by entity type. User features on shard 1, item features hash-distributed across shards 2-3.'
   common_mistake: |
     **The Pitfall:** Calculating independent point lookups without batching or shared features.
     **The Rationale:** Candidates naively calculate 50K * 100 * 150 = 750M ops/s, ignoring MGET and the fact that user features are identical across all candidates in a single request.
     **The Consequence:** Massively over-provisioning the Redis cluster by multiple orders of magnitude.
   napkin_math: |
-    1. **Feature Split:** Assume 80 user features (shared) and 70 item features.
-    2. **User Fetches:** 50K QPS * 1 MGET batch = 50K ops/s.
-    3. **Item Fetches:** 50K QPS * 100 candidates. Batched via MGET per candidate group (e.g., 10 MGETs per request) = 500K ops/s.
-    4. **Total Load:** 550K ops/s.
-    5. **Scaling Strategy:** 550K / 300K = 1.8. **Requires a 3-shard Redis Cluster.**
+    1. **Assumptions & Constraints:**
+       - 50K QPS.
+       - Feature Split: Assume 80 user features (shared) and 70 item features.
+    2. **Calculations:**
+       - User Fetches: 50K QPS * 1 MGET batch = 50K ops/s.
+       - Item Fetches: 50K QPS * 100 candidates. Batched via MGET per candidate group (e.g., 10 MGETs per request) = 500K ops/s.
+       - Total Load: 550K ops/s.
+       - Scaling Strategy: 550K / 300K = 1.83.
+    3. **Conclusion & Interpretation:** **Result: Throughput-Bound.** Requires a 3-shard Redis Cluster.
 status: published
 provenance: imported
 requires_explanation: false

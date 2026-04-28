@@ -8,22 +8,26 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Mastering End-to-End Optimization of a 4-Stage Compound Pipeline on Snapdragon 8 Gen 3
-scenario: "A Snapdragon 8 Gen 3 compound AI system currently processes queries in 3.8 seconds: OCR (400ms) → embedding+retrieval (250ms) → cross-encoder reranking of 20 docs (600ms) → 3B LLM generation of 80 tokens (2550ms). The target is 1.5 seconds P95."
-question: "How would you design a comprehensive optimization strategy that achieves this target without changing models or hardware?"
+scenario: A Snapdragon 8 Gen 3 compound AI system currently processes queries in 3.8 seconds. The pipeline includes OCR (400ms), embedding+retrieval (250ms), cross-encoder reranking of 20 docs (600ms), and 3B LLM generation of 80 tokens (2550ms). The target is 1.5 seconds P95.
+question: How would you design a comprehensive optimization strategy that achieves this target without changing models or hardware?
 details:
-  realistic_solution: 'Multi-pronged restructuring: (1) Parallelize OCR + query embedding: if OCR result not needed for embedding, run concurrently: max(400,50)=400ms (embedding is fast, runs on NPU while OCR runs on CPU). (2) Reduce reranker candidates from 20 to 8 docs: 600ms*(8/20)=240ms. (3) INT4 LLM: 2550/2=1275ms. (4) Reduce generation from 80 to 35 tokens. (5) Pipeline overlap: start LLM prefill while reranker completes last 2 docs. Restructured: parallel(OCR+embed)=400ms, retrieval(200ms, after embed), rerank-8(240ms), LLM-35tok-INT4(557ms), with OCR→retrieval→rerank→LLM as critical path: 400+200+240+557=1397ms < 1500ms target.'
+  realistic_solution: 'Restructure the pipeline: (1) Parallelize OCR + query embedding (run concurrently on CPU and NPU). (2) Reduce reranker candidates via Top-K Sparsification. (3) Apply INT4 quantization to LLM. (4) Reduce generation length context via prompt engineering. Apply pipeline overlap to start LLM prefill during final reranker chunks.'
   common_mistake: |
-    **The Pitfall:** Applying standard latency optimizations independently without restructuring the pipeline.
-    **The Rationale:** Candidates fail to realize that the 3B LLM generation is memory-bandwidth-bound, so quantization alone won't reach the target.
-    **The Consequence:** The final pipeline remains far from the 1.5s latency target.
+    **The Pitfall:** Applying standard latency optimizations independently without restructuring the pipeline dependencies.
+    **The Rationale:** Candidates fail to realize that the 3B LLM generation is heavily memory-bandwidth-bound, so quantization alone will not bridge the gap to the 1.5s target.
+    **The Consequence:** The final pipeline remains far from the 1.5s P95 latency target, rendering the feature unusable.
   napkin_math: |
-    - Original total: `400 + 250 + 600 + 2550 = 3800ms`.
-    - Step 1 (Parallel OCR + Embed): Embed takes 50ms, OCR takes 400ms. Running in parallel caps at `max(400, 50) = 400ms`. Retrieval is `200ms`.
-    - Step 2 (Rerank 8 docs): `600ms * (8/20) = 240ms`.
-    - Step 3 (INT4 LLM): Reduces time to `2550ms / 2 = 1275ms`.
-    - Step 4 (Generate 35 tokens): `1275ms * (35/80) = 557ms`.
-    - Total: `400 (OCR||Embed) + 200 (Retrieval) + 240 (Rerank) + 557 (LLM) = 1397ms`.
-    - **Conclusion:** Applying a 5% jitter buffer results in `1397ms * 1.05 = 1467ms`, which is **< 1.5s P95**.
+    1. **Assumptions & Constraints:**
+       - Target: < 1.5s P95 total latency.
+       - Original total: 400ms + 250ms + 600ms + 2550ms = 3800ms.
+    2. **Calculations:**
+       - Step 1 (Parallel OCR + Embed): max(400ms, 50ms) = 400ms. Retrieval = 200ms.
+       - Step 2 (Rerank top-8 instead of 20): 600ms * (8/20) = 240ms.
+       - Step 3 (Quantize LLM to INT4): 2550ms / 2 = 1275ms.
+       - Step 4 (Reduce generation to 35 tokens): 1275ms * (35/80) = 557ms.
+       - Total Restructured: 400ms + 200ms + 240ms + 557ms = 1397ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Pipeline-Latency-Bound**. Applying a 5% jitter buffer results in 1467ms, which safely meets the <1.5s P95 target via parallelization and memory-bandwidth reduction.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,21 +8,27 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Decode Throughput Scaling with Tensor Parallelism
-scenario: You are scaling a 70B FP16 decode cluster using tensor parallelism. Assume NVLink (600 GB/s bidirectional) between TP peers. You are evaluating whether to serve using two TP=2 H100 GPUs or a single TP=1 MI300X.
-question: How do TP=2 H100s and TP=1 MI300X compare for 70B decode latency and throughput, and when does AllReduce become the bottleneck?
+scenario: 'You are scaling a 70B FP16 decode cluster using tensor parallelism. Assume NVLink (600 GB/s bidirectional) between TP peers. You are evaluating whether to serve using two TP=2 H100 GPUs or a single TP=1 MI300X.'
+question: 'How do TP=2 H100s and TP=1 MI300X compare for 70B decode latency and throughput, and when does AllReduce become the bottleneck?'
 details:
-  realistic_solution: 'TP=2 H100 decode: each GPU holds half the weights (70 GB). Decode step: each GPU reads 70 GB from HBM at 3.35 TB/s = 20.9 ms. After each GEMM (96 layers), an AllReduce across 2 GPUs via NVLink: message size = batch_size × hidden_dim × 2 bytes. At batch=1, hidden_dim=8192: 1 × 8192 × 2 = 16 KB. NVLink AllReduce latency = 16 KB / (600 GB/s / 2) = 0.05 μs — negligible. At batch=128: 128 × 8192 × 2 = 2 MB. AllReduce = 2 MB / 300 GB/s = 6.7 μs per layer × 96 layers = 0.64 ms — still small vs 20.9 ms. TP=1 MI300X: reads 140 GB at 5.3 TB/s = 26.4 ms. No AllReduce. Per-token latency: TP=2 H100 = 20.9 ms (weight read dominates, AllReduce negligible). TP=1 MI300X = 26.4 ms. H100 TP=2 is 21% faster per token but requires 2 GPUs. Throughput: H100 TP=2: 1/0.0209 = 47.8 tok/s using 2 GPUs. MI300X TP=1: 1/0.0264 = 37.9 tok/s using 1 GPU. Per GPU: H100 23.9 tok/s vs MI300X 37.9 tok/s — MI300X wins per GPU.'
+  realistic_solution: 'Calculate the per-token latency for both configurations, factoring in weight read times and TP AllReduce overhead. While H100 TP=2 yields a faster per-token latency by dividing the weight read cost, the single MI300X delivers significantly higher throughput per GPU, making it more cost-effective for pure throughput scaling.'
   common_mistake: |
-    **The Pitfall:** Assuming TP=2 always immediately doubles throughput simply because compute is divided.
-    **The Rationale:** Candidates forget that Tensor Parallelism requires synchronous AllReduce communication after every layer's GEMM, which introduces overhead.
+    **The Pitfall:** Assuming TP=2 always immediately doubles throughput simply because compute and memory are divided.
+    **The Rationale:** Candidates forget that Tensor Parallelism requires synchronous AllReduce communication after every layer's GEMM, which introduces non-trivial overhead.
     **The Consequence:** The chosen architecture scales poorly at small batch sizes where communication latency dominates compute speedups.
   napkin_math: |
-    1. H100 TP=2: Each GPU reads 70GB / 3.35 TB/s = ~20.9ms per step.
-    2. MI300X TP=1: Single GPU reads 140GB / 5.3 TB/s = ~26.4ms per step.
-    3. H100 TP=2 AllReduce (batch=1): 16KB message across 300 GB/s (unidirectional) = 53ns per layer. For 96 layers = ~5.1µs (negligible).
-    4. H100 TP=2 Throughput: 1 / 0.0209s = 47.8 tok/s (using 2 GPUs, so 23.9 tok/s per GPU).
-    5. MI300X TP=1 Throughput: 1 / 0.0264s = 37.9 tok/s (using 1 GPU).
-    **While H100 TP=2 is 21% faster per token (20.9ms vs 26.4ms), the MI300X delivers significantly higher throughput per GPU.**
+    1. **Assumptions & Constraints:**
+       - Model: 70B FP16 (140GB weights).
+       - TP=2 H100: 70GB/GPU, 3.35 TB/s HBM. NVLink 300 GB/s unidirectional.
+       - TP=1 MI300X: 140GB, 5.3 TB/s HBM.
+    2. **Calculations:**
+       - H100 TP=2 Weight Read: 70 GB / 3.35 TB/s = ~20.9ms.
+       - MI300X TP=1 Weight Read: 140 GB / 5.3 TB/s = ~26.4ms.
+       - H100 TP=2 AllReduce (batch=1): ~5.1μs per token (negligible).
+       - H100 TP=2 Throughput: 1 / 0.0209s = 47.8 tok/s (using 2 GPUs, so 23.9 tok/s per GPU).
+       - MI300X TP=1 Throughput: 1 / 0.0264s = 37.9 tok/s per GPU.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound. H100 TP=2 is faster per token (20.9ms vs 26.4ms), but the single MI300X delivers significantly higher throughput per GPU.**
 status: published
 provenance: imported
 requires_explanation: false

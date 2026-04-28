@@ -11,16 +11,22 @@ title: Jetson Orin Unified Memory Bottleneck
 scenario: You have deployed a high-resolution vision model on an NVIDIA Jetson Orin (32 GB LPDDR5, Ampere GPU + DLA accelerator). The model is quantized to INT8 to take advantage of the 275 TOPS capability. Despite the massive compute available, your Nsight Systems trace shows an end-to-end inference latency of 60ms. The trace reveals that the Ampere GPU is only active for a small fraction of the pipeline, the DLA is idle, and a massive amount of time is spent on memory transfer APIs before and after kernel execution.
 question: Given the Orin's architecture and its 60W TDP budget, what is the most likely root cause of this latency bottleneck?
 details:
-  realistic_solution: The root cause is the use of explicit `cudaMemcpy` operations (Host-to-Device and Device-to-Host). The NVIDIA Jetson Orin features a unified 32 GB LPDDR5 memory shared physically between the CPU, Ampere GPU, and DLA. The correct approach is to use zero-copy memory or `cudaMallocManaged` so the GPU can directly read the buffers populated by the CPU, eliminating the memory duplication and associated latency.
+  realistic_solution: 'The root cause is the use of explicit `cudaMemcpy` operations (Host-to-Device and Device-to-Host). The NVIDIA Jetson Orin features a unified 32 GB LPDDR5 memory shared physically between the CPU, Ampere GPU, and DLA. The correct approach is to use zero-copy memory or `cudaMallocManaged` so the GPU can directly read the buffers populated by the CPU, eliminating the memory duplication and associated latency.'
   common_mistake: |
     **The Pitfall:** Treating an SoC like a discrete PCIe GPU.
     **The Rationale:** Candidates often assume the latency solution is to further optimize the CUDA kernels, aggressively prune the model, or lower the precision.
     **The Consequence:** They miss the massive software block time in the trace and force completely unnecessary memory copies across a physically unified DRAM pool.
   napkin_math: |
-    1. **Compute Estimate**: Assume the model needs 550 GOPS. Orin at 275 TOPS → 550 / 275000 = 2 ms compute time.
-    2. **Bottleneck Math**: 2 ms / 60 ms total = 3.3% GPU utilization.
-    3. **Wasted Time**: The remaining 58 ms is spent running explicit `cudaMemcpy` on 30 MB image tensors in software.
-    4. **Result**: Utilizing shared LPDDR5 architecture drops latency towards **2 ms**, maximizing efficiency under the 60W TDP.
+    1. **Assumptions & Constraints:**
+       - Jetson Orin: 32 GB LPDDR5 Unified Memory, 275 TOPS, 60W TDP.
+       - Image tensor size = 30 MB. Total observed latency = 60ms.
+       - Model INT8 compute demand ≈ 550 GOPS.
+    2. **Calculations:**
+       - GPU compute time = 550 GOPS / 275,000 GOPS/s = 2 ms.
+       - GPU Utilization = 2 ms / 60 ms = 3.3%.
+       - Software memory copy overhead = 60ms - 2ms = 58 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Copy Bound**. The architecture fails to leverage physically shared memory; utilizing zero-copy eliminates the 58ms `cudaMemcpy` overhead, plummeting total latency.
 status: published
 provenance: imported
 requires_explanation: false

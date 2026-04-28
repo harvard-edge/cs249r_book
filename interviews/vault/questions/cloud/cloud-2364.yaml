@@ -12,17 +12,22 @@ scenario: A critical real-time fraud detection model uses a 2-node RDMA setup fo
 question: Why do 10ms RDMA fraud-inference requests spike to 150ms during a TCP Hadoop shuffle, and what network QoS configuration would prevent it?
 details:
   realistic_solution: |
-    The root cause is the lack of Network Quality of Service (QoS) isolation. The massive TCP shuffle traffic from the Hadoop job fills the shared switch egress buffers. Because RoCEv2 (RDMA) is sharing the same buffer pool without strict priority isolation, the RDMA packets get queued behind megabytes of TCP traffic, delaying them significantly. Furthermore, when the buffer fills, it triggers PFC pause frames that halt the RDMA traffic entirely. The solution is to configure Priority Flow Control (PFC) and Explicit Congestion Notification (ECN) on separate DSCP (Differentiated Services Code Point) traffic classes. Assign RDMA traffic to a strict-priority lossless queue (e.g., TC3) and TCP to a lossy queue (TC0) to guarantee buffer space for RoCEv2.
+    The massive TCP shuffle traffic fills the shared switch egress buffers. Because RoCEv2 (RDMA) shares the same buffer pool without strict priority isolation, RDMA packets queue behind megabytes of TCP traffic, delaying them. Buffer exhaustion triggers PFC pause frames that halt RDMA entirely. The architectural solution requires assigning RDMA traffic to a strict-priority lossless queue (e.g., TC3) via explicit Differentiated Services Code Point (DSCP) tags, while relegating TCP to a lossy queue (TC0).
   common_mistake: |
     **The Pitfall:** Assuming the RDMA NIC is overheating or that the background job is consuming all CPU cores, prompting node-level migration rather than network-level QoS.
     **The Rationale:** Many ML engineers treat the network fabric as a transparent pipe, unaware that TCP and RDMA traffic share hardware switch buffers and will violently collide if QoS partitions aren't explicitly enforced.
     **The Consequence:** Node migration provides no relief because the switch buffers are still universally flooded, leading to continued SLA violations and missed fraud detection.
   napkin_math: |
-    - **Bandwidth:** 100 Gbps link = 12.5 GB/s.
-    - **Buffer Capacity:** Switch buffer = 16MB.
-    - **TCP Flooding:** TCP shuffle pushes 40 Gbps, filling the 16MB buffer in 3.2ms.
-    - **Queue Delay:** When an RDMA packet arrives, it queues behind 16MB of TCP packets. Delay = 16MB / 12.5 GB/s = 1.28ms per hop.
-    - **Conclusion: Over 3 network hops, base delay is ~4ms. When combined with PFC storms triggered by the full buffer pausing the sender, latency easily balloons past the 10ms SLA to >150ms.**
+    1. **Assumptions & Constraints:**
+       - Network: 100 Gbps (12.5 GB/s) shared Ethernet.
+       - Switch Buffer Capacity: 16 MB.
+       - Competitors: Real-time RDMA (RoCEv2) vs. background TCP Hadoop Shuffle.
+    2. **Calculations:**
+       - TCP Flooding Time: TCP fills the 16 MB buffer in: 16 MB / 12.5 GB/s = 1.28 ms.
+       - Queue Delay: An arriving RDMA packet waits behind 16 MB of TCP packets, adding ~1.28 ms delay per hop.
+       - Multi-Hop Impact: Over 3 hops, base delay hits ~4 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Buffer-Bound.** The shared switch buffers fill with TCP traffic, triggering PFC pause frames that violently stall RDMA. Strict Priority Flow Control (PFC) QoS partitions are required to isolate lossless RDMA queues from lossy TCP traffic.
 status: published
 provenance: imported
 requires_explanation: false

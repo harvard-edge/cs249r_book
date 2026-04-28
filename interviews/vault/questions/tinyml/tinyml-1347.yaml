@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Real-time Anomaly Detection Latency on Nordic nRF5340
-scenario: A health monitoring wearable device utilizes a Nordic nRF5340 System-on-Chip (SoC) (128 MHz Arm Cortex-M33, 256 KB SRAM, 1 MB flash, integrated BLE 5.2) to perform real-time anomaly detection on streaming accelerometer data. The device samples data at 100 Hz. A pre-trained TinyML model (TensorFlow Lite for Microcontrollers) is deployed to detect unusual activity patterns. Upon detecting an anomaly, the device must immediately transmit an alert via Bluetooth Low Energy (BLE) to a connected smartphone. The overall end-to-end latency, from sensor data acquisition to the BLE alert being sent, is critical and must not exceed 250 ms to ensure timely intervention. You are observing that the system is occasionally exceeding this latency budget.
+scenario: A health monitoring wearable device performs real-time anomaly detection on streaming accelerometer data sampled at 100 Hz. Upon detecting an anomaly, the device must immediately transmit an alert via BLE. The overall end-to-end latency must not exceed 250 ms to ensure timely intervention. You are observing that the system is occasionally exceeding this latency budget.
 question: Why can an nRF5340 wearable exceed a 250 ms anomaly-alert budget even when TinyML inference itself is fast?
 details:
   realistic_solution: 'To address the latency budget breach, one would perform a systematic latency decomposition. This involves profiling each stage: 1) Sensor acquisition and data windowing/preprocessing (e.g., FFT or scaling), 2) ML model inference (MAC operations, memory access patterns), 3) Postprocessing (thresholding, alert formatting), and 4) BLE transmission (packetization, stack overhead, connection interval optimization). Using hardware debuggers, logic analyzers, and internal timers on the nRF5340, precise measurements can be taken for each component. Optimizations might include reducing model complexity, optimizing data transfer between peripherals and CPU, streamlining BLE advertising/connection parameters (e.g., shorter connection intervals if power budget allows), or offloading some pre/post-processing to a more powerful edge device if the nRF5340 cannot meet the required performance.'
@@ -17,13 +17,20 @@ details:
     **The Rationale:** Engineers assume that since the model is tiny and fast, the system will easily meet latency requirements.
     **The Consequence:** They overlook significant latency contributions from sensor data acquisition (which dominates), preprocessing, and BLE communication stack overheads, leading to budget breaches.
   napkin_math: |
-    *   **Data Acquisition:** 100 samples at 100 Hz take 1,000 ms (1 second), which immediately violates the 250 ms end-to-end latency budget if the window is fully sequential to the alert.
-    *   **Preprocessing:** Windowing and basic scaling add ~5-15 ms on a 128 MHz M33.
-    *   **Inference:** A 200K MAC CNN/MLP on M33 (assume ~5 cycles/MAC) takes 1,000,000 cycles. At 128 MHz: 1,000,000 / 128,000,000 = ~7.8 ms.
-    *   **Postprocessing:** Decision logic and packet formatting take ~2-5 ms.
-    *   **BLE Transmission:** A 20-byte notification with a 100 ms connection interval adds 50-150 ms (avg ~100 ms).
-    *   **Total Post-Acquisition Latency:** 7.8 ms (inference) + 5 ms (post) + 100 ms (BLE) = **~112.8 ms**.
-    *   **Conclusion:** The BLE connection interval variability and RTOS scheduling jitter push the post-window processing over the remaining budget.
+    1. **Assumptions & Constraints:**
+       - Sampling Rate: 100 Hz.
+       - Model Size: 200K MACs.
+       - CPU Clock: 128 MHz.
+       - Latency Budget: 250 ms.
+    2. **Calculations:**
+       - Data Acquisition: 100 samples at 100 Hz = 1000 ms (violates budget if fully sequential).
+       - Preprocessing: ~10 ms.
+       - Inference: 200,000 MACs * 5 cycles/MAC / 128 MHz = 7.8 ms.
+       - Postprocessing: ~5 ms.
+       - BLE Transmission: ~100 ms average.
+       - Total Post-Acquisition Latency: 7.8 + 5 + 100 = 112.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound Pipeline**. While inference is fast (7.8 ms), data acquisition and BLE connection variability push the pipeline over the 250 ms budget.
 status: published
 provenance: imported
 requires_explanation: false

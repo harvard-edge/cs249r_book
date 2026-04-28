@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Sequence Parallelism in Megatron-LM
-scenario: Megatron-LM introduced sequence parallelism alongside tensor parallelism. LayerNorm and Dropout are not parallelized by standard TP and their activations are replicated across all TP ranks. You are training a 70B model with seq_len=8192, batch=4, hidden=8192, TP=8 on H100 GPUs.
+scenario: Megatron-LM introduced sequence parallelism alongside tensor parallelism. LayerNorm and Dropout are not parallelized by standard TP and their activations are replicated across all TP ranks. You are training a 70B model with seq_len=8192, batch=4, hidden=8192, TP=8 on GPUs.
 question: "For seq_len=8192, batch=4, hidden=8192, TP=8, how much activation memory is wasted, and how does sequence parallelism fix it?"
 details:
   realistic_solution: 'Without sequence parallelism, LayerNorm and Dropout activations of shape [batch, seq, hidden] = [4, 8192, 8192] are replicated on all 8 GPUs. Each copy is 4 × 8192 × 8192 × 2B = 512 MB per layer. With 80 layers, that is 80 × 512 MB = 40 GB of replicated activations per GPU — wasted because each GPU holds identical copies. Sequence parallelism splits the sequence dimension across TP ranks for these operations. Each GPU processes seq_len/TP = 1024 tokens for LayerNorm/Dropout, reducing activation memory to 512/8 = 64 MB per layer, saving 87.5%. The key insight: between the column-parallel and row-parallel layers, activations are already partitioned. Sequence parallelism replaces the AllGather/ReduceScatter with communication that serves double duty — redistributing for TP while partitioning for LayerNorm.'
@@ -17,10 +17,16 @@ details:
     **The Rationale:** Candidates hear "parallelism" and assume it applies to the parameter matrices, confusing it with context-parallelism or tensor-parallelism.
     **The Consequence:** Misunderstanding the memory profile, failing to realize that SP specifically targets the massive activation memory waste of non-GEMM operations.
   napkin_math: |
-    - Replicated activation per layer (LayerNorm/Dropout): 4 (batch) × 8192 (seq) × 8192 (hidden) × 2 bytes = 512 MB.
-    - With TP=8 but no SP, this 512 MB is replicated on all 8 GPUs.
-    - With Sequence Parallelism: The sequence is split, so memory is 512 MB / 8 = 64 MB per layer.
-    - **Savings over 80 layers: (512 MB - 64 MB) × 80 = 35.8 GB of memory saved per GPU.**
+    1. **Assumptions & Constraints:**
+       - Replicated activation: LayerNorm/Dropout.
+       - Batch=4, SeqLen=8192, Hidden=8192, TP=8.
+       - Precision: FP16 (2 bytes). Layers: 80.
+    2. **Calculations:**
+       - Memory per layer: 4 * 8192 * 8192 * 2 bytes = 512 MB.
+       - With TP=8 but no SP, this 512 MB is replicated on all 8 GPUs.
+       - With Sequence Parallelism, sequence is split: 512 MB / 8 = 64 MB per layer.
+       - Savings over 80 layers: (512 MB - 64 MB) * 80 = 35.8 GB.
+    3. **Conclusion & Interpretation:** **Result: Memory-Capacity-Bound**. Sequence parallelism specifically eliminates 35.8 GB of massive activation memory waste per GPU.
 status: published
 provenance: imported
 requires_explanation: true

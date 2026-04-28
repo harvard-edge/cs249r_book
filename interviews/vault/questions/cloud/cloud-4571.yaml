@@ -11,14 +11,22 @@ title: MoE Autoscaling Cluster
 scenario: Serving a 70B MoE model on an 8x H100 SXM node. Peak traffic fluctuates 10x between day and night, requiring frequent scale-up of decode instances.
 question: Design a serving cluster architecture and memory allocation specification that dynamically shifts resources without massive cold-start latencies.
 details:
-  realistic_solution: Implement a disaggregated prefill/decode architecture. Keep the 140GB model weights permanently loaded in HBM across a base pool of GPUs. Scale decode dynamically by swapping KV caches to CPU RAM or NVMe, transferring state via RoCE rather than reloading model weights from object storage.
+  realistic_solution: |
+    Implement a disaggregated prefill/decode architecture. Keep the 140 GB model weights permanently loaded in HBM across a base pool of idle GPUs. Scale decode dynamically by swapping KV caches to CPU RAM or NVMe, transferring state via RoCE rather than reloading massive model weights from slow object storage.
   common_mistake: |
     **The Pitfall:** Tying autoscaling to basic container orchestration workflows.
     **The Rationale:** Candidates treat GPU nodes like stateless web servers, ignoring the massive initialization penalty of downloading and loading >100GB weight files from object storage.
     **The Consequence:** The system suffers multi-minute cold starts during scale-up events, failing to absorb immediate traffic spikes and violating SLAs.
   napkin_math: |
-    - **Weight Transfer:** 140 GB weights / 3.35 TB/s HBM bandwidth = **41.8ms local transfer**.
-    - **Cold Start Penalty:** Transferring 140 GB over a 10Gbps network takes **~2 minutes**. Keeping weights hot across a base pool avoids this penalty entirely.
+    1. **Assumptions & Constraints:**
+       - Model weights: 140 GB.
+       - HBM3 bandwidth: ~3.35 TB/s.
+       - Network bandwidth: 10 Gbps (1.25 GB/s).
+    2. **Calculations:**
+       - Cold Start Penalty (Network): 140 GB / 1.25 GB/s = 112 seconds (~2 minutes).
+       - Hot Scale-Up (Local HBM): 140 GB / 3.35 TB/s = 41.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network I/O-Bound.** Pulling weights from object storage causes multi-minute scale-up delays. Disaggregating prefill/decode and keeping weights resident in a base pool eliminates this penalty entirely.
 status: published
 provenance: llm-draft
 expected_time_minutes: 15

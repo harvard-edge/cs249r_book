@@ -11,16 +11,22 @@ title: JIT Tracing Memory Leak
 scenario: An NLP model deployed on an edge CPU processes variable-length text sequences. Inference takes 50ms, using 200MB memory. Over 24 hours of processing random lengths, memory grows linearly by 2MB per inference until the system OOMs at 4GB.
 question: Why does memory grow by 2MB per inference for variable-length text on the edge CPU, eventually OOMing at 4GB?
 details:
-  realistic_solution: The graph capture mode used was JIT tracing, which hardcodes static shapes. The framework dispatcher maintains an LRU cache of compiled execution graphs. Because inputs are variable-length, almost every sequence length is unique, causing continuous cache misses. The framework recompiles a new static graph for each length, and the memory planner allocates new cached workspaces, leaking 2MB per unique length until OOM.
+  realistic_solution: The framework relies on Just-In-Time (JIT) tracing, which maps static graph dimensions. Because input tensors fluctuate constantly in sequence length, the execution engine triggers a continuous cycle of caching misses. The framework recompiles and statically isolates a fresh 2MB workspace configuration per unique dimension, generating a devastating compilation leak across the dispatcher pool.
   common_mistake: |
-    **The Pitfall:** Blaming standard heap fragmentation or Python garbage collection.
-    **The Rationale:** Engineers assume standard memory leaks without understanding how JIT compilation interacts with dynamic shapes.
-    **The Consequence:** They waste time profiling Python objects instead of fixing the compilation framework's caching behavior.
+    **The Pitfall:** Blaming the failure on mundane heap fragmentation or basic Python garbage collection delays.
+    **The Rationale:** Engineers default to generic software-level memory hygiene diagnoses without interrogating compiler-level tensor shape logic.
+    **The Consequence:** Teams squander vital hours debugging standard code objects while the immutable underlying JIT architecture continues leaking.
   napkin_math: |
-    - **Memory Available:** 4GB (Limit) - 200MB (Base) = 3.8GB = **3,800MB**.
-    - **Leak per Compilation:** 2MB of graph metadata cached per unique sequence length.
-    - **Unique Lengths to OOM:** 3,800MB / 2MB = **1,900 unique lengths**.
-    - **Time to OOM:** If 1 unique length arrives per minute, OOM occurs in 1,900 minutes = **31.6 hours**.
+    1. **Assumptions & Constraints:**
+       - Edge Limit: 4 GB (4000 MB).
+       - Base Memory: 200 MB.
+       - JIT compilation tax: 2 MB per unique dimension sequence.
+    2. **Calculations:**
+       - Available Buffer = 4000 MB - 200 MB = 3800 MB.
+       - Unique Lengths required to OOM = 3800 MB / 2 MB/length = 1900 unique lengths.
+       - Assume 1 unique length arrives per minute: 1900 mins = 31.6 hours.
+    3. **Conclusion & Interpretation:**
+       - **Result: Tensor Shape Poisoning**. 1900 dynamic length variations will inexorably fill the compiler cache, creating a terminal crash state.
 status: published
 provenance: imported
 requires_explanation: false

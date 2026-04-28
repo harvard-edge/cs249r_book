@@ -8,26 +8,26 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: SRAM Optimization via Fused Operator Scheduling
-scenario: You are deploying a sequential CNN on an ARM Cortex-M4 (STM32F4) microcontroller with 256 KB SRAM, 1 MB flash, and no FPU. The network has a 40 KB input, followed by Conv1 (outputs a 120 KB tensor) and Conv2 (outputs a 120 KB tensor), using CMSIS-NN SIMD (2x INT8 MACs/cycle). A standard sequential operator schedule crashes with an Out-Of-Memory (OOM) error during the transition between the two layers. However, when the compiler applies a strip-mined layer fusion schedule with a tile factor of 4, the inference runs successfully.
+scenario: You are deploying a sequential CNN on an ARM Cortex-M4 microcontroller with 256 KB SRAM, 1 MB flash, and no FPU. The network has a 40 KB input, followed by Conv1 (outputs a 120 KB tensor) and Conv2 (outputs a 120 KB tensor), using CMSIS-NN SIMD. A standard sequential operator schedule crashes with an Out-Of-Memory (OOM) error during the transition between the two layers. However, when the compiler applies a strip-mined layer fusion schedule with a tile factor of 4, the inference runs successfully.
 question: Why does the default sequential schedule fail, and how does the fused execution order resolve the SRAM bottleneck?
 details:
-  realistic_solution: In a standard sequential schedule, the entire output of Conv1 must be materialized in SRAM before Conv2 can begin execution, forcing the input, the full intermediate tensor, and the final output buffer to coexist in memory simultaneously to prevent overwriting unconsumed data. A fused schedule interleaves the execution order: it computes a small spatial tile of Conv1 and immediately feeds it into Conv2. This dramatically reduces the lifespan of the intermediate tensor, dropping peak memory well below the hardware limit.
+  realistic_solution: 'In a standard sequential schedule, the entire output of Conv1 must be materialized in SRAM before Conv2 can begin execution, forcing the input, the full intermediate tensor, and the final output buffer to coexist in memory simultaneously to prevent overwriting unconsumed data. A fused schedule interleaves the execution order: it computes a small spatial tile of Conv1 and immediately feeds it into Conv2. This dramatically reduces the lifespan of the intermediate tensor, dropping peak memory well below the hardware limit.'
   common_mistake: |
-    **The Pitfall:** Assuming SRAM usage is just the largest single layer.
-    **The Rationale:** Candidates forget that intermediate tensors must overlap in memory during the transition between consecutive operators.
-    **The Consequence:** They underestimate peak SRAM requirements, leading to unexpected OOM errors during deployment.
+    **The Pitfall:** Assuming SRAM usage is determined solely by the largest single layer.
+    **The Rationale:** Candidates forget that intermediate tensors must physically overlap in memory during the transition between consecutive operators to prevent overwriting unconsumed data.
+    **The Consequence:** They fatally underestimate peak SRAM requirements, leading to deterministic OOM errors during real-world execution.
   napkin_math: |
-    - **Standard Sequential Peak SRAM:**
-      - Input: 40 KB
-      - Conv1 Out: 120 KB
-      - Conv2 Out (allocated before Conv1 Out can be safely freed): 120 KB
-      - Total: 40 + 120 + 120 = 280 KB. (280 KB > 256 KB limit, triggers OOM crash).
-    - **Fused Schedule Peak SRAM (Tile factor = 4):**
-      - Input: 40 KB
-      - Conv1 Tile Buffer (120 KB / 4): 30 KB
-      - Conv2 Out (where tiles are accumulated): 120 KB
-      - Total: 40 + 30 + 120 = 190 KB.
-    - **Conclusion:** 190 KB < 256 KB, ensuring the model fits securely in memory.
+    1. **Assumptions & Constraints:**
+       - SRAM Limit: 256 KB.
+       - Input: 40 KB. Conv1 Out: 120 KB. Conv2 Out: 120 KB.
+       - Fused Tile Factor: 4.
+    2. **Calculations:**
+       - Standard Sequential Peak: 40 KB (Input) + 120 KB (Conv1 Out) + 120 KB (Conv2 Out allocated before freeing) = 280 KB.
+       - 280 KB > 256 KB (OOM Crash).
+       - Fused Schedule Conv1 Tile: 120 KB / 4 = 30 KB.
+       - Fused Peak: 40 KB (Input) + 30 KB (Tile Buffer) + 120 KB (Conv2 Out) = 190 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** Fusing the operators dramatically reduces the intermediate tensor lifespan, dropping peak memory to 190 KB and successfully fitting it within the 256 KB hardware limit.
 status: published
 provenance: imported
 requires_explanation: false

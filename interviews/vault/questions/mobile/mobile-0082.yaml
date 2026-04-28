@@ -11,15 +11,22 @@ title: The Hardware Decoder Synchronization
 scenario: "Your app runs an action recognition model on a live video stream. You use the Android MediaCodec API to decode the H.264 video using hardware. You then convert the frame to a tensor and run inference. The model takes 15ms and the hardware decode takes 10ms, which should comfortably hit 30 FPS, yet the app drops frames."
 question: "What is fundamentally wrong with putting hardware decoding in the critical path of a synchronous loop?"
 details:
-  realistic_solution: 'Synchronous wait on an asynchronous peripheral. Hardware decoders have variable latency: 3 frames in 5ms, then 25ms for a keyframe. Blocking on the 25ms frame misses the 33ms deadline. Fix: decouple with a producer-consumer ring buffer. Decoder writes asynchronously; inference reads the latest frame. The buffer absorbs jitter — during keyframe stalls, inference uses a slightly stale frame (imperceptible at 30 FPS). Never put hardware decode in the synchronous critical path.'
+  realistic_solution: |
+    Hardware video decoders exhibit highly variable, asynchronous latency due to frame dependencies (e.g., I/P/B frames). Blocking the ML inference thread synchronously on decoder output guarantees missed real-time deadlines during keyframe stalls. Implement a decoupled producer-consumer architecture utilizing a ring buffer. The decoder writes asynchronously, while the ML thread reads the most recent available frame, absorbing the jitter.
   common_mistake: |
     **The Pitfall:** Assuming hardware decoding is slow or constant-time.
     **The Rationale:** Engineers assume a synchronous wait is fine, without realizing that hardware decoders have highly variable, asynchronous latency due to keyframes.
-    **The Consequence:** Severe frame drops and UI stutter.
+    **The Consequence:** Severe frame drops, unhandled jitter, and UI stutter.
   napkin_math: |
-    - A hardware decoder might decode 3 frames in `5ms`, then take `25ms` to decode the next frame due to keyframe dependencies.
-    - If the ML thread blocks on that `25ms` frame, the total time (`25ms + 15ms = 40ms`) misses the `33ms` deadline.
-    - **Conclusion:** Decoupling with a **producer-consumer ring buffer** absorbs the 25ms jitter perfectly.
+    1. **Assumptions & Constraints:**
+       - Target framing: 30 FPS (33.3ms deadline).
+       - Inference time: 15ms constant.
+       - Decode time: 5ms for P-frames, up to 25ms for I-frames (keyframes).
+    2. **Calculations:**
+       - P-frame critical path: 5ms + 15ms = 20ms (Under 33.3ms deadline).
+       - I-frame critical path: 25ms + 15ms = 40ms (Misses 33.3ms deadline).
+    3. **Conclusion & Interpretation:**
+       - **Result: 40ms worst-case latency.** Synchronous design creates a **jitter bottleneck** during keyframes. Decoupling perfectly absorbs this latency spike.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,20 +11,25 @@ title: The Integer Arithmetic Engine
 scenario: Walk me through exactly how a quantized Conv2D layer executes on a Cortex-M4 with no floating-point unit.
 question: How does an integer-only quantized Conv2D execute on a Cortex-M4 from inputs through requantized outputs?
 details:
-  realistic_solution: 'The full integer-only inference pipeline works as follows. Each tensor has a quantization scheme: $x_{real} = S_x (x_{int} - Z_x)$ where $S$ is a float scale and $Z$ is an integer zero-point. For convolution, the real-valued output is $Y = W \cdot X + b$. Substituting the quantization parameters and expanding: $S_y (Y_{int} - Z_y) = S_w (W_{int} - Z_w) \cdot S_x (X_{int} - Z_x) + S_b (b_{int} - Z_b)$. This simplifies to an integer dot product $\sum (W_{int} - Z_w)(X_{int} - Z_x)$, which is accumulated in 32-bit integer registers, then multiplied by a precomputed multiplier $M = \frac{S_w S_x}{S_y}$ (applied via integer multiply and bit-shift), and finally shifted by $Z_y$ before clamping back to 8-bit.'
+  realistic_solution: 'The full integer-only inference pipeline accumulates an integer dot product into 32-bit registers, then multiplies by a precomputed multiplier M (applied via integer multiply and bit-shift), and finally shifts by the zero point before clamping back to 8-bit.'
   common_mistake: |
     **The Pitfall:** Over-simplifying INT8 convolution.
     **The Rationale:** Candidates think INT8 convolution just means "multiply and truncate."
     **The Consequence:** They ignore accumulator width overflows, zero-point offsets, and the complex integer-shift requantization step necessary for mathematical correctness.
   napkin_math: |
-    - 3x3 depthwise conv on 48x48x64 feature map.
-    - MACs = 3 * 3 * 48 * 48 * 64 = 1,327,104.
-    - CMSIS-NN SMLAD instruction does two MACs per cycle.
-    - At 100 MHz (200M MACs/s): 1.3M / 200M = **6.5 ms per layer**.
-    - Requantization adds ~1 shift/add per output element (147,456 ops, negligible overhead).
+    1. **Assumptions & Constraints:**
+       - 3x3 depthwise conv on 48x48x64 feature map.
+       - CMSIS-NN SMLAD instruction (2 MACs/cycle) at 100 MHz.
+    2. **Calculations:**
+       - MACs = 3 * 3 * 48 * 48 * 64 = 1,327,104.
+       - SMLAD Throughput = 200M MACs/s.
+       - Core Time = 1.327M / 200M = 6.63 ms.
+       - Requantization Overhead = ~147,456 ops (negligible).
+    3. **Conclusion & Interpretation:**
+       - **Result: ~6.6 ms.** Execution is strictly **Compute-Bound** on the integer ALU, with CMSIS-NN SIMD effectively halving the latency.
   options:
   - Simply multiply INT8 inputs by INT8 weights, truncate to INT8, and output. The zero-points and scales are only needed during training, not inference.
-  - 'Full integer pipeline: each tensor has scale S and zero-point Z where x_real = S(x_int - Z). Convolution expands to: accumulate INT8xINT8 products into INT32, subtract cross-terms involving zero-points (precomputed), add INT32 bias. Then requantize: multiply the INT32 accumulator by a fixed-point multiplier (M = S_w * S_x / S_y, represented as int32 x 2^-shift), apply the output zero-point, and clamp to [-128, 127]. No floats anywhere — CMSIS-NN''s SMLAD does 2 MACs/cycle this way.'
+  - 'Full integer pipeline: accumulate INT8xINT8 products into INT32, subtract cross-terms involving zero-points, add INT32 bias. Then requantize via integer multiply and bit-shift, apply zero-point, and clamp to [-128, 127]. No floats anywhere.'
   - The Cortex-M4 must use software floating-point emulation for the scale factors during requantization, adding ~10 cycles per output element.
   - 'The pipeline uses lookup tables (LUTs) for all multiplications: precompute all 256x256 possible INT8 products in a 64 KB table and replace multiplication with table lookups.'
   correct_index: 1

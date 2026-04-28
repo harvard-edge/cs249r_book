@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Multi-Stage Ranking Latency Budget
-scenario: A social platform's recommendation pipeline has 4 stages: (1) Retrieval: 1B candidates → 10k, (2) Pre-ranking: 10k → 1k, (3) Ranking: 1k → 100, (4) Re-ranking: 100 → 10 final results. Total end-to-end SLO is 150 ms.
+scenario: "A social platform's recommendation pipeline has 4 stages: (1) Retrieval: 1B candidates → 10k, (2) Pre-ranking: 10k → 1k, (3) Ranking: 1k → 100, (4) Re-ranking: 100 → 10 final results. Total end-to-end SLO is 150 ms."
 question: How would you allocate the 150 ms SLO across the 4-stage recommendation pipeline, and which stages benefit most from GPU acceleration?
 details:
   realistic_solution: 'Latency budget allocation (principles): Retrieval must scan 1B candidates in minimal time → use approximate nearest-neighbor (ANN) search (e.g., FAISS, ScaNN) on vector embeddings. Budget: 20 ms. Pre-ranking: 10k candidates, simple model (2-layer MLP, no embedding lookups). GPU batch scoring. Budget: 15 ms. Ranking: 1k candidates, full DLRM with all embedding lookups and deep MLP. Most expensive per-candidate. Budget: 80 ms (dominant stage). Re-ranking: 100 candidates, rule-based + light contextual model. CPU. Budget: 20 ms. Overhead (network, feature fetch): 15 ms. Total: 150 ms. GPU acceleration most valuable at Ranking: 1k × full DLRM forward pass. Pre-ranking can run on CPU at 10k candidates if model is small enough. Retrieval: GPU-accelerated FAISS/HNSW for ANN — critical for 1B-scale.'
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Failing to account for the exponentially decreasing number of candidates processed at each stage.
     **The Consequence:** Bottlenecking the retrieval stage (which processes 1B items) while wasting compute time on the re-ranking stage (which processes only 100).
   napkin_math: |
-    * **Ranking (1k items, DLRM):** ~1 GFLOP + 128 KB embedding lookups per candidate. Total = 1 TFLOP + 128 MB reads.
-    * **A100 Compute:** 1 TFLOP / 312 TFLOPS = 3.2 ms.
-    * **A100 Memory:** 128 MB / 2 TB/s = 0.064 ms. Total Ranking = ~5 ms.
-    * **Pre-ranking (10k items, CPU):** 10k * 10 MFLOPs = 100 GFLOPs. CPU @ 2 TFLOPS = 50 ms (Over budget!).
-    * **Pre-ranking (GPU):** 100 GFLOPs / 312 TFLOPS = 0.32 ms.
-    * **Conclusion:** **Both pre-ranking and ranking strictly require GPU acceleration to meet the latency budget.**
+    1. **Assumptions & Constraints:**
+       - End-to-end SLO: 150 ms.
+       - Candidates per stage: 1B -> 10k -> 1k -> 100.
+       - CPU compute: 2 TFLOPS. A100 compute: 312 TFLOPS.
+    2. **Calculations:**
+       - Ranking (1k items, DLRM): 1 TFLOP + 128 MB reads. On A100: 3.2 ms compute + 0.064 ms memory = ~5 ms.
+       - Pre-ranking (10k items, CPU): 100 GFLOPs / 2 TFLOPS = 50 ms (Over budget).
+       - Pre-ranking (GPU): 100 GFLOPs / 312 TFLOPS = 0.32 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound Latency.** CPU pre-ranking blows the latency budget; both pre-ranking and ranking strictly require GPU acceleration.
 status: published
 provenance: imported
 requires_explanation: false

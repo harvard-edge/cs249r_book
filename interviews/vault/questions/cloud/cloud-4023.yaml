@@ -8,19 +8,23 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Congestion-Aware Adaptive Routing on InfiniBand
-scenario: 'You are evaluating NVIDIA''s Adaptive Routing (AR) on Quantum-2 InfiniBand switches for a 4096-H100 cluster against static routing with ECMP. AR uses real-time port load telemetry to reroute packets, but introduces potential packet reordering. A workload mixes AllReduce (90% of traffic) with parameter-server updates (10%).'
-question: "Should Adaptive Routing be enabled for the 4096-H100 mix of 90% AllReduce and 10% parameter-server traffic, and how should it be configured?"
+scenario: 'You are evaluating NVIDIA''s Adaptive Routing (AR) on Quantum-2 InfiniBand switches for a 4096-GPU cluster against static routing with ECMP. AR uses real-time port load telemetry to reroute packets, but introduces potential packet reordering. A workload mixes AllReduce (90% of traffic) with parameter-server updates (10%).'
+question: 'Should Adaptive Routing be enabled for the mix of 90% AllReduce and 10% parameter-server traffic, and how should it be configured?'
 details:
-  realistic_solution: 'Recommendation: Enable AR selectively. For AllReduce (UD transport in NCCL over IB): AR is safe because NCCL handles reordering at the application layer, and the throughput gain (15-25% in congested scenarios) outweighs the overhead. For parameter-server RC connections: disable AR because RC transport''s go-back-N retransmission makes reordering catastrophically expensive. Implementation: (1) Configure AR on Quantum-2 with per-SL (Service Level) policies: SL0 (AllReduce) = AR enabled, SL1 (param server) = AR disabled. (2) Set the AR aggressiveness to medium: reroute when port load exceeds 80% (not 50%, to avoid flapping). (3) Enable AR with packet-spray mode for UD (NCCL) traffic — packets within a message can take different paths. (4) Monitor with IB performance counters: PortXmitWait and PortRcvSwitchRelayErrors. Expected result: 18% throughput improvement for AllReduce under congestion, zero reordering overhead for param server traffic.'
+  realistic_solution: 'Enable AR selectively via Service Level policies: SL0 (AllReduce) = AR enabled, SL1 (param server) = AR disabled. NCCL handles reordering effectively for AllReduce over UD transport, but packet reordering is catastrophic for RC transport in parameter-server flows.'
   common_mistake: |
     **The Pitfall:** Assuming adaptive routing is universally better for all network traffic.
     **The Rationale:** Adaptive routing dynamically avoids congestion, which sounds strictly superior to static ECMP.
     **The Consequence:** Packet reordering triggers catastrophic go-back-N retransmissions in RC (Reliable Connection) transport protocols, destroying parameter-server throughput.
   napkin_math: |
-    1. **Static ECMP Variance:** Average path utilization variance σ ≈ 15% due to hash collisions across 32,768 active ports.
-    2. **AR Variance:** Variance drops to σ ≈ 3%.
-    3. **Tail Latency Impact:** For AllReduce with 2GB gradients, an ECMP worst-case path takes 2GB / 25GB/s = 80ms. AR keeps all paths near average = 2GB / 40GB/s = 50ms.
-    4. **Result:** AR yields a **37.5% faster tail latency** for AllReduce flows.
+    1. **Assumptions & Constraints:**
+       - AllReduce: 2GB gradient payloads.
+       - Link Speed: 25GB/s (ECMP congested) vs 40GB/s (AR optimal).
+    2. **Calculations:**
+       - ECMP Worst-Case: 2GB / 25GB/s = 80ms tail latency.
+       - AR Worst-Case: 2GB / 40GB/s = 50ms tail latency.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound. Selective AR configuration cuts tail latency by 37.5% for AllReduce without breaking RC transport.**
 status: published
 provenance: imported
 requires_explanation: true

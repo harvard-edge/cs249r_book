@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Implement depthwise separable conv for Cortex-M4 with CMSIS-NN
-scenario: You are deploying a 3-layer depthwise separable CNN on an STM32F4 (Cortex-M4, 168MHz, 256KB SRAM) for keyword detection. The model has layers: depthwise 3x3 (16ch, 32x32 input), pointwise 1x1 (16->32ch), depthwise 3x3 (32ch, 16x16).
+scenario: 'You are deploying a 3-layer depthwise separable CNN on an STM32F4 (Cortex-M4, 168MHz, 256KB SRAM) for keyword detection. The model has layers: depthwise 3x3 (16ch, 32x32 input), pointwise 1x1 (16->32ch), depthwise 3x3 (32ch, 16x16).'
 question: How should the three-layer depthwise separable CNN be implemented with CMSIS-NN and buffered to fit STM32F4 SRAM?
 details:
   realistic_solution: 'CMSIS-NN functions: arm_depthwise_conv_s8() for depthwise, arm_convolve_1x1_s8_fast() for pointwise 1×1. Buffer strategy: ping-pong buffers A and B. Layer 1: input from A, output to B. Layer 2: input from B, output to A. Layer 3: input from A, output to B. Peak SRAM: max(|A|, |B|) + scratch buffer. |A_0| = 32×32×16×1B = 16KB. |B_0| = 32×32×32×1B = 32KB after pointwise... wait, after layer 1 depthwise: 32×32×16 = 16KB. After pointwise: 32×32×32 = 32KB. After layer 3 depthwise: 16×16×32 = 8KB. Peak: 32KB (B after pointwise) + 16KB (A input). Plus model weights.'
@@ -17,11 +17,20 @@ details:
     **The Rationale:** Candidates used to high-level frameworks (like Python/PyTorch) assume dynamic allocation handles memory, rather than statically reusing memory buffers.
     **The Consequence:** The model immediately runs out of SRAM (OOM) because all intermediate activations are needlessly kept alive at once.
   napkin_math: |
-    - **Ping-Pong Strategy**: Use Buffer A and Buffer B.
-    - **Layer 1 (Depthwise)**: Input from A (32×32×16 = 16 KB), Output to B (32×32×16 = 16 KB).
-    - **Layer 2 (Pointwise)**: Input from B (16 KB), Output to A (32×32×32 = 32 KB).
-    - **Layer 3 (Depthwise)**: Input from A (32 KB), Output to B (16×16×32 = 8 KB).
-    - **Peak SRAM**: Largest combined state is Buffer A (32 KB) + Scratch Buffer (0.3 KB) + Weights (1.3 KB) + Stack = **~37.6 KB**. Fits easily within 256 KB.
+    1. **Assumptions & Constraints:**
+       - Architecture: 3-layer depthwise separable CNN.
+       - Layer 1: Depthwise 3x3, 16ch, 32x32 input.
+       - Layer 2: Pointwise 1x1, 16->32ch.
+       - Layer 3: Depthwise 3x3, 32ch, 16x16 input (assumed stride 2 from prev).
+       - Memory Strategy: Ping-pong buffers A and B.
+    2. **Calculations:**
+       - Buffer A (Layer 1 Input): 32 × 32 × 16 × 1B = 16 KB.
+       - Buffer B (Layer 1 Output / L2 Input): 32 × 32 × 16 × 1B = 16 KB.
+       - Buffer A (Layer 2 Output / L3 Input): 32 × 32 × 32 × 1B = 32 KB.
+       - Buffer B (Layer 3 Output): 16 × 16 × 32 × 1B = 8 KB.
+       - Peak Buffer Memory: Buffer A max (32 KB) + Scratch/Weights (~5 KB) = 37 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Ping-pong buffering yields a 37 KB peak, fitting easily in 256 KB.** **Result: Memory-Bound Optimization.**
 status: published
 provenance: imported
 requires_explanation: true

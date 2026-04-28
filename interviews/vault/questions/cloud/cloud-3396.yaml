@@ -8,19 +8,26 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Optimizing Large Model Inference on H100 with AOT Compilation
-scenario: Your team is deploying a large language model (LLM) for high-throughput inference on a cluster of NVIDIA H100 GPUs (80 GB HBM3, 989 TFLOPS FP16 dense, 3.35 TB/s HBM3 bandwidth). The model's computational graph involves numerous custom operators and varying data types.
+scenario: Your team is deploying a large language model (LLM) for high-throughput inference on a cluster of NVIDIA H100 GPUs. The model's computational graph involves numerous custom operators and varying data types.
 question: How would you design an AOT graph compiler for H100 LLM inference using operator lowering and constant folding while balancing FP16 compute and HBM3 bandwidth?
 details:
-  realistic_solution: A robust solution would involve a multi-stage AOT compiler. Initially, the framework graph is captured and validated. Then, operator lowering would transform high-level operations into H100-native primitives (e.g., cuBLAS, cuDNN, Triton kernels), potentially fusing multiple operations into single kernels to reduce memory traffic and launch overheads. Constant folding would pre-compute static parts of the graph, reducing runtime computation. For dynamic shapes, the compiler might generate specialized kernels for common input dimensions or employ shape-polymorphic compilation. It would also prioritize memory access patterns to leverage the 3.35 TB/s HBM3 bandwidth efficiently, ensuring data reuse and minimizing off-chip memory transfers, especially for FP16 operations. The compiler would analyze the arithmetic intensity of fused kernels to optimally schedule work between the 989 TFLOPS FP16 compute and memory throughput, using profiling feedback to guide subsequent optimization passes.
+  realistic_solution: 'A robust solution involves a multi-stage AOT compiler. Operator lowering transforms high-level operations into H100-native primitives (e.g., Triton kernels), fusing multiple operations to reduce memory traffic and launch overheads. Constant folding pre-computes static parts of the graph. The compiler must analyze arithmetic intensity to optimally schedule work between the FP16 compute and HBM3 memory throughput.'
   common_mistake: |
     **The Pitfall:** Overlooking the interplay between HBM3 bandwidth and FP16 compute capacity.
     **The Rationale:** Engineers optimize purely for FLOPs without considering how dynamic shapes or conditional execution paths impact memory bandwidth.
     **The Consequence:** The compiler creates memory-bound bottlenecks or is forced to fallback to less optimized paths, reducing overall throughput.
   napkin_math: |
-    - **Analyze GEMM sizes:** Consider a GEMM operation `C = A * B`, where A is M x K, B is K x N. For M=4096, K=4096, N=4096, total FLOPs \u2248 **137.4 GFLOPs**.
-    - **Calculate ideal compute time:** On an H100 (989 TFLOPS), compute time is `137.4 GFLOPs / 989 TFLOPS` \u2248 **0.139 ms**.
-    - **Calculate ideal memory time:** Transferring A, B, C (FP16, 2 bytes) is `3 * 4096^2 * 2 bytes` \u2248 100 MB. At 3.35 TB/s, transfer time is `100 MB / 3.35 TB/s` \u2248 **0.030 ms**.
-    - **Conclusion:** While large GEMMs are compute-bound (0.139 ms > 0.030 ms), real LLM graphs have many small operations where memory bandwidth becomes the bottleneck, highlighting the need for aggressive operator fusion.
+    1. **Assumptions & Constraints:**
+       - Hardware: H100 (989 TFLOPS FP16, 3.35 TB/s HBM3).
+       - Operation: GEMM C = A * B.
+       - Dimensions: M=4096, K=4096, N=4096.
+       - Precision: FP16 (2 bytes per element).
+    2. **Calculations:**
+       - Total FLOPs: 2 * M * K * N = 2 * 4096^3 ≈ 137.4 GFLOPs.
+       - Compute time: 137.4 GFLOPs / 989 TFLOPS ≈ 0.139 ms.
+       - Memory transfer data (A + B + C): 3 * (4096 * 4096) * 2 bytes = 100.6 MB.
+       - Memory transfer time: 100.6 MB / 3.35 TB/s ≈ 0.030 ms.
+    3. **Conclusion & Interpretation:** **While large GEMMs are Compute-Bound (0.139 ms > 0.030 ms), real LLM graphs contain small operations that become Memory-Bound, requiring operator fusion.**
 status: published
 provenance: imported
 requires_explanation: false

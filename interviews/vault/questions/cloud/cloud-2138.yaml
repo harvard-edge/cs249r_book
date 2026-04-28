@@ -8,19 +8,25 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: The Feature Store Hot Key Problem
-scenario: Your feature store is backed by Redis Cluster with 16 shards. Feature keys are sharded by user_id. During a viral marketing campaign, a single celebrity influencer drives 500K simultaneous users to view their profile page. The recommendation model needs to look up the influencer's item features for ranking. Redis P99 latency spikes from 2ms to 800ms, and the single shard holding the influencer's user_id becomes CPU-saturated.
+scenario: Your feature store is backed by a Redis Cluster with 16 shards. Feature keys are sharded by user_id. During a viral marketing campaign, a single celebrity influencer drives 500K simultaneous users to view their profile page. The recommendation model needs to look up the influencer's item features for ranking. Redis P99 latency spikes from 2ms to 800ms, and the single shard holding the influencer's user_id becomes CPU-saturated.
 question: How do you fix this single-shard saturation without re-architecting the entire feature store?
 details:
-  realistic_solution: 'This is the hot-key (celebrity) problem: a single key receives disproportionate read traffic that saturates one shard. Solutions (in order of implementation effort): (1) **Client-side caching with TTL**: Cache the influencer''s features locally in the serving process for 5-10 seconds. 500K requests hit local memory instead of Redis. Cost: ~10 lines of code. (2) **Read replicas for hot keys**: Replicate the hot shard to 4-8 read replicas. Spread reads across replicas. Reduces per-node load by 4-8x. (3) **Key replication with jitter**: Store the same feature under keys `user:123:replica:0` through `user:123:replica:7`, each hashing to a different shard. Client randomly picks a replica key. Distributes load across shards. (4) **Two-tier caching**: Add a CDN-like feature cache (e.g., memcached) in front of Redis for features with high read:write ratios.'
+  realistic_solution: 'This is the hot-key (celebrity) problem. The best immediate fix is client-side caching with TTL: Cache the influencer''s features locally in the serving process for 5-10 seconds. Alternatively, use key replication with jitter: Store the same feature under multiple replica keys, distributing load across shards.'
   common_mistake: |
     **The Pitfall:** Adding more Redis shards to the cluster.
     **The Rationale:** Engineers assume scaling horizontally solves all database load issues.
     **The Consequence:** Because the hot key lives on exactly one shard, adding shards doesn't split a single key's traffic. The single shard remains saturated while the new shards sit idle.
   napkin_math: |
-    - **Calculate Hot Key Traffic:** 500K QPS * 3 feature lookups = 1.5M ops/sec to one shard.
-    - **Identify Overload:** A single Redis shard maxes out around ~100K ops/sec. This is a **15x overload**.
-    - **Calculate Cache Impact:** A client-side cache with a 5s TTL will serve 2.5M requests locally after the first Redis hit.
-    - **Calculate Load Reduction:** Redis load drops to ~200 ops/sec (one cache miss per 5s per server), achieving a **7,500x load reduction**.
+    1. **Assumptions & Constraints:**
+       - Traffic spike: 500K QPS.
+       - Feature lookups per request: 3.
+       - Redis shard limit: ~100K ops/sec.
+    2. **Calculations:**
+       - Total ops to hot shard: 500K QPS * 3 = 1.5M ops/sec.
+       - Overload factor: 1.5M ops/sec / 100K ops/sec = 15x overload.
+       - Client cache load reduction: With a 5s TTL, 2.5M queries are served locally per server between Redis hits.
+       - New Redis load: ~200 ops/sec globally.
+    3. **Conclusion & Interpretation:** **Client-side caching achieves a 7,500x load reduction, eliminating the Single-Shard CPU Bottleneck.**
 status: published
 provenance: imported
 requires_explanation: false

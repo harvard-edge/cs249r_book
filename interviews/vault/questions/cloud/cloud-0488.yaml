@@ -8,18 +8,24 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Cross-Node All-Reduce Stall
-scenario: You are training a 175-billion parameter model on a 16-GPU cluster. The cluster consists of two physical nodes, each containing 8 H100 GPUs connected internally with NVLink 4.0. The two nodes are connected via an InfiniBand NDR switch. You observe that scaling from 8 GPUs (one node) to 16 GPUs (two nodes) gives you only a 1.5x speedup, not the near-linear 2x you expected. Profiling shows the `All-Reduce` operation for gradient synchronization is now the dominant part of your training step.
+scenario: You are training a 175-billion parameter model on a 16-GPU cluster. The cluster consists of two physical nodes, each containing 8 H100 GPUs connected internally with NVLink 4.0. The two nodes are connected via an InfiniBand NDR switch. You observe that scaling from 8 GPUs (one node) to 16 GPUs (two nodes) gives you only a 1.5x speedup, not the near-linear 2x you expected. Profiling shows the All-Reduce operation for gradient synchronization is now the dominant part of your training step.
 question: What primary communication bottleneck causes the 1.5x speedup when scaling the 175B model from one NVLink node to two InfiniBand nodes?
 details:
-  realistic_solution: The primary bottleneck is the InfiniBand NDR network that connects the two physical nodes. While NVLink provides an extremely fast 900 GB/s of bandwidth for All-Reduce communication *within* a node, any communication that has to cross the node boundary is limited to InfiniBand's 50 GB/s. For a distributed operation like All-Reduce that must synchronize gradients across all 16 GPUs, the data transfer between the two nodes is throttled by this weakest link, which is ~18x slower than the internal interconnect.
+  realistic_solution: 'The primary bottleneck is the InfiniBand NDR network that connects the two physical nodes. While NVLink provides an extremely fast 900 GB/s of bandwidth for All-Reduce communication within a node, any communication that has to cross the node boundary is limited to InfiniBand''s 50 GB/s.'
   common_mistake: |
     **The Pitfall:** Focusing only on GPU-to-GPU interconnect bandwidth (NVLink).
     **The Rationale:** Engineers underestimate the massive bandwidth gap between the on-chassis fabric and the cross-rack network.
     **The Consequence:** They misattribute scaling bottlenecks to GPU compute or PCIe limitations rather than the much slower node-to-node network.
   napkin_math: |
-    - **Calculate Gradient Data:** A 175B parameter model using FP16/BF16 requires 175 billion * 2 bytes/param = **350 GB** of data to synchronize for each update.
-    - **Compare Bandwidths:** NVLink 4.0 provides ~900 GB/s intra-node. InfiniBand NDR provides ~50 GB/s (400 Gbps) inter-node.
-    - **Calculate bottleneck impact:** Cross-node synchronization of 350 GB takes `350 / 50 = 7 seconds`, throttling the entire distributed operation and causing the sub-linear 1.5x speedup.
+    1. **Assumptions & Constraints:**
+       - Model size: 175B parameters.
+       - Precision: FP16/BF16 (2 bytes).
+       - Intra-node interconnect: NVLink 4.0 (900 GB/s).
+       - Inter-node interconnect: InfiniBand NDR (50 GB/s).
+    2. **Calculations:**
+       - Gradient data size: 175 billion * 2 bytes = 350 GB.
+       - Cross-node transfer time: 350 GB / 50 GB/s = 7 seconds.
+    3. **Conclusion & Interpretation:** **The 7-second cross-node synchronization heavily throttles scaling, making it a Network-Bound bottleneck.**
   options:
   - The PCIe Gen5 bus is saturated from loading data for the next step.
   - The NVLink 4.0 bandwidth within each node is insufficient for 8 H100s during the All-Reduce.

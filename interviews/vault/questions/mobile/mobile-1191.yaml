@@ -8,21 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: Encoder-Decoder Memory Bandwidth Advantage
-scenario: You are evaluating two 2B-parameter models for an on-device translation feature targeting the Qualcomm Hexagon NPU. The options are a 2B-parameter decoder-only model and an encoder-decoder model (1B encoder, 1B decoder). Profiling reveals that the encoder-decoder model generates tokens significantly faster during the decoding phase.
-question: Why does a 1B/1B encoder-decoder translation model decode faster than a 2B decoder-only model on Hexagon NPU?
+scenario: "You are evaluating two 2B-parameter models for an on-device translation feature targeting the Qualcomm Hexagon NPU. The options are a 2B-parameter decoder-only model and an encoder-decoder model (1B encoder, 1B decoder). Profiling reveals that the encoder-decoder model generates tokens significantly faster during the decoding phase."
+question: "Why does a 1B/1B encoder-decoder translation model decode faster than a 2B decoder-only model on Hexagon NPU?"
 details:
   realistic_solution: |
-    Autoregressive generation at batch size 1 is heavily memory-bandwidth bound, meaning the NPU's compute units spend most of their time waiting for weights from memory. The decoding speed is gated by how fast weights can be read from the shared LPDDR5X RAM. Since the encoder-decoder model only evaluates its 1B decoder parameters during generation, it transfers half the data per token compared to loading the full 2B weights of the decoder-only model, resulting in much faster token generation.
+    Autoregressive token generation at batch size 1 is intrinsically memory-bandwidth bound. Every generation step requires fetching the entire active parameter set from LPDDR5X. In a 2B decoder-only model, all 2B weights must be streamed per token. In the 1B/1B encoder-decoder architecture, the 1B encoder is dormant during generation; only the 1B decoder weights are fetched. This halving of memory traffic directly doubles the decoding throughput.
   common_mistake: |
     **The Pitfall:** Assuming total parameter count dictates decoding latency.
     **The Rationale:** Candidates expect both 2B models to perform equally, failing to recognize that during autoregressive generation, an encoder-decoder model only loads the decoder's weights.
-    **The Consequence:** Incorrect model selection, missing out on significant memory bandwidth reductions.
+    **The Consequence:** Incorrect model selection, missing out on significant memory bandwidth reductions and higher TPS.
   napkin_math: |
-    - **Assumptions:** LPDDR5X memory bandwidth ~64 GB/s, INT8 quantization (1 byte/param).
-    - **2B decoder-only:** Generating one token requires loading 2 GB of weights. 2 GB / 64 GB/s = 31.25 ms/token (max ~32 tokens/sec).
-    - **1B/1B encoder-decoder:** Decoding step only loads 1 GB of decoder weights. 1 GB / 64 GB/s = 15.6 ms/token (max ~64 tokens/sec).
-    - **Compute constraint:** NPU offers 45 TOPS; each token requires ~2-4 GOPs, so compute is not the bottleneck.
-    - **Result:** **The system is memory-bandwidth bound, favoring the smaller active parameter count of the encoder-decoder model.**
+    1. **Assumptions & Constraints:**
+       - Shared LPDDR5X bandwidth: ~64 GB/s. INT8 weights (1 byte/param).
+       - 2B Decoder-only: 2 GB loaded per token.
+       - 1B/1B Encoder-Decoder: 1 GB loaded per token (during decode).
+    2. **Calculations:**
+       - 2B decode latency: 2 GB / 64 GB/s = 31.25 ms/token (~32 tokens/sec).
+       - 1B decode latency: 1 GB / 64 GB/s = 15.625 ms/token (~64 tokens/sec).
+    3. **Conclusion & Interpretation:**
+       - **Result: 2x faster decode (64 tokens/sec).** The generation phase is restricted by a **memory-bandwidth bottleneck**. The encoder-decoder model minimizes active parameters, doubling performance.
 status: published
 provenance: imported
 requires_explanation: false

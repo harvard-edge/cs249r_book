@@ -8,19 +8,23 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: 'Latency Decomposition: Compare Batched vs. Streaming Inference on H100'
-scenario: 'You are comparing two serving strategies for a 13B-parameter LLaMA model on a single H100 (80GB HBM3, 3.35TB/s bandwidth). Strategy A batches 32 requests and processes them together; Strategy B streams each request individually with continuous batching. Prefill is 512 tokens, decode is 256 tokens per request.'
-question: "How do batched serving and individual continuous batching compare in end-to-end latency for 512-token prefill and 256-token decode?"
+scenario: 'You are comparing two serving strategies for a 13B-parameter model on a single H100. Strategy A batches 32 requests together; Strategy B streams each request individually with continuous batching. Prefill is 512 tokens, decode is 256 tokens.'
+question: 'How do batched serving and individual continuous batching compare in end-to-end latency for 512-token prefill and 256-token decode?'
 details:
-  realistic_solution: 'Strategy A: prefill time ≈ (32×512×2×13B params×2 bytes)/3.35TB/s ≈ compute-bound. Decode: 256 steps × (13B×2 bytes per token)/3.35TB/s × 1/32 batch ≈ 2.3ms/token for batch. Strategy B: per-request decode ≈ 7.8ms/token (bandwidth-bound). Batching lowers per-token memory bandwidth pressure; Strategy A gives lower throughput latency but higher per-request tail latency.'
+  realistic_solution: 'Strategy A amortizes the massive memory bandwidth cost of loading the 13B weights across 32 requests, massively improving token throughput. However, because autoregressive decoding is inherently memory-bandwidth-bound, batching increases the absolute time to complete each decoding step. Strategy A delivers superior total system throughput, but Strategy B (continuous) yields significantly lower per-request tail latency.'
   common_mistake: |
-    **The Pitfall:** Assuming batching always reduces latency.
-    **The Rationale:** Ignoring the fact that decoding is memory-bandwidth-bound and that batching increases the decode time per request.
-    **The Consequence:** Optimizing for throughput while accidentally causing severe per-request tail latency degradation.
+    **The Pitfall:** Assuming batching always identically reduces latency.
+    **The Rationale:** Candidates ignore that decoding is strictly memory-bandwidth-bound and that larger batches increase the per-step generation time.
+    **The Consequence:** Optimizing exclusively for throughput while accidentally violating strict per-request latency SLAs.
   napkin_math: |
-    1. Model weight read per decode step: 13B * 2 bytes = **26GB**.
-    2. Single-request decode latency: 26GB / 3.35TB/s ≈ **7.8ms/token**.
-    3. Batch-32 decode latency: same 26GB read, amortized over 32 requests -> **7.8ms/token** still (memory-bound), but 32 tokens generated per step.
-    4. **Result:** Strategy A gives higher throughput but higher per-request tail latency. TTFT (prefill) at batch=32 is compute-bound.
+    1. **Assumptions & Constraints:**
+       - Model: 13B parameters (26GB in FP16).
+       - Hardware: 3.35 TB/s bandwidth.
+    2. **Calculations:**
+       - Single-request decode step: 26GB / 3.35TB/s = ~7.8ms.
+       - Batch-32 decode step: Same 26GB read, yielding 32 tokens in 7.8ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Batching maximizes throughput but increases the total time each request spends in the system (Bandwidth-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

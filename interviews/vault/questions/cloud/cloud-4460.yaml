@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: Continuous Batching Micro-Batch Scheduling for TPOT Fairness
 scenario: In a continuous batching decode pool, 10 requests complete their generation while 90 ongoing requests are mid-decode. The scheduler adds 15 new requests to the next step.
-question: "What fairness and TPOT impact does adding 15 new requests to a 90-request continuous decode batch have?"
+question: What fairness and TPOT impact does adding 15 new requests to a 90-request continuous decode batch have?
 details:
   realistic_solution: 'TPOT impact of batch size increase: decode is memory-bandwidth bound. Per-step time = (total KV bytes + model bytes) / HBM bandwidth. Model bytes are fixed per step. KV bytes per step = sum of all requests'' context lengths * kv_size_per_token. Adding 15 new requests (avg 512 tokens context): delta_KV = 15 * 512 * kv_per_token. For 8B model: 15 * 512 * (2*32*32*128*2B) = 15 * 512 * 524KB = 4GB extra KV per step. At 3.35 TB/s: +1.19ms per step. If baseline step is 40ms: +3% TPOT inflation for all 90 existing requests. Fairness policy: to maintain SLA for existing requests, limit batch expansion rate. Add at most N new requests where N satisfies: (N * avg_context * kv_per_token) / HBM_BW < TPOT_slack_ms. This is the TPOT budget constraint for admission control.'
   common_mistake: |
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Candidates forget that each new request adds to the per-step memory bandwidth consumption by requiring more KV pages to be loaded.
     **The Consequence:** Existing requests suffer from TPOT inflation, which can silently violate latency SLAs if admission control is unbounded.
   napkin_math: |
-    - Per-step KV bandwidth (baseline): 90 requests * 1K context * 524KB/token = 47.2 GB.
-    - Model load: 16 GB (8B BF16).
-    - Total baseline load: 63.2 GB / 3.35 TB/s = 18.9 ms/step.
-    - Adding 15 requests (avg 512 context): +15 * 512 * 524KB = +4.0 GB.
-    - New total load: 67.2 GB / 3.35 TB/s = 20.1 ms/step.
-    - **TPOT inflation: +1.2 ms/step (+6.3% slowdown) for the existing 90 requests.**
+    1. **Assumptions & Constraints:**
+       - Baseline: 90 requests * 1K context * 524KB/token = 47.2 GB KV.
+       - Model load: 16 GB (8B BF16).
+       - Memory Bandwidth: 3.35 TB/s.
+    2. **Calculations:**
+       - Total baseline load: 63.2 GB / 3.35 TB/s = 18.9 ms/step.
+       - Adding 15 requests (avg 512 context): +15 * 512 * 524KB = +4.0 GB KV.
+       - New total load: 67.2 GB / 3.35 TB/s = 20.1 ms/step.
+       - TPOT inflation: 20.1 - 18.9 = 1.2 ms/step.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bandwidth Bound.** Adding 15 new requests inflates TPOT by 1.2 ms/step (+6.3% slowdown) for the existing 90 requests.
 status: published
 provenance: imported
 requires_explanation: false

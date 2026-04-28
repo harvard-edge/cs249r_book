@@ -8,30 +8,29 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: FlashAttention SRAM Bank Conflicts
-scenario: A custom cloud AI accelerator (128MB shared SRAM, 16 physical memory banks) runs a custom FlashAttention
-  kernel. With a sequence length of 4096 and head dimension of 128, SRAM bandwidth utilization maxes out
-  at 12.5% (400 GB/s out of 3.2 TB/s peak), and compute SMs are stalled 85% of the time waiting for SRAM
-  loads.
+scenario: 'A custom cloud AI accelerator (128MB shared SRAM, 16 physical memory banks) runs a custom FlashAttention kernel. With a sequence length of 4096 and head dimension of 128, SRAM bandwidth utilization maxes out at 12.5% (400 GB/s out of 3.2 TB/s peak), and compute SMs are stalled 85% of the time waiting for SRAM loads.'
 question: "What is causing the 12.5% SRAM bandwidth utilization in this FlashAttention kernel, and how would you fix it?"
 details:
-  realistic_solution: The symptom (high SRAM stall rate and exactly 1/8th of peak bandwidth) perfectly
-    describes severe SRAM bank conflicts. Memory in accelerators is divided into banks to allow parallel
-    access. If multiple threads request addresses that map to the same bank simultaneously, the requests
-    are serialized. With 16 banks, addresses are typically interleaved (e.g., every 32 bytes maps to the
-    next bank). A head dimension of 128 (often 256 bytes in FP16) is a multiple of the bank stride. When
-    a warp/wavefront tries to load a column of the Query/Key matrix (stride = 128 elements = 256 bytes),
-    all memory addresses hit Bank 0, serializing 16 parallel load requests into 16 sequential cycles.
-    The co-design solution is to pad the inner dimension in shared memory (e.g., allocate stride as 128
-    + 8 elements) so consecutive column accesses skew across different physical banks, restoring parallel
-    memory fetches.
-  common_mistake: Assuming the SRAM is too small and the kernel is thrashing to HBM, leading to proposals
-    to increase SRAM size.
-  napkin_math: 16 banks, each 32 bytes wide. Bank stride = 16 * 32 = 512 bytes. Head dim = 128 FP16 elements
-    = 256 bytes. Thread 0 accesses A[0][0] (addr 0 -> Bank 0). Thread 1 accesses A[1][0] (addr 256 ->
-    Bank 8). Thread 2 accesses A[2][0] (addr 512 -> Bank 0). Half the threads hit Bank 0, the other half
-    hit Bank 8. A 16-thread warp load takes 8 cycles instead of 1 cycle. Bandwidth drops to 1/8th (12.5%).
-    Peak BW = 3.2 TB/s * 0.125 = 400 GB/s. Padding the row stride to 136 elements (272 bytes) forces Thread
-    2 to address 544 -> Bank 1, eliminating the conflict.
+  realistic_solution: 'The symptom (high SRAM stall rate and exactly 1/8th of peak bandwidth) perfectly describes severe SRAM bank conflicts. Memory in accelerators is divided into banks to allow parallel access. If multiple threads request addresses that map to the same bank simultaneously, the requests are serialized. With 16 banks, addresses are typically interleaved (e.g., every 32 bytes maps to the next bank). A head dimension of 128 (often 256 bytes in FP16) is a multiple of the bank stride. When a warp/wavefront tries to load a column of the Query/Key matrix (stride = 128 elements = 256 bytes), all memory addresses hit Bank 0, serializing 16 parallel load requests into 16 sequential cycles. The co-design solution is to pad the inner dimension in shared memory (e.g., allocate stride as 128 + 8 elements) so consecutive column accesses skew across different physical banks, restoring parallel memory fetches.'
+  common_mistake: |
+    **The Pitfall:** Assuming the shared SRAM capacity is too small and the kernel is simply thrashing data to the slower HBM.
+    **The Rationale:** When faced with massive memory stalls, engineers instinctively blame memory size rather than memory access geometry and physical bank conflicts.
+    **The Consequence:** Architectural decisions are made to massively increase SRAM size (wasting silicon area and power) without solving the serialized access bottleneck, yielding zero performance gain.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Accelerator: 16 SRAM banks, each 32 bytes wide.
+       - Head dimension: 128 FP16 elements (256 bytes).
+       - Peak SRAM Bandwidth: 3.2 TB/s.
+    2. **Calculations:**
+       - Bank Stride = 16 banks × 32 bytes = 512 bytes.
+       - Thread 0 accesses addr 0 (Bank 0).
+       - Thread 1 accesses addr 256 (Bank 8).
+       - Thread 2 accesses addr 512 (Bank 0).
+       - Bank mapping repeats every 512 bytes, meaning 16 parallel threads serialize into just 2 banks (Bank 0 and Bank 8).
+       - Effective throughput = 2 / 16 = 12.5%.
+       - Bandwidth = 3.2 TB/s × 0.125 = 400 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: SRAM Bank Conflict Bound**. Padding the row stride by 8 elements (16 bytes) skews consecutive accesses, completely eliminating bank conflicts and restoring 100% parallel bandwidth.
   options:
   - The SRAM is too small (128MB), causing the kernel to thrash to HBM. Fix it by increasing the SRAM size or reducing the sequence length.
   - The head dimension of 128 creates severe SRAM bank conflicts because it is a multiple of the bank stride, serializing parallel load requests. Fix it by padding the inner dimension in shared memory to skew consecutive column accesses across different banks.

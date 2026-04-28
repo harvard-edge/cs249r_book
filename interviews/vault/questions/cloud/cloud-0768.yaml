@@ -9,7 +9,7 @@ bloom_level: apply
 phase: training
 title: The DDP Bucket Straggler
 scenario: You are using PyTorch DistributedDataParallel (DDP) across 4 GPUs. GPU 3 is slightly slower than the others due to thermal throttling. You notice that GPU 0, 1, and 2 are sitting idle for 200ms at the end of every backward pass. You know DDP overlaps communication with computation.
-question: "Why isn't the DDP communication overlap hiding the 200ms delay of throttled GPU 3?"
+question: Why isn't the DDP communication overlap hiding the 200ms delay of throttled GPU 3?
 details:
   realistic_solution: |
     DDP overlaps AllReduce with backward computation by splitting gradients into buckets. As each bucket fills during backprop, its AllReduce begins immediately. This works well when all GPUs progress at the same rate. But GPU 3 is 200ms slower due to thermal throttling, so it reaches the final gradient bucket 200ms late. All other GPUs have finished their backward pass and final AllReduce, but the collective requires all participants. GPUs 0-2 sit idle waiting for GPU 3's final bucket. The overlap only hides communication latency, not compute imbalance. The fix: identify and fix the thermal issue, or use asynchronous gradient methods.
@@ -18,10 +18,14 @@ details:
     **The Rationale:** DDP actually uses gradient bucketing to overlap AllReduce with compute. However, the overlap only hides communication latency, not compute imbalance.
     **The Consequence:** Engineers incorrectly try to tune NCCL parameters instead of fixing the hardware thermal issue.
   napkin_math: |
-    - **Compute Imbalance:** 3 GPUs finish backward pass in 800ms, 1 throttled GPU takes 1000ms.
-    - **Stall Time:** Fast GPUs stall at the global synchronization barrier waiting for the final bucket.
-    - **Waste Per Step:** 3 GPUs * 200ms = 600ms wasted.
-    - **Cost Impact:** Over 2 million steps, 1.2M GPU-seconds are wasted (333 GPU-hours). At $3/hr, the slow chip costs an extra **$1,000**.
+    1. **Assumptions & Constraints:**
+       - 3 GPUs finish in 800ms, 1 throttled GPU in 1000ms.
+       - Hardware cost: $3/hr.
+    2. **Calculations:**
+       - Waste Per Step: 3 GPUs × 200ms = 600ms wasted.
+       - Over 2 million steps: 1.2M GPU-seconds = 333 GPU-hours.
+       - Cost Impact: 333 hrs × $3/hr ≈ $1,000.
+    3. **Conclusion & Interpretation:** **The overlap hides network latency, but 200ms compute skew wastes $1,000. Result: Compute-Skew-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

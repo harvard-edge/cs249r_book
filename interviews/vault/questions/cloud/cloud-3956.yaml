@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: apply
 phase: both
 title: 'Multi-Level Overlap: Data Loading, Compute, and Communication Pipeline'
-scenario: Your training pipeline has three phases per step: data loading (10ms, CPU+DMA), forward+backward (200ms, GPU compute), and AllReduce (30ms, NVLink/IB). Currently these run sequentially taking 240ms per step.
+scenario: 'Your training pipeline has three phases per step: data loading (10ms, CPU+DMA), forward+backward (200ms, GPU compute), and AllReduce (30ms, NVLink/IB). Currently these run sequentially taking 240ms per step.'
 question: How would you pipeline data loading, forward/backward compute, and AllReduce so the 240 ms step approaches 200 ms?
 details:
   realistic_solution: 'Three-way pipeline: (1) Step N: GPU computes forward+backward on batch N. (2) Simultaneously: NCCL performs AllReduce on batch N-1''s gradients (NVLink, separate from GPU compute SMs). (3) Simultaneously: CPU workers + DMA engine load batch N+1 from storage to GPU memory (PCIe, separate from both NVLink and compute SMs). These three use different hardware: SMs for compute, NVLink NICs for AllReduce, PCIe DMA for data loading. Implementation: CUDA stream 1 (compute), stream 2 (NCCL), stream 3 (H2D copy). Events synchronize: compute(N) waits on AllReduce(N-1) and load(N) completion.'
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Developers assume GPU pipelines are strictly dual-channel or fear synchronization complexity.
     **The Consequence:** Hardware remains underutilized because available discrete pathways (PCIe, NVLink, SMs) aren't fully saturated simultaneously.
   napkin_math: |
-    * Sequential step time: 10 + 200 + 30 = 240ms.
-    * Baseline GPU utilization: 200 / 240 = 83%.
-    * Three-way overlap step time: max(10, 200, 30) = 200ms.
-    * Overlap GPU utilization: 200 / 200 = 100%.
-    * Speedup for 1000 steps: 240s -> 200s (40 seconds saved).
-    * **Result: Full overlap yields a 16.7% overall speedup.**
+    1. **Assumptions & Constraints:**
+       * Sequential step time: 10 + 200 + 30 = 240ms.
+       * Pipeline stages: data loading, compute, communication.
+    2. **Calculations:**
+       * Baseline GPU utilization: 200 / 240 = 83%.
+       * Three-way overlap step time: max(10, 200, 30) = 200ms.
+       * Overlap GPU utilization: 200 / 200 = 100%.
+       * Speedup for 1000 steps: 240s -> 200s (40 seconds saved).
+    3. **Conclusion & Interpretation:**
+       * **Result: Compute-Bound Pipeline.** Full overlap yields a 16.7% overall speedup.
 status: published
 provenance: imported
 requires_explanation: true

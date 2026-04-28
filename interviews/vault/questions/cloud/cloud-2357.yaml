@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: Root Causing NVSwitch MoE Contention
-scenario: On a single 8x H100 node with a 900 GB/s bidirectional NVSwitch, an MoE model with 8 experts processes a batch. The intra-node All-to-All dispatch phase takes 8ms instead of the theoretical 1.1ms. `nvidia-smi nvlink` shows GPU 0 hitting 100% Rx utilization, while GPUs 1-7 show only 15% Tx utilization.
+scenario: On a single 8-GPU node with a 900 GB/s bidirectional switch, an MoE model with 8 experts processes a batch. The intra-node All-to-All dispatch phase takes 8ms instead of 1.1ms. GPU 0 hits 100% Rx utilization, while GPUs 1-7 show only 15% Tx utilization.
 question: Why does intra-node MoE All-to-All take 8ms with GPU 0 at 100% Rx and GPUs 1-7 at 15% Tx, and how would you fix the imbalance?
 details:
   realistic_solution: |
@@ -18,10 +18,9 @@ details:
     **The Rationale:** Engineers look at high latency and poor utilization on GPUs 1-7 and conclude the network switch must be failing or thermally throttling.
     **The Consequence:** Submitting spurious hardware tickets while entirely missing the software-driven MoE routing skew that is completely destroying their scaling efficiency.
   napkin_math: |
-    - **Bandwidth:** Total batch size = 4GB (0.5GB per GPU). Unidirectional bandwidth = 450 GB/s.
-    - **Perfectly balanced:** GPU 0 receives 1/8th from 7 GPUs ≈ 0.43GB. Time = 0.43GB / 450 GB/s = 0.95ms.
-    - **Highly unbalanced:** (e.g., 85% of tokens to GPU 0): GPU 0 receives 3.4GB.
-    - **Conclusion: Time = 3.4GB / 450 GB/s = 7.5ms. This perfectly matches the observed ~8ms latency.**
+    1. Assumptions & Constraints: Total batch size = 4GB (0.5GB per GPU). Unidirectional bandwidth = 450 GB/s. Unbalanced routing sends 85% of tokens to GPU 0.
+    2. Calculations: Balanced load: GPU 0 receives 1/8th from 7 GPUs ≈ 0.43GB. Time = 0.43GB / 450 GB/s = 0.95ms. Unbalanced load: GPU 0 receives 4GB * 0.85 = 3.4GB. Time = 3.4GB / 450 GB/s = 7.5ms.
+    3. Conclusion & Interpretation: **Result: Unbalanced load yields ~8ms latency, matching observation. Bottleneck: Network Ingress Contention.**
 status: archived
 provenance: imported
 requires_explanation: false

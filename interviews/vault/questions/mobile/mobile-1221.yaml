@@ -8,20 +8,25 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: A17 Pro Unified Memory KV-Cache OOM
-scenario: You are deploying a local 4-bit quantized 7B language model on a device using the Apple A17 Pro. The OS and background apps are actively using 3.5 GB, leaving 4.5 GB strictly for your application, of which the 4-bit model weights take up exactly 3.5 GB. When a user asks a simple short question, the model responds perfectly, but when a user pastes a 4096-token prompt, the app crashes due to an Out of Memory (OOM) error. The model has 32 layers, 32 attention heads, and a head dimension of 128 while storing the KV-cache in float16.
-question: Why does a 4096-token prompt OOM a 7B INT4 model on A17 Pro even though the weights fit?
+scenario: You are deploying a local 4-bit quantized 7B language model on a mobile device. The OS and background apps reserve a portion of memory, leaving 4.5 GB strictly for your application, of which the 4-bit model weights take up exactly 3.5 GB. When a user asks a simple short question, the model responds perfectly, but when a user pastes a 4096-token prompt, the app crashes due to an Out of Memory (OOM) error. The model has 32 layers, 32 attention heads, and a head dimension of 128 while storing the KV-cache in float16.
+question: Why does a 4096-token prompt OOM a 7B INT4 model even though the weights fit in memory?
 details:
-  realistic_solution: The crash occurs because the unified memory architecture of the A17 Pro means the Neural Engine must share its 8 GB pool with the rest of the system. After accounting for the OS and the 3.5 GB model weights, only 1 GB of memory remains for dynamic allocations. The KV-cache for a 4096-token sequence requires exactly 2 GB of memory. Since the total required memory (5.5 GB) exceeds the 4.5 GB available to the application, the system triggers an immediate OOM error during the prefill phase.
+  realistic_solution: The crash occurs because the unified memory architecture means the Neural Engine must share its pool with the rest of the system. After accounting for the OS and the 3.5 GB model weights, only 1 GB of memory remains for dynamic allocations. The KV-cache for a 4096-token sequence requires exactly 2 GB of memory. Since the total required memory (5.5 GB) exceeds the 4.5 GB available to the application, the system triggers an immediate OOM error during the prefill phase.
   common_mistake: |
     **The Pitfall:** Failing to account for dynamic memory allocations like the KV-cache.
     **The Rationale:** Candidates often focus only on static weight size or compute limits and forget the memory required to maintain context during sequence generation.
     **The Consequence:** Unpredictable OOM crashes in production when users input large context prompts.
   napkin_math: |
-    1. **KV-Cache per Token per Layer:** 2 (Key + Value) * 32 heads * 128 head dim * 2 bytes (FP16) = 16,384 bytes (16 KB).
-    2. **Total KV-Cache per Token:** 16 KB * 32 layers = 512 KB.
-    3. **Total KV-Cache for 4096 Tokens:** 512 KB * 4096 = 2,097,152 KB = 2 GB.
-    4. **Total App Memory Required:** 3.5 GB (weights) + 2 GB (KV-cache) = 5.5 GB.
-    5. **Conclusion:** **5.5 GB needed > 4.5 GB available, resulting in an OOM crash.**
+    1. **Assumptions & Constraints:**
+       - Available App Memory = 4.5 GB. Weights = 3.5 GB.
+       - 32 layers, 32 heads, 128 head dim, FP16 (2 bytes) KV cache.
+       - Prompt length = 4096 tokens.
+    2. **Calculations:**
+       - KV-Cache/token/layer = 2 (K+V) * 32 heads * 128 dim * 2 bytes = 16,384 bytes (16 KB).
+       - Total KV-Cache/token = 16 KB * 32 layers = 512 KB.
+       - Total KV-Cache (4096 tokens) = 512 KB * 4096 = 2,097,152 KB = 2 GB (approx 2 GiB).
+       - Total Memory Required = 3.5 GB (weights) + 2.0 GB (KV-Cache) = 5.5 GB.
+    3. **Conclusion & Interpretation:** **Requiring 5.5 GB exceeds the 4.5 GB available unified memory, triggering a hard OOM crash.** Memory-capacity-bound failure.
 status: published
 provenance: imported
 requires_explanation: false

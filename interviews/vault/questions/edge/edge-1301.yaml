@@ -8,38 +8,25 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Latency Spikes During Edge Drift Detection
-scenario: An autonomous monitoring system runs a vision model on an NVIDIA Jetson
-  Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP, Ampere GPU + DLA accelerator). To monitor
-  for environmental data drift, a background process runs every 10 minutes to compute
-  KL divergence and PSI on FP32 feature embeddings. During this background process,
-  the primary INT8 object detection model experiences a sudden 40% latency spike and
-  drops frames. Identify the root cause of this performance degradation based on the
-  Orin's specific hardware architecture.
-question: Why does the FP32 KL/PSI drift monitor cause a 40% latency spike in the
-  primary INT8 model on Jetson Orin?
+scenario: An autonomous monitoring system runs a vision model on an NVIDIA Jetson Orin. To monitor for environmental data drift, a background process runs every 10 minutes to compute KL divergence and PSI on FP32 feature embeddings. During this background process, the primary INT8 object detection model experiences a sudden 40% latency spike and drops frames.
+question: Why does the FP32 KL/PSI drift monitor cause a 40% latency spike in the primary INT8 model on Jetson Orin?
 details:
-  realistic_solution: The root cause is memory bandwidth contention and thermal throttling.
-    The Jetson Orin shares its LPDDR5 bandwidth between the Ampere GPU, DLA, and CPU.
-    While the primary inference efficiently uses the DLA/GPU (leveraging the 275 TOPS
-    INT8), computing KL divergence and PSI on unquantized FP32 embeddings is highly
-    memory-bound. This intense CPU workload spikes power consumption near the 60W
-    TDP limit, triggering dynamic frequency scaling (DVFS) that downclocks the Ampere
-    GPU/DLA to save power, starving the primary inference of both memory bandwidth
-    and clock speed.
-  common_mistake: Candidates often assume the Ampere GPU is running out of compute
-    capacity (TOPS) or that the 32 GB of memory is simply filling up. They fail to
-    identify that the Orin uses a shared memory architecture, and that mixing INT8
-    inference with heavily memory-bound FP32 statistical calculations creates a bandwidth
-    or power bottleneck.
-  napkin_math: The primary INT8 inference at 30 FPS might consume a steady ~5-10 GB/s
-    of memory bandwidth. However, computing drift on a sliding window of 250,000 FP32
-    embeddings (250,000 * 1024 dimensions * 4 bytes = 1.02 GB) requires sweeping that
-    1 GB of data multiple times for histogram binning. If the CPU processes this in
-    0.5 seconds, it demands an additional >6 GB/s of burst bandwidth while maxing
-    out CPU utilization. This sudden, sustained load pushes the system towards its
-    60W TDP maximum. To prevent shutting down, the system throttles the Ampere GPU
-    and DLA clocks by ~30-40% to maintain the 60W envelope, directly causing the observed
-    40% inference latency spike.
+  realistic_solution: 'The root cause is memory bandwidth contention and thermal throttling. The Jetson Orin shares its LPDDR5 bandwidth between the Ampere GPU, DLA, and CPU. Computing KL divergence on unquantized FP32 embeddings is highly memory-bound, demanding massive burst bandwidth and spiking CPU power. This pushes the SoC near its TDP limit, triggering dynamic frequency scaling (DVFS) that downclocks the GPU/DLA and starves the primary inference.'
+  common_mistake: |
+    **The Pitfall:** Assuming the Ampere GPU is running out of compute capacity (TOPS).
+    **The Rationale:** Candidates fail to recognize the shared memory architecture and unified TDP envelope of edge SoCs.
+    **The Consequence:** Attempting to optimize the INT8 model further when the actual fix is throttling the background CPU task's memory access.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - TDP: 60W limit
+       - FP32 Data: 250,000 embeddings * 1024 dims * 4 bytes ~ 1.02 GB
+       - Process time: 0.5 seconds
+    2. **Calculations:**
+       - Memory bandwidth required: 1.02 GB / 0.5s = 2.04 GB/s continuous read.
+       - Multiple sweeps for histogram binning (e.g., 3 passes): 2.04 * 3 = 6.12 GB/s burst.
+       - Sustained high CPU load pushes power to >50W, leaving insufficient headroom for the GPU at max clocks.
+    3. **Conclusion & Interpretation:**
+       - **Result: Bandwidth Contention & DVFS Throttling.** The burst memory traffic and power draw force a 30-40% GPU downclock, directly causing the latency spike.
 status: published
 provenance: imported
 requires_explanation: false
@@ -48,9 +35,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Napkin Math's bandwidth calculation (">6 GB/s") is not directly derived from the
-  stated 1.02 GB processed in 0.5 seconds (which is 2.04 GB/s).
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

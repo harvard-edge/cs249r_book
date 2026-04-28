@@ -9,22 +9,26 @@ bloom_level: analyze
 phase: training
 title: Active Learning SRAM Overflow
 scenario: >
-  You are deploying an industrial defect detection system on an ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform. The system has 512 KB of shared SRAM. The 480 MHz M7 runs an edge-detection algorithm to extract 64x64 grayscale Regions of Interest (ROIs), which are batched and classified by a CNN on the Ethos-U55. To capture low-contrast anomalies in production, the M7's upstream edge-detection threshold is drastically lowered. In testing, the system now frequently crashes with an Out-of-Memory (OOM) error, or misses its 20ms real-time latency budget. The CNN's architecture and per-ROI execution time remain static.
-question: >
-  Why does curating a dataset of low-contrast anomalies cause these specific hardware failures?
+  A defect detection system on a Corstone-300 (M7 + Ethos-U55, 512 KB shared SRAM) extracts 64x64 ROIs.
+  To capture low-contrast anomalies, the upstream edge-detection threshold is lowered, causing OOM crashes or missed 20ms real-time latency budgets.
+question: Why does curating a dataset of low-contrast anomalies cause these specific hardware failures?
 details:
-  realistic_solution: >
+  realistic_solution: |
     By actively curating low-contrast anomalies to train the CNN, the team forced a system-level relaxation of the M7's ROI extraction threshold so those faint defects could actually reach the NPU. This lowered threshold generates an exponential increase in false-positive ROIs per frame. Because the system batches these ROIs to maximize Ethos-U55 utilization, the memory footprint of the batched 64x64 crops quickly exceeds the Corstone-300's tight 512 KB shared SRAM limit, causing OOM crashes. When memory doesn't fault, the sheer M7 CPU time spent cropping and moving hundreds of ROIs starves the latency budget.
   common_mistake: |
     **The Pitfall:** Arguing that the Ethos-U55 dynamically takes longer to compute or allocates more memory for 'harder' or 'noisier' low-contrast images.
     **The Rationale:** Candidates fail to realize that NPU execution on static CNN graphs is input-independent and deterministic.
     **The Consequence:** They waste time trying to optimize the CNN instead of fixing the classical preprocessing bottleneck on the M7.
   napkin_math: |
-    - **Ethos-U55 Throughput:** 480 MHz × 256 MAC/cycle = ~122.8 GMAC/s. A 2.5M MAC CNN takes ~20 μs per ROI.
-    - **Memory per ROI:** One 64x64 8-bit grayscale ROI takes 4 KB of SRAM.
-    - **Batched Memory:** Lowering the threshold spikes the ROI count from 10 to 150 per frame. 150 ROIs × 4 KB = 600 KB.
-    - **OOM Crash:** 600 KB strictly exceeds the 512 KB shared SRAM, triggering an OOM fault.
-    - **Latency Miss:** If processed sequentially, the M7 overhead of cropping/moving 150 ROIs (~0.1ms per crop) consumes 15ms. This leaves only 5ms for edge detection and NPU scheduling, breaking the **20ms budget**.
+    1. **Assumptions & Constraints:**
+       - Budget: 20 ms. Memory limit: 512 KB shared SRAM.
+       - ROI: 64x64 8-bit (4 KB/ROI).
+    2. **Calculations:**
+       - Lowered threshold increases ROIs from 10 to 150 per frame.
+       - Batched Memory: 150 ROIs * 4 KB = 600 KB. (Exceeds 512 KB limit -> OOM).
+       - Processing Time: 150 ROIs * 0.1ms/crop = 15ms CPU overhead.
+       - Remaining budget: 20ms - 15ms = 5ms (Starves NPU scheduling).
+    3. **Conclusion & Interpretation:** High ROI count blows out both memory and CPU cycle budgets. **Result: Memory/Compute-Bound (Preprocessing Overhead)**.
 status: published
 provenance: imported
 requires_explanation: false

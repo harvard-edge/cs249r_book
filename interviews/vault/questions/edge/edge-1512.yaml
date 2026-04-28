@@ -8,33 +8,28 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Feature Map Drift Detection Power Throttling
-scenario: You deploy an INT8 quantized object detector on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP) using the Ampere GPU and DLA. Inference runs smoothly at 30 FPS using only 20W. To monitor training-serving skew, a pipeline is added to compute KL divergence on FP32 intermediate feature maps at 30 FPS. Shortly after deployment, the system begins dropping frames and telemetry shows power consumption continuously hitting the 60W TDP limit, despite the INT8 inference requiring only a fraction of the 275 TOPS compute.
+scenario: You deploy an INT8 quantized object detector on an NVIDIA Jetson Orin using the Ampere GPU and DLA. Inference runs smoothly at 30 FPS using only 20W. To monitor training-serving skew, a pipeline is added to compute KL divergence on FP32 intermediate feature maps at 30 FPS. Shortly after deployment, the system begins dropping frames and telemetry shows power consumption continuously hitting the TDP limit, despite the INT8 inference requiring only a fraction of the available compute.
 question: "What is the root cause of the power spike and thermal throttling?"
 details:
-  realistic_solution: The root cause is the power bottleneck created by continuously writing full-precision (FP32) intermediate feature maps from the DLA to main memory for drift detection. While the Ampere GPU and DLA easily handle the INT8 inference, breaking the pipeline to extract FP32 tensors at 30 FPS forces continuous large transfers to the 32 GB LPDDR5. This aggressive memory traffic and subsequent CPU processing drives the power consumption from 20W to the 60W TDP limit, causing thermal throttling. The fix is to sample frames periodically or compute drift only on the final low-dimensional outputs.
+  realistic_solution: The root cause is the power bottleneck created by continuously writing full-precision (FP32) intermediate feature maps from the DLA to main memory for drift detection. While the Ampere GPU and DLA easily handle the INT8 inference, breaking the pipeline to extract FP32 tensors at 30 FPS forces continuous large transfers to the LPDDR5. This aggressive memory traffic and subsequent CPU processing drives the power consumption from 20W to the TDP limit, causing thermal throttling. The fix is to sample frames periodically or compute drift only on the final low-dimensional outputs.
   common_mistake: |
     **The Pitfall:** Assuming the math of KL divergence itself is too computationally complex.
     **The Rationale:** Forgetting the massive I/O overhead required to extract intermediate activations from the accelerator to the host CPU.
     **The Consequence:** Investigating model degradation or metric complexity instead of identifying the crippling memory bus traffic.
   napkin_math: |
-    *   **Tensor Size:** Intermediate feature map of 256x256x128 in FP32 (4 bytes) = 33.55 MB.
-    *   **Bandwidth Cost:** 8 camera streams at 30 FPS = 33.55 MB * 8 * 30 ≈ **8.05 GB/s**.
-    *   **Power Impact:** Writing this continuous stream from the DLA/GPU to LPDDR5 and reading it into the CPU breaks the efficient pipeline.
-    *   **Result:** This immense memory traffic consumes the remaining 40W of the budget, causing severe thermal throttling.
+    1. **Assumptions & Constraints:**
+       - Intermediate feature map size: 256x256x128 in FP32 (4 bytes).
+       - 8 camera streams at 30 FPS.
+    2. **Calculations:**
+       - Tensor Size: 256 * 256 * 128 * 4 = 33.55 MB.
+       - Bandwidth Cost: 33.55 MB * 8 * 30 = 8.05 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound.** Writing this continuous stream from the DLA/GPU to LPDDR5 and reading it into the CPU breaks the efficient pipeline. This immense memory traffic consumes the remaining power budget, causing severe thermal throttling.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
 validated: true
 validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
 math_verified: true
 math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

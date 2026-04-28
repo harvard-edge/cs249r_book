@@ -8,8 +8,8 @@ competency_area: deployment
 bloom_level: apply
 phase: training
 title: The SLA-Driven Batching Strategy
-scenario: You are designing a unified inference service on H100 GPUs to serve two workloads: 1) a real-time chatbot with a strict P99 TTFT SLA of <250ms, and 2) a batch job that summarizes millions of documents overnight, prioritizing maximum throughput. The chatbot has short prompts, while the batch job has long documents. A teammate proposes using static batching with a large batch size (e.g., 64) to maximize throughput for the batch job.
-question: Why is large static batching a poor solution for this unified service, and what scheduling approach is better?
+scenario: "You are designing a unified inference service to serve two workloads: 1) a real-time chatbot with a strict P99 TTFT SLA of <250ms, and 2) a batch job that summarizes millions of documents overnight, prioritizing maximum throughput. The chatbot has short prompts, while the batch job has long documents. A teammate proposes using static batching with a large batch size (e.g., 64) to maximize throughput for the batch job."
+question: "Why is large static batching a poor solution for this unified service, and what scheduling approach is better?"
 details:
   realistic_solution: "Using a large static batch is a poor solution because it creates extreme head-of-line blocking for the latency-sensitive chatbot workload. A chatbot request might arrive but have to wait a long time for 63 other requests to fill the batch, catastrophically violating its 250ms SLA. A better approach is to use continuous batching with priority scheduling. Chatbot requests are assigned a higher priority. The scheduler can then fill the GPU with a mix of requests, but ensures high-priority requests are processed first, meeting their SLA. This allows the batch jobs to 'soak up' any spare capacity, maximizing throughput without compromising the latency of the real-time service."
   common_mistake: |
@@ -17,10 +17,14 @@ details:
     **The Rationale:** Engineers assume a single scheduling policy (large static batches) fits all workloads.
     **The Consequence:** Extreme head-of-line blocking that completely destroys real-time latency SLAs.
   napkin_math: |
-    1. **Batch Job Prefill:** 64 docs × 8K tokens on a 70B model.
-    2. **Total Compute:** 2 × 70B × 8,000 × 64 = 71,680 TFLOPs (71.68 PFLOPs).
-    3. **Batch Latency:** At 989 TFLOPS peak (assume 50% util = 494.5 TFLOPS), time = 71,680 TFLOPs / 494.5 TFLOPS ≈ 144 seconds.
-    4. **Conclusion:** **A chatbot request arriving behind a static batch waits 144s, violating the 250ms SLA by over 500x. Continuous batching prevents this blocking.**
+    1. **Assumptions & Constraints:**
+       - Batch Job Prefill: 64 docs x 8K tokens on a 70B model.
+       - Peak TFLOPS: 989. Assume 50% util = 494.5 TFLOPS.
+    2. **Calculations:**
+       - Total Compute: 2 * 70B * 8,000 * 64 = 71,680 TFLOPs.
+       - Batch Latency: 71,680 TFLOPs / 494.5 TFLOPS \u2248 144 seconds.
+    3. **Conclusion & Interpretation:**
+       **A chatbot request arriving behind a static batch waits 144s, violating the SLA by 500x. Result: Queue-Latency-Bound.**
   options:
   - It's a good solution; the chatbot users will just have to tolerate higher latency.
   - It fails because large static batches can exhaust HBM, causing frequent swapping.
@@ -42,10 +46,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- The prefill FLOPs calculation (1,120 TFLOPs) is for a single 8K-token document.
-  It forgot to multiply by the batch size (64), making the 2.3s estimate off by 64x
-  (should be ~144s).
 human_reviewed:
   status: not-reviewed
   by: null

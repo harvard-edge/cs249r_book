@@ -8,21 +8,25 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: The ZeRO-1 Memory Squeeze
-scenario: You are trying to fit a 30B parameter model on a single 8-GPU node (80GB A100s) for fine-tuning. The weights in FP16 take 60GB. You enable DeepSpeed ZeRO Stage 1, which partitions the optimizer states across the 8 GPUs. However, the system still instantly OOMs on the first forward pass, even with a batch size of 1.
+scenario: You are trying to fit a 30B parameter model on a single 8-GPU node for fine-tuning. The weights in FP16 take 60GB. You enable DeepSpeed ZeRO Stage 1, which partitions the optimizer states across the 8 GPUs. However, the system still instantly OOMs on the first forward pass, even with a batch size of 1.
 question: Why didn't ZeRO-1 save you enough memory?
 details:
-  realistic_solution: 'ZeRO Stage 1 only shards the optimizer states (e.g., Adam''s m and v), not the model weights or gradients. For a 30B model: weights = 60GB FP16, gradients = 60GB FP16, optimizer states = 240GB FP32 (Adam: 4x weights). ZeRO-1 reduces optimizer states from 240GB to 30GB per GPU (240/8), but each GPU still holds full weights (60GB) + full gradients (60GB) = 120GB. On an 80GB A100, that''s already 50% over capacity before any activations. You need ZeRO Stage 3, which shards weights, gradients, AND optimizer states, bringing per-GPU memory to ~(60+60+240)/8 = 45GB.'
+  realistic_solution: 'ZeRO Stage 1 only shards the optimizer states (e.g., Adam''s m and v), not the model weights or gradients. For a 30B model: weights = 60GB FP16, gradients = 60GB FP16, optimizer states = 240GB FP32 (Adam: 4x weights). ZeRO-1 reduces optimizer states from 240GB to 30GB per GPU (240/8), but each GPU still holds full weights (60GB) + full gradients (60GB) = 120GB. That''s already 50% over capacity before any activations. You need ZeRO Stage 3, which shards weights, gradients, AND optimizer states, bringing per-GPU memory to ~(60+60+240)/8 = 45GB.'
   common_mistake: |
     **The Pitfall:** Believing "ZeRO-1 reduces the memory footprint by 8x, so it should fit."
     **The Rationale:** Candidates misunderstand ZeRO stages, falsely assuming Stage 1 partitions weights and gradients along with optimizer states.
     **The Consequence:** Wasting time debugging batch sizes or activation memory when the fundamental static memory footprint exceeds hardware limits.
   napkin_math: |
-    1. 30B model FP16 Weights (W): 60 GB.
-    2. FP16 Gradients (G): 60 GB.
-    3. Optimizer states (Adam): 240 GB.
-    4. With ZeRO-1 on 8 GPUs: Optimizer states are sharded: 240 GB / 8 = 30 GB per GPU.
-    5. Total VRAM per GPU before activations: W (60 GB) + G (60 GB) + Optimizer Part (30 GB) = 150 GB.
-    6. **Result:** **150 GB far exceeds the 80 GB A100 capacity, OOMing instantly. ZeRO-3 is required to shard W and G.**
+    1. **Assumptions & Constraints:**
+       - 30B model FP16 Weights (W): 60 GB.
+       - FP16 Gradients (G): 60 GB.
+       - Optimizer states (Adam): 240 GB.
+       - 8 GPUs, ZeRO-1 partitions optimizer states.
+    2. **Calculations:**
+       - With ZeRO-1 on 8 GPUs: Optimizer states are sharded: 240 GB / 8 = 30 GB per GPU.
+       - Total VRAM per GPU before activations: W (60 GB) + G (60 GB) + Optimizer Part (30 GB) = 150 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity Bound.** 150 GB far exceeds standard GPU capacity, OOMing instantly. ZeRO-3 is required to shard W and G.
 status: published
 provenance: imported
 requires_explanation: false
@@ -33,10 +37,3 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
 math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

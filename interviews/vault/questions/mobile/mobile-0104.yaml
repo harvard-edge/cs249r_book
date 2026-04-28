@@ -9,25 +9,28 @@ bloom_level: apply
 phase: inference
 title: The Silent Battery Drain
 scenario: Your social media app includes an AI feature that continuously analyzes user content in the background for personalization. Users are reporting significant battery drain, even when they're not actively using the app.
-question: "What common pitfalls in mobile ML background processing lead to excessive battery drain, and how can you mitigate them?"
+question: What common pitfalls in mobile ML background processing lead to excessive battery drain, and how can you mitigate them?
 details:
   realistic_solution: |
-    Excessive battery drain from background ML is typically caused by:
-    1.  **Continuous Polling/Inference:** Running the ML model too frequently, even when there's no new relevant data or user interaction.
-    2.  **Lack of Opportunistic Scheduling:** Not leveraging the OS's background task scheduling APIs (e.g., Android's WorkManager, iOS's BackgroundTasks framework) to run tasks when the device is charging, on Wi-Fi, or in low-power states.
-    3.  **Wake Locks:** Holding CPU/NPU wake locks unnecessarily, preventing the device from entering deep sleep states.
-    4.  **Inefficient Hardware Usage:** Not delegating to the NPU/DSP when available, forcing computationally expensive tasks onto the CPU, which is less power-efficient for ML.
-    5.  **Data Transfers:** Frequent data transfers (e.g., uploading processed results, downloading model updates) over cellular networks can be very power-hungry.
-    6.  **Sensor Activation:** Keeping power-hungry sensors (e.g., GPS, camera) active for background ML when not strictly necessary.
+    Excessive battery drain from background ML is overwhelmingly caused by system wake locks and continuous polling, not the pure computational cost of the model itself. Mitigations include:
+    1. **Opportunistic Batching:** Leverage OS scheduling APIs (e.g., WorkManager, BackgroundTasks) to execute inferences only when the device is charging or in unmetered states.
+    2. **Eliminate Polling Wakelocks:** Stop polling every few seconds. Wake locks prevent the CPU from entering deep sleep, burning immense power.
+    3. **NPU/DSP Delegation:** Delegate all continuous execution to low-power DSP islands, ensuring the high-power main CPU stays asleep during inference.
   common_mistake: |
-    **The Pitfall:** Blaming the model size alone for battery drain.
-    **The Rationale:** While model size affects per-inference energy, continuous background activity and wakelocks are the primary culprits for total battery drain.
-    **The Consequence:** Optimizing the model architecture while failing to address the high-frequency polling that actually drains the battery.
+    **The Pitfall:** Blaming the ML model size alone for battery drain and attempting model compression to fix it.
+    **The Rationale:** Engineers assume that if a model is "heavy," making it smaller uses less battery, entirely missing the OS-level scheduling overhead required to execute the job.
+    **The Consequence:** Months wasted pruning and quantizing a model, only to realize the background polling interval still drains the battery via system wakelocks.
   napkin_math: |
-    - **NPU Baseline:** 0.3W for 100ms per inference, every 5s = 0.3W * 0.1s * (86400s / 5s) ≈ 518 Joules/day.
-    - **CPU Wake Overhead:** Keeping the CPU awake at 1W for 10% of the day = 1W * 8640s = 8640 Joules/day.
-    - **Battery Capacity:** ~15-20 Wh = 54,000-72,000 Joules.
-    - **Result:** **CPU wakelocks consume over 15x more energy than the NPU inference itself, creating massive battery drain.**
+    1. **Assumptions & Constraints:**
+       - NPU background inference: 100ms duration, 0.3W power, running every 5 seconds.
+       - CPU Wake overhead: Waking the CPU to schedule the NPU takes 1W for 10% of the entire day.
+       - Target Battery Capacity: ~20 Wh = 72,000 Joules.
+    2. **Calculations:**
+       - NPU Energy/Day: 0.3W * 0.1s * (86,400s / 5s) = 518 Joules.
+       - CPU Wake Energy/Day: 1W * (86,400s * 0.10) = 8,640 Joules.
+       - Total background drain: 9,158 Joules (12.7% of total battery).
+    3. **Conclusion & Interpretation:**
+       **Result: CPU wakelocks use ~16x more energy than NPU inference (Power-Bound).** The architectural anti-pattern of continuous CPU wakes structurally dominates the battery budget.
 status: published
 provenance: imported
 requires_explanation: false

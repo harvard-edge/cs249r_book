@@ -8,19 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing BLE Drops from Dense Distilled Models
-scenario: You distilled a large audio classification model into a smaller student model to fit within the Nordic nRF5340's 1 MB flash and 256 KB SRAM. The student model achieves the target accuracy, but during field deployment, the device frequently drops its BLE 5.3 connection and triggers watchdog resets precisely during inference. The active current draw remains around the expected ~5mA.
+scenario: You distilled a large audio model into a smaller dense student model on the Nordic nRF5340. The student model meets accuracy targets, but during deployment, the device frequently drops its BLE 5.3 connection and triggers watchdog resets precisely during inference.
 question: Why does a dense distilled model on nRF5340 drop BLE 5.3 connections and trigger watchdog resets during inference?
 details:
-  realistic_solution: Knowledge distillation produces a smaller but entirely dense model, meaning every parameter requires computation. On the nRF5340, while the 128 MHz app core executes this dense inference, it can monopolize the shared AHB matrix or lock interrupts for extended periods. This starves the 64 MHz network core, preventing it from servicing strict BLE 5.3 timing deadlines, resulting in a supervision timeout and connection drop.
+  realistic_solution: The dense student model monopolizes the shared AHB matrix, blocking the network core from servicing strict BLE timing deadlines, resulting in supervision timeouts. The inference must be unblocked or sliced.
   common_mistake: |
     **The Pitfall:** Misdiagnosing the issue as a generic memory leak, OOM error, or power brownout.
     **The Rationale:** Failing to recognize how a dense distilled model (where every parameter requires computation) locks up the shared AHB matrix on a dual-core MCU, starving the network core.
     **The Consequence:** Wasting time debugging memory allocators while the actual solution requires slicing the inference into non-blocking yields.
   napkin_math: |
-    1. **Inference Cost:** Assume dense model needs 10 million MACs.
-    2. **Execution Time:** At 128 MHz (~2 cycles/MAC overhead), this takes ~20 million cycles, or **~156 ms** of continuous execution.
-    3. **BLE Timing:** If BLE 5.3 connection interval is 30 ms, a 156 ms blocking inference misses 5 consecutive connection events.
-    4. **Conclusion:** If the supervision timeout is 100 ms, the connection will reliably drop before the dense inference completes.
+    1. **Assumptions & Constraints:**
+       - nRF5340: 128 MHz app core, 64 MHz net core. BLE 5.3 connection.
+       - Dense distilled model: Every parameter requires MAC.
+    2. **Calculations:**
+       - Inference Cost: ~10M MACs.
+       - Compute time: 10M MACs * 2 cycles/MAC / 128 MHz = 156 ms.
+       - BLE Timeout: e.g., 100 ms connection interval limit.
+    3. **Conclusion & Interpretation:**
+       **Result: 156 ms blocking inference starves the network core.** The system is **AHB-Matrix-Bound**, causing supervision timeouts due to continuous dense compute.
 status: published
 provenance: imported
 requires_explanation: false

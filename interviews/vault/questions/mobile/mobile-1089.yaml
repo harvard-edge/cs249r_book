@@ -8,20 +8,24 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: Analyze Encoder vs Decoder Latency on Snapdragon NPU
-scenario: Your team is deploying a real-time translation model to a mobile device featuring the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). You are comparing a 1-billion parameter encoder-only model for intent classification versus a 1-billion parameter decoder-only model for generative translation. The NPU provides 45 TOPS for INT8 operations and shares 12 GB of LPDDR5X memory with the CPU and GPU. During profiling, you observe that the encoder-only model achieves significantly higher throughput per token than the decoder-only model during its generation phase, despite both models having the exact same number of parameters.
-question: Why does a 1B encoder run faster per token than a 1B decoder on Snapdragon 8 Gen 3 Hexagon NPU?
+scenario: Your team is deploying a real-time translation model to a mobile device featuring a Snapdragon NPU. You are comparing a 1-billion parameter encoder-only model for intent classification versus a 1-billion parameter decoder-only model for generative translation. During profiling, you observe the encoder runs significantly faster per token.
+question: Why does a 1B encoder run faster per token than a 1B decoder on a mobile NPU?
 details:
-  realistic_solution: The discrepancy happens because the encoder processes the entire input sequence in parallel, making it compute-bound and able to efficiently utilize the 45 TOPS of the Hexagon NPU. In contrast, the decoder generates tokens autoregressively. For each new token, the entire 1B parameter weight matrix must be fetched from the shared 12 GB LPDDR5X memory, making it heavily memory-bandwidth bound. The NPU's high compute capacity sits idle while waiting for memory transfers during the decoding phase.
+  realistic_solution: The performance divergence originates from sequence execution. Encoders leverage parallel matrix multiplications across all tokens simultaneously, heavily saturating the NPU's matrix math engines. Decoders generate autoregressively, forcing a complete 1 GB weight fetch from LPDDR RAM for every single token generated. The decoder abandons its compute capacity and starves while waiting for memory DMA.
   common_mistake: |
     **The Pitfall:** Assuming equal parameter count yields equal latency.
     **The Rationale:** Candidates see two 1B parameter models and assume they will execute with identical performance profiles on the same hardware.
     **The Consequence:** They overlook the fundamental difference between the compute-bound nature of parallel encoding and the memory-bandwidth-bound nature of autoregressive decoding.
   napkin_math: |
-    - 1B INT8 model size: 1 GB.
-    - Memory loading time per token: 1 GB / 50 GB/s = 20 ms.
-    - Compute required per token: ~2 GOPS.
-    - Compute time per token: 2 GOPS / 45,000 GOPS = 0.044 ms.
-    - **20 ms >> 0.044 ms**. The decoder is entirely bottlenecked by memory fetching, while the encoder processes all input tokens in parallel.
+    1. **Assumptions & Constraints:**
+       - 1B INT8 model size: 1 GB.
+       - Memory Bandwidth: 50 GB/s.
+       - NPU Compute: 45 TOPS (45,000 GOPS).
+    2. **Calculations:**
+       - Memory loading time per token: 1 GB / 50 GB/s = 20 ms.
+       - Compute time per token: 2 GOPS / 45,000 GOPS = 0.044 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 20 ms memory vs 0.044 ms compute.** The decoder is entirely **Memory-Bandwidth-Bound**, while the encoder is parallelized and compute-efficient.
 status: published
 provenance: imported
 requires_explanation: false

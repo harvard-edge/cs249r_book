@@ -8,19 +8,23 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: The AV Pipeline Stall
-scenario: You are an ML systems engineer at an autonomous vehicle company. Your perception stack runs a large 3D object detection model across two interconnected Jetson AGX Orin accelerators to meet a 33ms (30 FPS) real-time deadline. The model is split using pipeline parallelism: Orin A runs the first half of the model, and Orin B runs the second half. Profiling shows the total compute time is 25ms, perfectly balanced (12.5ms per Orin). However, the measured end-to-end latency is 30.5ms. You find that the feature map transferred from Orin A to Orin B between stages is 64 MB. The Orins are connected by a dedicated 100 Gbps (12.5 GB/s) link.
+scenario: You are an ML systems engineer at an autonomous vehicle company. Your perception stack runs a large 3D object detection model across two interconnected accelerators to meet a 33ms real-time deadline. The model is split using pipeline parallelism. Profiling shows the total compute time is 25ms, perfectly balanced. However, the measured end-to-end latency is 30.5ms. You find that the feature map transferred between stages is 64 MB. The accelerators are connected by a dedicated 100 Gbps link.
 question: What is the most likely cause of the 5.5ms overhead you are observing?
 details:
-  realistic_solution: The communication link between the two accelerators is the bottleneck. The time required to transfer the 64 MB feature map over the 100 Gbps link is the primary source of the overhead. The pipeline can't be perfectly parallel because Orin B must wait for the data from Orin A. By calculating the transfer time, we can confirm this is the bottleneck before attempting other optimizations like model compression or changing the parallelism strategy.
+  realistic_solution: The communication link between the two accelerators is the bottleneck. The pipeline can't be perfectly parallel because the second device must wait for the data. By calculating the transfer time via nsys profiling, we confirm this is the bottleneck before attempting optimizations like model compression or topological layout changes.
   common_mistake: |
-    **The Pitfall:** Blaming compute or generic "software overhead" without doing the math.
+    **The Pitfall:** Blaming compute or generic software overhead without doing the math.
     **The Rationale:** Engineers often underestimate the time cost of moving large tensors between processors, even on seemingly fast networks.
     **The Consequence:** Failing to isolate the network bottleneck and attempting to optimize model size instead of reducing the cross-node activation payload.
   napkin_math: |
-    * **Data transfer:** 64 MB
-    * **Link speed:** 100 Gbps = 12.5 GB/s
-    * **Transfer time:** 64 MB / 12.5 GB/s = **5.12 ms**
-    * **Conclusion:** The 5.12 ms network transfer perfectly accounts for the ~5.5 ms overhead observed in the 30.5ms total latency.
+    1. **Assumptions & Constraints:**
+       - Data transfer payload: 64 MB.
+       - Link speed: 100 Gbps.
+    2. **Calculations:**
+       - 100 Gbps = 12.5 GB/s bandwidth.
+       - 64 MB / 12.5 GB/s = 0.00512 seconds = 5.12 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound**. The 5.12 ms network transfer perfectly accounts for the ~5.5 ms overhead observed in the 30.5ms total latency.
   options:
   - The model's operators are not fully supported by the Jetson AGX Orin's hardware, causing frequent CPU fallbacks.
   - The 100 Gbps interconnect is the bottleneck; transferring the 64 MB feature map is taking ~5.1ms.

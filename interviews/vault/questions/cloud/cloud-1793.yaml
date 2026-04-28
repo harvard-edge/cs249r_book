@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing Autograd Memory Leaks in Training Loops
-scenario: A machine learning team is training a massive Transformer model on a cloud node with 8x A100 (80GB) GPUs. While GPU memory utilization starts at 45GB per device, it steadily increases by about 8GB per validation step, eventually crashing with a CUDA Out of Memory (OOM) error. The validation loop accumulates the total loss for logging using the code `epoch_loss += loss`.
+scenario: A machine learning team is training a massive Transformer model on a cloud node with 8x A100 GPUs. While GPU memory utilization starts at 45GB per device, it steadily increases by about 8GB per validation step, eventually crashing with a CUDA Out of Memory (OOM) error. The validation loop accumulates the total loss for logging using the code `epoch_loss += loss`.
 question: Why does GPU memory grow by 8 GB per validation step when the loop does epoch_loss += loss, and how should it be fixed?
 details:
   realistic_solution: The `loss` tensor retains a pointer (e.g., `grad_fn` in PyTorch) to the entire reverse-linked computational graph built during the forward pass to maintain state for backpropagation. By accumulating `epoch_loss += loss`, the engineer unintentionally keeps the intermediate activations for every batch alive in VRAM. The fix is to decouple the scalar value using `epoch_loss += loss.item()`.
@@ -17,11 +17,15 @@ details:
     **The Rationale:** Candidates fail to understand that framework tensors implicitly retain the full reverse computational graph when not detached.
     **The Consequence:** Applying complex infrastructure fixes to what is essentially a one-line code bug.
   napkin_math: |
-    - **Baseline Memory:** 45 GB per device.
-    - **Activations per step:** 8 GB.
-    - **Accumulation:** Over 5 validation steps, 5 distinct reverse-linked graphs are retained.
-    - **Total Memory:** 45 GB + (5 × 8 GB) = 85 GB.
-    - **Result:** **85 GB > 80 GB limit on the A100, resulting in an immediate OOM crash.**
+    1. **Assumptions & Constraints:**
+       - Baseline Memory: 45 GB per device.
+       - Activations per step: 8 GB.
+       - Leak mechanism: Accumulating `loss` directly retains the entire reverse computational graph.
+    2. **Calculations:**
+       - After 1 step: 45 GB + 8 GB = 53 GB.
+       - After 4 steps: 45 GB + (4 * 8 GB) = 77 GB.
+       - After 5 steps: 45 GB + (5 * 8 GB) = 85 GB.
+    3. **Conclusion & Interpretation:** **At 85 GB, the memory exceeds the 80 GB limit of the A100, resulting in an immediate OOM crash. Using `loss.item()` prevents retaining the 8GB graph per step.**
 status: published
 provenance: imported
 requires_explanation: false

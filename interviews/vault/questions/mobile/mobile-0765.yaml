@@ -8,26 +8,27 @@ competency_area: data
 bloom_level: evaluate
 phase: training
 title: The On-Device Training Memory Crisis
-scenario: You are implementing on-device fine-tuning of a 32-layer transformer on a phone with 8 GB memory. With batch size 4, sequence length 512, and hidden dimension 4096 in FP16, the activation memory for backpropagation across all layers is ~537 MB. The model weights (INT4) are 3.5 GB. Together with KV cache and OS, memory is critically tight.
+scenario: You are implementing on-device fine-tuning of a 32-layer transformer on a phone with 8 GB memory. The activation memory for backpropagation across all layers is ~537 MB. Together with KV cache and OS, memory is critically tight.
 question: How much memory does gradient checkpointing save for 32-layer FP16 activations, and what compute cost does it add?
 details:
-  realistic_solution: 'Without checkpointing: 537 MB activations across 32 layers. With gradient checkpointing (store every sqrt(32)=5-6 layers): ~84 MB activations, saving ~450 MB. The cost: ~33% more compute (recomputing activations for non-checkpointed layers during backward). On a 5W device, this means ~1.65W extra per training step, but the 450 MB savings is critical to fitting in memory.'
+  realistic_solution: Gradient checkpointing trades compute for memory by saving only a subset of activations (e.g., every sqrt(N) layers) and recomputing the rest during the backward pass. This shrinks the activation footprint from 537 MB to ~84 MB, rescuing ~453 MB of RAM. However, this forces a ~33% increase in total FLOPs. On a thermally constrained 5W device, this directly increases inference time and battery drain per step, representing a critical memory-compute tradeoff.
   common_mistake: |
     **The Pitfall:** Assuming gradient checkpointing is a "free" memory optimization.
     **The Rationale:** Candidates focus solely on the memory reduction (from 537 MB to 85 MB) to fit within RAM.
     **The Consequence:** They ignore that this trades memory for compute, adding ~33% more wall-clock time and significantly increasing energy consumption per step on a battery-powered device.
   napkin_math: |
-    - Full activations: 32 layers * 4 batch * 512 seq * 4096 dim * 2 bytes = 537 MB.
-    - Checkpointed (every 6th layer): ~5 layers stored * 17 MB/layer ≈ 85 MB.
-    - Memory savings: 537 MB - 85 MB = **452 MB**.
-    - Compute cost: Recomputing forward pass adds **~33% more FLOPs** during backprop.
+    1. **Assumptions & Constraints:**
+       - Full activations: 32 layers * 4 batch * 512 seq * 4096 dim * 2 bytes = 536.8 MB.
+       - Checkpointing interval: Every 6th layer (~5 layers stored).
+    2. **Calculations:**
+       - Checkpointed size: ~5 layers * 16.7 MB/layer ≈ 83.8 MB.
+       - Memory savings: 536.8 MB - 83.8 MB = 453 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 453 MB saved / 33% compute penalty.** The system trades being **Memory-Capacity-Bound** for being **Energy-Bound**.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 12
-chains:
-- id: mobile-chain-103
-  position: 1
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'

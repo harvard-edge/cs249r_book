@@ -9,21 +9,26 @@ bloom_level: evaluate
 phase: both
 title: H100 FP8 Migration Throughput Cliff
 scenario: You migrate a 70B parameter LLM serving stack from 4x A100s (INT8 W8A8) to 2x H100s (FP8 W8A8). Theoretical TOPS suggest a >2.5x throughput gain, but your actual QPS only increases from 12 QPS to 14 QPS at batch size 64. Profiling shows high SM idle time despite FP8 Tensor Cores.
-question: "Why does moving from 4x A100 INT8 to 2x H100 FP8 barely increase QPS, and what must change in the KV cache path?"
+question: Why does moving from 4x A100 INT8 to 2x H100 FP8 barely increase QPS, and what must change in the KV cache path?
 details:
-  realistic_solution: The issue is KV cache memory bandwidth bottlenecking the FP8 compute. H100's FP8 Tensor Cores are incredibly fast, but if the KV cache remains in FP16, the memory bandwidth required to fetch it for batch size 64 starves the compute units. The solution requires transitioning to FP8 KV caching. Furthermore, FP8 requires scaling factors (per-tensor or per-channel). If these scaling factors are not fused with the attention kernels (like FlashAttention-3 with FP8 support), the round-trip to global memory for dequantization destroys the latency.
+  realistic_solution: 'The issue is KV cache memory bandwidth bottlenecking the FP8 compute. H100''s FP8 Tensor Cores are incredibly fast, but if the KV cache remains in FP16, the memory bandwidth required to fetch it for batch size 64 starves the compute units. The solution requires transitioning to FP8 KV caching and fusing scaling factors.'
   common_mistake: |
     **The Pitfall:** Assuming the H100 clock speed is throttling and attempting to increase batch size further.
     **The Rationale:** High SM idle time can mistakenly look like a lack of concurrent work.
     **The Consequence:** Increasing batch size leads to an immediate Out-Of-Memory (OOM) crash without resolving the underlying memory bandwidth bottleneck.
   napkin_math: |
-    * 70B model FP8 weights = 70 GB.
-    * Batch Size = 64, Sequence Length = 2048.
-    * KV cache in FP16 (using GQA with 1024 KV dim): 2 bytes × 2 (K&V) × 64 batch × 2048 seq × 80 layers × 1024 dim = 42.9 GB.
-    * Total memory read per token: 70 GB + 42.9 GB = 112.9 GB.
-    * Fetching 112.9 GB across 2x H100s (6.7 TB/s total bandwidth) takes ~17 ms per token.
-    * FP8 compute for BS64 takes < 2 ms.
-    * **The system is severely memory bandwidth bound because the KV cache wasn't quantized to FP8, starving the faster H100 compute units.**
+    1. **Assumptions & Constraints:**
+       - Model size: 70B params (70 GB in FP8).
+       - Batch size: 64.
+       - Sequence length: 2048.
+       - KV cache in FP16 (GQA 1024 dim): ~42.9 GB.
+       - 2x H100 Bandwidth: 6.7 TB/s.
+    2. **Calculations:**
+       - Total memory read per token: 70 GB (weights) + 42.9 GB (KV) = 112.9 GB.
+       - Fetching 112.9 GB at 6.7 TB/s takes ~17 ms.
+       - FP8 compute for BS 64 takes < 2 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound. Because the KV cache remained in FP16, fetching it starves the immensely fast FP8 compute units.**
 status: published
 provenance: imported
 requires_explanation: true
@@ -41,7 +46,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-tags:
-- llm-serving
-- fp8
-- hardware-accelerators

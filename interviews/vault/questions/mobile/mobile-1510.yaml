@@ -8,20 +8,27 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: CI/CD Pipeline Design for On-Device LLM on Tensor G3
-scenario: Your team needs to design an automated deployment pipeline for regular updates to an on-device LLM running on Pixel phones equipped with the Google Tensor G3 chip. The pipeline must guarantee that the quantized model, optimized for the G3's on-device TPU (7.5 TOPS), maintains strict training-serving consistency. Given the device's 12 GB LPDDR5X shared memory limit, you must specify the CI/CD stages required to profile memory footprint and validate TPU execution latency.
-question: What CI/CD checks catch Tensor G3 LLM latency, memory, and consistency regressions before OTA release?
+scenario: Your team needs to design an automated deployment pipeline for regular updates to an on-device LLM. The pipeline must guarantee that the quantized model maintains strict training-serving consistency.
+question: What CI/CD checks catch LLM latency, memory, and consistency regressions before OTA release?
 details:
-  realistic_solution: The CI/CD pipeline must include a hardware-in-the-loop (HITL) stage targeting the Google Tensor G3 architecture. After quantization, the pipeline should compile the model for the Edge TPU and run automated regression tests on physical G3 device farms to measure actual inference latency and accuracy. Furthermore, rigorous memory profiling must be integrated to ensure peak RAM usage during context generation leaves sufficient headroom within the 12 GB LPDDR5X shared memory for the OS.
+  realistic_solution: Mobile MLOps demands physical validation. The CI/CD pipeline absolutely must incorporate a Hardware-In-The-Loop (HITL) stage. Relying on x86 emulators is fatal for edge models. The pipeline must compile the INT4 weights explicitly for the Edge TPU compiler, deploy to physical device farms, and assert physical latency profiles while strictly monitoring peak KV-cache memory inflation to prevent OS OOM kills.
   common_mistake: |
-    **The Pitfall:** Designing generic CI/CD pipelines focused solely on model accuracy, neglecting hardware-in-the-loop (HITL) testing.
-    **The Rationale:** Teams rely on standard software CI practices and cloud-based simulators instead of testing on physical edge hardware.
-    **The Consequence:** They fail to validate the exact post-training quantization behavior required by the TPU, leading to severe training-serving skew and memory exhaustion in production.
+    **The Pitfall:** Designing purely generic software CI/CD pipelines that validate model accuracy solely via cloud-based x86 simulators.
+    **The Rationale:** Engineering teams port standard cloud DevOps practices without accounting for the wild variability of edge compiler hardware.
+    **The Consequence:** They entirely fail to catch post-training quantization drift on the specific TPU silicon, resulting in catastrophic training-serving skew and massive latency regressions upon OTA deployment.
   napkin_math: |
-    - **Memory Footprint:** 3.2B parameter INT4 weights = **1.6 GB**.
-    - **RAM Headroom:** 12 GB total - 6 GB (OS) - 1.6 GB (weights) = **4.4 GB** available for KV cache and app overhead.
-    - **Compute Requirement:** Generating 1 token = 3.2B params × 2 MACs = **6.4 GOPS**.
-    - **SLA Compute Target:** 20 tokens/sec × 6.4 GOPS = **128 GOPS** (0.128 TOPS).
-    - **Conclusion:** 0.128 TOPS fits comfortably within the Tensor G3's 7.5 TOPS limit.
+    1. **Assumptions & Constraints:**
+       - Total RAM: 12 GB.
+       - OS Reservation: 6 GB (App ceiling 6 GB).
+       - Model size: 3.2B parameters (INT4).
+       - Target Generation SLA: 20 tokens/sec.
+    2. **Calculations:**
+       - Weight footprint: 3.2B * 0.5 bytes = 1.6 GB.
+       - Headroom for KV/App: 6.0 GB - 1.6 GB = 4.4 GB.
+       - Compute per token: 3.2B * 2 MACs = 6.4 GOPS.
+       - Sustained compute: 6.4 GOPS * 20 tok/sec = 128 GOPS = 0.128 TOPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound Verification.** The 0.128 TOPS demand is trivial for the hardware, but verifying exact operator execution via physical Hardware-in-the-Loop (HITL) CI prevents catastrophic quantization failure in production.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,21 +8,29 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Edge New 0007
-scenario: A keyword spotting model (100K params) runs on Cortex-M4. FP32 requires 400KB Flash, while INT8 requires 100KB. However, lacking native 8-bit dot product instructions, unpacking INT8 to INT32 adds 4 CPU cycles per weight.
+scenario: A keyword spotting model (100K params) runs on a Cortex-M4. FP32 requires 400KB Flash, while INT8 requires 100KB. However, lacking native 8-bit dot product instructions, unpacking INT8 to INT32 adds 4 CPU cycles per weight.
 question: Is INT8 still faster than FP32 on the Cortex-M4 despite 4 extra unpack cycles per weight?
 details:
-  realistic_solution: Flash memory on standard microcontrollers is accessed over relatively slow buses. While unpacking costs 4 extra CPU cycles per parameter, fetching 4x less data from Flash massively outweighs the CPU overhead. The spatial tradeoff also enables the model to fit directly into the 256KB SRAM, completely eliminating Flash read stalls. INT8 is superior despite the lack of native SIMD instructions.
+  realistic_solution: Yes, it is massively faster. On simple MCUs, Flash memory incurs profound wait-state latencies compared to single-cycle SRAM. The spatial compression of INT8 allows the entire model to migrate from slow Flash to fast SRAM. The latency eliminated by avoiding Flash reads profoundly offsets the arithmetic cost of the software unpacking loop.
   common_mistake: |
     **The Pitfall:** Refusing to quantize on simple MCUs because they lack specialized AI accelerators or SIMD.
     **The Rationale:** Engineers often focus solely on compute cycle counts and ignore the massive latency difference between memory tiers (Flash vs SRAM).
     **The Consequence:** Missing the opportunity to completely eliminate slow Flash reads, resulting in a much slower FP32 implementation.
   napkin_math: |
-    1. Flash read latency: ~10 cycles/byte.
-    2. FP32 execution (Flash read bound): 400KB * 10 cycles = 4,000,000 cycles.
-    3. INT8 unpacking overhead: 100K params * 4 cycles = 400,000 cycles.
-    4. SRAM read latency: 1 cycle/byte.
-    5. INT8 total execution: 400K (unpack) + 100K (SRAM read) = 500,000 cycles.
-    6. Speedup: 4M / 500K = **8x faster**.
+    1. **Assumptions & Constraints:**
+       - Model size: 100K parameters
+       - FP32 Flash read: 10 cycles/byte
+       - SRAM read: 1 cycle/byte
+       - Unpack overhead: 4 CPU cycles per parameter
+    2. **Calculations:**
+       - FP32 Flash latency: 100K * 4 bytes * 10 cycles/byte = 4,000,000 cycles
+       - INT8 memory footprint: 100 KB (fits in SRAM)
+       - INT8 SRAM latency: 100K * 1 byte * 1 cycle/byte = 100,000 cycles
+       - INT8 Unpack overhead: 100K * 4 cycles = 400,000 cycles
+       - Total INT8 latency: 100,000 + 400,000 = 500,000 cycles
+       - Speedup: 4,000,000 / 500,000 = 8x
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound I/O Win.** Despite unpacking overhead, migrating from Flash to SRAM yields an 8x speedup.
 status: published
 provenance: imported
 requires_explanation: false

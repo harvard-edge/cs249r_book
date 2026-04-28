@@ -11,15 +11,21 @@ title: The Watchdog Blind Spot
 scenario: Your edge AI cameras have a hardware watchdog timer (WDT) set to 60 seconds. The CPU application process kicks the watchdog every 10 seconds. You receive reports that cameras are freezing (video stream stops, no detections) but the devices aren't rebooting. You SSH in and find the CPU is running fine, but the GPU is deadlocked running a custom CUDA kernel for a new ML model.
 question: Why didn't the hardware watchdog trigger a reboot, and how do you design a watchdog system that actually monitors the ML hardware?
 details:
-  realistic_solution: The hardware WDT is tied to the CPU. The CPU application thread responsible for kicking the watchdog is still running perfectly fine, so the WDT never fires. However, the ML inference is executing asynchronously on the GPU. If a custom CUDA kernel enters an infinite loop (e.g., due to a bad index calculation in a custom NMS layer), the GPU hangs. The CPU thread might be waiting on a `cudaStreamSynchronize()` or a queue, but a separate health-check thread on the CPU is still happily kicking the WDT.
+  realistic_solution: |
+    The hardware WDT only monitors the CPU thread responsible for sending the heartbeat. Because ML inference executes asynchronously on the GPU, a stalled CUDA kernel deadlocks the accelerator while the CPU continues running and kicking the WDT. To fix this, implement an end-to-end semantic watchdog: the health-check thread must explicitly await a timestamped token or metadata event from the GPU inference pipeline before it is permitted to reset the hardware WDT.
   common_mistake: |
     **The Pitfall:** Assuming the watchdog timeout duration is too long and shortening it (e.g., to 5 seconds).
     **The Rationale:** Treating the symptoms rather than the root cause of what the watchdog is actually monitoring.
     **The Consequence:** The CPU continues to kick the shortened watchdog while the GPU remains deadlocked, completely failing to recover the edge device.
   napkin_math: |
-    * **Expected GPU Output**: At 30 FPS, the GPU should produce a tensor every 33.3 ms.
-    * **Hang Threshold**: If the ML pipeline hasn't produced an output in 5 seconds, it has missed 150 frames.
-    * **Conclusion**: The GPU is undeniably hung, and the watchdog logic must monitor this **semantic tensor output rate**, not just the CPU thread execution.
+    1. **Assumptions & Constraints:**
+       - WDT Timeout: 60 seconds.
+       - Expected Pipeline Rate: 30 FPS (33.3 ms/frame).
+    2. **Calculations:**
+       - Time to Failure: 5 seconds of GPU hang.
+       - Missed Frames: 5 seconds / 0.0333 seconds = 150 frames.
+    3. **Conclusion & Interpretation:**
+       - **Result: The GPU has missed 150 frames while the CPU is alive. Bottleneck: Asynchronous Execution (Semantic Failure).**
 status: published
 provenance: imported
 requires_explanation: false

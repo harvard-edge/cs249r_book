@@ -11,16 +11,21 @@ title: The Head-of-Line Blocking Problem
 scenario: Your team is serving a large language model. You observe that overall throughput is low and users with short, quick queries are experiencing high latency. You suspect this is because their requests get stuck in batches with users who are generating very long sequences.
 question: What is the primary latency-related problem that continuous batching is designed to solve compared to static batching?
 details:
-  realistic_solution: Continuous batching solves the 'head-of-line blocking' problem. In static batching, the entire batch of requests is processed as a single unit; it is not finished until the longest sequence in the batch has generated its final token. Continuous batching decouples the requests, allowing the server to evict finished sequences from the batch and add new ones continuously.
+  realistic_solution: Continuous batching (iteration-level scheduling) explicitly solves the 'head-of-line blocking' problem. In static batching, an entire batch processes concurrently until the absolute longest sequence yields its EOS token. Continuous batching dynamically evicts finished sequences at the token boundary and aggressively injects new requests into the compute pool, rescuing short requests from queue starvation.
   common_mistake: |
-    **The Pitfall:** Thinking that batching is only about maximizing throughput (tokens/sec).
-    **The Rationale:** Engineers often focus on GPU utilization and throughput, forgetting that static batching ties all requests to the longest sequence.
-    **The Consequence:** The system suffers from head-of-line blocking, causing short, fast requests to be unnecessarily delayed and resulting in high average and tail latency.
+    **The Pitfall:** Believing that batching is strictly designed to maximize FLOP utilization (throughput/tokens per second).
+    **The Rationale:** Engineers hyper-focus on Tensor Core saturation metrics, forgetting that static batching ties all user-facing latency to the heaviest payload in the queue.
+    **The Consequence:** The system suffers severe head-of-line blocking, causing simple 10-token queries to stall while waiting for 1000-token generations to clear, ruining tail latency.
   napkin_math: |
-    1. Set assumptions: TPOT is 10ms. Request A needs 10 tokens; Request B needs 100 tokens.
-    2. Calculate static batching latency: Both finish when the longest finishes. Latency A = 100 tokens * 10ms = 1,000ms.
-    3. Calculate continuous batching latency: Request A is evicted early and finishes in 10 tokens * 10ms = 100ms.
-    4. **Evaluate benefit: Continuous batching prevents the 900ms head-of-line blocking delay for Request A.**
+    1. **Assumptions & Constraints:**
+       - TPOT: 10ms.
+       - Request A: Needs 10 tokens.
+       - Request B: Needs 100 tokens.
+    2. **Calculations:**
+       - Static Batching Latency (Req A): Tied to Req B. 100 tokens * 10ms = 1,000ms.
+       - Continuous Batching Latency (Req A): Evicted on completion. 10 tokens * 10ms = 100ms.
+    3. **Conclusion & Interpretation:**
+       - **Continuous batching prevents a 900ms head-of-line blocking delay for Request A. Result: Queueing-Delay Bound.**
   options:
   - It primarily increases the maximum theoretical throughput (tokens/sec) of the GPU.
   - It solves head-of-line blocking, where short requests are stuck waiting for the longest request in a batch to complete.

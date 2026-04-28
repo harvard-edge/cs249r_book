@@ -11,17 +11,21 @@ title: MoE Training Throughput vs Dense Model
 scenario: A team trains both a dense 13B model and a Mixtral-style 8x7B MoE (47B total, 13B active) on 64 H100 GPUs. The dense model achieves 3200 tokens/sec/GPU. The MoE model only achieves 2100 tokens/sec/GPU despite having the same active FLOPs.
 question: Why is the 8x7B MoE 34% slower than a dense 13B on 64 H100s despite similar active FLOPs?
 details:
-  realistic_solution: 'The 34% throughput gap has three main sources: (1) All-to-all communication: dispatch + combine operations per MoE layer add ~10-15% overhead even with NVLink, especially with non-uniform routing. (2) Memory bandwidth: The MoE model has 47B params vs 13B — 3.6× more weights to load from HBM per forward pass. Even though only 13B are ''active,'' the expert weights still consume HBM bandwidth for loading the selected experts'' weights. At batch sizes where the model is memory-bandwidth-bound (common during training with gradient checkpointing), this is the dominant factor. (3) Load imbalance: The slowest expert determines layer latency. Even with aux loss, a 10-15% imbalance means 10-15% idle time on the fastest GPUs. (4) Router overhead: computing gating probabilities and top-k selection adds serial latency. Combined: ~15% memory BW + ~12% communication + ~7% load imbalance ≈ 34% total.'
+  realistic_solution: 'The 34% throughput gap has three main sources: (1) All-to-all communication: dispatch + combine operations per MoE layer add ~10-15% overhead even with NVLink, especially with non-uniform routing. (2) Memory bandwidth: The MoE model has 47B params vs 13B — 3.6× more weights to load from HBM per forward pass. Even though only 13B are active, the expert weights still consume HBM bandwidth for loading the selected experts weights. At batch sizes where the model is memory-bandwidth-bound (common during training with gradient checkpointing), this is the dominant factor. (3) Load imbalance: The slowest expert determines layer latency. Even with aux loss, a 10-15% imbalance means 10-15% idle time on the fastest GPUs. (4) Router overhead: computing gating probabilities and top-k selection adds serial latency. Combined: ~15% memory BW + ~12% communication + ~7% load imbalance ≈ 34% total.'
   common_mistake: |
     **The Pitfall:** Attributing the throughput gap entirely to all-to-all communication overhead.
     **The Rationale:** MoE introduces complex networking requirements, so it's the most obvious scapegoat for performance loss.
     **The Consequence:** Focusing optimization efforts solely on NVLink routing while ignoring the dominant bottleneck: the massive HBM bandwidth penalty of loading 3.6x more parameters per step.
   napkin_math: |
-    - **Dense 13B Weight Loads:** 13B parameters * 2 Bytes = 26 GB per step.
-    - **MoE 47B Weight Loads:** 47B parameters * 2 Bytes = 94 GB per step.
-    - **Weight Load Ratio:** 94 / 26 = **3.6x more weights to load**.
-    - **Bandwidth Time (3.35 TB/s HBM3):** Dense takes 26 GB / 3.35 TB/s = **7.8ms**. MoE takes ~94 GB / 3.35 TB/s = **~28ms**.
-    - **Conclusion:** Even though active FLOPs are identical, the memory bandwidth cost of loading non-active expert weights drastically slows down the MoE forward pass.
+    1. **Assumptions & Constraints:**
+       - Dense 13B vs MoE 47B model.
+       - HBM3 bandwidth: 3.35 TB/s.
+    2. **Calculations:**
+       - Dense Weight Loads: 13B * 2 Bytes = 26 GB/step.
+       - MoE Weight Loads: 47B * 2 Bytes = 94 GB/step (3.6x more weights).
+       - Dense Bandwidth Time: 26 GB / 3.35 TB/s = 7.8ms.
+       - MoE Bandwidth Time: 94 GB / 3.35 TB/s = ~28ms.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bandwidth-Bound.** The HBM bandwidth cost of loading non-active expert weights drastically slows down the MoE forward pass.
 status: published
 provenance: imported
 requires_explanation: false

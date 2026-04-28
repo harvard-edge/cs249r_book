@@ -8,22 +8,27 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Memory Optimization for 7B LLM Inference on Samsung Exynos 2400 NPU
-scenario: You are deploying a 7 billion parameter (FP16) Large Language Model (LLM) for real-time inference on a Samsung Exynos 2400 NPU, which features 12 GB of LPDDR5X memory and 34.7 TOPS. Initial deployment attempts encounter Out-Of-Memory (OOM) errors, as the model's FP16 weights alone consume 14 GB. You must implement memory-saving strategies to allow the model to fit and run efficiently. The inference pipeline involves tokenizing input sequences of up to 512 tokens and generating output sequences of up to 128 tokens.
+scenario: You are deploying a 7B parameter (FP16) LLM for real-time inference on a Samsung Exynos 2400. Initial deployment attempts encounter Out-Of-Memory (OOM) errors, as the model's FP16 weights alone consume 14 GB. The inference pipeline processes sequences of up to 512 input tokens and 128 output tokens.
 question: What minimum integer quantization bit-width is required to fit the weights, and what is the KV cache size for 128 tokens?
 details:
-  realistic_solution: "Employ a multi-pronged approach:\n\n1. **Weight Quantization**: Quantize model weights to INT8 or INT4 using techniques like Grouped Quantization or AWQ (Activation-aware Weight Quantization) to reduce the model size, while carefully evaluating accuracy degradation.\n\n2. **KV Cache Optimization**: Implement PagedAttention or FlashAttention to efficiently manage KV cache memory, potentially offloading older cache entries to system RAM if latency permits, or employing techniques like token pruning.\n\n3. **Dynamic Tensor Management**: Utilize custom memory allocators or frameworks that minimize memory fragmentation and optimize tensor lifecycle.\n\n4. **Operator Fusion/Kernel Optimization**: Reduce intermediate tensor creation through operator fusion and custom NPU kernels, and ensure efficient data movement between memory tiers."
+  realistic_solution: Employ a multi-pronged optimization strategy. First, apply Weight Quantization (e.g., AWQ or GPTQ) to compress weights to INT8. Second, implement PagedAttention to efficiently manage KV cache memory, eliminating memory fragmentation and pre-allocating fixed-size blocks. Finally, utilize fused attention kernels (e.g., FlashAttention-2 adapted for NPU) to avoid materializing large attention score matrices in SRAM/DRAM, keeping memory usage deterministic.
   common_mistake: |
-    **The Pitfall:** Overlooking the cumulative memory footprint of activations and the KV cache.
-    **The Rationale:** Engineers often focus solely on fitting the static model weights into memory.
-    **The Consequence:** The model loads but crashes via OOM as soon as generation starts and the KV cache expands.
+    **The Pitfall:** Overlooking the cumulative memory footprint of activations and the dynamically growing KV cache.
+    **The Rationale:** Engineers often focus solely on fitting the static model weights into the memory envelope.
+    **The Consequence:** The model loads successfully but crashes via an OOM exception as soon as autoregressive generation starts and the KV cache expands.
   napkin_math: |
-    1. **Weight Quantization Requirement:** Target memory for weights = 12 GB - 2 GB (for activations/buffers) = 10 GB.
-    2. **Max Bytes per Parameter:** 10 GB / 7 billion parameters ≈ 1.42 bytes/parameter.
-    3. **Quantization Selection:** INT8 uses 1 byte/parameter (7GB). FP16 uses 2 bytes/parameter (14GB).
-    **INT8 is the minimum required bit-width (7GB < 10GB).**
-    4. **KV Cache Calculation (Formula):** 2 (K and V) * 32 layers * 4096 hidden size * 128 tokens * 2 bytes/element (FP16).
-    5. **KV Cache Size:** 2 * 32 * 4096 * 128 * 2 = 67,108,864 bytes.
-    **67,108,864 / (1024 * 1024) = 64 MB.**
+    1. **Assumptions & Constraints:**
+       - Target app memory budget: ~10 GB.
+       - Model size: 7B parameters.
+       - KV Cache requirements: 32 layers, 4096 dim, up to 640 tokens, FP16 (2 bytes).
+    2. **Calculations:**
+       - Required weight compression: < 10 GB total budget.
+       - Max bytes per parameter: 10 GB / 7B params = 1.42 bytes/param.
+       - INT8 footprint: 7B * 1 byte = 7 GB.
+       - KV Cache per token: 2 (K&V) * 32 layers * 4096 dim * 2 bytes = 524 KB.
+       - Total KV Cache footprint (640 tokens): 640 tokens * 524 KB = 335.5 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** INT8 is the minimum bit-width required. With 7 GB allocated for weights and ~336 MB for KV cache, the total footprint comfortably fits within the 10 GB envelope.
 status: published
 provenance: imported
 requires_explanation: false

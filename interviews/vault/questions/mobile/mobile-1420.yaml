@@ -8,19 +8,25 @@ competency_area: reliability
 bloom_level: analyze
 phase: inference
 title: Hexagon NPU Telemetry Bottleneck
-scenario: You are monitoring a real-time CV model deployed on a Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). Production dashboards show frequent stragglers and high tail latency. The telemetry agent polls NPU performance counters per-frame and writes raw logs directly to the shared 16 GB LPDDR5X memory, causing memory contention with the heterogeneous CPU+GPU+NPU pipeline.
-question: How would you redesign Hexagon NPU telemetry to avoid per-frame memory and CPU overhead?
+scenario: You are monitoring a real-time CV model deployed on a Qualcomm Hexagon NPU. Production dashboards show frequent stragglers and high tail latency. The telemetry agent polls NPU performance counters per-frame and writes raw logs directly to the shared LPDDR5X memory, causing memory contention with the heterogeneous CPU+GPU+NPU pipeline.
+question: How would you redesign Hexagon NPU telemetry to avoid per-frame memory and CPU overhead on a Snapdragon 8 Gen 3?
 details:
-  realistic_solution: The correct approach is to implement on-chip aggregation using the Hexagon NPU's tightly coupled memory (SRAM) to accumulate telemetry metrics (like execution time and hardware faults) over multiple frames. By batching these metrics and performing a single DMA transfer to the shared LPDDR5X memory once every second, you drastically reduce memory bus transactions and eliminate the contention, restoring the NPU's full compute utilization.
+  realistic_solution: Implement on-chip aggregation utilizing the Hexagon NPU's tightly coupled memory (TCM/SRAM) to accumulate telemetry metrics (e.g., execution time, hardware faults) across multiple frames. Periodically flush this aggregated data via a single Direct Memory Access (DMA) transfer to the shared LPDDR5X memory (e.g., once per second). This completely eliminates the per-frame memory bus contention and restores the NPU's effective compute throughput.
   common_mistake: |
     **The Pitfall:** Disabling telemetry entirely or moving logging to an asynchronous CPU thread.
-    **The Rationale:** Candidates fail to realize the bottleneck is the frequent NPU-to-memory writes and bus contention on the shared LPDDR5X memory, missing the architectural interaction.
-    **The Consequence:** The solution either loses observability entirely or fails to resolve the underlying memory bus contention.
+    **The Rationale:** Candidates fail to realize the bottleneck is the high-frequency NPU-to-memory writes and bus contention on the unified memory architecture.
+    **The Consequence:** The solution either loses critical observability or fails to resolve the underlying memory bus contention, leaving tail latency unchanged.
   napkin_math: |
-    1. **Current Overhead:** At 60 FPS, per-frame logging causes 60 memory syncs/sec. If each sync stalls the NPU for 5ms, total stall = 300ms/sec (30% overhead).
-    2. **Throughput Loss:** The NPU's 45 TOPS INT8 is reduced to 31.5 TOPS (70% utilization).
-    3. **Optimized Overhead:** Batching telemetry to 1 write/sec drops stall time to 5ms/sec (0.5% overhead).
-    4. **Reclaimed Performance:** This reclaims 29.5% of compute capacity, restoring effective throughput to **44.7 TOPS**.
+    1. **Assumptions & Constraints:**
+       - Target: 60 FPS inference on Hexagon NPU (45 TOPS INT8).
+       - Per-frame telemetry causes a 5ms stall per memory sync.
+    2. **Calculations:**
+       - Current Stall Overhead: 60 frames * 5ms = 300ms/sec (30% utilization penalty).
+       - Current Throughput: 45 TOPS * 0.70 = 31.5 TOPS effective.
+       - Optimized Overhead: 1 DMA write/sec = 5ms/sec (0.5% utilization penalty).
+    3. **Conclusion & Interpretation:**
+       - Batching telemetry reclaims 29.5% of the compute capacity.
+       - **Result: Memory-Bandwidth Bound (Restores 44.7 TOPS)**.
 status: published
 provenance: imported
 requires_explanation: false
@@ -33,8 +39,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -2,25 +2,29 @@ schema_version: '1.0'
 id: cloud-4299
 track: cloud
 level: L6+
-zone: mastery
+zone: design
 topic: disaggregated-serving
 competency_area: deployment
 bloom_level: create
 phase: inference
 title: Speculative Decoding in Disaggregated Architecture
-scenario: A disaggregated serving system uses a 70B target model on MI300X decode nodes and a 7B draft model for speculative decoding.
+scenario: A disaggregated serving system uses a 70B target model on decode nodes and a 7B draft model for speculative decoding.
 question: Where should the 7B draft model run in disaggregated speculative decoding, how should KV caches interact, and what failure modes arise?
 details:
-  realistic_solution: "Optimal placement: co-locate the 7B draft model on each decode node alongside the 70B target model. MI300X has 192 GB — 70B target (140 GB) + 7B draft (14 GB) = 154 GB, fits with 38 GB for KV. Draft runs γ=4 steps autonomously on the decode node, producing 4 candidate tokens. Target model verifies in one forward pass (also on decode node). Accepted tokens skip target decode steps; rejected tokens revert. KV-cache interaction: draft model and target model maintain separate KV caches; accepted tokens' target-model KV entries are written, draft KV is discarded. New failure modes: (1) Draft-target KV desynchronization if preemption occurs mid-speculation — requires atomic speculation rollback. (2) Speculative decoding changes batch composition unpredictably, breaking the fixed-size decode step assumption used by the prefill-to-decode scheduling contract. (3) Rejection rate spikes under distribution shift, wasting compute without throughput gain."
+  realistic_solution: 'Optimal placement: co-locate the 7B draft model on each decode node alongside the 70B target model. MI300X has 192 GB \u2014 70B target (140 GB) + 7B draft (14 GB) = 154 GB, fits with 38 GB for KV. Draft runs \gamma=4 steps autonomously on the decode node, producing 4 candidate tokens. Target model verifies in one forward pass (also on decode node). Accepted tokens skip target decode steps; rejected tokens revert. KV-cache interaction: draft model and target model maintain separate KV caches; accepted tokens'' target-model KV entries are written, draft KV is discarded. New failure modes: (1) Draft-target KV desynchronization if preemption occurs mid-speculation \u2014 requires atomic speculation rollback. (2) Speculative decoding changes batch composition unpredictably, breaking the fixed-size decode step assumption used by the prefill-to-decode scheduling contract. (3) Rejection rate spikes under distribution shift, wasting compute without throughput gain.'
   common_mistake: |
     **The Pitfall:** Placing the draft model on the prefill nodes.
     **The Rationale:** Assuming that because the draft model is smaller, it should be grouped with other initial processing steps like prefill.
     **The Consequence:** Prefill nodes, sized for compute-bound workloads, become underutilized for memory-bound draft decode steps, and the scheduling contract breaks.
   napkin_math: |
-    *   **Draft Model Throughput:** 7B draft on MI300X (5.3 TB/s bandwidth) = 5.3e12 / 14e9 = 378 tokens/s.
-    *   **Expected Speedup:** With $\gamma=4$ and acceptance rate $\alpha=0.8$, expected tokens per step $E[\text{tokens/step}] = \frac{1-\alpha^{\gamma+1}}{1-\alpha} = \frac{1 - 0.32768}{0.2} = 3.36$.
-    *   **Throughput Gain:** The target model is called 3.36× fewer times.
-    *   **Net Result:** Approximately **2.5× end-to-end TPOT improvement** after accounting for the draft model's overhead.
+    1. **Assumptions & Constraints:**
+       - 7B draft throughput: 378 tokens/s.
+       - Target speedup: \gamma=4, acceptance rate \alpha=0.8.
+    2. **Calculations:**
+       - E[tokens/step] = (1 - \alpha^(\gamma+1)) / (1 - \alpha) = (1 - 0.32768) / 0.2 = 3.36.
+       - Target model called 3.36x fewer times.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** Placing the draft model on decode nodes yields a ~2.5x end-to-end TPOT improvement.
 status: published
 provenance: imported
 requires_explanation: true

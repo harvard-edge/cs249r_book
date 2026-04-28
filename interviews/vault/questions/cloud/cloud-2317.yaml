@@ -8,23 +8,24 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Attention Softmax FP16 Overflow
-scenario: You are serving a 70B model with a 32k context window. The KV cache is stored in FP16 to fit
-  within 4x80GB A100s. At context lengths below 16k, generation is flawless. As soon as the context exceeds
-  16k tokens, the model outputs completely black/empty tokens (NaNs).
+scenario: You are serving a 70B model with a 32k context window. The KV cache is stored in FP16 to fit within 4 A100s. At context lengths below 16k, generation is flawless. As soon as the context exceeds 16k tokens, the model outputs completely black/empty tokens (NaNs).
 question: "Why does the 70B model produce NaNs beyond 16k context, and what precision change fixes attention?"
 details:
-  realistic_solution: The failure is a numerical range overflow in the attention softmax calculation.
-    In self-attention, the dot product of Query and Key is scaled by 1/sqrt(d_k). For long sequences,
-    accumulating attention scores can result in pre-softmax logits that exceed FP16's maximum representable
-    value. Furthermore, the exponential function in softmax exp(x) will overflow FP16 if x > 11. FlashAttention
-    mitigates this by maintaining a running maximum and scaling on the fly, but if the intermediate accumulators
-    for the softmax denominator aren't explicitly cast to FP32 in the kernel, the sum of thousands of
-    exp() values will exceed 65504, resulting in Inf, and subsequently NaN when divided.
-  common_mistake: Assuming the KV cache memory allocation is fragmenting and causing out-of-memory errors
-    that fail silently.
-  napkin_math: FP16 max value = 65504. If average exp(logit) is just 5.0, summing over 16,000 tokens yields
-    80,000. 80,000 > 65504, causing an immediate overflow to Infinity. Softmax division (Inf/Inf) yields
-    NaN.
+  realistic_solution: 'The failure is a numerical range overflow in the attention softmax calculation. In self-attention, the dot product of Query and Key is scaled by 1/sqrt(d_k). For long sequences, accumulating attention scores can result in pre-softmax logits that exceed FP16''s maximum representable value. Furthermore, the exponential function in softmax exp(x) will overflow FP16 if x > 11. FlashAttention-2 mitigates this by maintaining a running maximum and scaling on the fly, but if the intermediate accumulators for the softmax denominator aren''t explicitly cast to FP32 in the kernel, the sum of thousands of exp() values will exceed 65504, resulting in Inf, and subsequently NaN when divided.'
+  common_mistake: |
+    **The Pitfall:** Assuming the KV cache memory allocation is fragmenting and causing out-of-memory errors that fail silently.
+    **The Rationale:** Candidates default to memory capacity issues for long context windows, ignoring the numerical stability limits of half-precision floating-point formats.
+    **The Consequence:** Wasting time debugging memory allocation and scaling strategies when the issue is a fundamental arithmetic overflow.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - FP16 max representable value = 65504.
+       - Sequence length > 16,000 tokens.
+    2. **Calculations:**
+       - If average exp(logit) is 5.0, sum over 16,000 tokens = 80,000.
+       - 80,000 > 65504, causing an immediate overflow to Infinity.
+       - Softmax division (Inf/Inf) yields NaN.
+    3. **Conclusion & Interpretation:**
+       - **Result: Intermediate softmax accumulators must use FP32 to prevent NaN outputs.** (Precision-Bound Numerical Instability).
 status: published
 provenance: imported
 requires_explanation: false

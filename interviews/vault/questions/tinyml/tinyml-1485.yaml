@@ -8,20 +8,26 @@ competency_area: networking
 bloom_level: create
 phase: training
 title: Gossip-Based Gradient Averaging on Cortex-M4 Mesh Network
-scenario: A 16-node Cortex-M4 mesh network (168MHz, 256KB SRAM each) runs distributed on-device learning for a smart building system. Each node trains on local sensor data and must share model updates. There is no central coordinator.
+scenario: A 16-node Cortex-M4 mesh network runs distributed on-device learning for a smart building system. Each node trains on local sensor data and must share model updates. There is no central coordinator.
 question: How would you design a gossip-based gradient averaging protocol that converges in under 60 seconds with minimal memory overhead per node?
 details:
-  realistic_solution: 'Gossip averaging: each node maintains a local model w_i. Every T seconds, each node picks a random neighbor, exchanges model parameters (or gradients), and averages: w_i = (w_i + w_j) / 2. Convergence: with N=16 nodes on a 4×4 mesh (diameter=6), gossip averaging converges in O(N log N) = 64 rounds. At T=0.5s per round: 32s convergence — under 60s. Memory: each node stores 1 model copy (assume 50K params × 4B = 200KB) + 1 receive buffer (200KB) = 400KB. But Cortex-M4 only has 256KB SRAM! Use FP16 model (200KB×0.5=100KB) + receive buffer (100KB) = 200KB — fits with 56KB headroom for stack. Bandwidth per exchange: 100KB per round-trip over 250kbps mesh radio = 3.2s per exchange. Too slow. Compress: send only delta (top-10% changed params) = 10KB → 0.32s. Converges in 64×0.32=20s.'
+  realistic_solution: 'Utilize asynchronous gossip averaging: nodes independently pick a random neighbor at interval T, execute an FP16 delta-exchange, and merge updates. Enforcing Top-10% sparsity compression on the deltas ensures the payload comfortably bridges the 250 kbps mesh radio while the FP16 model structure preserves the tight 256 KB SRAM constraints.'
   common_mistake: |
-    **The Pitfall:** Implementing synchronous AllReduce on a mesh network.
-    **The Rationale:** Candidates often assume all nodes can communicate simultaneously.
-    **The Consequence:** They ignore O(diameter) routing latency, leading to massive network congestion and failure to converge.
+    **The Pitfall:** Defaulting to synchronous AllReduce protocols across an ad-hoc mesh architecture.
+    **The Rationale:** Candidates automatically apply heavy data-center synchronization concepts without evaluating network diameter latency.
+    **The Consequence:** The model experiences extreme congestion stalls, violating real-time update boundaries and missing the 60s convergence deadline.
   napkin_math: |
-    - **Network Setup:** 16 nodes, 4x4 mesh. Gossip rounds for convergence = O(N log N) = **64 rounds**.
-    - **Payload:** FP16 + 10% delta compression = **10KB per exchange**.
-    - **Latency:** 10KB / 31.25KB/s (250kbps) = **0.32s per round**.
-    - **Total Time:** 64 * 0.32s = **20s** (well under the 60s target).
-    - **Memory:** 100KB model + 100KB buffer = **200KB** (fits within 256KB SRAM).
+    1. **Assumptions & Constraints:**
+       - Nodes: 16 (4x4 Mesh). Required Convergence Rounds: O(N log N) = 64 rounds.
+       - Model: 50K parameters (FP16 = 100 KB). SRAM: 256 KB.
+       - Radio: 250 kbps (~31.25 KB/s).
+    2. **Calculations:**
+       - Delta Compress: Send 10% parameters = 10 KB payload per exchange.
+       - Payload latency = 10 KB / 31.25 KB/s = 0.32s per round.
+       - Total Convergence = 64 rounds * 0.32s = 20.48s.
+       - SRAM Load = 100 KB model + 10 KB delta + stack = < 150 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Verified Top-K Sparsification**. The sparse FP16 update solves the mesh latency puzzle, converging in ~20s and fully respecting the 256KB threshold.
 status: deleted
 provenance: imported
 requires_explanation: true

@@ -8,27 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: The Snapdragon 8 Elite NPU Scheduling
-scenario: You're running a real-time object detection model on a Snapdragon 8 Elite phone. The Hexagon
-  NPU shares a 6 MB system-level cache (SLC) with the Kryo CPU cores. During inference, the CPU is simultaneously
-  decoding a 4K H.265 video stream for the camera preview. Your NPU inference latency spikes from 5ms
-  to 18ms every few hundred milliseconds. What's happening, and how do you fix it?
-question: "Why do Snapdragon 8 Elite NPU latencies spike from 5ms to 18ms while the CPU decodes 4K H.265 video?"
+scenario: You're running a real-time object detection model on a Snapdragon 8 Elite phone. During inference, the CPU is simultaneously decoding a 4K H.265 video stream for the camera preview, and your NPU inference latency spikes from 5ms to 18ms every few hundred milliseconds.
+question: Why do Snapdragon 8 Elite NPU latencies spike from 5ms to 18ms while the CPU decodes 4K H.265 video, considering the shared 6 MB system-level cache (SLC)?
 details:
-  realistic_solution: The CPU's H.265 decoder is evicting the NPU's weight tiles from the shared 6 MB
-    SLC. The Hexagon NPU stages model weights into the SLC to avoid round-trips to LPDDR5 DRAM. When the
-    CPU decoder flushes the SLC with video reference frames (each I-frame decode touches ~12 MB of reference
-    data, cycling through the 6 MB SLC twice), the NPU's next layer must re-fetch weights from DRAM. Crucially,
-    it must do so while the CPU is simultaneously hammering DRAM for video decoding, plunging the NPU's
-    effective DRAM bandwidth to a fraction of the 51 GB/s peak. This bandwidth starvation, not just the
-    cache misses themselves, creates the massive latency spike.
-  common_mistake: '"The NPU is throttling due to heat from the CPU video decode." Thermal throttling takes
-    tens of seconds to onset, not hundreds of milliseconds. The spikes are too fast and too periodic for
-    thermal effects — this is a cache-level problem, not a power problem.'
-  napkin_math: 'SLC bandwidth: ~200 GB/s. LPDDR5 bandwidth: ~51 GB/s. Weight tile per layer: 1.5 MB. DRAM
-    miss penalty: 1.5 MB / 51 GB/s = ~29 μs. However, when the CPU decodes an I-frame, it saturates DRAM
-    bandwidth. NPU effective DRAM bandwidth drops severely (e.g., to < 5 GB/s). Reading 1.5 MB at 5 GB/s
-    takes 300 μs per layer. 40 layers × 300 μs = 12 ms spike. After SLC partitioning: NPU weights stay
-    in cache → stable 5ms.'
+  realistic_solution: The CPU's H.265 decoder is evicting the NPU's weight tiles from the shared 6 MB SLC. The Hexagon NPU stages model weights into the SLC to avoid round-trips to LPDDR5 DRAM. When the CPU decoder flushes the SLC with video reference frames (each I-frame decode touches ~12 MB of reference data, cycling through the 6 MB SLC twice), the NPU's next layer must re-fetch weights from DRAM. Crucially, it must do so while the CPU is simultaneously hammering DRAM for video decoding, plunging the NPU's effective DRAM bandwidth to a fraction of the 51 GB/s peak. This bandwidth starvation, not just the cache misses themselves, creates the massive latency spike.
+  common_mistake: |
+    **The Pitfall:** Attributing the latency spikes to thermal throttling from the CPU video decode.
+    **The Rationale:** Candidates misunderstand the timeframe of thermal effects, which take tens of seconds to onset, not hundreds of milliseconds.
+    **The Consequence:** Misdiagnosing a cache-level problem as a power problem, leading to ineffective optimizations like underclocking.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - SLC bandwidth: ~200 GB/s; LPDDR5 bandwidth: ~51 GB/s.
+       - Weight tile per layer: 1.5 MB; 40 layers.
+    2. **Calculations:**
+       - DRAM miss penalty (ideal): 1.5 MB / 51 GB/s = ~29 μs.
+       - Contended DRAM bandwidth (CPU saturating LPDDR5): Drops to < 5 GB/s.
+       - Contended read time: 1.5 MB / 5 GB/s = 300 μs per layer.
+       - Total spike: 40 layers * 300 μs = 12 ms spike.
+    3. **Conclusion & Interpretation:**
+       - **Result: Cache-Contention-Bound.** After SLC partitioning, NPU weights stay in cache, restoring a stable 5ms latency.
 status: published
 provenance: imported
 requires_explanation: false

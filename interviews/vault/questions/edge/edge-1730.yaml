@@ -8,34 +8,25 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: Multi-Model Pipelining on Hailo-8 Dataflow Architecture
-scenario: You are deploying a compound retail checkout pipeline on a single Hailo-8
-  accelerator (26 TOPS INT8, 2.5W, no local DRAM). The pipeline cascades a primary
-  object detector to locate items and a secondary OCR network to read text on those
-  items. Because the Hailo-8 lacks local DRAM and must stream from host memory, you
-  must evaluate the tradeoffs between sequentially swapping the two models per frame
-  versus co-compiling them to share the accelerator's spatial resources concurrently
-  to meet a strict 30 FPS requirement.
-question: Should the detector and OCR networks be swapped sequentially or co-compiled
-  on Hailo-8 to meet 30 FPS, and why?
+scenario: You are deploying a compound retail checkout pipeline on a single Hailo-8 accelerator (26 TOPS INT8, 2.5W, no local DRAM). The pipeline cascades a primary object detector to locate items and a secondary OCR network to read text on those items. Because the Hailo-8 lacks local DRAM and must stream from host memory, you must evaluate the tradeoffs between sequentially swapping the two models per frame versus co-compiling them to share the accelerator's spatial resources concurrently to meet a strict 30 FPS requirement.
+question: Should the detector and OCR networks be swapped sequentially or co-compiled on Hailo-8 to meet 30 FPS, and why?
 details:
-  realistic_solution: The correct approach is to co-compile both the detector and
-    OCR models into a single execution context. Because Hailo-8 uses a spatial dataflow
-    architecture, co-compiling allocates distinct regions of the chip's compute and
-    internal memory to each model simultaneously. This eliminates the need to stream
-    weights from host memory during runtime, limiting host traffic to just the input
-    activations.
-  common_mistake: Candidates often treat the Hailo-8 like a traditional edge GPU,
-    assuming they can rapidly swap models sequentially without penalty. They fail
-    to account for the fact that without local DRAM, sequential execution requires
-    constantly reloading model weights over the PCIe bus from host memory, creating
-    a severe bandwidth bottleneck.
-  napkin_math: 'Compute is abundant: Detector (30 GOPs) + OCR (10 GOPs) = 40 GOPs/frame.
-    At 30 FPS, this requires 1.2 TOPS, easily fitting the 26 TOPS budget. However,
-    if swapped sequentially, transferring a 20MB detector and 10MB OCR model per frame
-    requires (20+10) MB * 30 FPS = 900 MB/s of weight streaming from host memory.
-    Co-compiling the models eliminates this 900 MB/s penalty, reducing host memory
-    streaming exclusively to the 1080p input activations (approx. 6 MB * 30 FPS =
-    180 MB/s), operating efficiently within the 2.5W power envelope.'
+  realistic_solution: 'The correct approach is to co-compile both the detector and OCR models into a single execution context. Because Hailo-8 uses a spatial dataflow architecture, co-compiling allocates distinct regions of the chip''s compute and internal memory to each model simultaneously. This eliminates the need to stream weights from host memory during runtime, limiting host traffic to just the input activations.'
+  common_mistake: |
+    **The Pitfall:** Treating the Hailo-8 like a traditional edge GPU and swapping models sequentially.
+    **The Rationale:** Candidates assume model swapping is cheap, failing to account for the lack of local DRAM which forces constant reloading over the PCIe bus.
+    **The Consequence:** Severe PCIe bandwidth bottlenecks that destroy inference throughput and violate the 30 FPS deadline.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hailo-8 (26 TOPS, 2.5W, no local DRAM)
+       - 30 FPS target
+       - Detector (30 GOPs, 20MB), OCR (10 GOPs, 10MB)
+    2. **Calculations:**
+       - Compute needed: (30 + 10) GOPs * 30 FPS = 1.2 TOPS (fits 26 TOPS budget)
+       - Sequential host memory bandwidth needed: (20MB + 10MB) * 30 FPS = 900 MB/s
+       - Co-compiled memory bandwidth needed: 6 MB (1080p input) * 30 FPS = 180 MB/s
+    3. **Conclusion & Interpretation:**
+       **Result: Co-compilation saves 720 MB/s (Bandwidth-Bound)**
 status: published
 provenance: imported
 requires_explanation: false

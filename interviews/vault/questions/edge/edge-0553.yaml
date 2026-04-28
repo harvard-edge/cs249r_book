@@ -8,21 +8,23 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: The Automotive Parallelism Dilemma
-scenario: You are designing the perception system for an autonomous vehicle. The core is a large multi-modal Vision Transformer (20B parameters) fusing data from 8 cameras. This model is too large for a single Jetson AGX Orin, so you must split its execution across two Orin boards connected by a 40 Gbps automotive ethernet link. The pipeline has a hard real-time deadline of 33ms (30 FPS).
+scenario: A 20B parameter Vision Transformer (ViT) must be split across two Jetson AGX Orin boards connected via a 40 Gbps automotive ethernet link. The pipeline has a 33ms real-time deadline.
 question: Should you use tensor or pipeline parallelism for the 20B ViT across two Orins over the 40Gbps link, and why?
 details:
-  realistic_solution: |
-    Pipeline Parallelism is the only viable strategy. Tensor Parallelism requires AllReduce communication at every transformer layer. With 80 layers and a 5 GB/s link, the communication overhead alone is ~640 ms, which is 19x over the 33 ms budget. Pipeline Parallelism requires only a single activation transfer between the two halves (~20 MB, 4 ms), keeping total latency under 27 ms.
+  realistic_solution: Pipeline Parallelism is the only viable strategy. Tensor Parallelism (TP) requires massive AllReduce communication at every transformer layer, which immediately bottlenecks on the slow 40 Gbps automotive ethernet link, blowing past the 33ms deadline. Pipeline Parallelism splits the model sequentially, requiring only a single forward activation transfer between the two halves per frame, keeping latency within the real-time budget.
   common_mistake: |
     **The Pitfall:** Applying cloud-HPC intuition directly to an edge problem by choosing Tensor Parallelism.
-    **The Rationale:** Engineers accustomed to high-bandwidth datacenters (e.g., NVLink) underestimate the communication overhead of TP on constrained automotive ethernet.
+    **The Rationale:** Engineers accustomed to high-bandwidth datacenter interconnects (e.g., NVLink) underestimate the severe communication overhead of TP on constrained edge ethernet.
     **The Consequence:** Frequent, high-volume AllReduce operations become the dominant bottleneck, completely missing the real-time deadline.
   napkin_math: |
-    - System: 20B param ViT (FP16 = 40 GB), 40 Gbps (5 GB/s) link, 33 ms deadline.
-    - Tensor Parallelism (TP): 2 AllReduce ops/layer. Activation tensor: ~20 MB.
-    - TP Transfer time: 80 layers x 2 x 20 MB = 3.2 GB. 3.2 GB / 5 GB/s = 640 ms **(Fails 33 ms budget)**.
-    - Pipeline Parallelism (PP): Split model at layer 40. 1 transfer: 20 MB.
-    - PP Transfer time: 20 MB / 5 GB/s = 4 ms.
-    - PP Compute time: ~200 GFLOPs / 17.5 TFLOPS = 11.4 ms per half. Total = 11.4 + 4 + 11.4 = 26.8 ms.
-    - **Result: PP takes 26.8 ms, successfully meeting the 33 ms deadline.**
+    1. **Assumptions & Constraints:**
+       - Model: 20B ViT (80 layers). Deadline: 33 ms.
+       - Interconnect: 40 Gbps (5 GB/s).
+       - Activation transfer: 20 MB.
+    2. **Calculations:**
+       - TP Transfer: 80 layers * 2 (AllReduce) * 20 MB = 3.2 GB. 3.2 GB / 5 GB/s = 640 ms (Fails).
+       - PP Transfer: 1 transfer of 20 MB. 20 MB / 5 GB/s = 4 ms.
+       - PP Compute: ~11.4 ms per half. Total = 11.4 + 4 + 11.4 = 26.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound. Tensor Parallelism takes 640ms, while Pipeline Parallelism takes 26.8ms, safely meeting the 33ms deadline.**
 status: published

@@ -8,21 +8,23 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: The Silent ECC Degradation
-scenario: Your 128-GPU H100 cluster has been running for 14 months. You notice that one specific node consistently produces slightly different AllReduce results than other nodes. The gradient checksums diverge by 1–2 ULP (units in the last place) every ~100 steps. Training still converges, but reproducibility tests fail. `nvidia-smi` shows no uncorrectable errors.
+scenario: Your 128-GPU cluster has been running for 14 months. You notice that one specific node consistently produces slightly different AllReduce results than other nodes. The gradient checksums diverge by 1-2 ULP every ~100 steps. Training still converges, but reproducibility tests fail. nvidia-smi shows no uncorrectable errors.
 question: What hardware component is silently degrading, and when does this 'slightly different' behavior become dangerously wrong?
 details:
-  realistic_solution: 'The HBM on GPUs 40–47 is experiencing an elevated rate of *correctable* ECC errors (single-bit flips that ECC silently fixes). While each individual correction is invisible to the application, the correction process stalls the memory controller for ~100 ns per event. If a memory page has a marginal cell that flips frequently, the GPU''s memory controller spends increasing time on corrections, subtly changing the timing of memory accesses. This timing change affects the order of floating-point reductions in parallel operations (warp-level reductions are timing-dependent when using non-deterministic atomics), producing the 1–2 ULP divergence. The danger: correctable ECC errors are precursors to *uncorrectable* errors (double-bit flips). HBM cells degrade over time — a cell that flips once per hour today may flip once per minute in 3 months, and eventually produce double-bit errors that ECC cannot fix, causing Silent Data Corruption. Check `nvidia-smi -q -d ECC` for the `Volatile ECC Errors: Single Bit` counter — if it''s climbing, the HBM is degrading and the GPU should be proactively replaced.'
+  realistic_solution: 'The HBM on the GPUs is experiencing an elevated rate of correctable ECC errors. The correction process stalls the memory controller for ~100 ns per event, subtly changing the timing of memory accesses. This affects the order of floating-point reductions in parallel operations, producing the 1-2 ULP divergence. Correctable ECC errors are precursors to uncorrectable errors (double-bit flips). Check nvidia-smi -q -d ECC for the Volatile ECC Errors: Single Bit counter.'
   common_mistake: |
     **The Pitfall:** Dismissing ULP differences as normal floating-point non-determinism.
-    **The Rationale:** Candidates know FP math is non-deterministic across different topologies and falsely assume it's normal for the *exact same code/hardware* to diverge over time.
+    **The Rationale:** Candidates know FP math is non-deterministic across different topologies and falsely assume it's normal for the exact same code/hardware to diverge over time.
     **The Consequence:** The degrading HBM is ignored until it triggers a double-bit flip, permanently corrupting an expensive training run.
   napkin_math: |
-    *   **Normal Error Rate:** <1 correctable ECC error per GPU per day.
-    *   **Degrading Error Rate:** 100+ errors/day on an affected page.
-    *   **Correction Stall:** ~100 ns per event.
-    *   **Total Daily Stall:** ~10 µs/day (negligible for raw performance).
-    *   **The Bug:** The 100 ns stall randomly delays threads during warp-level reductions. Because FP32 addition is non-associative, altering the execution order changes the result by 1–2 ULP.
-    *   **Result:** Errors typically double every month. By month 20, correctable errors will turn into double-bit **uncorrectable errors**, causing silent data corruption.
+    1. **Assumptions & Constraints:**
+       - Normal correctable ECC Error Rate: <1 per GPU per day.
+       - Correction Stall: ~100 ns per event.
+    2. **Calculations:**
+       - Degraded rate: 100+ errors/day on an affected page.
+       - Total daily stall: ~10 us/day (negligible for performance, highly impactful for timing non-determinism).
+    3. **Conclusion & Interpretation:**
+       - **Result: Hardware-Failure-Bound. The 100 ns stall randomly delays threads, altering execution order and producing ULP errors. Uncorrectable errors will follow.**
 status: published
 provenance: imported
 requires_explanation: false

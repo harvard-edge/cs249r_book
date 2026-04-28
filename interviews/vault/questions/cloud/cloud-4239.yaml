@@ -8,24 +8,25 @@ competency_area: optimization
 bloom_level: understand
 phase: training
 title: Understanding why torch.compile retraces after dynamic batch size changes
-scenario: A team trains a model on A100 (312 TFLOPS, 2TB/s) with variable batch sizes
-  from a data loader that pads batches differently each step. After enabling torch.compile,
-  they notice periodic 3-5 second stalls every few hundred steps and GPU utilization
-  drops to 0% during these windows.
-question: What causes the 3-5 second torch.compile stalls with variable padded batch
-  sizes, and how would you eliminate them?
+scenario: A team trains a model on an accelerator (312 TFLOPS, 2TB/s) with variable batch sizes from a data loader that pads batches differently each step. After enabling `torch.compile`, they notice periodic 3-5 second stalls every few hundred steps, during which GPU utilization drops to 0%.
+question: "What causes the 3-5 second torch.compile stalls with variable padded batch sizes, and how would you eliminate them?"
 details:
-  realistic_solution: Use torch.compile(model, dynamic=True) to generate shape-generic
-    code. Alternatively, bucket batch sizes into 2-3 discrete values and always pad
-    to the nearest bucket — this caps recompilations to the number of buckets. Monitor
-    with TORCH_LOGS='recompiles' to confirm fixes work.
-  common_mistake: Not understanding that torch.compile (via TorchDynamo) traces and
-    compiles a specialized graph for each unique set of tensor shapes it encounters.
-    A new batch size triggers retracing and recompilation, causing the observed stalls.
-  napkin_math: 'TorchInductor compilation takes 30-90 seconds for large models. If
-    seen once: fine. If triggered every 100 steps due to shape variation, overhead
-    is 90s/100steps × 1000steps = 900s of pure compile time — more than the training
-    itself for short runs.'
+  realistic_solution: The stalls are caused by TorchDynamo recompiling the computation graph. `torch.compile` defaults to static shapes; every time the data loader yields a novel padded batch size, it triggers a cache miss and forces a synchronous re-tracing and recompilation of the execution graph via Triton/Inductor. Fix this by explicitly setting `torch.compile(model, dynamic=True)` to generate shape-agnostic symbolic kernels, or deliberately bucket/pad the data loader into 2-3 discrete fixed sizes to cap the total number of compilations.
+  common_mistake: |
+    **The Pitfall:** Assuming `torch.compile` is a "free" JIT that universally handles dynamic Python logic seamlessly.
+    **The Rationale:** Engineers treat the compiler like a black box, not understanding that underneath, it relies on strict static tensor shape hashing to emit optimized C++/PTX code.
+    **The Consequence:** The training loop spends more time blocked on the host CPU running the LLVM/Triton compiler stack than actually executing FLOPs on the GPU.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Compilation time: ~3 seconds per unique shape.
+       - Shape frequency: New batch size every 100 steps.
+       - Total training run: 10,000 steps.
+    2. **Calculations:**
+       - Number of unique shapes encountered: 10,000 / 100 = 100 recompiles.
+       - Total compilation overhead: 100 * 3 seconds = 300 seconds.
+       - If base step time is 50ms: 10,000 * 0.05s = 500 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 300s Compilation Overhead.** The pipeline is disastrously **Host-Compiler-Bound**, adding 60% overhead to the entire training run due to shape variability.
 status: published
 provenance: imported
 requires_explanation: false

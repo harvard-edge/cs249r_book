@@ -8,33 +8,22 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: The TPU v5e vs H100 Trade-off
-scenario: Your company is choosing between a Google Cloud TPU v5e pod (256 chips) and an equivalent NVIDIA H100 cluster for serving a 7B parameter model at 50,000 requests per second. The TPU v5e costs $1.20/chip-hour and the H100 costs $3.50/GPU-hour. The PM says 'TPU is obviously cheaper.'
-question: Why isn't choosing TPU v5e over H100 for 50,000 RPS serving a 7B model just a $/chip-hour comparison?
+scenario: Your company is choosing between a TPU v5e pod and an equivalent H100 cluster for serving a 7B parameter model. The TPU v5e costs $1.20/chip-hour and the H100 costs $3.50/GPU-hour. The PM says 'TPU is obviously cheaper.'
+question: Why isn't choosing TPU v5e over H100 for serving a 7B model just a $/chip-hour comparison?
 details:
-  realistic_solution: 'The correct metric is cost per token, not cost per chip. TPU v5e has 16 GB HBM — a 7B FP16 model (14 GB) barely fits, leaving ~2 GB for KV cache (~1 request). Must shard TP=2, using 2 chips per replica with max batch ~8. H100 has 80 GB HBM — model fits trivially with 66 GB free, supporting batch ~61. This 7.6× batching advantage translates directly to cost-per-token advantage. At $3.50/GPU-hr, H100 achieves ~$0.067/M tokens. The 256-chip TPU v5e pod at $307.20/hr achieves ~$0.71/M tokens. H100 wins by ~10×. The lesson: per-chip price is meaningless — what matters is $/token at realistic batch sizes, determined by HBM capacity.'
+  realistic_solution: The correct metric is cost per token. TPU v5e has 16GB HBM, restricting batch sizes heavily, whereas H100 has 80GB HBM, supporting massive batches. The batching advantage translates directly to a cost-per-token advantage.
   common_mistake: |
     **The Pitfall:** Comparing raw $/chip-hour without considering memory capacity.
-    **The Rationale:** PMs and engineers sometimes assume compute costs scale linearly with chip price.
-    **The Consequence:** This ignores that differing memory capacities dictate achievable batch sizes, making per-chip comparisons meaningless for memory-bound LLM serving.
+    **The Rationale:** Assuming compute costs scale linearly with chip price for inference.
+    **The Consequence:** Designing deployments with horrible per-token economics because memory limits severely restrict batch sizes.
   napkin_math: |
-    1. **Model Size:** 7B parameters in FP16 = 14 GB.
-    2. **H100 Serving (80 GB HBM, 3.35 TB/s):**
-       - Free HBM: 80 GB - 14 GB = 66 GB.
-       - KV cache per request (2048 tokens): 2 $\times$ 32 layers $\times$ 32 heads $\times$ 128 dim $\times$ 2048 tokens $\times$ 2 bytes = 1.07 GB.
-       - Max batch: 66 GB / 1.07 GB $\approx$ 61 requests.
-       - Decode throughput: 3.35 TB/s / 14 GB = 239 steps/s.
-       - Throughput at batch 61: 239 $\times$ 61 = 14,579 tokens/s.
-       - Cost per 1M tokens: $3.50/hr / (14,579 \times 3600 / 1M) = $0.067 / M tokens.
-    3. **TPU v5e Serving (16 GB HBM, 819 GB/s):**
-       - Free HBM: 16 GB - 14 GB = 2 GB (Cannot batch meaningfully on 1 chip, must shard TP=2).
-       - TP=2 configuration: 7 GB weights per chip, 9 GB free.
-       - Max batch (TP=2): 9 GB / 1.07 GB $\approx$ 8 requests.
-       - Decode throughput: 7 GB / 819 GB/s = 8.55 ms/step $\rightarrow$ 117 steps/s.
-       - Throughput per replica (batch 8): 117 $\times$ 8 = 936 tokens/s.
-       - Total Pod Throughput (128 replicas on 256 chips): 128 $\times$ 936 = 119,808 tokens/s.
-       - Pod cost: 256 chips $\times$ $1.20/hr = $307.20/hr.
-       - Cost per 1M tokens: $307.20/hr / (119,808 \times 3600 / 1M) = $0.71 / M tokens.
-    4. **Result:** **H100 wins by ~10x on per-token cost due to larger HBM enabling larger batch sizes.**
+    1. **Assumptions & Constraints:**
+       - 7B model (14GB). H100 (80GB), TPU v5e (16GB).
+    2. **Calculations:**
+       - H100 max batch ~61. Cost ~$0.067/M tokens.
+       - TPU max batch ~8. Cost ~$0.71/M tokens.
+    3. **Conclusion & Interpretation:**
+       - **Result: H100 wins by ~10x on per-token cost due to higher HBM enabling larger batches.**
 status: published
 provenance: imported
 requires_explanation: false

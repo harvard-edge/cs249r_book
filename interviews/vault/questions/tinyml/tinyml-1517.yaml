@@ -8,19 +8,25 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: Tensor Arena Sizing for MobileNetV2 on Cortex-M7
-scenario: You're deploying a quantized INT8 MobileNetV2 (96x96 input) on a Cortex-M7. TFLite Micro requires a statically allocated tensor arena for all intermediate activations. The model has 52 operators. The largest single activation tensor is 96x96x32 = 294,912 bytes. A naive estimate says you need the sum of all activation tensors (~2.1 MB).
-question: Why is summing 2.1 MB of MobileNetV2 activations wrong, and what arena fits a 96x96 INT8 model in 512 KB SRAM?
+scenario: You are deploying a quantized INT8 MobileNetV2 on a Cortex-M7. TFLite Micro requires a statically allocated tensor arena. The model possesses 52 operators, with the single largest tensor occupying 288 KB. The sum of all tensors is ~2.1 MB.
+question: Why is estimating a 2.1 MB SRAM requirement mathematically flawed, and what is the true arena size to fit a 96x96 INT8 MobileNetV2 within 512 KB of SRAM?
 details:
-  realistic_solution: 'TFLite Micro''s memory planner analyzes the tensor lifetime graph — each tensor is ''alive'' from its producing operator to its last consuming operator. The planner schedules tensors to reuse memory from dead tensors (memory aliasing). For MobileNetV2: depthwise separable convolutions have two stages. The peak memory occurs at the widest point of the network where feature maps are largest AND residual connections keep two tensors alive simultaneously. For 96x96 input: peak is at the first inverted residual block where input (96x96x32 = 288 KB) and output (96x96x16 = 144 KB) must coexist = 432 KB. Plus operator scratch buffers (~20 KB for im2col). Total arena: ~452 KB. This fits in 512 KB SRAM with 60 KB remaining for stack and globals. The memory planner typically achieves 3-5x reduction versus naive sum.'
+  realistic_solution: The TFLite Micro memory planner fundamentally relies on memory aliasing. Tensors only require allocation from their producing operator to their final consuming operator. The true arena size is governed strictly by the network's maximum concurrent memory peak. For a 96x96 MobileNetV2, this peak manifests at the first inverted residual block, requiring the input tensor (288 KB), the output tensor (144 KB), and operational scratch buffers (~20 KB) to exist simultaneously.
   common_mistake: |
-    **The Pitfall:** Overestimating memory by summing all tensors.
-    **The Rationale:** Candidates fail to account for tensor lifetime analysis and memory aliasing (reuse) during sequential execution.
-    **The Consequence:** They erroneously conclude the model cannot fit the hardware, incorrectly initiating a costly architecture redesign or hardware upgrade.
+    **The Pitfall:** Linearly summing all intermediate activation tensors.
+    **The Rationale:** Candidates fail to execute a tensor lifetime analysis, assuming the neural network must hold every intermediate calculation in SRAM persistently.
+    **The Consequence:** They estimate a catastrophic 2.1 MB memory requirement, abandoning the Cortex-M7 deployment path due to an illusionary SRAM deficiency.
   napkin_math: |
-    - Naive sum: 52 operator outputs ≈ 2.1 MB.
-    - Peak concurrent: largest layer input (288 KB) + output (144 KB) + scratch (20 KB) = **452 KB**.
-    - Remaining SRAM: 512 - 452 = 60 KB for stack and globals.
-    - Reduction factor: 2150 KB / 452 KB = **4.7x reduction**.
+    1. **Assumptions & Constraints**:
+       - 512 KB Cortex-M7 SRAM.
+       - MobileNetV2 peak node (inverted residual block).
+    2. **Calculations**:
+       - Naive Summation: ~2.1 MB (Incorrect).
+       - Peak Node Input Tensor: 96x96x32 = 288 KB.
+       - Peak Node Output Tensor: 96x96x16 = 144 KB.
+       - Arena Size = 288 KB + 144 KB + 20 KB (scratch) = 452 KB.
+    3. **Conclusion & Interpretation**:
+       - **Result: Memory-Bound Allocation**. By tracking tensor lifetimes, the required SRAM footprint compresses from an impossible 2.1 MB down to a practical 452 KB, safely validating the Cortex-M7 deployment.
 status: published
 provenance: imported
 requires_explanation: false

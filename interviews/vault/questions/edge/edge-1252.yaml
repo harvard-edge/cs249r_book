@@ -11,17 +11,24 @@ title: Edge TPU Sequence Scaling Bottleneck Analysis
 scenario: We deployed a quantized INT8 Vision Transformer on a Google Coral Edge TPU. At a base sequence length of 196 tokens, the model runs efficiently at 15ms per inference. However, when we increase the input resolution to yield 784 tokens, the inference time spikes disproportionately to over 240ms, and we observe heavy PCIe bus traffic and host CPU thrashing.
 question: Why does increasing ViT sequence length from 196 to 784 tokens make Coral Edge TPU latency exceed 240ms and trigger host thrashing?
 details:
-  realistic_solution: The severe latency spike is driven by the O(n²) time and space complexity of the self-attention mechanism. When the sequence length increases by a factor of 4, the number of attention operations and the size of the attention matrix increase by a factor of 16. Because the Coral Edge TPU has a small on-chip SRAM cache (typically ~8MB), the 16x larger intermediate attention matrices can no longer fit entirely on-chip. The Edge TPU runtime is forced to spill these intermediate INT8 activations back to the host CPU over the USB/PCIe bus, causing the massive latency penalty and host thrashing.
+  realistic_solution: 'The spike is driven by the O(n²) space complexity of the self-attention mechanism. When the sequence length increases 4x, the intermediate attention matrices increase 16x. Because the Coral has a strict ~8MB SRAM limit, these massive INT8 activations spill back to the host CPU over the USB/PCIe bus, causing the latency penalty.'
   common_mistake: |
-    **The Pitfall:** Assuming compute time scales linearly with input size.
-    **The Rationale:** Candidates forget the O(n²) complexity of self-attention and the strict SRAM limits of edge devices.
-    **The Consequence:** They fail to identify that the intermediate tensors exceed SRAM, forcing fallback to the host CPU over PCIe.
+    **The Pitfall:** Assuming compute time and memory scale linearly with input size.
+    **The Rationale:** Candidates forget the quadratic complexity of self-attention and the hard physical limits of edge SRAM.
+    **The Consequence:** Catastrophic latency regression when processing higher resolution images.
   napkin_math: |
-    * Sequence length increase: N=196 to N=784 (4x)
-    * Attention scaling: O(N²), so compute and memory increase by 16x
-    * Score matrix per head: N=196 -> ~38KB; N=784 -> ~614KB (INT8)
-    * Total score matrix memory (12 heads): ~460KB -> ~7.3MB
-    * **Total memory exceeds ~8MB SRAM when combined with weights, triggering host fallback.**
+    1. **Assumptions & Constraints:**
+       - Sequence length increase: N=196 to N=784 (4x)
+       - Attention scaling: O(N²)
+       - Hardware: Coral Edge TPU (~8MB SRAM)
+    2. **Calculations:**
+       - Memory scale factor: 4² = 16x increase.
+       - Score matrix per head at N=196: ~38KB.
+       - Total matrix memory (12 heads) at N=196: ~460KB (Fits in 8MB).
+       - Total matrix memory at N=784: 460KB * 16 ~ 7.36MB.
+       - 7.36MB + Model Weights > 8MB SRAM limit.
+    3. **Conclusion & Interpretation:**
+       - **Result: SRAM Overflow & Host Fallback.** The O(n²) memory footprint exceeds the 8MB SRAM, triggering a fallback to the host CPU over PCIe.
 status: published
 provenance: imported
 requires_explanation: false

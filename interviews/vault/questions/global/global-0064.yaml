@@ -8,8 +8,8 @@ competency_area: optimization
 bloom_level: create
 phase: training
 title: SRAM Layer Fusion for Edge CNNs
-scenario: You are deploying an INT8 vision model on a custom edge accelerator with 4MB of on-chip SRAM (500 GB/s bandwidth) and external LPDDR4 DRAM (10 GB/s bandwidth). Processing a high-resolution block (Conv 3x3 -> ReLU -> Conv 1x1) takes ~26ms per frame. The MAC units can theoretically execute the operations in 2ms. Profiling indicates the chip is stalled waiting on DRAM memory transactions for the intermediate activations between the two convolutions.
-question: "How would you eliminate the DRAM bottleneck between Conv 3x3, ReLU, and Conv 1x1 on the 4MB-SRAM edge accelerator?"
+scenario: You are deploying an INT8 vision model on a custom edge accelerator with 4MB of on-chip SRAM and external LPDDR4 DRAM. Processing a high-resolution block (Conv 3x3 -> ReLU -> Conv 1x1) takes ~26ms per frame. The MAC units can theoretically execute the operations in 2ms. Profiling indicates the chip is stalled waiting on DRAM memory transactions for the intermediate activations between the two convolutions.
+question: How would you eliminate the DRAM bottleneck between Conv 3x3, ReLU, and Conv 1x1 on the 4MB-SRAM edge accelerator?
 details:
   realistic_solution: The performance is bottlenecked by the external DRAM bandwidth. The intermediate activation tensor is too large to fit in the 4MB SRAM, forcing the accelerator to write the output of the 3x3 Conv to external DRAM and immediately read it back for the 1x1 Conv. To optimize this, implement Layer Fusion (Depth-First Tiling). By computing a small spatial tile (e.g., 128x128) of the 3x3 Conv, the intermediate activations remain small enough to stay entirely within the 4MB SRAM. The ReLU and 1x1 Conv are applied immediately to this tile in SRAM, and only the final output is written to DRAM. This completely eliminates the DRAM round-trip for intermediate activations.
   common_mistake: |
@@ -17,11 +17,15 @@ details:
     **The Rationale:** Quantization is the standard go-to for edge model optimization to reduce latency.
     **The Consequence:** Model accuracy degrades without addressing the actual bottleneck, which is the massive intermediate activation footprint.
   napkin_math: |
-    - **Intermediate activation size**: 2M pixels * 64 channels * 1 byte = 128 MB.
-    - **Without fusion**: 3x3 Conv writes 128 MB, 1x1 Conv reads 128 MB. Total = 256 MB DRAM I/O.
-    - **DRAM I/O time**: 256 MB / 10 GB/s = 25.6 ms.
-    - **With Layer Fusion (128x128 tiles)**: Tile size is 128 * 128 * 64 = 1 MB (fits in 4MB SRAM).
-    - **Conclusion**: DRAM traffic for intermediates drops to 0, saving **~25.6 ms** and reaching the ~2ms compute bound.
+    1. **Assumptions & Constraints:**
+       - 4MB SRAM, 10 GB/s DRAM.
+       - Activation size = 2M pixels * 64 channels * 1 byte = 128 MB.
+    2. **Calculations:**
+       - Without fusion DRAM I/O = 128 MB write + 128 MB read = 256 MB.
+       - I/O time = 256 MB / 10 GB/s = 25.6 ms.
+       - With fusion (128x128 tiles) = 1 MB (fits in 4MB SRAM).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound**
 status: published
 provenance: imported
 requires_explanation: false

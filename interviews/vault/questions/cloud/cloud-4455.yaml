@@ -11,17 +11,22 @@ title: Multi-Tenant KV Cache Isolation in Disaggregated Serving
 scenario: A shared disaggregated serving cluster handles requests from 10 enterprise tenants. Tenant A's large batch of 10K requests floods the KV cache store, causing tenant B's requests to be preempted and delayed.
 question: How would you isolate KV cache usage so tenant A's 10K-request burst cannot preempt tenant B's requests?
 details:
-  realistic_solution: Multi-tenant KV cache isolation involves per-tenant KV page quotas (e.g., 6GB baseline per tenant), allowing burst up to 10GB with work-stealing from idle tenants. Implement hierarchical fair queuing, admission control per tenant, and restrict KV cache eviction scope strictly within a tenant's own pages.
+  realistic_solution: 'Multi-tenant KV cache isolation involves per-tenant KV page quotas (e.g., 6GB baseline per tenant), allowing burst up to 10GB with work-stealing from idle tenants. Implement hierarchical fair queuing, admission control per tenant, and restrict KV cache eviction scope strictly within a tenant''s own pages.'
   common_mistake: |
     **The Pitfall:** Implementing token-bucket rate limiting at the request level without KV cache memory quotas.
     **The Rationale:** Rate limiting prevents request flooding but does not prevent a single tenant with large requests from monopolizing KV cache memory.
     **The Consequence:** A single tenant can trigger cache evictions across the system, degrading performance for all other tenants and violating SLAs.
   napkin_math: |
-    1. **Establish Baseline Quota:** 10 tenants, 60GB KV cache = 6GB baseline per tenant.
-    2. **Calculate Max Outstanding Context:** 6GB / (524KB/token for 8B model) = 11,450 tokens. For 70B: 6GB / 2.62MB/token = 2,290 tokens max.
-    3. **Calculate Typical Usage:** At 10 requests per tenant with 200-token context: 10 × 200 × 2.62MB = 5.24GB per tenant (under 6GB quota).
-    4. **Calculate Burst Allowance:** Burst allowance (10GB): 10 × 400-token context = 10.48GB.
-    **Final Result: A baseline of 6GB with a 10GB burst allowance safely prevents monopolization while allowing reasonable bursting.**
+    1. **Assumptions & Constraints:**
+       - 10 tenants, 60 GB total KV cache pool.
+       - 70B model KV cache size: ~2.62 MB/token.
+    2. **Calculations:**
+       - Baseline quota per tenant: 60 GB / 10 = 6 GB.
+       - Max outstanding tokens (6 GB limit): 6 GB / 2.62 MB/token = ~2,290 tokens.
+       - Typical request (200 tokens): 200 * 2.62 MB = 524 MB.
+       - Tenant burst allowance (e.g., 10 GB): allows ~3,816 tokens using work-stealing from idle tenants.
+    3. **Conclusion & Interpretation:**
+       **Result: 6 GB Quota (Memory-Bound).** Enforcing a strict memory quota rather than just RPS limits isolates tenants and guarantees SLA performance.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,19 +8,23 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: The FP32 Fallback Penalty
-scenario: You serve a PyTorch model on a T4 GPU. The model is cast to `torch.float16`. You use standard matrix multiplications. However, your profiler shows the GPU is only achieving 8 TFLOPS of throughput, which is the theoretical maximum for FP32 on a T4. The T4 is capable of 65 TFLOPS in FP16.
+scenario: You serve a PyTorch model on a GPU. The model is cast to `torch.float16`. You use standard matrix multiplications. However, your profiler shows the GPU is only achieving 8 TFLOPS of throughput, which is the theoretical maximum for FP32 on this hardware.
 question: Why is your FP16 model running at FP32 speeds?
 details:
-  realistic_solution: 'Your FP16 data is being processed by the CUDA cores (FP32 pipeline), not the Tensor Cores. On the T4, Tensor Cores deliver 65 TFLOPS for FP16 but require specific conditions: matrix dimensions must be multiples of 8 (ideally 16), and you must use `torch.cuda.amp` or explicitly call cuBLAS with TF32/FP16 Tensor Core paths. Standard `torch.matmul` on FP16 tensors with non-aligned dimensions falls back to CUDA cores, which process FP16 at FP32 speed (8.1 TFLOPS). The fix: enable `torch.backends.cudnn.allow_tf32 = True` and ensure tensor dimensions are multiples of 8.'
+  realistic_solution: 'Your FP16 data is being processed by the CUDA cores (FP32 pipeline), not the Tensor Cores. Tensor Cores deliver 65 TFLOPS for FP16 but require specific conditions: matrix dimensions must be multiples of 8 (ideally 16), and you must use `torch.cuda.amp` or explicitly call cuBLAS with TF32/FP16 Tensor Core paths. Standard `torch.matmul` on FP16 tensors with non-aligned dimensions falls back to CUDA cores, which process FP16 at FP32 speed (8.1 TFLOPS). The fix: enable `torch.backends.cudnn.allow_tf32 = True` and ensure tensor dimensions are multiples of 8.'
   common_mistake: |
     **The Pitfall:** Assuming the model didn't actually cast to FP16.
     **The Rationale:** When performance doesn't increase, engineers often suspect the tensor data types remained FP32.
-    **The Consequence:** They verify the memory footprint confirms FP16, but fail to realize the math engine is falling back to CUDA cores because of unaligned matrix dimensions or missing backend flags.
+    **The Consequence:** They fail to realize the math engine is falling back to CUDA cores because of unaligned matrix dimensions or missing backend flags.
   napkin_math: |
-    1. **T4 Peak FP32:** 8.1 TFLOPS.
-    2. **T4 Peak FP16 (Tensor Cores):** 65 TFLOPS.
-    3. **Alignment Rule:** Tensor Cores require matrix dimensions to be multiples of 8.
-    4. **Result:** **Failing to align dimensions by even 1 pixel (e.g., size 127 instead of 128) silently degrades hardware performance by exactly 8x.**
+    1. **Assumptions & Constraints:**
+       - Peak FP32 = 8.1 TFLOPS.
+       - Peak FP16 (Tensor Cores) = 65 TFLOPS.
+       - Tensor Cores require dimensions to be multiples of 8.
+    2. **Calculations:**
+       - Throughput ratio: 65 TFLOPS / 8.1 TFLOPS ≈ 8x.
+    3. **Conclusion & Interpretation:**
+       - **Result: 8x Hardware Fallback Penalty.** Standard `torch.matmul` on unaligned dimensions silently forces FP16 data through the slower FP32 CUDA core pipeline.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,20 +8,23 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Evaluating IO-Aware Attention on A100
-scenario: Your team is training a 7B parameter Transformer model on a cluster of NVIDIA A100 GPUs (40GB HBM2, 2.0 TB/s memory bandwidth, 312 TFLOPS BF16). Profiling the standard self-attention implementation reveals it is heavily memory-bound. For sequence length 4096, attention takes 10ms per layer. An engineer proposes a new attention algorithm that computes attention scores on-the-fly in SRAM (192KB per SM) without writing the N x N attention matrix to HBM. However, this algorithm requires recomputing values during the backward pass, increasing total FLOPs by 15%.
-question: Will the SRAM-tiled attention algorithm speed up training at sequence length 4096 despite 15% more FLOPs, and why?
+scenario: Your team is training a 7B parameter Transformer model on a cluster of NVIDIA A100 GPUs. Profiling the standard self-attention implementation reveals it is heavily memory-bound. For sequence length 4096, attention takes 10ms per layer. An engineer proposes a new attention algorithm that computes attention scores on-the-fly in SRAM without writing the N x N attention matrix to HBM. However, this algorithm requires recomputing values during the backward pass, increasing total FLOPs by 15%.
+question: Will FlashAttention-2 speed up training at sequence length 4096 despite 15% more FLOPs, and why?
 details:
-  realistic_solution: Accept the proposal. Standard attention writes an O(N^2) intermediate matrix to HBM. At N=4096 with batch=8 and 32 heads, this IO costs ~8.5GB per layer, taking ~4.25ms at 2.0 TB/s. The proposed IO-aware algorithm (FlashAttention) trades ~15% extra FLOPs for eliminating this HBM traffic entirely. Since the operation is heavily memory-bound (IO time >> compute time), the extra compute adds <0.5ms while saving >4ms of IO — a clear net win.
+  realistic_solution: Accept the proposal. Standard attention writes an O(N^2) intermediate matrix to HBM. At N=4096 with batch=8 and 32 heads, this IO costs ~8.5GB per layer, taking ~4.25ms at 2.0 TB/s. The proposed IO-aware algorithm (FlashAttention-2) trades ~15% extra FLOPs for eliminating this HBM traffic entirely. Since the operation is heavily memory-bound (IO time >> compute time), the extra compute adds <0.5ms while saving >4ms of IO — a clear net win.
   common_mistake: |
     **The Pitfall:** Rejecting the proposal because it increases total FLOPs.
     **The Rationale:** Engineers fixate on minimizing compute operations, failing to realize that for memory-bound operations, HBM I/O is the true bottleneck.
     **The Consequence:** Missing out on massive speedups because they refuse to trade a small amount of cheap compute for dramatically reduced expensive memory traffic.
   napkin_math: |
-    - N=4096 matrix size per head: 16.7M elements ≈ 33MB in BF16.
-    - For batch size 8 and 32 heads: 33MB * 8 * 32 ≈ 8.5 GB per layer.
-    - HBM transfer time at 2.0 TB/s: 8.5 GB / 2.0 TB/s ≈ 4.25 ms.
-    - A 15% increase in compute on a heavily underutilized 312 TFLOPS unit adds negligible overhead (< 0.5ms).
-    - **Conclusion: Saving >4ms of I/O heavily outweighs the <0.5ms of extra compute.**
+    1. **Assumptions & Constraints:**
+       - N=4096 matrix size per head: ~33MB in BF16. Batch=8, 32 heads.
+    2. **Calculations:**
+       - HBM footprint: 33MB * 8 * 32 ≈ 8.5 GB per layer.
+       - HBM transfer time at 2.0 TB/s: 8.5 GB / 2.0 TB/s ≈ 4.25 ms.
+       - A 15% increase in compute on a heavily underutilized 312 TFLOPS unit adds < 0.5ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound. Saving >4ms of I/O heavily outweighs the <0.5ms of extra compute.**
 status: published
 provenance: imported
 requires_explanation: true

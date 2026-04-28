@@ -7,36 +7,24 @@ topic: kv-cache-management
 competency_area: memory
 bloom_level: create
 phase: inference
-title: 'KV-Cache: Design Prefix Sharing KV Cache for System Prompt Optimization'
-scenario: 'You serve a 7B LLM on H100s (80GB HBM3) where 80% of requests share the same 1024-token system prompt. Currently you recompute the KV cache for the system prompt on every request.'
-question: 'How would you design a prefix KV cache for the shared 1024-token system prompt, and what TTFT and compute savings would it provide?'
+title: Design Prefix Sharing KV Cache for System Prompt Optimization
+scenario: 'You serve a 7B LLM on H100s where 80% of requests share the same 1024-token system prompt. Currently you recompute the KV cache for the system prompt on every request.'
+question: 'How would you design a prefix KV cache, and what TTFT savings would it provide?'
 details:
-  realistic_solution: 'Store the KV cache for the 1024-token system prompt in HBM. All requests sharing this prefix skip prefill for the first 1024 tokens. Only compute KV for the user-specific suffix.'
+  realistic_solution: 'Store the KV cache for the 1024-token system prompt in HBM. All requests sharing this prefix skip prefill for the first 1024 tokens and only compute KV for the user-specific suffix.'
   common_mistake: |
     **The Pitfall:** Not accounting for the fact that prefix caching only helps Time To First Token (prefill).
-    **The Rationale:** Candidates overestimate the impact, assuming it will speed up the entire generation process including decode latency.
-    **The Consequence:** Erroneous capacity planning and failing to realize that cached prefixes must be invalidated when the model is updated.
+    **The Rationale:** Candidates overestimate the impact, assuming it speeds up decode latency.
+    **The Consequence:** Erroneous capacity planning and failing to realize cached prefixes must be invalidated on model updates.
   napkin_math: |
-    - **KV Cache per Token:** 32 layers × 2 (K&V) × 8 KV heads × 128 head_dim × 2 bytes = 131,072 bytes (~131 KB).
-    - **System Prompt KV Size:** 1024 tokens × 131 KB = 134 MB.
-    - **HBM Impact:** 134 MB / 80 GB = **0.17% of HBM**.
-    - **Without Caching TTFT:** 1280 tokens (1024+256) prefill. FLOPs = 7B × 2 × 1280 = 17.92 TFLOPs. Time at 40% MFU (395.6 TFLOPS) = 17.92 / 395.6 = 0.045 seconds.
-    - **With Caching TTFT:** 256 tokens prefill. FLOPs = 7B × 2 × 256 = 3.58 TFLOPs. Time = 3.58 / 395.6 = 0.009 seconds (**5× faster TTFT**).
-    - **Compute Savings:** 80% of traffic saves 1024/1280 compute = **64% overall prefill compute reduction**.
-status: published
-provenance: imported
-requires_explanation: true
-expected_time_minutes: 16
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: claude-sonnet-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - 7B Model, 32 layers, 8 KV heads, 128 head_dim.
+       - 1024 shared tokens, 256 unique tokens.
+    2. **Calculations:**
+       - KV Size per Token: 32 * 2 * 8 * 128 * 2 bytes = 131 KB.
+       - Shared Prefix Cache: 1024 * 131 KB = 134 MB (0.17% of 80GB HBM).
+       - Old TTFT FLOPs: 7B * 2 * 1280 = 17.92 TFLOPs.
+       - New TTFT FLOPs: 7B * 2 * 256 = 3.58 TFLOPs.
+    3. **Conclusion & Interpretation:**
+       - **Result: 5x TTFT speedup, 64% total prefill compute reduction.**
+       - **Conclusion: Compute-Bound prefill significantly accelerated via HBM cache.**

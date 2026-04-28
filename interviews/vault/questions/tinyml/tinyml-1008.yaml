@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Diagnosing Flash Wait State Stalls in CMSIS-NN
-scenario: A team deployed a wake-word detection model on an ARM Cortex-M4 (STM32F4) running at 168 MHz. The model requires 200 KB of the 256 KB SRAM for activations and 800 KB of the 1 MB Flash for INT8 weights and program code. The CMSIS-NN kernels utilize SIMD instructions (2x INT8 MACs/cycle), and theoretical peak compute suggests an inference time of 50 ms. However, actual on-device profiling shows an inference latency of 180 ms, with heavy MAC unit stalling.
+scenario: A team deployed a wake-word detection model on an ARM Cortex-M4 running at 168 MHz. The model requires 200 KB of SRAM for activations and 800 KB of Flash for INT8 weights and program code. The CMSIS-NN kernels utilize SIMD instructions (2x INT8 MACs/cycle), and theoretical peak compute suggests an inference time of 50 ms. However, actual on-device profiling shows an inference latency of 180 ms, with heavy MAC unit stalling.
 question: Why does a 168 MHz STM32F4 stall when CMSIS-NN streams 800 KB of INT8 weights from flash?
 details:
   realistic_solution: The root cause is Flash memory wait states and bus contention. At 168 MHz, the STM32F4 Flash requires wait states (typically 5), meaning a Flash read takes 6 cycles. Simultaneously fetching instructions and reading INT8 weights from the same Flash interface causes thrashing in the ART accelerator. The CPU is starved of weights. The solution is to relocate inner-loop code or heavily used weights to the remaining 56 KB of zero-wait-state SRAM.
@@ -17,10 +17,15 @@ details:
     **The Rationale:** Candidates often blame CPU frequency and miss the critical latency difference between SRAM activation reads and Flash weight reads.
     **The Consequence:** Failing to diagnose severe bus contention and wait-state stalling in memory-bound ML models.
   napkin_math: |
-    * **Flash Read Latency:** At 168 MHz, Flash requires 5 wait states (6 cycles per read).
-    * **Fetch Rate:** A 32-bit Flash read provides 4 INT8 weights every 6 cycles.
-    * **Compute Rate:** CMSIS-NN SIMD processes 2 INT8 MACs/cycle, consuming 4 weights in 2 cycles.
-    * **Result:** The CPU stalls for 4 out of every 6 cycles, capping throughput at **~33% of theoretical peak**, turning a 50 ms inference into >150 ms.
+    1. **Assumptions & Constraints:**
+       - CPU Clock: 168 MHz. SIMD Capability: 2 INT8 MACs/cycle.
+       - Flash Latency: 5 wait states (6 cycles per 32-bit read).
+    2. **Calculations:**
+       - Compute Demand: 2 INT8 MACs/cycle means 4 weights are consumed every 2 cycles.
+       - Memory Supply: A 32-bit Flash read provides 4 INT8 weights every 6 cycles.
+       - Stall Ratio: CPU waits 4 out of every 6 cycles for weights to load from Flash.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bandwidth-Bound.** The CPU is starved by Flash wait states, capping throughput at ~33% of theoretical peak, turning a 50 ms inference into >150 ms.
 status: published
 provenance: imported
 requires_explanation: false

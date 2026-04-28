@@ -8,21 +8,25 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: Layer Fusion SRAM Calculation
-scenario: You are optimizing operator scheduling for an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system with 512 KB of shared SRAM. A sub-graph has two sequential Conv2D layers running on the Ethos-U55. Layer 1 takes a 120 KB input and produces a 320 KB intermediate tensor. Layer 2 consumes this intermediate tensor to produce a 160 KB output. Assuming standard sequential scheduling allocates output memory before execution and frees input memory after, you must compare this to cascaded layer fusion, which divides the intermediate tensor into 4 spatial tiles (requiring only one tile in memory plus a 10 KB halo overhead) while keeping full input and output tensors allocated.
-question: "What are the sequential and fused peak SRAM requirements for the two-layer Corstone-300 convolution subgraph?"
+scenario: Two sequential Conv2D layers process a 120 KB input through a 320 KB intermediate tensor into a 160 KB output. Layer fusion cascades execution, utilizing a single 90 KB spatial intermediate tile instead of materializing the entire 320 KB buffer.
+question: "What are the sequential and fused peak SRAM requirements for the two-layer convolution subgraph?"
 details:
-  realistic_solution: Analyze the memory lifecycle of the tensors. In sequential execution, the peak occurs when the largest producer-consumer pair is in memory. With cascaded layer fusion on the Ethos-U55, the intermediate tensor is never fully materialized. Instead, the scheduler only allocates a single tile buffer with its halo margin, keeping the full input and output tensors in the shared SRAM.
+  realistic_solution: Model inference utilizes localized buffer reuse mechanics. Deep layer cascaded fusion structurally eradicates complete temporal buffer allocation cycles by spatially interlocking operators directly via tightly mapped SRAM tiles.
   common_mistake: |
-    **The Pitfall:** Incorrectly summing all tensor sizes for the sequential peak instead of tracking memory lifecycles.
-    **The Rationale:** Candidates often forget that memory is freed and reused throughout the execution graph.
-    **The Consequence:** They overestimate sequential usage (120+320+160=600 KB) and for fusion, may forget the 10 KB halo overhead or mistakenly divide the input and output sizes by 4 as well.
+    **The Pitfall:** Incorrectly summing independent tensor boundaries linearly for sequential execution footprints.
+    **The Rationale:** Candidates fundamentally fail to process Directed Acyclic Graph (DAG) temporal memory reclamation mechanisms.
+    **The Consequence:** The model footprint drastically overestimates actual runtime usage, falsely diagnosing hard SRAM bound exhaustion.
   napkin_math: |
-    * **Sequential Peak:**
-      * During Layer 1 = 120 KB + 320 KB = 440 KB.
-      * During Layer 2 = 320 KB + 160 KB = 480 KB.
-      * Peak = **480 KB** (fits in 512 KB SRAM).
-    * **Fusion Intermediate Buffer:** (320 KB / 4 tiles) + 10 KB halo = 90 KB.
-    * **Fused Peak:** 120 KB (input) + 90 KB (intermediate) + 160 KB (output) = **370 KB**.
+    1. **Assumptions & Constraints:**
+       - Tensors: 120 KB (Input), 320 KB (Intermediate), 160 KB (Output).
+       - Fused intermediate geometry: 320 KB / 4 spatial tiles + 10 KB temporal halo = 90 KB tile footprint.
+    2. **Calculations:**
+       - Sequential Stage 1 trace: 120 KB + 320 KB = 440 KB.
+       - Sequential Stage 2 trace: 320 KB + 160 KB = 480 KB.
+       - Max sequential execution envelope: 480 KB.
+       - Fused graph envelope: 120 KB (In) + 90 KB (Tiled buffer) + 160 KB (Out) = 370 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Fused allocation isolates a 370 KB peak versus a sequential 480 KB baseline (Memory-Bound Optimization).**
 status: published
 provenance: imported
 requires_explanation: false

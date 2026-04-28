@@ -11,21 +11,23 @@ title: Implementing memory-efficient backprop for on-device RL on A17 Pro
 scenario: You are implementing a mobile game AI using PPO on a device with 8GB RAM. The policy network (500K params) updates after 64 steps. PPO requires the ratio of new to old policy probabilities, which OOMs when keeping two full autograd graphs.
 question: How do you compute PPO old-policy ratios without keeping two full autograd graphs in memory?
 details:
-  realistic_solution: 'For PPO ratio computation, the old policy probabilities are
-    constants (no gradient needed): compute old_log_probs with torch.no_grad() before
-    the update, store the scalar log probabilities (64 floats = 256 bytes), then discard
-    the old policy graph. Only the new policy forward pass needs the computational
-    graph. For 500K params at batch=64: new policy activations ≈ 50MB — fits easily
-    in 8GB.'
+  realistic_solution: 'For PPO ratio computation, the old policy probabilities are constants (no gradient needed): compute old_log_probs with torch.no_grad() before the update, store the scalar log probabilities (64 floats = 256 bytes), then discard the old policy graph. Only the new policy forward pass needs the computational graph. For 500K params at batch=64: new policy activations ≈ 50MB — fits easily in 8GB.'
   common_mistake: |
     **The Pitfall:** Running both old and new policy forward passes with autograd enabled.
     **The Rationale:** Blindly porting PPO implementations that rely on huge cloud GPU VRAM to store massive parallel computational graphs.
-    **The Consequence:** The activation tape for both graphs blows past the device's usable memory, causing an immediate OOM crash.
+    **The Consequence:** The activation tape for both graphs blows past the device's usable memory limit, causing an immediate OOM crash.
   napkin_math: |
-    - **Old Policy (no_grad):** Compute log_probs and store as scalars (64 * 4 bytes = 256 bytes). 0 MB graph.
-    - **New Policy (autograd):** Activations for backward pass ≈ 10 MB.
-    - **Model Weights:** 500K params * 4 bytes * 2 policies = 4 MB.
-    - **Result:** Total memory is **~14 MB**, easily avoiding OOM on an 8GB device.
+    1. **Assumptions & Constraints:**
+       - Model: 500K parameters (FP32 = 2 MB).
+       - Batch size: 64 steps.
+       - Device RAM: 8GB (OS limits usable RAM).
+    2. **Calculations:**
+       - Old Policy (no_grad): 64 scalar floats * 4 bytes = 256 bytes (0 MB graph).
+       - New Policy (autograd): Activations for 64 steps ≈ 10 MB.
+       - Total Model Weights: 2 MB * 2 policies = 4 MB.
+       - Total Peak Memory: 256 bytes + 10 MB + 4 MB ≈ 14 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound training fits cleanly in ~14 MB by detaching the old policy's computational graph.**
 status: published
 provenance: imported
 requires_explanation: false

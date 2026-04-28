@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-2098
+title: MoE Capacity Factor Tuning
+topic: mixture-of-experts
+status: published
+provenance: human
+scenario: You are tuning the capacity factor (CF) for a 64-expert MoE model. CF=1.0 means each expert can handle exactly B/E tokens (batch size / num experts). Your monitoring shows 5% of tokens are being dropped at CF=1.0. Increasing CF to 1.5 eliminates drops but increases per-expert buffer memory by 50% and slows AllToAll.
+question: How do you reason about the optimal capacity factor and the resulting trade-offs?
+details:
+  realistic_solution: 'The capacity factor controls a three-way tradeoff: (1) Quality: dropped tokens hurt model quality (they get a zero or residual-only path). At 5% drop rate, quality loss may be significant. (2) Memory: buffer memory per expert = CF × B/E × d × bytes. Going from CF=1.0 to 1.5 adds 50% memory overhead per expert. (3) Communication: AllToAll volume scales with the actual number of dispatched tokens, which increases with CF. Optimal approach: profile the actual routing distribution. If it''s near-uniform (low variance), CF=1.1-1.2 suffices. If heavily skewed (some experts are popular), either increase CF to 1.3-1.5 OR strengthen the auxiliary load-balancing loss. In practice, CF=1.25 with a well-tuned aux loss is the common sweet spot.'
+  common_mistake: |
+    **The Pitfall:** Setting the capacity factor arbitrarily high (e.g., 2.0) "just to be safe."
+    **The Rationale:** Prioritizing zero token drops without understanding the linear increase in memory allocation and network communication volume.
+    **The Consequence:** Severe OOMs or degraded AllToAll performance that bottlenecks the entire training run.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 64 experts, global batch 8192, hidden dimension d=4096, BF16 (2 bytes).
+    2. **Calculations:**
+       - Base token allocation (B/E): 8192 / 64 = 128 tokens per expert.
+       - CF=1.0 buffer: 128 × 4096 × 2 = 1.05 MB/expert (67 MB total).
+       - CF=1.5 buffer: 192 × 4096 × 2 = 1.57 MB/expert (100 MB total).
+       - CF=1.25 buffer: 160 × 4096 × 2 = 1.31 MB/expert (84 MB total).
+    3. **Conclusion & Interpretation:**
+       - **Result: Communication-Bound.** CF=1.25 balances minimal token dropping with efficient 84 MB memory utilization, avoiding bloated AllToAll traffic.
+last_modified: '2026-04-01'
+tags:
+- scope:Network Architectures

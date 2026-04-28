@@ -8,20 +8,26 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: 'DLRM Training on TPU v5e Pod: Embedding Table Placement'
-scenario: A team is porting a DLRM training job to a TPU v5e pod (256 chips). The embedding tables total 8TB — far exceeding HBM capacity. TPU v5e has 16GB HBM per chip, 256 chips = 4TB total HBM. Embedding tables don't fit.
-question: How would you place 8TB of embedding tables on a 256-chip TPU v5e pod with only 4TB total HBM?
+scenario: A team is porting a DLRM training job to a TPU pod (256 chips). The embedding tables total 8TB. TPU HBM is 16GB per chip, providing 4TB total HBM. Embedding tables don't fit.
+question: How would you place 8TB of embedding tables on a 256-chip TPU pod with only 4TB total HBM?
 details:
-  realistic_solution: 'Tiered memory placement for embedding tables: (1) Hot table partition (high-access frequency): top 20% of embedding rows receive 80% of lookups (Zipf). Size: 20% * 8TB = 1.6TB. Place in HBM. Fits in 4TB HBM alongside model. (2) Warm table partition: next 30% of rows. Place in TPU extended memory (if available) or CPU DRAM attached via PCIe. TPU v5e: 256GB DRAM per host * 256 chips / (8 TPUs per host) = 256 * 32 hosts = 8TB CPU DRAM available. Use HBM-DRAM hybrid: pre-fetch warm rows to HBM before batch using access pattern prediction. (3) Cold partition (50% of rows, 20% of lookups): keep in distributed parameter server (CPU cluster). Async fetch during step N for step N+2 (prefetch pipeline). (4) JAX/XLA implementation: use jax.lax.all_gather with sharded embedding tables across all 256 chips. Each chip holds a 1.6TB/256 = 6.25GB shard of the hot partition. Cold lookups: async fetch from CPU parameter server, pipelined with GPU compute.'
+  realistic_solution: 'Tiered memory placement for embedding tables: (1) Hot table partition (high-access frequency): top 20% of embedding rows receive 80% of lookups (Zipf). Size: 20% * 8TB = 1.6TB. Place in HBM. Fits in 4TB HBM alongside model. (2) Warm table partition: next 30% of rows. Place in TPU extended memory (if available) or CPU DRAM attached via PCIe. Use HBM-DRAM hybrid: pre-fetch warm rows to HBM before batch using access pattern prediction. (3) Cold partition (50% of rows, 20% of lookups): keep in distributed parameter server (CPU cluster). Async fetch during step N for step N+2 (prefetch pipeline).'
   common_mistake: |
     **The Pitfall:** Attempting to fit all embedding tables in HBM by aggressive quantization (e.g., INT4).
     **The Rationale:** Engineers accustomed to LLM weight quantization assume the same techniques apply to recommendation models without quality loss.
-    **The Consequence:** INT4 embedding quality degrades significantly for recommendation models where precision matters. Moreover, 8TB/8 = 1TB still exceeds available per-chip capacity depending on sharding overhead, but fundamentally harms model accuracy.
+    **The Consequence:** INT4 embedding quality degrades significantly for recommendation models, and 1TB still strains capacity, fundamentally harming model accuracy.
   napkin_math: |
-    - **Capacity Gap:** 8TB total tables / 256 TPU chips = 31.25GB per chip. TPU v5e HBM = 16GB. Gap = 15.25GB per chip.
-    - **Hot Partition Sizing:** Top 20% of 8TB = 1.6TB.
-    - **Per-Chip Hot Partition:** 1.6TB / 256 chips = 6.25GB (fits easily in 16GB HBM, leaving 9.75GB for model/KV).
-    - **Cold Lookup Latency:** CPU PS latency is &approx;100&mu;s per lookup.
-    - **Pipeline Hiding:** With an async prefetch pipeline of depth 2, the cold lookup latency is hidden behind the **10-50ms TPU compute step**.
+    1. **Assumptions & Constraints:**
+       - Total embedding tables = 8TB.
+       - TPU HBM = 16GB/chip * 256 chips = 4TB total.
+       - Access pattern: Top 20% of rows receive 80% of lookups.
+    2. **Calculations:**
+       - Capacity Gap: 8TB / 256 chips = 31.25GB/chip (exceeds 16GB).
+       - Hot Partition (20%): 8TB * 0.20 = 1.6TB.
+       - Per-Chip Hot Partition: 1.6TB / 256 chips = 6.25GB (fits in 16GB, leaving 9.75GB).
+       - Cold Lookup Latency: CPU PS latency ≈ 100μs per lookup.
+    3. **Conclusion & Interpretation:**
+       - **Result: Multi-tiered memory architecture required.** Hot embeddings fit in HBM, while cold lookups are pipelined from CPU DRAM.
 status: published
 provenance: imported
 requires_explanation: true

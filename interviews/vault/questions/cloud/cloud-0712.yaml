@@ -8,37 +8,30 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: The Multi-GPU Scaling Curve
-scenario: You scale a 7B parameter training job from 1 to 2, 4, 8, 16, and 32 H100 GPUs using data parallelism. At 1 GPU, throughput is 1,000 samples/sec. The interconnect is NVLink (450 GB/s unidirectional) within 8-GPU nodes and InfiniBand (50 GB/s unidirectional) between nodes.
+scenario: You scale a 7B parameter training job from 1 to 2, 4, 8, 16, and 32 H100 GPUs using data parallelism. At 1 GPU, throughput is 1,000 samples/sec. The interconnect is NVLink within 8-GPU nodes and InfiniBand between nodes.
 question: What throughput do you predict at 1, 2, 4, 8, 16, and 32 H100 GPUs, accounting for communication overhead?
 details:
-  realistic_solution: Scaling efficiency = actual throughput / (N × single-GPU throughput). Within a node (NVLink), AllReduce is fast and overlaps well with compute. Across nodes (InfiniBand), bandwidth drops ~9× and latency increases, creating a scaling cliff at the node boundary.
+  realistic_solution: Scaling efficiency = actual throughput / (N * single-GPU throughput). Within a node (NVLink), AllReduce is fast and overlaps well with compute. Across nodes (InfiniBand), bandwidth drops ~9x and latency increases, creating a scaling cliff at the node boundary.
   common_mistake: |
     **The Pitfall:** Assuming linear scaling (e.g., 32 GPUs = 32,000 samples/sec).
     **The Rationale:** Candidates often ignore communication overhead entirely or fail to model it mathematically.
     **The Consequence:** Completely missing the discontinuous drop in scaling efficiency caused by crossing the node boundary from high-bandwidth NVLink to lower-bandwidth InfiniBand.
   napkin_math: |
-    - **Single-GPU Compute Time:** 100 ms per step (based on 1,000 samples/sec).
-    - **Intra-node Ring AllReduce Time (NVLink 450 GB/s):** `2 * ((N-1)/N) * 14 GB / 450 GB/s`.
-    - **2 GPUs:** 31.1 ms. Exposed overhead (30%) = 9.3 ms. Throughput = 2 * 1000 * (100 / 109.3) = **1,830 samples/sec (91.5%)**.
-    - **4 GPUs:** 46.7 ms. Exposed overhead (30%) = 14.0 ms. Throughput = 4 * 1000 * (100 / 114.0) = **3,509 samples/sec (87.7%)**.
-    - **8 GPUs:** 54.4 ms. Exposed overhead (30%) = 16.3 ms. Throughput = 8 * 1000 * (100 / 116.3) = **6,879 samples/sec (86.0%)**.
-    - **Inter-node Ring AllReduce Time (IB NDR 50 GB/s):** Across 16 GPUs (2 nodes), flat ring: `2 * (15/16) * 14 GB / 50 GB/s` = 525 ms.
-    - **16 GPUs:** Exposed overhead (30%) = 157.5 ms. Throughput = 16 * 1000 * (100 / 257.5) = **6,213 samples/sec (38.8%)**.
-    - **Conclusion: The massive drop from NVLink to InfiniBand creates a scaling cliff at the node boundary.**
+    1. **Assumptions & Constraints:**
+       - Single-GPU Compute Time: 100 ms per step (based on 1,000 samples/sec).
+       - NVLink (Intra-node) bandwidth: 450 GB/s.
+       - InfiniBand (Inter-node) bandwidth: 50 GB/s.
+       - Gradients size: 14 GB.
+    2. **Calculations:**
+       - Intra-node Ring AllReduce Time (NVLink): `2 * ((N-1)/N) * 14 GB / 450 GB/s`.
+       - 8 GPUs: `2 * (7/8) * 14 / 450` = 54.4 ms. Exposed overhead (assuming 30% unhidden) = 16.3 ms. Throughput = 8 * 1000 * (100 / 116.3) = 6,879 samples/sec.
+       - Inter-node Ring AllReduce Time (IB NDR): `2 * ((N-1)/N) * 14 GB / 50 GB/s`.
+       - 16 GPUs: `2 * (15/16) * 14 / 50` = 525 ms. Exposed overhead (30%) = 157.5 ms. Throughput = 16 * 1000 * (100 / 257.5) = 6,213 samples/sec.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** The massive drop from NVLink to InfiniBand creates a discontinuous scaling cliff at the node boundary.
 status: archived
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 12
 validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
 math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

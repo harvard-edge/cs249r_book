@@ -8,19 +8,25 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: On-Device Personalization Memory Footprint
-scenario: An edge device runs a personalized acoustic anomaly detector for factory machines. The base model is a ResNet-18 feature extractor. To adapt to a specific machine's noise profile, you freeze the ResNet and append a 2-layer FP32 MLP personalization head (Input: 256, Hidden: 64, Output: 2). You train this head on-device using the Adam optimizer with a batch size of 16.
+scenario: 'An edge device runs a personalized acoustic anomaly detector for factory machines. The base model is a ResNet-18 feature extractor. To adapt to a specific machine''s noise profile, you freeze the ResNet and append a 2-layer FP32 MLP personalization head (Input: 256, Hidden: 64, Output: 2). You train this head on-device using the Adam optimizer with a batch size of 16.'
 question: What exact byte footprint is needed for the MLP head's weights, gradients, Adam states, and batch activations with batch size 16?
 details:
-  realistic_solution: Recognize that the backbone is frozen, so its intermediate activations are discarded. Calculate the memory for 16,578 parameters (16 bytes per param for weights, grads, and Adam states) and add the activation memory for the batch of 16 flowing into the two linear layers.
+  realistic_solution: 'With the backbone frozen, its intermediate activations are safely discarded. Compute the total parameters of the 2-layer FP32 MLP (16,578). Each parameter requires 16 bytes: 4 for the weight, 4 for the gradient, and 8 for the Adam optimizer states (first and second moments). Finally, calculate the transient activation memory for the batch of 16 flowing through the two layers, yielding a highly constrained, cache-friendly footprint of ~286 KB.'
   common_mistake: |
     **The Pitfall:** Forgetting optimizer state memory requirements.
     **The Rationale:** Candidates often forget that Adam requires 8 bytes per parameter for first and second moment states, or they incorrectly include memory for the frozen ResNet-18's intermediate activations.
     **The Consequence:** The calculated memory footprint is wildly underestimated, potentially leading to Out-Of-Memory (OOM) errors during on-device fine-tuning.
   napkin_math: |
-    1. Parameters: L1 (256*64 + 64 bias) + L2 (64*2 + 2 bias) = 16,448 + 130 = 16,578 params.
-    2. Param Memory (FP32+Adam): 16,578 * 16 bytes (Weights: 4, Gradients: 4, Momentum: 4, Variance: 4) = 265,248 bytes.
-    3. Activations (BS=16): L1_in (16*256*4 = 16,384 B) + L2_in (16*64*4 = 4,096 B) = 20,480 bytes.
-    4. **Total Footprint = 265,248 + 20,480 = 285,728 bytes (~286 KB).**
+    1. **Assumptions & Constraints:**
+       - FP32 parameters (16 bytes total: 4 weight + 4 grad + 8 Adam state).
+       - Frozen backbone (no gradients/activations).
+       - Batch size: 16.
+    2. **Calculations:**
+       - Params L1: (256 * 64) + 64 = 16,448. Params L2: (64 * 2) + 2 = 130. Total = 16,578.
+       - State footprint: 16,578 * 16 bytes = 265,248 bytes.
+       - Activations footprint: (16 * 256 * 4) + (16 * 64 * 4) = 16,384 + 4,096 = 20,480 bytes.
+    3. **Conclusion & Interpretation:**
+       - **Result: 285,728 bytes (~286 KB) total footprint.** Overlooking Adam optimizer states drastically underestimates on-device fine-tuning memory limits.
 status: published
 provenance: imported
 requires_explanation: false

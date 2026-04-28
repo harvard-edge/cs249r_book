@@ -8,21 +8,29 @@ competency_area: precision
 bloom_level: evaluate
 phase: inference
 title: The Mixed-Precision Deployment Plan
-scenario: You're deploying a 100-layer model on the Apple Neural Engine via Core ML. Running everything in FP16 gives a 2% accuracy drop — unacceptable for your medical imaging app. Running everything in FP32 means the Neural Engine can't be used (it only supports FP16).
+scenario: You're deploying a 100-layer model via Core ML. Running everything in FP16 gives a 2% accuracy drop — unacceptable for your medical imaging app. Running everything in FP32 means the Neural Engine can't be used.
 question: How would you design a mixed-precision strategy that gets Neural Engine speed with FP32 accuracy?
 details:
-  realistic_solution: Profile each layer's precision sensitivity by running the model in FP32 and comparing each layer's output to its FP16 equivalent using cosine similarity. Layers with cosine similarity > 0.999 are FP16-safe. Layers below that threshold need FP32.
+  realistic_solution: Implement a layer-wise mixed-precision profiling strategy. Execute the model in FP32 as the golden baseline, then iteratively quantize individual layers to FP16, measuring the cosine similarity of the output activations. Pin layers with cosine similarity < 0.999 (e.g., softmax, layer normalization) to FP32 for execution on the CPU/GPU, while offloading the remaining 90%+ FP16-safe layers to the Neural Engine. Use Core ML's MLComputeUnits configuration to manage execution routing.
   common_mistake: |
-    **The Pitfall:** Running the whole model in FP32 on the GPU/CPU to preserve accuracy.
-    **The Rationale:** Engineers assume that if one layer fails in FP16, the entire model must be bumped to FP32.
-    **The Consequence:** The model runs 3-5x slower because it fails to utilize the dedicated Neural Engine for the 95% of layers that are perfectly stable in FP16.
+    **The Pitfall:** Bumping the entire model to FP32 upon observing a slight top-line accuracy regression.
+    **The Rationale:** Assuming precision sensitivity is uniform across the architecture, rather than isolated to specific operations that demand high dynamic range.
+    **The Consequence:** The model is completely evicted from the dedicated Neural Engine and runs entirely on the CPU/GPU, incurring a massive latency and power penalty.
   napkin_math: |
-    1. **FP16 Only:** 100 layers * 0.2ms = 20ms (Fast but inaccurate).
-    2. **FP32 Only (GPU):** 100 layers * 1.0ms = 100ms (Accurate but slow).
-    3. **Mixed Precision:** 95 layers on NE (FP16) = 19ms. 5 precision-sensitive layers on CPU (FP32) = 5 * 0.6ms = 3ms.
-    4. **Transfer Overhead:** 10 data transfers (5 round-trips between NE and CPU) = 10 * 1.5ms = 15ms.
-    5. **Total Mixed Latency:** 19ms + 3ms + 15ms = 37ms.
-    **Mixed precision is 2.7x faster than pure FP32 while maintaining full accuracy.**
+    1. **Assumptions & Constraints:**
+       - Model depth: 100 layers.
+       - ANE (FP16) layer time: 0.2 ms.
+       - CPU (FP32) layer time: 1.0 ms.
+       - ANE-CPU context switch / data transfer: 1.5 ms per round-trip.
+       - Precision sensitivity: 5 layers require FP32.
+    2. **Calculations:**
+       - FP16 only: 100 * 0.2 ms = 20 ms.
+       - FP32 only (CPU): 100 * 1.0 ms = 100 ms.
+       - Mixed precision execution: (95 * 0.2) + (5 * 1.0) = 19 + 5 = 24 ms.
+       - Transfer overhead: 5 round-trips * 1.5 ms = 7.5 ms.
+       - Total mixed latency: 24 ms + 7.5 ms = 31.5 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound Optimization.** Mixed precision achieves 31.5 ms (vs 100 ms pure FP32), delivering a ~3.1x speedup while strictly preserving the medical-grade FP32 accuracy baseline.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,19 +8,29 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: NPU to CPU Porting Power Diagnosis
-scenario: Your team ported a continuous vibration monitoring model from an NPU-accelerated SoC to a Nordic nRF5340 to leverage its BLE 5.3 capabilities and simplify the BOM. The nRF5340 features a 128 MHz app core, a 64 MHz net core, 256 KB SRAM, 1 MB flash, and a very low ~5mA active current. However, QA reports a massive power regression: the new nRF5340-based system drains the coin cell battery in under two weeks, whereas the previous NPU-based system lasted for months despite having a higher peak active current.
+scenario: >
+  Your team ported a continuous vibration monitoring model from an NPU-accelerated SoC to a Nordic nRF5340 to leverage its BLE 5.3 capabilities and simplify the BOM. QA reports a massive power regression: the new nRF5340-based system drains the coin cell battery in under two weeks, whereas the previous NPU-based system lasted for months despite having a higher peak active current.
 question: Why does the nRF5340 port drain a coin cell faster than the old NPU design despite lower peak current?
 details:
-  realistic_solution: The root cause is the massive increase in active duty cycle due to the loss of hardware acceleration. While the nRF5340's 128 MHz app core has a low peak current, it lacks the parallel MAC arrays of an NPU. It must stay awake for vastly more clock cycles to compute the same neural network, leading to a much higher total energy-per-inference. The programmability-efficiency tradeoff dictates that the CPU takes longer to execute the math, negating the benefits of its lower peak power.
+  realistic_solution: >
+    The root cause is a massive increase in active duty cycle due to the loss of dedicated hardware acceleration. While the general-purpose CPU has a lower peak current, it lacks parallel MAC arrays. It must stay awake for vastly more clock cycles to compute the same neural network, destroying the energy-per-inference metric. The programmability-efficiency tradeoff dictates that the prolonged active time entirely negates the benefit of lower peak power.
   common_mistake: |
-    **The Pitfall:** Assuming the power drain comes from the BLE 5.3 radio, a memory leak, or a sleep state misconfiguration.
+    **The Pitfall:** Assuming the power drain comes from the BLE radio, a memory leak, or sleep state misconfiguration.
     **The Rationale:** Candidates look at the ~5mA active current and fail to analyze the massive difference in processing efficiency and duty cycle between an NPU and a general-purpose CPU.
     **The Consequence:** Time is wasted debugging non-existent software bugs instead of realizing the fundamental hardware mismatch for the workload.
   napkin_math: |
-    - Old NPU: 15mA * 1ms = 15 µAs per inference.
-    - CPU (nRF5340): 5mA * 25ms = 125 µAs per inference.
-    - Average current at 10 inferences per second = 10 * 125 µAs = 1250 µA (1.25 mA).
-    - **Final Result:** A standard 220 mAh CR2032 battery would be depleted by compute alone in 220 mAh / 1.25 mA = 176 hours (**~7.3 days**).
+    1. **Assumptions & Constraints:**
+       - Old NPU: 15mA peak, 1ms inference.
+       - CPU (nRF5340): 5mA peak, 25ms inference.
+       - Inference Rate: 10 Hz.
+       - Battery: 220 mAh CR2032.
+    2. **Calculations:**
+       - NPU Charge/Inference: 15 mA * 1 ms = 15 µAs.
+       - CPU Charge/Inference: 5 mA * 25 ms = 125 µAs.
+       - CPU Average Current: 10 * 125 µAs = 1,250 µA (1.25 mA).
+       - CPU Battery Life: 220 mAh / 1.25 mA = 176 hours (~7.3 days).
+    3. **Conclusion & Interpretation:**
+       - **Result: Battery dead in ~7.3 days.** The CPU draws lower peak current but requires 25x the time, resulting in vastly worse energy efficiency. **Bottleneck: Compute Duty Cycle.**
 status: published
 provenance: imported
 requires_explanation: false

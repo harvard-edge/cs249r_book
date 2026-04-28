@@ -9,7 +9,7 @@ bloom_level: apply
 phase: inference
 title: The Silent Wake-Word Failure
 scenario: You are a TinyML engineer deploying a keyword spotting (KWS) model on a Cortex-M4 microcontroller for a new car's hands-free system. The model, which detects the wake-word 'Hey Lumi', performed at 98% accuracy in its FP32 version. To meet the 10mW power budget, you quantize it to full INT8 using post-training static quantization. On the bench, it works perfectly. But during in-car testing, the wake-word detection rate plummets to near 0%, especially when the AC is on high or a window is down. You notice the model fails silently; it doesn't crash, it just stops recognizing the keyword.
-question: "Why does the INT8 `Hey Lumi` model fail in car noise after PTQ calibration on quiet audio?"
+question: Why does the INT8 `Hey Lumi` model fail in car noise after PTQ calibration on quiet audio?
 details:
   realistic_solution: This is a classic case of quantization overflow due to a non-representative calibration dataset. The initial calibration was likely done with clean audio recorded in a quiet room. The in-car environment introduces high-amplitude noise (AC, road noise) that pushes the audio feature values (e.g., from an MFCC frontend) far outside the dynamic range observed during calibration. When these out-of-range values are quantized, they are 'clipped' or 'clamped' to the max/min integer values (e.g., 127 or -128), destroying the feature's information and making the input pattern unrecognizable to the model. The correct first step is to collect a new, representative calibration dataset that includes these noisy, real-world conditions. Then, re-run the quantization process to capture the true dynamic range of the inputs.
   common_mistake: |
@@ -17,10 +17,14 @@ details:
     **The Rationale:** The most common failure in PTQ comes from a mismatch between calibration data and real-world data, leading to quantization overflow.
     **The Consequence:** Wasting time debugging hardware or falling back to expensive Quantization-Aware Training (QAT) instead of just fixing the calibration dataset.
   napkin_math: |
-    * **Calibration Range:** [-6.0, 6.0]. Scale = 6.0 / 127 ≈ 0.047.
-    * **Normal Input:** 4.0 quantizes to round(4.0 / 0.047) = 85.
-    * **Noisy Spike:** 9.0 is clamped to 6.0, which quantizes to 127.
-    * **Result:** All out-of-range noise values clip to **127**, destroying the magnitude and variation information required for accurate prediction.
+    1. **Assumptions & Constraints:**
+       - Clean Calibration Range: [-6.0, 6.0]. INT8 maximums: [-128, 127].
+    2. **Calculations:**
+       - Scale = 6.0 / 127 ≈ 0.047.
+       - Normal Input: 4.0 quantizes to round(4.0 / 0.047) = 85.
+       - Noisy Spike: 9.0 is out-of-range and clamps to 6.0, which quantizes to 127.
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound.** All out-of-range noise values clip to 127, destroying the magnitude and variation information required for accurate prediction, causing the model to fail silently.
   options:
   - The calibration dataset did not include noisy, in-car audio, causing activation values to exceed the calibrated range and 'clip' during quantization.
   - The Cortex-M4 microcontroller lacks the necessary DSP instructions to perform INT8 convolutions efficiently, corrupting the output.

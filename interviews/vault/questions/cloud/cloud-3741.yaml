@@ -8,19 +8,23 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Dynamic Sparse Attention Pattern Implementation on H100 for Code LLM
-scenario: A code generation LLM uses dynamic sparse attention where each token attends to its 256 nearest tokens + 32 global tokens (288 total). At 8K context, this reduces attention FLOPs from O(n²) to O(n×k).
+scenario: A code generation LLM uses dynamic sparse attention where each token attends to its 256 nearest tokens + 32 global tokens (288 total). At 8K context, this reduces attention FLOPs from O(n²) to O(n*k).
 question: On an H100, will dynamic sparse attention with 288 attended positions per token at 8K context be faster than dense FlashAttention, and why?
 details:
-  realistic_solution: 'Full attention at 8K is BW-limited: 3×8192×128×32×2B (QKV) = 201MB at 3.35 TB/s = 60μs. Sparse attention (288 active positions per token) yields a 96.5% FLOP reduction. But sparse gather requires indirect memory access. GPU sparse attention kernels have an effective bandwidth of ~200 GB/s. Sparse attention time: 8192×288×2B×32 = 151MB at 200 GB/s = 755μs. Sparse is 12.6× SLOWER due to gather overhead.'
+  realistic_solution: 'Full attention at 8K is BW-limited: 3*8192*128*32*2B (QKV) = 201MB at 3.35 TB/s = 60μs. Sparse attention (288 active positions per token) yields a 96.5% FLOP reduction. But sparse gather requires indirect memory access. GPU sparse attention kernels have an effective bandwidth of ~200 GB/s. Sparse attention time: 8192*288*2B*32 = 151MB at 200 GB/s = 755μs. Sparse is 12.6x SLOWER due to gather overhead.'
   common_mistake: |
     **The Pitfall:** Assuming that reducing attention FLOPs proportionally reduces wall-clock time.
     **The Rationale:** Candidates ignore that sparse attention requires irregular memory access patterns that are cache-unfriendly and hard to vectorize.
     **The Consequence:** Adopting a sparse architecture that is paradoxically slower than standard dense attention.
   napkin_math: |
-    - **FlashAttention (8K Dense):** QKV memory = 201MB. At 3.35 TB/s = 60μs.
-    - **Sparse Attention (288 tokens/pos):** Memory = 151MB. Indirect gather effective bandwidth ≈ 200 GB/s. Time = 151MB / 200 GB/s = 755μs.
-    - **Performance Gap:** Sparse is **12.6× slower** than FlashAttention at 8K context.
-    - **Result:** Sparse attention crossover point is around **N ~ 5K**; dense wins easily below that due to contiguous memory access.
+    1. **Assumptions & Constraints:**
+       - Full attention at 8K: 3 * 8192 * 128 * 32 * 2B (QKV) = 201MB. Memory Bandwidth = 3.35 TB/s.
+       - Sparse attention: 288 tokens/pos. Memory = 151MB. Indirect gather effective bandwidth ≈ 200 GB/s.
+    2. **Calculations:**
+       - FlashAttention-2 Time = 201MB / 3.35 TB/s ≈ 60 μs.
+       - Sparse Attention Time = 151MB / 200 GB/s = 755 μs.
+       - Speed Ratio = 755 μs / 60 μs ≈ 12.6x.
+    3. **Conclusion & Interpretation:** **Sparse attention is Memory-Bound and 12.6x slower than FlashAttention-2 at 8K context due to indirect gather overhead.**
 status: published
 provenance: imported
 requires_explanation: true

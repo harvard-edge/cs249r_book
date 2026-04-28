@@ -8,20 +8,25 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Custom Autograd vs Reverse-Linked Graph
-scenario: You are optimizing a custom attention mechanism for a 13B parameter LLM running on 80GB A100 GPUs with a sequence length of 8192. Design A relies on native PyTorch operations, which automatically constructs a reverse-linked graph during the forward pass, linking tensors to their creating functions and saving all intermediate activations (Q, K, V, pre-softmax logits, softmax probabilities) for backpropagation. Design B implements a custom `torch.autograd.Function` that bypasses the default graph construction for intermediates, saving only inputs/outputs and recomputing the rest in the backward pass.
-question: Which attention implementation should you choose: native PyTorch autograd saving all intermediates or a custom autograd function that recomputes them?
+scenario: You are optimizing a custom attention mechanism for a 13B parameter LLM running on 80GB A100 GPUs with a sequence length of 8192. Design A relies on native PyTorch operations, which automatically constructs a reverse-linked graph during the forward pass. Design B implements a custom `torch.autograd.Function` that bypasses the default graph construction for intermediates, saving only inputs/outputs and recomputing the rest in the backward pass.
+question: 'Which attention implementation should you choose: native PyTorch autograd saving all intermediates or a custom autograd function that recomputes them?'
 details:
-  realistic_solution: Design B is required. The default reverse-linked graph maintains references to all intermediate tensors, whose memory footprint scales quadratically with sequence length. By writing a custom autograd function, you prune the reverse-linked graph, dropping massive intermediate nodes and recomputing them, which trades a minor compute penalty for a drastic memory reduction that fits within the 80GB HBM constraint.
+  realistic_solution: 'Design B is required. Implement a custom `torch.autograd.Function` to prune the reverse-linked graph, dropping massive intermediate nodes and applying FlashAttention-style recomputation in the backward pass. This trades a minor compute penalty for a drastic memory reduction that fits within the 80GB HBM constraint.'
   common_mistake: |
     **The Pitfall:** Rejecting the custom autograd function due to compute overhead.
     **The Rationale:** Candidates assume re-materializing intermediates in the backward pass will severely degrade training throughput.
-    **The Consequence:** They fail to calculate the native reverse-linked graph's memory footprint for O(N²) activations, leading to an immediate Out-Of-Memory (OOM) error.
+    **The Consequence:** They fail to calculate the native reverse-linked graph's memory footprint for O(N^2) activations, leading to an immediate Out-Of-Memory (OOM) error.
   napkin_math: |
-    - Sequence N=8192, batch B=4, heads H=40.
-    - Attention matrix size = B * H * N² = 4 * 40 * 67.1M = 10.74 billion elements.
-    - At FP16 (2 bytes), the reverse-linked graph saves ~21.5 GB per layer just for the softmax tensor.
-    - Across 40 layers, the graph attempts to retain 860 GB of activations.
-    - **Result: Massive OOM on an 80GB A100. Design B drops these nodes.**
+    1. **Assumptions & Constraints:**
+       - Sequence N=8192, batch B=4, heads H=40.
+       - Precision: FP16 (2 bytes/element).
+       - Model: 40 layers.
+    2. **Calculations:**
+       - Attention matrix size = B * H * N^2 = 4 * 40 * (8192)^2 = 10.73 billion elements.
+       - Memory for softmax tensor per layer = 10.73B * 2 bytes = 21.47 GB.
+       - Total activation memory across 40 layers = 21.47 GB * 40 = 858.8 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 858.8 GB required. The native PyTorch approach is Memory-Capacity-Bound (Massive OOM on 80GB), demanding a custom autograd function.**
 status: published
 provenance: imported
 requires_explanation: true

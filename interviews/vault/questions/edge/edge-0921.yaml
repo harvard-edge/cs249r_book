@@ -8,8 +8,8 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: Hardware-Aware Batching for Edge NLP
-scenario: A smart home hub processes 4 concurrent audio streams using an NLP intent model. The model requires 10 GOPS, 20MB of weights, and 1MB of activations per stream. The NPU has 5 TOPS compute and 5 GB/s memory bandwidth. You can execute them sequentially (Batch=1, 4 times) or batch them together (Batch=4, 1 time). The latency SLA is 15ms total for all streams to finish.
-question: Should the 4 audio streams run sequentially or as Batch=4 to meet the 15ms SLA, and why?
+scenario: A smart home hub processes 4 concurrent audio streams using an NLP intent model. The model requires 10 GOPS, 20MB of weights, and 1MB of activations per stream. You can execute them sequentially (Batch=1, 4 times) or batch them together (Batch=4, 1 time). The latency SLA is 15ms total for all streams to finish.
+question: Given an NPU with 5 TOPS compute and 5 GB/s memory bandwidth, should the 4 audio streams run sequentially or as Batch=4 to meet the 15ms SLA, and why?
 details:
   realistic_solution: Batching fundamentally alters Arithmetic Intensity by reusing loaded weights across multiple inputs. For Batch=1, the 20MB weights are loaded 4 separate times from DRAM, making the workload highly memory-bound and exceeding the SLA due to cumulative memory transfer latency. For Batch=4, the 20MB weights are loaded only once, shifting the workload's Arithmetic Intensity significantly higher. The total execution time for Batch=4 becomes compute-bound but still easily meets the 15ms SLA for all streams.
   common_mistake: |
@@ -17,19 +17,25 @@ details:
     **The Rationale:** Candidates ignore the memory bandwidth constraint and assume that execution time is strictly bound by the GPU's TOPS, missing the impact of Arithmetic Intensity on unbatched requests.
     **The Consequence:** The unbatched sequential execution becomes severely memory-bound, failing the real-time SLA in production.
   napkin_math: |
-    - **Batch=1 (Sequential):** Data = 20MB (Weights) + 1MB (Acts) = 21MB.
-    - Mem time = 21MB / 5 GB/s = 4.2ms per stream.
-    - Compute time = 10 GOPS / 5 TOPS = 2ms per stream.
-    - Total time for 4 streams = 4 * max(4.2ms, 2ms) = 16.8ms.
-    - **Batch=4 (Batched):** Data = 20MB (Weights) + 4 * 1MB (Acts) = 24MB.
-    - Mem time = 24MB / 5 GB/s = 4.8ms.
-    - Compute time = 40 GOPS / 5 TOPS = 8ms.
-    - Total time = max(4.8ms, 8ms) = 8ms.
-    **Conclusion: Batch=4 completes in 8ms (Passes 15ms SLA), while Batch=1 takes 16.8ms (Fails SLA).**
+    1. **Assumptions & Constraints:**
+       - Model: 10 GOPS, 20MB weights, 1MB activations/stream.
+       - NPU Hardware: 5 TOPS compute, 5 GB/s memory bandwidth.
+       - SLA Constraint: 15ms total limit for 4 streams.
+    2. **Calculations:**
+       - Batch=1 (Sequential): Data = 20MB (Weights) + 1MB (Acts) = 21MB.
+       - Mem time = 21MB / 5 GB/s = 4.2ms per stream.
+       - Compute time = 10 GOPS / 5000 GOPS = 2ms per stream.
+       - Total time for 4 streams = 4 * max(4.2ms, 2ms) = 16.8ms.
+       - Batch=4 (Batched): Data = 20MB (Weights) + 4 * 1MB (Acts) = 24MB.
+       - Mem time = 24MB / 5 GB/s = 4.8ms.
+       - Compute time = 40 GOPS / 5000 GOPS = 8ms.
+       - Total time = max(4.8ms, 8ms) = 8ms.
+    3. **Conclusion & Interpretation:**
+       **Conclusion: Batch=4 completes in 8ms (Passes 15ms SLA), while Batch=1 takes 16.8ms (Fails SLA).** **Result: Memory-Bound (Unbatched) vs Compute-Bound (Batched).**
   options:
   - Calculating compute time only (40 GOPS / 5 TOPS = 8ms) and assuming both batching strategies will easily meet the 15ms SLA.
   - Increasing batch size will shift the workload from memory-bound to compute-bound, fully utilizing the available TOPS.
-  - Batching fundamentally alters Arithmetic Intensity by reusing loaded weights across multiple inputs. For Batch=1, the 20MB weights are loaded 4 separate times from DRAM, making the workload highly memory-bound and exceeding the SLA due to cumulative memory transfer latency.
+  - Batching alters Arithmetic Intensity. For Batch=1, the 20MB weights are loaded 4 separate times, making the workload highly memory-bound and exceeding the SLA due to 16.8ms cumulative memory transfer latency.
   - The OOM is caused by memory fragmentation in the Python runtime; running garbage collection before inference will prevent it.
   correct_index: 2
 status: published

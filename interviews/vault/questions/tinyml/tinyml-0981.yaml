@@ -8,24 +8,28 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Operator Scheduling for Peak SRAM Reduction
-scenario: You are deploying an INT8 model on an ARM Cortex-M4 (STM32F4) with 256 KB SRAM and 1 MB flash using CMSIS-NN. The network has an input of 40 KB and splits into two parallel branches that later concatenate. Branch A outputs 60 KB and needs 30 KB of internal scratchpad memory. Branch B outputs 80 KB and needs 50 KB of scratchpad memory. When the runtime schedules Branch A first, the system requires 230 KB of SRAM, but scheduling Branch B first only requires 210 KB.
+scenario: A flat tensor arena executes an INT8 model splitting into Branch A (outputs 60 KB, needs 30 KB scratch) and Branch B (outputs 80 KB, needs 50 KB scratch). Input is 40 KB. Scheduling A first requires 230 KB SRAM, while scheduling B first requires 210 KB.
 question: "Why does changing the execution order of these parallel branches alter the peak static memory requirement in the flat tensor arena?"
 details:
-  realistic_solution: In a flat tensor arena, memory is reused by non-overlapping buffers. The peak memory is the maximum sum of all live tensors at any single point in time. When Branch A runs first, its output must stay alive during Branch B's execution, adding to Branch B's already high memory requirements. Running the memory-heavy Branch B first means its peak usage happens when only the input is alive, and by the time Branch A runs with its smaller internal requirements, the overall peak is lower.
+  realistic_solution: Flat arena allocators optimize lifecycle persistence mappings. Reversing sequential topological DAG ordering strictly modifies temporal tensor overlaps. Spawning the largest scratchpad requirements when minimal outputs are concurrently alive suppresses peak aggregate limits.
   common_mistake: |
-    **The Pitfall:** Assuming static memory planning simply sums up the maximum sizes of all layers or only accounts for the final concatenated output size.
-    **The Rationale:** Candidates often fail to visualize the lifespan of intermediate tensors in a Directed Acyclic Graph (DAG) and how scratchpad buffers overlap.
-    **The Consequence:** Memory usage is grossly miscalculated, resulting in unexpected Out-Of-Memory (OOM) errors during deployment on constrained devices.
+    **The Pitfall:** Assuming static memory planning algorithmically sums all layer maximums blindly without temporal overlap awareness.
+    **The Rationale:** Candidates fail to conceptualize the overlapping temporal DAG execution window of scratchpads and persisted matrices.
+    **The Consequence:** Peak memory allocations are blindly overestimated or underestimated, resulting in random crash events during real-time deployment.
   napkin_math: |
-    * **Order A then B:**
-      * Exec A peak = 40KB (Input) + 60KB (A_out) + 30KB (A_scratch) = 130KB.
-      * Exec B peak = 40KB (Input) + 60KB (A_out, kept alive) + 80KB (B_out) + 50KB (B_scratch) = 230KB.
-      * Max peak = **230KB**.
-    * **Order B then A:**
-      * Exec B peak = 40KB (Input) + 80KB (B_out) + 50KB (B_scratch) = 170KB.
-      * Exec A peak = 40KB (Input) + 80KB (B_out, kept alive) + 60KB (A_out) + 30KB (A_scratch) = 210KB.
-      * Max peak = **210KB**.
-    * Both fit within the 256 KB SRAM of the Cortex-M4, but scheduling B first saves 20 KB.
+    1. **Assumptions & Constraints:**
+       - Common persisted memory: 40 KB Input.
+       - Branch A: 60 KB out, 30 KB scratch.
+       - Branch B: 80 KB out, 50 KB scratch.
+    2. **Calculations:**
+       - Order A then B Peak eval:
+         - Exec A timeline: 40 KB + 60 KB + 30 KB = 130 KB.
+         - Exec B timeline: 40 KB + 60 KB (A out kept alive) + 80 KB + 50 KB = 230 KB.
+       - Order B then A Peak eval:
+         - Exec B timeline: 40 KB + 80 KB + 50 KB = 170 KB.
+         - Exec A timeline: 40 KB + 80 KB (B out kept alive) + 60 KB + 30 KB = 210 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduling massive footprint Branch B first mitigates simultaneous lifetime overlap, saving 20 KB (Memory-Bound Scheduling).**
 status: published
 provenance: imported
 requires_explanation: false

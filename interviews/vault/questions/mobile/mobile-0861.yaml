@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Optimize MobileNetV2 expansion ratio for Snapdragon 8 Gen 3 Hexagon HTP memory
-scenario: MobileNetV2 with expansion ratio t=6 achieves 72ms on Snapdragon 8 Gen 3 using TFLite GPU delegate, but only 4ms on Hexagon HTP. The HTP version hits a memory spike at the bottleneck_2_expand layer (input 56×56×32, output 56×56×192). You need to reduce peak activation memory to prevent HTP SRAM overflow while maintaining >72% top-1 accuracy.
-question: "How should MobileNetV2 expansion ratios be adjusted to reduce early activation memory pressure on Hexagon HTP?"
+scenario: MobileNetV2 with expansion ratio t=6 achieves 72ms on Snapdragon 8 Gen 3 using TFLite GPU delegate, but only 4ms on Hexagon HTP. The HTP version hits a memory spike at the bottleneck_2_expand layer (input 56x56x32, output 56x56x192). You need to reduce peak activation memory to prevent HTP SRAM overflow while maintaining >72% top-1 accuracy.
+question: How should MobileNetV2 expansion ratios be adjusted to reduce early activation memory pressure on Hexagon HTP?
 details:
   realistic_solution: 'Apply non-uniform expansion ratios: early stages (large spatial dims, 56×56 and 28×28) use t=4; later stages (14×14 and 7×7) keep t=6. Memory for bottleneck_2: t=6 → 56×56×192×1B = 602KB. At t=4 → 56×56×128×1B = 401KB. Total peak reduction: from ~1.5MB to ~0.9MB across early stages. Hexagon HTP SRAM: 8MB — the single activation still fits! Actual problem may be multi-buffering for pipeline. Check QNN profiler: if HTP is double-buffering (input + output in SRAM simultaneously), peak = 602 + 602 = 1.2MB. Use t=5 as compromise: 56×56×160×1B = 501KB × 2 = 1MB.'
   common_mistake: |
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Engineers assume the model memory footprint needs a global reduction to fit the NPU.
     **The Consequence:** Accuracy needlessly drops by ~1.5%, when the memory spike was isolated entirely to the early, large-spatial-dimension layers.
   napkin_math: |
-    - **Hexagon HTP SRAM:** ~8MB.
-    - **Early Layer Memory (t=6):** 56 * 56 * 192 bytes = 602,112 bytes = **~602 KB**.
-    - **Early Layer Memory (t=4):** 56 * 56 * 128 bytes = 401,408 bytes = **~401 KB**.
-    - **Double Buffering:** If the profiler shows double-buffering, peak is 602 KB * 2 = 1.2 MB. This still easily fits in the 8MB SRAM. 
-    - **Conclusion:** The selective reduction directly limits the peak spike without degrading the global feature extraction capability of deeper layers.
+    1. **Assumptions & Constraints:**
+       - Hexagon HTP SRAM limit: ~8MB.
+       - Current Layer (t=6): 56x56x192 at INT8 (1 byte).
+       - Modified Layer (t=4): 56x56x128 at INT8.
+    2. **Calculations:**
+       - Peak Memory (t=6): 56 * 56 * 192 bytes = 602,112 bytes (~602 KB).
+       - Double Buffering (t=6): 602 KB * 2 = ~1.2 MB.
+       - Peak Memory (t=4): 56 * 56 * 128 bytes = 401,408 bytes (~401 KB).
+       - Double Buffering (t=4): 401 KB * 2 = ~802 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: SRAM-Bound Activation. Limiting expansion solely in early spatial dimensions (t=4) avoids LPDDR fallback and keeps peak buffer well inside the 8MB SRAM.**
 status: published
 provenance: imported
 requires_explanation: true

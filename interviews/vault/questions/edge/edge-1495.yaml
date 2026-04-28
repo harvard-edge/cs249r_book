@@ -8,20 +8,24 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Architecting a Multi-Camera Perception System for Jetson Orin
-scenario: You are tasked with designing the perception architecture for an autonomous delivery robot using an NVIDIA Jetson Orin. The system must process six high-resolution 4K camera streams at 30 FPS simultaneously for real-time object detection and segmentation. The Orin provides 275 TOPS INT8, an Ampere GPU, a DLA (Deep Learning Accelerator), and 32 GB LPDDR5 within a 60W TDP.
+scenario: You are tasked with designing the perception architecture for an autonomous delivery robot using an NVIDIA Jetson Orin. The system must process six high-resolution 4K camera streams at 30 FPS simultaneously for real-time object detection and segmentation.
 question: What CNN architecture and GPU/DLA mapping would you use for six 4K 30 FPS streams on Jetson Orin without becoming memory-bound?
 details:
-  realistic_solution: A strong candidate will design a hybrid architecture that balances FLOPs and memory bandwidth. They should propose an EfficientNet-style backbone but optimize the inverted bottlenecks for the hardware. They would map memory-bound depthwise operations to the DLA where possible, while keeping compute-heavy 1x1 point-wise convolutions on the Ampere GPU, carefully managing the 32 GB LPDDR5 shared memory to keep the compute units fed.
+  realistic_solution: Design a hybrid architecture balancing FLOPs and memory bandwidth. Map memory-bound depthwise operations to the DLA where possible, while keeping compute-heavy 1x1 point-wise convolutions on the Ampere GPU. Standard convolutions are needed early on because pure depthwise layers lack the arithmetic intensity to prevent stalling the LPDDR5 interface.
   common_mistake: |
     **The Pitfall:** Proposing a standard MobileNet architecture purely to minimize FLOPs.
     **The Rationale:** Candidates fail to realize that depthwise separable convolutions have extremely low arithmetic intensity and severely underutilize the Ampere GPU and DLA.
     **The Consequence:** The system becomes memory-bound on the LPDDR5 bandwidth rather than compute-bound, failing to reach the required FPS.
   napkin_math: |
-    - **Throughput:** 6 cameras * 30 FPS = 180 frames/sec.
-    - **Compute limit:** 100 GOPS/frame = 18 TOPS total (well within 275 TOPS INT8 limit).
-    - **Memory constraint:** LPDDR5 provides ~204 GB/s bandwidth.
-    - **Arithmetic Intensity Check:** A purely depthwise convolution layer has an AI of ~1 MAC/byte. To achieve even 50 TOPS on depthwise layers, it would require 50 TB/s of bandwidth, which is impossible.
-    - **Result:** The design must use standard or grouped convolutions (intensity > 50 MAC/byte) in early layers to avoid hitting the 204 GB/s memory wall.
+    1. **Assumptions & Constraints:**
+       - Hardware Limit: LPDDR5 provides ~204 GB/s bandwidth
+       - Load: 6 cameras * 30 FPS = 180 frames/sec
+       - Depthwise Conv AI = ~1 MAC/byte
+    2. **Calculations:**
+       - To reach even 50 TOPS on pure depthwise: 50e12 MACs / 1 MAC/byte = 50 TB/s
+       - 50 TB/s vastly exceeds the 204 GB/s available limit
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** Must use standard or grouped convolutions (AI > 50 MAC/byte) in early layers to avoid the memory wall.
 status: published
 provenance: imported
 requires_explanation: true

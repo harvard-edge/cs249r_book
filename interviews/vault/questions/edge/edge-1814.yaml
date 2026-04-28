@@ -8,19 +8,25 @@ competency_area: precision
 bloom_level: analyze
 phase: training
 title: INT8 Dataflow Specification for Hailo-8
-scenario: You are tasked with deploying an FP32 object detection model to a Hailo-8 edge accelerator for real-time video analytics. The Hailo-8 is a dataflow accelerator providing 26 TOPS strictly in INT8 at 2.5W, and it features no local DRAM, streaming data directly from host memory.
-question: What precision-reduction and deployment pipeline efficiently runs the FP32 detector on Hailo-8 without host-memory streaming bottlenecks?
+scenario: You are tasked with deploying an FP32 object detection model to a dataflow edge accelerator for real-time video analytics. The accelerator provides strictly INT8 compute and features no local DRAM, streaming data directly from host memory.
+question: What precision-reduction and deployment pipeline efficiently runs the FP32 detector on this architecture without host-memory streaming bottlenecks?
 details:
-  realistic_solution: The specification must dictate full-network Quantization-Aware Training (QAT) simulating INT8, rather than runtime mixed-precision. Because there is no local DRAM, the entire graph must be compiled to fit on-chip to maintain the dataflow. If a layer loses too much accuracy in INT8, the specification should use per-channel scaling or architectural modifications (like expanding channel width) to recover accuracy within the INT8 constraint, rather than breaking the pipeline to stream FP16 activations to the host.
+  realistic_solution: Mandate a rigorous Quantization-Aware Training (QAT) methodology that forces 100% of the model graph into INT8 precision. To compensate for activation degradation, implement Top-K sparsification or expand channel widths prior to compilation. The dataflow architecture requires the model to entirely reside on-chip; falling back to mixed-precision destroys the pipeline throughput by flooding the host PCIe bus.
   common_mistake: |
-    **The Pitfall:** Suggesting standard mixed-precision execution (keeping sensitive layers in FP16).
-    **The Rationale:** Candidates apply cloud-centric mixed-precision heuristics without realizing the strict INT8 spatial dataflow hardware constraints.
-    **The Consequence:** Falling back to FP16 breaks the dataflow graph, spilling massive intermediate activations to the host CPU and crippling performance.
+    **The Pitfall:** Executing standard mixed-precision deployment (retaining FP16 for sensitive layers).
+    **The Rationale:** Candidates copy cloud inference heuristics without accounting for the architectural hostility of DRAM-less dataflow accelerators toward graph partitions.
+    **The Consequence:** The dataflow pipeline shatters, spilling gigabytes of activation memory to the host CPU, instantly turning real-time inference into a slideshow.
   napkin_math: |
-    - **Activation Size:** A 256-channel 128x128 feature map in FP16 is 256 * 128 * 128 * 2 bytes = 8.38 MB.
-    - **Transfer Cost:** A single round-trip (device to host and back) over PCIe Gen3 x4 (~3.9 GB/s) takes (8.38 MB * 2) / 3900 MB/s = 4.3 ms.
-    - **Bottleneck Limit:** This graph break alone caps the system at 232 FPS.
-    - **Wasted Capacity:** Completely wastes the 26 TOPS INT8 compute capacity that could otherwise process a 4 GOPS frame in **under 0.2 ms**.
+    1. **Assumptions & Constraints:**
+       - Target Feature Map: 256-channel 128x128 in FP16
+       - PCIe Gen3 x4 bandwidth: ~3.9 GB/s
+       - Accelerator capability: 4 GOPS in < 0.2 ms natively
+    2. **Calculations:**
+       - FP16 Activation Size = 256 * 128 * 128 * 2 bytes = 8.38 MB
+       - Round-trip PCIe penalty = (8.38 MB * 2) / 3900 MB/s = 4.3 ms
+       - Theoretical max FPS with graph break = 1000 ms / 4.3 ms = 232 FPS
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound. A single precision fallback inflates latency by 20x compared to pure on-chip execution.**
 status: published
 provenance: imported
 requires_explanation: true
@@ -31,8 +37,3 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
 math_status: UNCHECKED
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

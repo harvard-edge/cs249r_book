@@ -8,18 +8,25 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The Background Batching Bottleneck
-scenario: Your mobile OS runs a 3B LLM (INT4 quantized). A foreground chat runs at 20 tok/s (batch size 1). When the OS schedules a background notification summarizer to run concurrently (batch size 2), the total system throughput plummets to 12 tok/s (6 tok/s per task), rather than achieving higher total throughput.
+scenario: Your mobile OS runs a 3B LLM. A foreground chat runs at 20 tok/s. When the OS schedules a background summarizer concurrently, total system throughput plummets to 12 tok/s.
 question: "Why does adding a background summarizer reduce total LLM throughput instead of improving batching efficiency?"
 details:
-  realistic_solution: 'The system hits a severe memory bandwidth wall. At batch size 1, the LLM streams the quantized weights from LPDDR5 perfectly linearly. At batch size 2, continuous batching must fetch the KV cache for two disparate sequences simultaneously, disrupting contiguous memory access patterns and causing DRAM page misses.'
+  realistic_solution: The system crashes into a severe memory bandwidth wall. Multiplexing disparate sequences breaks the contiguous streaming of INT4 weights from DRAM. Implement chunked prefill and strictly serialize sequence generation to preserve LPDDR5 spatial locality.
   common_mistake: |
     **The Pitfall:** Assuming the NPU ran out of compute ALUs.
     **The Rationale:** Engineers accustomed to cloud GPUs assume adding batch size scales throughput linearly until compute saturation is reached.
     **The Consequence:** They wrongly attempt to optimize the arithmetic intensity of the model, failing to fix the memory access patterns that are the actual bottleneck.
   napkin_math: |
-    - **Baseline Bandwidth:** INT4 3B model = 1.5GB weights. At 20 tok/s, weight bandwidth = 1.5GB * 20 = 30 GB/s (near the ~34 GB/s max of LPDDR5).
-    - **Batching Penalty:** At BS=2, scattered reads for two KV caches drop effective memory bandwidth to ~18 GB/s due to DRAM page misses.
-    - **Final Result:** Max decode speed drops to 18 GB/s / 1.5 GB = **12 tok/s total** (divided by 2 tasks, exactly 6 tok/s each).
+    1. **Assumptions & Constraints:**
+       - Model: INT4 3B (1.5GB weights).
+       - LPDDR5 max bandwidth: ~34 GB/s.
+       - Batch Size 1 = 20 tok/s.
+    2. **Calculations:**
+       - BS=1 Bandwidth = 1.5 GB * 20 = 30 GB/s.
+       - Scattered reads (BS=2) drop effective bandwidth to ~18 GB/s due to page misses.
+       - Max Decode = 18 / 1.5 = 12 tok/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Bandwidth-Bound**. Total decode speed drops to 12 tok/s due to KV cache scattered reads disrupting contiguous memory access.
 status: published
 provenance: imported
 requires_explanation: false

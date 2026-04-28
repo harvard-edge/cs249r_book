@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: Long-Context Attention with Ring Attention on H100 Multi-Node
-scenario: You are implementing Ring Attention for a 1M token context across 64 GPUs. Each GPU holds a sequence chunk of 15,625 tokens. The attention head uses head_dim=128 in BF16.
+scenario: You are implementing Ring Attention for a 1M token context across 64 GPUs. Each GPU holds a sequence chunk of 15,625 tokens with head_dim=128 in BF16.
 question: What is the KV communication volume per ring step, and what is the total ring communication time?
 details:
   realistic_solution: 'Ring Attention: each GPU holds Q_chunk (15,625×128 BF16 = 4MB) and receives K,V chunks from neighbors. Per ring step: send K_chunk (15,625×128×2B = 4MB) + V_chunk (4MB) = 8MB per step. 64 GPUs: 63 ring steps. Intra-node NVLink: first 7 steps × 8MB = 56MB at 450 GB/s = 0.12ms. Inter-node IB: 56 steps × 8MB = 448MB at 25 GB/s = 17.9ms. Total ring: ~18ms for all ring steps. Parallel: compute and communicate overlap (Ring Attention is designed for overlap). Attention FLOPs per GPU: 2×15625×1M×128 = 4T FLOPs / GPU. H100 at 66 TFLOPS effective = 60ms compute. Overlap: 18ms comm << 60ms compute → communication hidden.'
@@ -17,14 +17,17 @@ details:
     **The Rationale:** Failing to recognize that Ring Attention replaces massive $N^2$ memory materialization with pipelined, point-to-point KV block passing.
     **The Consequence:** Incorrectly concluding that extreme long-context attention is fundamentally bound by interconnect bandwidth rather than compute.
   napkin_math: |
-    - Each GPU holds Q_chunk. Per ring step, it sends K_chunk + V_chunk to its neighbor.
-    - K_chunk size = $15,625 \times 128 \times 2\text{B (BF16)} = 4\text{ MB}$.
-    - V_chunk size = $4\text{ MB}$.
-    - Total KV sent per step = $8\text{ MB}$.
-    - 64 GPUs require 63 ring steps. Total data = $63 \times 8\text{ MB} = 504\text{ MB}$.
-    - Intra-node (7 steps at 450 GB/s) = $0.12\text{ ms}$. Inter-node (56 steps at 25 GB/s) = $17.9\text{ ms}$.
-    - Compute time per step: 4 TFLOP/GPU / 66 TFLOPS effective $\approx 60\text{ ms}$.
-    - **Because communication (18ms) << compute (60ms), pipeline overlap hides the network entirely.**
+    1. **Assumptions & Constraints:**
+       - Chunk size: 15,625 tokens, head_dim=128, BF16.
+       - 64 GPUs (63 ring steps).
+    2. **Calculations:**
+       - K_chunk size = 15,625 * 128 * 2B = 4 MB.
+       - V_chunk size = 4 MB. Total KV sent per step = 8 MB.
+       - Intra-node (7 steps at 450 GB/s) = 0.12 ms.
+       - Inter-node (56 steps at 25 GB/s) = 17.9 ms. Total Comm = ~18 ms.
+       - Compute per step: 4 TFLOPs / 66 TFLOPS = ~60 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: Compute-Bound.** Because communication (18ms) is completely hidden behind compute (60ms), pipeline overlap enables infinite context scaling without network bottlenecks.
 status: published
 provenance: imported
 requires_explanation: true
@@ -37,8 +40,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

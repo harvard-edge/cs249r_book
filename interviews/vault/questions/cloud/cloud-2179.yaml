@@ -14,15 +14,19 @@ details:
   realistic_solution: 'GPU thread block scheduling works in waves. With 132 SMs and 2 blocks per SM, each wave processes 264 blocks. At 264 total blocks, the kernel completes in exactly 1 wave — all SMs finish simultaneously. At 265 blocks, the first wave of 264 blocks completes in 1.0ms. Then a second wave launches for the 1 remaining block. This single block runs on 1 SM while the other 131 SMs sit completely idle. The second wave takes approximately 0.5ms (one block''s compute time, which is 1.0ms / 2 blocks per wave for a fully occupied SM = 0.5ms per block). Total: 1.0 + 0.5 = 1.5ms. Only 1/132 of the GPU''s compute is utilized during the tail wave. The general strategy: ensure the total number of thread blocks is a multiple of (SMs x blocks_per_SM) — the ''wave size.'' For the H100 with 2 blocks per SM: grid sizes should be multiples of 264. When the work decomposition doesn''t naturally align, use persistent thread blocks or dynamic work distribution (each block loops to process multiple tiles) to eliminate tail effects. This is called ''wave quantization'' and is a primary concern in production GPU kernel tuning.'
   common_mistake: |
     **The Pitfall:** Assuming kernel execution time scales linearly with work.
-    **The Rationale:** Not realizing that the GPU processes thread blocks in discrete waves (quantization).
-    **The Consequence:** The last partial wave can cause dramatic load imbalance where most SMs sit idle waiting for the stragglers, reducing performance significantly.
+    **The Rationale:** Not realizing that the GPU processes thread blocks in discrete, synchronized waves (quantization).
+    **The Consequence:** Causing massive load imbalance where SMs sit idle waiting for stragglers, severely reducing overall utilization.
   napkin_math: |
-    - Wave size = 132 SMs × 2 blocks/SM = 264 blocks.
-    - At 264 blocks: 1 wave, 1.0ms, 100% SM utilization.
-    - At 265 blocks: 2 waves. Wave 1: 264 blocks, 1.0ms. Wave 2: 1 block on 1 SM, ~0.5ms.
-    - SM utilization in wave 2: 1/132 = 0.76%.
-    - Time-weighted utilization: (264 × 1.0 + 1 × 0.5) / (132 × 2 × 1.5) = 264.5 / 396 = 66.8%.
-    - **Adding one block drops utilization by 33%; grid sizes should be multiples of the wave size (264) to maintain 100% utilization.**
+    1. **Assumptions & Constraints:**
+       - H100: 132 SMs, 2 blocks/SM capacity.
+       - Wave size: 132 × 2 = 264 blocks.
+       - Wave 1 execution time: 1.0 ms.
+    2. **Calculations:**
+       - At 264 blocks: 1 wave takes 1.0 ms.
+       - At 265 blocks: 2 waves. Wave 1 takes 1.0 ms. Wave 2 (1 block on 1 SM) takes 0.5 ms.
+       - Total time for 265 blocks: 1.0 ms + 0.5 ms = 1.5 ms.
+       - Wave 2 SM utilization: 1 / 132 = 0.76%.
+    3. **Conclusion & Interpretation:** **Result: Compute-Bound (Utilization).** The final partial wave strands 131 SMs idle, causing a 50% latency regression from adding a single thread block.
 status: published
 provenance: imported
 requires_explanation: true

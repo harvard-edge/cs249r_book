@@ -8,27 +8,32 @@ competency_area: compute
 bloom_level: apply
 phase: inference
 title: The Mobile Video Battery Drain
-scenario: You are a mobile ML engineer diagnosing severe battery drain in a real-time video filter app on an Apple A17 Pro (35 TOPS, 51.2 GB/s memory bandwidth). The profiler points to a single 3x3 depthwise convolution layer on a 112x112x256 INT8 feature map.
+scenario: You are a mobile ML engineer diagnosing severe battery drain in a real-time video filter app on an Apple A17 Pro. The profiler explicitly points to a single 3x3 depthwise convolution layer on a 112x112x256 INT8 feature map.
 question: Why does a 3x3 depthwise convolution on a 112x112x256 INT8 tensor drain battery on A17 Pro?
 details:
-  realistic_solution: The workload is severely memory-bound. By calculating the arithmetic intensity (Ops/Byte), we can see it falls far below the hardware's ridge point. This means the Apple Neural Engine (ANE) is constantly waiting for data to arrive from the much slower memory, wasting energy and time.
+  realistic_solution: Execute a Roofline analysis. The workload is catastrophically memory-bound. Calculating the layer's arithmetic intensity (Ops/Byte) proves it resides far left of the hardware's ridge point. The Apple Neural Engine (ANE) cores finish their math instantly and idle wait on the LPDDR5 bus, bleeding massive static power without advancing execution.
   common_mistake: |
-    **The Pitfall:** Assuming high peak TOPS means slowdowns must be compute-bound.
-    **The Rationale:** Failing to calculate the arithmetic intensity of specific layers like depthwise convolutions.
-    **The Consequence:** Blaming the hardware instead of optimizing data movement, leaving the compute units starved.
+    **The Pitfall:** Assuming that high peak TOPS means system slowdowns must fundamentally be compute-bound.
+    **The Rationale:** Neglecting to mathematically calculate the arithmetic intensity of parameter-light layers like depthwise convolutions.
+    **The Consequence:** Recommending useless hardware upgrades or logic optimizations when the true solution lies exclusively in minimizing data movement.
   napkin_math: |
-    - Compute: 2 * 112 * 112 * 256 * 3 * 3 = 57,802,752 Ops (~57.8 M-Ops).
-    - Memory Read: Input (112 * 112 * 256 * 1 byte = 3.21 MB) + Weights (3 * 3 * 256 = ~2.3 KB).
-    - Memory Write: Output (112 * 112 * 256 * 1 byte = 3.21 MB).
-    - Total Memory: 3.21 + 3.21 = 6.42 MB.
-    - Arithmetic Intensity: 57.8 M-Ops / 6.42 MB = 9 Ops/Byte.
-    - Ridge Point: 35 TOPS / 51.2 GB/s = ~683 Ops/Byte.
-    - **9 Ops/Byte is vastly lower than the 683 Ops/Byte ridge point, meaning the layer is severely memory-bound.**
+    1. **Assumptions & Constraints:**
+       - A17 Pro Peak Compute: 35 TOPS. Bandwidth: 51.2 GB/s.
+       - Layer: 3x3 Depthwise Conv, 112x112 spatial, 256 channels, INT8 (1 byte/element).
+    2. **Calculations:**
+       - Total Compute: 2 (MAC ops) * 3 * 3 * 112 * 112 * 256 = 57,802,752 Ops (~57.8 M-Ops).
+       - Memory Read (Input + Weights): (112 * 112 * 256 * 1 byte) + (3 * 3 * 256 * 1 byte) = 3.21 MB + 2.3 KB ≈ 3.21 MB.
+       - Memory Write (Output): 112 * 112 * 256 * 1 byte = 3.21 MB.
+       - Total Memory Traffic: 3.21 MB + 3.21 MB = 6.42 MB.
+       - Arithmetic Intensity: 57.8 M-Ops / 6.42 MB = ~9.0 Ops/Byte.
+       - Hardware Ridge Point: 35,000 G-Ops / 51.2 GB/s = ~683 Ops/Byte.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bound. At 9 Ops/Byte, the layer is vastly beneath the 683 Ops/Byte hardware ridge point, stalling the NPU while waiting on memory and burning static power.**
   options:
-  - The layer is compute-bound; the `3x3` kernel requires too many calculations for the ANE to handle in real-time.
-  - The layer is memory-bound; its arithmetic intensity is far below the A17's ridge point, so the ANE is stalled waiting for data from DRAM.
-  - The OS is throttling the ANE due to thermal pressure, which is an unavoidable cost of mobile processing.
-  - The model needs to be quantized from INT8 to FP16 to unlock more of the ANE's floating-point performance.
+  - The layer is compute-bound; the 3x3 kernel requires too many FLOPs for the NPU to sustain 60 FPS.
+  - The layer is memory-bound; its arithmetic intensity (9 Ops/Byte) is far below the A17's ridge point, stalling the NPU.
+  - Thermal throttling is artificially reducing the ridge point to 10 Ops/Byte, matching the layer's intensity.
+  - The INT8 data type induces a 4x penalty on memory bus transfers compared to native FP16 execution.
   correct_index: 1
 status: published
 provenance: imported

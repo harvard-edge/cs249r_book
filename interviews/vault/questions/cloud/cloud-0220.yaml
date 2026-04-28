@@ -8,19 +8,24 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: The Request Routing Strategy
-scenario: Our LLM API serves both autocomplete requests (~10 output tokens, 50ms SLA) and document summarization requests (~10,000 output tokens, no strict SLA). Both hit the same pool of 8x H100 GPUs. Autocomplete users are furious — P99 latency is 4 seconds instead of 50ms. The summarization users are fine.
+scenario: Our LLM API serves both autocomplete requests (~10 output tokens, 50ms SLA) and document summarization requests (~10,000 output tokens, no strict SLA). Both hit the same pool of 8x GPUs. Autocomplete users are furious — P99 latency is 4 seconds instead of 50ms. The summarization users are fine.
 question: Why do autocomplete requests experience 4-second P99 latency on a shared GPU pool, and how do you fix it?
 details:
-  realistic_solution: 'Head-of-line blocking from mixed request lengths. With continuous batching, a 10,000-token summarization request occupies a batch slot for ~400 seconds (at 25 tokens/sec). During that time, the scheduler must run prefill for incoming autocomplete requests, but the long requests consume KV-cache memory, reducing the maximum batch size. Worse, if the batch is full of long-running decodes, new short requests queue behind prefill scheduling delays. The fix is workload-aware routing: separate GPU pools (or priority lanes) for latency-sensitive short requests vs throughput-oriented long requests. Short-request GPUs run with small max-sequence-length and aggressive preemption; long-request GPUs optimize for throughput with large batches.'
+  realistic_solution: 'Head-of-line blocking from mixed request lengths. With continuous batching, long requests consume KV-cache memory, reducing the maximum batch size and blocking prefill for incoming autocomplete requests. The fix is workload-aware routing: separate GPU pools for latency-sensitive short requests vs throughput-oriented long requests.'
   common_mistake: |
     **The Pitfall:** Throwing more hardware at the problem by adding more GPUs to handle the load.
     **The Rationale:** High P99 latency is often misdiagnosed as a raw capacity issue.
     **The Consequence:** The system remains structurally flawed because mixing incompatible SLA profiles in the same scheduling queue causes head-of-line blocking regardless of capacity.
   napkin_math: |
-    1. 8x H100 shared pool, continuous batching, max batch size = 32.
-    2. A 10,000-token summarization request at 25 tokens/sec takes ~400 seconds.
-    3. If a batch is full of long summarizations, their KV caches consume massive VRAM (e.g., 32 × 10,000 tokens × 1 MB/token = 320 GB).
-    4. **Conclusion: Incoming autocomplete requests are blocked from prefilling because KV cache memory is reserved, making wait times explode to seconds.**
+    1. **Assumptions & Constraints:**
+       - Shared pool: 8x GPUs, continuous batching, max batch size = 32.
+       - Summarization request length: ~10,000 tokens.
+       - Decode rate: ~25 tokens/sec.
+    2. **Calculations:**
+       - 10,000 tokens at 25 tokens/sec takes ~400 seconds.
+       - KV cache for 32 summarization requests: 32 * 10,000 tokens * 1 MB/token = 320 GB VRAM consumed.
+    3. **Conclusion & Interpretation:**
+       - **Result: Head-of-Line Blocking. Long summarizations consume all KV cache memory, blocking new autocomplete prefill requests and exploding wait times to seconds.**
 status: published
 provenance: imported
 requires_explanation: false

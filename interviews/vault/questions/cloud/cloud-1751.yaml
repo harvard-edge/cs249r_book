@@ -8,21 +8,27 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Counting Data-Parallel Process Groups in a 3D Layout
-scenario: A 175B-parameter LLM trains on 512 A100 GPUs (64 nodes, 8 GPUs per node) under 3D parallelism with TP=8, PP=8, DP=8. The team needs to know exactly how many Data-Parallel (DP) NCCL process groups must be initialized and which 8 ranks belong to each, so that the per-step gradient AllReduce runs only over the correct ranks and does not default to the world group.
+scenario: A 175B-parameter LLM trains on 512 GPUs (64 nodes, 8 GPUs per node) under 3D parallelism with TP=8, PP=8, DP=8. The team needs to know exactly how many Data-Parallel (DP) NCCL process groups must be initialized and which 8 ranks belong to each, so that the per-step gradient AllReduce runs only over the correct ranks and does not default to the world group.
 question: Under TP=8, PP=8, DP=8 on 512 GPUs, how many DP process groups must be initialized, and which 8 ranks belong to each — and which links does the DP AllReduce traverse?
 details:
-  realistic_solution: 'There are TP * PP = 64 DP process groups, one per (TP coord, PP coord) pair. Each DP group contains 8 ranks — exactly the 8 ranks that share the same (TP coord, PP coord) and differ only in their DP coord. Concretely, a DP group is the set of ranks at positions (dp_i, pp_j, tp_k) for fixed (j, k) and dp_i ∈ {0..7}. Because DP varies across nodes (TP fits inside one node''s NVLink island, PP varies across nodes, DP also crosses node boundaries), the DP AllReduce traverses 7 IB HDR (200 Gbps) inter-node hops per ring, not the NVLink intra-node fabric. The gradient AllReduce is therefore bottlenecked by the IB ring''s ~25 GB/s unidirectional link, not by NVLink.'
+  realistic_solution: 'There are TP * PP = 64 DP process groups, one per (TP coord, PP coord) pair. Each DP group contains 8 ranks — exactly the 8 ranks that share the same (TP coord, PP coord) and differ only in their DP coord. Concretely, a DP group is the set of ranks at positions (dp_i, pp_j, tp_k) for fixed (j, k) and dp_i ∈ {0..7}. Because DP varies across nodes, the DP AllReduce traverses 7 IB HDR (200 Gbps) inter-node hops per ring, not the intra-node fabric. The gradient AllReduce is therefore bottlenecked by the IB ring''s ~25 GB/s unidirectional link.'
   common_mistake: |
     **The Pitfall:** Initializing a single global process group using `dist.group.WORLD`.
     **The Rationale:** Candidates default to standard PyTorch DDP tutorials which assume the entire cluster is a single data-parallel group.
     **The Consequence:** The 8-way DP collective gets routed over all 512 ranks, destroying gradient synchronization performance and stalling the training loop.
   napkin_math: |
-    - Total GPUs: DP(8) × PP(8) × TP(8) = 512.
-    - Number of DP groups = TP(8) × PP(8) = 64 groups.
-    - DP gradient shard size = 175B params / (TP × PP) = 2.73B params.
-    - Data size (BF16): 2.73B × 2 bytes = 5.47 GB.
-    - Ring AllReduce Traffic per rank = 2 × (7/8) × 5.47 GB = 9.57 GB.
-    - **AllReduce Time:** 9.57 GB / 25 GB/s (IB HDR) ≈ **0.38 seconds**.
+    1. **Assumptions & Constraints:**
+       - Total GPUs: DP(8) × PP(8) × TP(8) = 512.
+       - Model: 175B parameters. Precision: BF16 (2 bytes/param).
+       - IB HDR bandwidth: 200 Gbps (25 GB/s unidirectional).
+    2. **Calculations:**
+       - Number of DP groups = TP(8) × PP(8) = 64 groups.
+       - DP gradient shard size = 175B params / (TP × PP) = 2.73B params.
+       - Data size (BF16): 2.73B × 2 bytes = 5.46 GB.
+       - Ring AllReduce Traffic per rank = 2 × (7/8) × 5.46 GB = 9.56 GB.
+       - AllReduce Time = 9.56 GB / 25 GB/s ≈ 0.38 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 0.38 seconds AllReduce time.** (Network-Bound)
 status: published
 provenance: imported
 requires_explanation: false

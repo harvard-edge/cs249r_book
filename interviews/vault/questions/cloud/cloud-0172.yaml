@@ -11,17 +11,21 @@ title: The Continuous Batching Paradox (cloud-0172)
 scenario: Your team deployed a new LLM serving system using continuous batching on H100s to serve both real-time chatbot queries (short prompts) and large offline document summarization jobs (long prompts). After launch, average throughput increased significantly, but P99 latency for the chatbot degraded by 500%.
 question: How can throughput be up, but latency for our most important users be so much worse?
 details:
-  realistic_solution: The system is experiencing scheduler-induced Head-of-Line Blocking, a more subtle variant that continuous batching alone doesn't solve. The default scheduler is likely FIFO ('first-in, first-out') to maximize hardware utilization. When a burst of long summarization jobs arrives, they fill up the batch slots. Even with continuous batching, a new, short chatbot query is blocked until one of the long jobs finishes its *entire*, multi-second prefill and generation cycle. The system's throughput is high because the GPU is always busy with the long jobs, but the queue time for short, latency-sensitive requests explodes. The fix is to implement a priority-based scheduler that reserves a portion of the batch capacity for high-priority (e.g., short, interactive) requests, or to create separate queues and even separate GPU pools for the different traffic classes.
+  realistic_solution: 'The system is experiencing scheduler-induced Head-of-Line Blocking, a more subtle variant that continuous batching alone doesn''t solve. When a burst of long summarization jobs arrives, they fill up the batch slots. Even with continuous batching, a new, short chatbot query is blocked until one of the long jobs finishes its entire, multi-second prefill and generation cycle. The fix is to implement a priority-based scheduler or chunked prefill.'
   common_mistake: |
     **The Pitfall:** Blaming the KV cache size, Python overhead, or network latency for the degradation.
     **The Rationale:** Candidates fail to recognize the impact of scheduler-induced Head-of-Line Blocking on continuous batching systems.
     **The Consequence:** These incorrect diagnoses focus on minor overheads (which cannot explain a 500% spike) while ignoring that short queries are stuck waiting for multi-second prefill cycles of long jobs.
   napkin_math: |
-    1. **Define constraints:** A 70B model on an H100 (989 TFLOPS). A long prompt is 8k tokens.
-    2. **Calculate prefill compute:** 2 * 70B parameters * 8000 tokens ≈ 1.12 PetaFLOPs.
-    3. **Calculate prefill latency:** 1.12e15 / 989e12 ≈ 1.13 seconds on a single H100.
-    4. **Analyze queuing delay:** If 16 such jobs fill a batch, they occupy the GPU for over a second just for prefill. A new short query arriving must wait in queue for this entire duration.
-    5. **Conclusion: The short query's TTFT is pushed to >1 second, a 500%+ degradation from a <200ms baseline.**
+    1. **Assumptions & Constraints:**
+       - Model: 70B on H100 (989 TFLOPS BF16/FP16).
+       - Long prompt length: 8k tokens.
+       - Batch size for long jobs: 16.
+    2. **Calculations:**
+       - Prefill compute per request: 2 * 70B parameters * 8000 tokens ≈ 1.12 PetaFLOPs.
+       - Prefill latency on 1x H100: 1.12e15 / 989e12 ≈ 1.13 seconds.
+       - Multi-second prefill for batch of 16 ensures a new chatbot query is queued for >1 second.
+    3. **Conclusion & Interpretation:** **Continuous batching alone fails; the system suffers from Head-of-Line Blocking.**
 status: published
 provenance: imported
 requires_explanation: false

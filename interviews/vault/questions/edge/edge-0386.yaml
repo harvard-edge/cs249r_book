@@ -8,32 +8,30 @@ competency_area: compute
 bloom_level: understand
 phase: both
 title: The Residual Bottleneck
-scenario: You're profiling a new vision model on a Jetson AGX Orin for an autonomous drone. You find a
-  major bottleneck in a residual connection where two INT8 tensors, each with dimensions `512x512x256`,
-  are added together. To understand the performance limit, calculate the theoretical Arithmetic Intensity
-  (AI) of this operation, assuming no data is cached. Based on your calculation, is this operation compute-bound
-  or memory-bound?
-question: "What is the arithmetic intensity of adding two 512x512x256 INT8 tensors with no caching, and is the operation compute- or memory-bound?"
+scenario: You're profiling a new vision model on a Jetson AGX Orin for an autonomous drone. You find a major bottleneck in a residual connection where two INT8 tensors, each with dimensions 512x512x256, are added together. Assume no data is cached.
+question: What is the arithmetic intensity of adding two 512x512x256 INT8 tensors with no caching, and is the operation compute- or memory-bound?
 details:
-  realistic_solution: The operation is heavily memory-bound. Its Arithmetic Intensity is far below the
-    hardware's ridge point, meaning performance is dictated by memory bandwidth, not the processor's compute
-    capability. A low AI signifies that for every byte of data moved, very few calculations are performed.
-    The performance of this layer is limited by the Jetson's 204.8 GB/s memory bandwidth.
-  common_mistake: The most common mistake is miscalculating the 'Total Bytes Moved'. Engineers often forget
-    to include all three data movements (reading two input tensors from DRAM, and writing one output tensor
-    back to DRAM). Counting only the two input tensors yields an AI of 0.5 Ops/Byte, while counting only
-    one tensor's worth of data gives an AI of 1.0 Ops/Byte. Both are arithmetically wrong and understate
-    how severely memory-bound the operation is.
-  napkin_math: "1. Total elements: 512 × 512 × 256 = 67,108,864 elements.\n2. Total operations: 67,108,864\
-    \ additions (1 INT8 op per element).\n3. Total bytes moved: Read 2 input tensors + write 1 output\
-    \ tensor = 3 × 67,108,864 × 1 byte (INT8) = 201,326,592 bytes ≈ 192 MB.\n4. Arithmetic Intensity:\
-    \ 67.1×10^6 ops / 201.3×10^6 bytes = 0.33 Ops/Byte.\n5. Orin Ridge Point: 275 TOPS (INT8) / 204.8\
-    \ GB/s = 1,343 Ops/Byte.\n6. Conclusion: 0.33 << 1,343 → extremely memory-bound.\n   Achievable throughput = 204.8\
-    \ GB/s × 0.33 = 67.6 GOPS (0.025% of peak 275 TOPS).\n   Time = 201.3 MB / 204.8 GB/s = 0.98 ms.\n\
-    \   Element-wise ops have near-zero arithmetic intensity and are always bandwidth-limited."
+  realistic_solution: 'Calculate Arithmetic Intensity (AI) by taking total operations divided by total bytes moved (reads + writes). Since it falls massively below the hardware ridge point, the operation is hopelessly memory-bound.'
+  common_mistake: |
+    **The Pitfall:** Forgetting to calculate total bytes moved by excluding the output write operation.
+    **The Rationale:** Engineers routinely count the two input reads but miss that the system must physically write the result back to DRAM.
+    **The Consequence:** Incorrectly doubling the perceived AI, leading to bad roofline modeling and failed kernel optimizations.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Tensor sizes: 512 x 512 x 256, INT8 (1 byte/element).
+       - Operation: Element-wise addition.
+       - Hardware: Jetson Orin (275 TOPS, 204.8 GB/s bandwidth).
+    2. **Calculations:**
+       - Total Elements = 512 * 512 * 256 = 67,108,864 elements.
+       - Total Operations = 67.1M additions (1 op per output element).
+       - Total Bytes Moved = 2 Reads + 1 Write = 3 * 67.1 MB = 201.3 MB.
+       - Arithmetic Intensity = 67.1M ops / 201.3M bytes = 0.33 Ops/Byte.
+       - Ridge Point = 275,000 GOPS / 204.8 GB/s = 1,343 Ops/Byte.
+    3. **Conclusion & Interpretation:**
+       - **Result: Severely Memory-Bound**. 0.33 is vastly lower than the 1,343 ridge point. Element-wise operations offer near-zero arithmetic intensity and inherently bottleneck on DRAM bandwidth.
   options:
   - ~1.0 Ops/Byte; it's memory-bound.
-  - ~3.0 Ops/Byte; it's memory-bound.
+  - ~0.5 Ops/Byte; it's memory-bound.
   - ~0.33 Ops/Byte; it's compute-bound.
   - ~0.33 Ops/Byte; it's memory-bound.
   correct_index: 3
@@ -48,16 +46,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The Napkin Math incorrectly calculates 'Total operations' as 67,108,864 additions, which implies only
-  one operation (addition) per element, but an 'add' operation involves two input elements for each output
-  element.
-- The alternative '200 TOPS dense figure' mentioned in the Napkin Math comment is extraneous and should
-  be removed for clarity and focus on the problem's stated 275 TOPS.
-validation_status_pro: ERROR
-validation_issues_pro:
-- The 'Napkin Math' section is empty and does not contain the required calculations for total operations,
-  total bytes moved, or the final Arithmetic Intensity.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

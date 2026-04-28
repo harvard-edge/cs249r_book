@@ -8,33 +8,26 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The L1 Cache Miss Penalty
-scenario: You are implementing a Transposed Convolution (often used in audio upsampling) on an MCU with an L1 Data Cache. The input array is small. To perform the transpose, your C code reads sequentially from the input array, but writes to the output array using a massive stride (`output[i * 256] = val;`). The profiler shows the CPU is stalling constantly.
+scenario: You are implementing a Transposed Convolution on an MCU with an L1 Data Cache. To perform the transpose, your C code reads sequentially from the input array, but writes to the output array using a massive stride (`output[i * 256] = val;`). The profiler shows the CPU is stalling constantly.
 question: Why does writing to memory with a massive stride destroy performance on an MCU with an L1 Data Cache?
 details:
-  realistic_solution: Strided writes cause continuous cache line evictions. Writing to output[i*256] with 32-byte cache lines means each write targets a different cache line. The CPU must: (1) fetch the entire 32-byte cache line from SRAM (read-allocate policy, ~6 cycles), (2) modify 4 bytes, (3) evict the previous cache line (write-back, ~6 cycles). Effective cost: 12 cycles per write vs 1 cycle for sequential writes. Fix: transpose the loop order so writes are sequential.
+  realistic_solution: |
+    Strided writes cause constant cache line evictions. Reorder the loop to write sequentially, maximizing cache line utilization and eliminating the read-allocate/write-back thrashing.
   common_mistake: |
-    **The Pitfall:** Assuming RAM write speeds are inherently slower than reads.
-    **The Rationale:** Candidates know that reading is often faster in some media, but RAM speeds are symmetrical.
-    **The Consequence:** They fail to identify cache line evictions as the root cause, leading to incorrect optimization attempts.
+    **The Pitfall:** Assuming SRAM write speeds are inherently slower than reads.
+    **The Rationale:** Candidates rely on asymmetrical memory intuition (like Flash/SSD) and fail to recognize cache thrashing on MCUs.
+    **The Consequence:** Engineers waste time modifying algorithm math without fixing the underlying strided memory access pattern.
   napkin_math: |
-    *   **Sequential write**: Packs 8 floats per 32-byte cache line = 1 SRAM access per 8 floats.
-    *   **Strided write**: Each float lands in a different cache line.
-    *   **Overhead**: Fetches 32 bytes (~6 cycles), modifies 4 bytes, evict 32 bytes (~6 cycles). Total ~12 cycles per float.
-    *   **Conclusion**: **Strided writes amplify physical memory bandwidth requirements by ~16x compared to sequential writes.**
+    1. **Assumptions & Constraints:**
+       - Cache line size: 32 bytes (8 floats)
+       - SRAM access: ~6 cycles read, ~6 cycles write
+    2. **Calculations:**
+       - Strided write (1 float/line): Fetch 32B (6c) + Evict 32B (6c) = 12 cycles/float
+       - Sequential write (8 floats/line): 12 cycles / 8 floats = 1.5 cycles/float
+    3. **Conclusion & Interpretation:**
+       - **Result: 12 cycles per strided write. Memory-Bandwidth-Bound.** Strided writes amplify memory bandwidth overhead by 8x.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 14
-chains:
-- id: tinyml-chain-066
-  position: 1
 validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed

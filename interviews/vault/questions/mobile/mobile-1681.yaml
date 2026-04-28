@@ -8,26 +8,25 @@ competency_area: reliability
 bloom_level: analyze
 phase: inference
 title: Graceful Degradation for On-Device AR on Google Tensor G3
-scenario: 'Your team is deploying a real-time object detection model, crucial for an on-device augmented reality feature, to smartphones equipped with the Google Tensor G3 (7.5 TOPS on-device TPU, 12 GB LPDDR5X). The model must maintain high reliability and responsiveness. You are considering two architectural approaches for implementing graceful degradation:
-
-**Architecture A (Hierarchical Fallback):**
-Uses a primary, high-accuracy FP16 model (requiring ~5 TOPS) on the Tensor G3''s TPU. If the frame rate drops below 30 FPS or device temperature exceeds a threshold, it falls back to a quantized INT8 version of the same model (requiring ~2 TOPS). If conditions worsen further, it falls back to a much lighter, less accurate INT8 model (requiring ~0.5 TOPS) that runs on the CPU. The system prioritizes critical object detection for core AR functionality over ancillary detections (e.g., background elements) during degradation.
-
-**Architecture B (Adaptive QoS Shedding with Parallel Models):**
-Deploys two models in parallel: a high-accuracy, medium-latency model (requires ~4 TOPS) for primary detections, and a low-accuracy, very low-latency model (requires ~1 TOPS) for secondary, non-critical detections. Both run on the Tensor G3''s TPU. When system resources (e.g., CPU load, memory pressure) are constrained, the system dynamically reduces the inference frequency or resolution of the secondary model, and if necessary, increases the acceptable latency for the primary model, eventually allowing it to run on the CPU with reduced frame rates if the TPU becomes unavailable.'
+scenario: 'Your team is deploying a real-time object detection model for an on-device AR feature. You are considering two architectural approaches for implementing graceful degradation: Architecture A (Hierarchical Fallback) vs. Architecture B (Adaptive QoS Shedding).'
 question: Which architecture would you recommend and why, specifically referencing the Tensor G3's capabilities, and what specific metrics would you monitor?
 details:
-  realistic_solution: Implement a robust 'degradation manager' service that continuously monitors multiple device metrics (CPU load, GPU/TPU utilization, memory pressure, battery level, device temperature, frame rate). Define clear thresholds for each metric and prioritize them. Use a state machine for degradation levels, allowing for smooth transitions up and down the degradation ladder. Pre-load smaller fallback models into memory where possible to minimize latency during switching. Utilize the Tensor G3's dedicated TPU for the primary and first-level fallback models to maximize efficiency, only offloading to CPU as a last resort.
+  realistic_solution: Architecture B (Adaptive QoS Shedding) is technically superior. Implement a robust degradation service targeting comprehensive telemetry (thermal APIs, bus pressure, dropped frames). Crucially, by shedding framerate rather than swapping weights, Architecture B immediately relieves the compute payload without triggering catastrophic DRAM loads. Architecture A's reliance on loading fallback model weights during peak thermal throttling completely devastates shared memory bus availability, totally ruining real-time AR tracking.
   common_mistake: |
-    **The Pitfall:** Over-reliance on a single degradation trigger and lacking clear recovery strategies.
-    **The Rationale:** Teams implement naive fallbacks based only on thermal limits or frame drops, without accounting for concurrent resource contention.
-    **The Consequence:** The system bounces between states or gets stuck in a degraded mode permanently, ruining the UX.
+    **The Pitfall:** Vastly over-relying on a single metric (like thermal limits) and attempting to solve it purely by dynamically loading smaller fallback models.
+    **The Rationale:** Teams naively believe that smaller parameter counts inherently solve all degradation problems, completely ignoring the massive I/O cost of the model swap itself.
+    **The Consequence:** The system becomes permanently paralyzed as the massive DRAM reads required to swap the fallback model inject catastrophic latency spikes into the already distressed AR render loop.
   napkin_math: |
-    - **High-Accuracy Model:** 166 GOPs per inference.
-    - **Throughput at 30 FPS:** 166 GOPs × 30 = **~5 TOPS**.
-    - **Available Buffer:** Tensor G3 TPU has 7.5 TOPS, leaving a 2.5 TOPS buffer.
-    - **Latency Bottleneck:** Sustaining 30 FPS requires inferences to complete in ~33ms. If system load pushes inference to 100ms (10 FPS), the effective throughput is 166 GOPs / 100ms = **1.66 TOPS**.
-    - **Conclusion:** The bottleneck is memory bandwidth or thermal throttling, not a lack of raw TPU compute.
+    1. **Assumptions & Constraints:**
+       - High-Accuracy Model: 166 GOPS per inference.
+       - Target Framerate: 30 FPS (33ms latency deadline).
+       - TPU Compute Limit: 7.5 TOPS.
+    2. **Calculations:**
+       - Required sustained throughput: 166 GOPS * 30 FPS = ~5.0 TOPS.
+       - Compute Buffer: 7.5 TOPS - 5.0 TOPS = 2.5 TOPS remaining.
+       - Throttled Latency Impact: If thermal throttling pushes inference to 100ms (10 FPS), effective throughput collapses to 1.66 TOPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: Thermal and Compute-Bound.** Dropping framerate (Architecture B) is mathematically superior. It instantly sheds compute demand from 5.0 TOPS to 1.66 TOPS without incurring the lethal memory bandwidth penalty caused by swapping model weights.
 status: published
 provenance: imported
 requires_explanation: false

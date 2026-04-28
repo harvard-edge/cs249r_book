@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: remember
 phase: training
 title: Column-Parallel Linear Layer Communication Pattern
-scenario: In Megatron-LM's column-parallel linear layer running on an 8×MI300X node, each GPU computes its local partial output.
-question: After a column-parallel linear layer on 8×MI300X, what collective, if any, is needed before the next layer can consume the partial outputs, and why?
+scenario: In Megatron-LM's column-parallel linear layer running on an 8x MI300X node, each GPU computes its local partial output.
+question: After a column-parallel linear layer on 8xMI300X, what collective, if any, is needed before the next layer can consume the partial outputs, and why?
 details:
   realistic_solution: No collective is needed between the column-parallel layer and a subsequent row-parallel layer in Megatron's fused design. The column-parallel layer splits weights along columns (output dim), producing independent partial activations on each GPU. These feed directly into the row-parallel layer, which splits along rows (input dim). Only after the row-parallel layer is an AllReduce needed to sum the partial results. This fused design eliminates one communication step per block.
   common_mistake: |
@@ -17,10 +17,14 @@ details:
     **The Rationale:** Candidates fail to understand that a column-parallel layer produces complete partial outputs that feed directly into a row-parallel layer without communication.
     **The Consequence:** Inserting redundant communication steps that destroy training efficiency.
   napkin_math: |
-    - **MLP Dimensions:** hidden_dim=16384 on 4-way TP. Weight matrix W is [H_in, H_out].
-    - **Column-Parallel Split:** W is split along H_out. Each shard is [16384, 4096].
-    - **Output per GPU:** [batch, seq, 4096].
-    - **Result:** An AllGather across 4 GPUs reconstructs the full **[batch, seq, 16384]** output if used standalone, but is skipped when fused with row-parallel.
+    1. **Assumptions & Constraints:**
+       - MLP Dimensions: hidden_dim=16384 on 4-way Tensor Parallelism.
+       - Weight Matrix W is [H_in, H_out].
+    2. **Calculations:**
+       - Column-Parallel Split: W is split along H_out. Each shard is [16384, 4096].
+       - Output per GPU: [batch, seq, 4096].
+       - Row-Parallel Split (subsequent): W_proj is split along H_in. Each shard expects [batch, seq, 4096].
+    3. **Conclusion & Interpretation:** **An AllGather is skipped because the partial outputs perfectly match the sharded input requirements of the subsequent row-parallel layer, eliminating one communication step per block.**
 status: published
 provenance: imported
 requires_explanation: false

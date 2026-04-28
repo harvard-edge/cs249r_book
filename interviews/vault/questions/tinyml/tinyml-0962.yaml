@@ -8,20 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Operator Fusion Memory Tradeoff on nRF5340
-scenario: You are deploying an audio classification model on a Nordic nRF5340 MCU (128 MHz app core, 256 KB SRAM, 1 MB flash). The BLE 5.3 stack reserves 80 KB of SRAM, leaving 176 KB for the application and ML model. An ahead-of-time (AOT) compiler applies aggressive operator fusion to a sequence of convolutions, reducing inference latency by 12%. However, the system now crashes with an out-of-memory (OOM) error during inference, as peak SRAM usage increased by 45 KB.
+scenario: You are deploying an audio classification model on a Nordic nRF5340 MCU. An ahead-of-time (AOT) compiler applies aggressive operator fusion to a sequence of convolutions, reducing inference latency by 12%. However, the system now crashes with an out-of-memory (OOM) error during inference.
 question: Why does fusing operators to reduce latency cause a significant increase in peak SRAM usage?
 details:
-  realistic_solution: While AOT operator fusion eliminates the need to write and read intermediate tensors to main SRAM—saving memory bandwidth and reducing latency—it forces the compiler to allocate a larger contiguous scratchpad buffer to handle the combined execution block. In an unfused graph, the memory planner can sequentially reuse buffers. When fused, the intermediate state and combined kernel requirements demand the memory to be held concurrently, increasing the peak SRAM watermark.
+  realistic_solution: AOT operator fusion eliminates intermediate tensor materialization but forces the compiler to allocate a larger contiguous scratchpad buffer to hold the combined working context for the fused layers concurrently.
   common_mistake: |
     **The Pitfall:** Assuming operator fusion strictly reduces memory requirements.
     **The Rationale:** Candidates correctly know fusion eliminates intermediate tensor materialization, but fail to realize it requires holding a larger combined working context (scratchpad) simultaneously.
     **The Consequence:** The compiler's strategy violates the hard memory constraint, trading a minor latency win for a fatal system crash.
   napkin_math: |
-    1. **Total SRAM:** 256 KB.
-    2. **Available SRAM:** 256 KB - 80 KB (BLE stack) = 176 KB.
-    3. **Unfused Model Peak:** 140 KB (leaves 36 KB headroom).
-    4. **Fused Model Peak:** 140 KB + 45 KB = **185 KB**.
-    5. **Conclusion:** 185 KB > 176 KB available, leading directly to an OOM crash.
+    1. **Assumptions & Constraints:**
+       - nRF5340: 256 KB SRAM, BLE Stack reserves 80 KB.
+       - Unfused peak arena: 140 KB. Fused overhead: +45 KB.
+    2. **Calculations:**
+       - Available SRAM for ML: 256 - 80 = 176 KB.
+       - Fused Peak Memory: 140 + 45 = 185 KB.
+       - Deficit: 185 KB > 176 KB.
+    3. **Conclusion & Interpretation:**
+       **Result: 185 KB peak usage causes OOM.** The system becomes fatally **SRAM-Bound**, showing that AOT operator fusion trades bandwidth for peak memory footprint.
 status: published
 provenance: imported
 requires_explanation: false

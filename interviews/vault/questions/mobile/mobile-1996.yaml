@@ -8,21 +8,29 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: both
 title: Diffusion Model Memory Bound Check
-scenario: An on-device diffusion model runs 20 unrolled denoising steps on a Snapdragon 8 Gen 3 (45 TOPS peak, 50 GB/s bandwidth).
+scenario: An on-device diffusion model runs 20 unrolled denoising steps on a mobile SoC (45 TOPS peak, 50 GB/s memory bandwidth).
 question: Evaluate total MACs per step and implement an arithmetic intensity check to prove whether generation is compute-bound or memory-bound.
 details:
   realistic_solution: |
-    Assume the UNet requires 1 Tera-MAC (2 TFLOPs) per step and weights are 2GB. Compute time per step at 45 TOPS is 2 TFLOPs / 45 TOPS = 44ms. Memory time per step is loading 2GB / 50 GB/s = 40ms. The arithmetic intensity is 2 TFLOPs / 2GB = 1000 FLOPs/byte. Since the hardware ratio is 45 TOPS / 50 GB/s = 900 FLOPs/byte, the system is closely balanced but slightly compute-bound for a batch size of 1.
+    Unlike autoregressive LLMs, image-based UNets heavily reuse weights spatially across feature maps via convolutions. This naturally pushes their Arithmetic Intensity much higher. By comparing the hardware's ridge point (TOPS/Bandwidth) to the model's actual OPs/byte ratio, we prove that the UNet generates enough arithmetic density to keep the NPU saturated, making single-batch diffusion generation fundamentally compute-bound, not memory-bandwidth bound.
   common_mistake: |
-    **The Pitfall:** Assuming diffusion models are entirely memory-bound like LLMs.
-    **The Rationale:** Candidates forget that CNN-based UNets reuse weights spatially, giving them much higher arithmetic intensity than autoregressive transformers.
-    **The Consequence:** Applying the wrong optimizations (e.g., extreme weight quantization) when compute is the actual bottleneck.
+    **The Pitfall:** Blindly assuming diffusion models are memory-bandwidth-bound exactly like LLMs.
+    **The Rationale:** Candidates conflate the bottlenecks of LLM autoregressive decoding (where weights are fetched per token) with the dense, spatially-reused convolutions of a UNet.
+    **The Consequence:** Misdirecting engineering effort into extreme, destructive weight quantization strategies when the actual bottleneck requires accelerating the NPU math kernels.
   napkin_math: |
-    - **Hardware Ridge Point:** 45 TOPS / 50 GB/s = 900 OPs/byte.
-    - **Model Compute:** Assume UNet requires 1 Tera-MAC (2 TFLOPs) per step.
-    - **Model Memory:** Weights are ~2GB.
-    - **Arithmetic Intensity:** 2 TFLOPs / 2 GB = 1000 OPs/byte.
-    - **Result:** **1000 OPs/byte > 900 OPs/byte, meaning the system is slightly compute-bound for a batch size of 1.**
+    1. **Assumptions & Constraints:**
+       - Hardware Compute: 45 TOPS (45,000 GOPS).
+       - Hardware Bandwidth: 50 GB/s.
+       - Model: UNet requiring 1 Tera-MAC = 2 TFLOPs (2,000 GOPS) per step.
+       - Model Weights (per step): ~2 GB.
+    2. **Calculations:**
+       - Hardware Ridge Point: 45,000 GOPS / 50 GB/s = 900 OPs/byte.
+       - Model Arithmetic Intensity: 2,000 GOPS / 2 GB = 1000 OPs/byte.
+       - Intensity Check: 1000 OPs/byte > 900 OPs/byte.
+       - Compute Execution Time: 2 TFLOPs / 45 TOPS = 44.4 ms.
+       - Memory Fetch Time: 2 GB / 50 GB/s = 40.0 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 1000 OPs/byte > 900 OPs/byte (Compute-Bound).** Spatial weight reuse allows the model to comfortably cross the hardware ridge point and fully saturate NPU execution units at batch size 1.
 status: published
 provenance: llm-draft
 expected_time_minutes: 15

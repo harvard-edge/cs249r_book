@@ -8,12 +8,22 @@ competency_area: reliability
 bloom_level: apply
 phase: training
 title: The Silent GPU Killer
-scenario: You are an ML Systems Engineer training a large language model on a 1,024-GPU H100 cluster. The training job, which is scheduled to run for 30 days, keeps failing after about 40-50 hours. The cluster scheduler (e.g., Slurm) terminates the job with a 'watchdog timer expired' error. Your application logs show normal training steps right up until the termination, with no exceptions. However, digging into the kernel logs (`dmesg`) on one of the failed nodes reveals a GPU-related 'Xid' error message that occurred just before the job was killed. What is the most likely cause of this failure, and what should be your immediate action?
-question: "What is the most likely cause of this failure, and what should be your immediate action?"
+scenario: You are an ML Systems Engineer training a large language model on a 1,024-GPU cluster. The training job keeps failing after about 40-50 hours. The cluster scheduler terminates the job with a 'watchdog timer expired' error. Your application logs show normal training steps right up until the termination. Digging into the kernel logs (dmesg) reveals a GPU-related 'Xid' error message that occurred just before the job was killed.
+question: What is the most likely cause of this failure, and what should be your immediate action?
 details:
-  realistic_solution: 'The `dmesg` log showing a GPU ''Xid'' error is the smoking gun for a transient, non-recoverable GPU hardware or driver fault. At this scale, hardware failures are not exceptions; they are routine operational occurrences. The watchdog timer expired because the faulty GPU became unresponsive, which in turn froze the user-space training process and prevented it from signaling its liveness. The correct immediate action is to ensure the cluster''s fault-tolerance system is working as designed: automatically detect the failed node, quarantine it for diagnostics, and reschedule the training job to restart from its most recent checkpoint on a healthy replacement node.'
-  common_mistake: Engineers from smaller-scale environments often assume software bugs (like an infinite loop) are the primary cause of hangs, underestimating the statistical certainty of hardware faults in large fleets. They incorrectly begin debugging the Python application code instead of treating the failure as an infrastructure-level, routine event and hardening the system's fault tolerance.
-  napkin_math: 'We can use the ''Fleet Math'' numbers to prove that this is an expected event. The Mean Time To Failure (MTTF) for a single high-end GPU is roughly 50,000 hours. For a fleet of 1,024 GPUs, the *entire fleet''s* MTTF is drastically lower. **Cluster MTTF = Single GPU MTTF / Number of GPUs = 50,000 / 1,024 ≈ 48.8 hours.** The observed failure rate of ~40-50 hours perfectly aligns with statistical expectations. It is not a software bug. **Immediate action:** Check if the Xid errors always originate from the same node. If so, quarantine that node and replace it. If failures are distributed across nodes, the ~49-hour MTTF is the baseline — implement checkpointing every ~30 minutes to limit rework to <15 minutes per failure.'
+  realistic_solution: 'The dmesg log showing a GPU Xid error is the smoking gun for a transient, non-recoverable hardware fault. At this scale, hardware failures are routine. The immediate action is to ensure the cluster''s fault-tolerance system is working: quarantine the node and restart the job from the last checkpoint.'
+  common_mistake: |
+    **The Pitfall:** Assuming software bugs are the primary cause of hangs in large fleets.
+    **The Rationale:** Engineers from smaller-scale environments underestimate the statistical certainty of hardware faults.
+    **The Consequence:** Wasting time debugging application code instead of hardening the system's fault tolerance and automated checkpointing.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Single GPU MTTF: ~50,000 hours.
+       - Fleet size: 1,024 GPUs.
+    2. **Calculations:**
+       - Cluster MTTF = Single GPU MTTF / Number of GPUs = 50,000 / 1,024 = 48.8 hours.
+    3. **Conclusion & Interpretation:**
+       - **Result: The ~49-hour MTTF is expected. The failure is a statistical certainty, not a software bug.**
   options:
   - The training code has entered an infinite loop, causing the application to hang. You should attach a debugger to the Python process.
   - The data loading pipeline is stuck, starving the GPU and freezing the process. You should investigate the data loader and network performance.

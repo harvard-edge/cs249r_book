@@ -8,7 +8,7 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: Diagnosing W8A16 Quantization Regression During Prefill
-scenario: You are deploying a 70B parameter LLM across 4x A100 GPUs. To save memory, you implement W8A16 quantization. Profiling reveals an interesting divergence: during the autoregressive decoding phase (batch size 1), token generation speed nearly doubles compared to the FP16 baseline. However, during the prefill phase (processing a 2048-token prompt), the latency is actually 15% slower than the pure FP16 model.
+scenario: 'You are deploying a 70B parameter LLM across 4x A100 GPUs. To save memory, you implement W8A16 quantization. Profiling reveals an interesting divergence: during the autoregressive decoding phase (batch size 1), token generation speed nearly doubles compared to the FP16 baseline. However, during the prefill phase (processing a 2048-token prompt), the latency is actually 15% slower than the pure FP16 model.'
 question: "Why does W8A16 nearly double batch-1 decode speed but make 2048-token prefill 15% slower than FP16?"
 details:
   realistic_solution: Decoding is memory-bandwidth bound (GEMV), so halving weight bytes directly halves latency (8.75ms vs 17.5ms). Prefill is compute-bound (GEMM). Because activations remain in FP16, the Tensor Cores require FP16 weights. The INT8 weights must be dequantized on-the-fly in the SM registers, adding ALU overhead without alleviating any bottleneck, thus degrading overall prefill latency.
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Failing to distinguish between the memory-bound nature of decoding (GEMV) and the compute-bound nature of prefill (GEMM).
     **The Consequence:** Over-optimizing for memory bandwidth at the expense of compute efficiency, leading to unexpected prefill regressions when deploying quantized models.
   napkin_math: |
-    * **Decoding (GEMV):** 70B params * 1 byte = 70GB memory traffic per token.
-    * **Bandwidth limit:** At 8 TB/s aggregate bandwidth (4x A100), decoding takes ~8.75ms vs ~17.5ms for FP16.
-    * **Prefill (GEMM):** 70B * 2048 * 2 = ~286 TFLOPs.
-    * **Compute limit:** 4x A100 has 1248 TFLOPS FP16; prefill is purely compute-bound.
-    * **The Regression:** INT8 memory bandwidth savings are irrelevant here, while the extra INT8-to-FP16 cast instructions consume vector ALU cycles, lowering achievable TFLOPS and slowing down prefill by 15%.
-    * **Conclusion:** **W8A16 slows down prefill due to dequantization overhead in a compute-bound phase.**
+    1. **Assumptions & Constraints:**
+       - Hardware: 4x A100 (8 TB/s aggregate bandwidth, 1248 TFLOPS FP16).
+       - Model: 70B params.
+       - Decode: Batch 1 (Memory-bound). Prefill: 2048 tokens (Compute-bound).
+    2. **Calculations:**
+       - Decoding (GEMV): 70B * 1 byte = 70GB traffic. Takes ~8.75ms vs ~17.5ms for FP16.
+       - Prefill (GEMM): 70B * 2048 * 2 = ~286 TFLOPs.
+       - INT8 Overhead: W8A16 requires runtime INT8-to-FP16 casting, consuming vector ALU cycles.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound Degradation.** The dequantization overhead slows down the compute-bound prefill phase by 15%, while memory bandwidth savings are irrelevant here.
 status: published
 provenance: imported
 requires_explanation: false

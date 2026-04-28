@@ -8,21 +8,26 @@ competency_area: precision
 bloom_level: evaluate
 phase: training
 title: Evaluating FP16 vs BF16 for LLM Pre-training Stability
-scenario: Your team is pre-training a 30B parameter LLM on a cluster of 512 NVIDIA A100 GPUs (80GB). Using standard FP16 mixed precision with dynamic loss scaling, the training frequently crashes with NaNs due to gradient overflow, leading to wasted compute. You are tasked with evaluating whether to switch to BF16 mixed precision or stick with FP16 and tune the loss scaler.
-question: Should the 30B LLM training run switch from FP16 with loss scaling to BF16 on A100s, and what trade-offs justify the choice?
+scenario: Your team is pre-training a 30B parameter LLM on a cluster of 512 GPUs. Using standard FP16 mixed precision with dynamic loss scaling, the training frequently crashes with NaNs due to gradient overflow, leading to wasted compute. You are tasked with evaluating whether to switch to BF16 mixed precision or stick with FP16 and tune the loss scaler.
+question: Should the 30B LLM training run switch from FP16 with loss scaling to BF16, and what trade-offs justify the choice?
 details:
-  realistic_solution: Switch to BF16 for the forward and backward passes to eliminate gradient overflow, while maintaining FP32 master weights for the optimizer step. Since A100 Tensor Cores process both FP16 and BF16 at 312 TFLOPS and both consume 2 bytes per parameter, there is zero performance or memory bandwidth penalty for switching to BF16, while its 8-bit exponent entirely removes the need for dynamic loss scaling.
+  realistic_solution: 'Switch to BF16 for the forward and backward passes to eliminate gradient overflow, while maintaining FP32 master weights for the optimizer step. Since both consume 2 bytes per parameter, there is zero performance or memory bandwidth penalty for switching to BF16, while its 8-bit exponent entirely removes the need for dynamic loss scaling.'
   common_mistake: |
     **The Pitfall:** Assuming BF16 is a strictly superior drop-in replacement.
     **The Rationale:** BF16 solves the overflow issue due to its larger dynamic range, so engineers assume it can be used everywhere without changes.
     **The Consequence:** Failing to realize that its 7-bit mantissa requires strictly maintaining FP32 master weights, otherwise small gradient updates are lost during the optimizer step.
   napkin_math: |
-    - FP16 max value = 65,504 (often exceeded in LLM training).
-    - BF16 max value = 3.4e38 (matches FP32, preventing overflow).
-    - Memory bandwidth: 2 bytes per parameter for both FP16 and BF16.
-    - Compute throughput: 312 TFLOPS for both on A100 Tensor Cores.
-    - BF16 machine epsilon is ~7.8e-3.
-    - **An update of 1e-4 to a weight of 1.0 yields 1.0 in BF16 (1.0 + 1e-4 < 1.0 + epsilon), proving the absolute necessity of FP32 master weights.**
+    1. **Assumptions & Constraints:**
+       - FP16 max value = 65,504 (frequently exceeded).
+       - BF16 max value = 3.4e38 (matches FP32).
+       - Memory bandwidth: 2 bytes per parameter for both.
+       - BF16 machine epsilon: ~7.8e-3.
+    2. **Calculations:**
+       - With an update of 1e-4 to a weight of 1.0 in BF16:
+       - 1.0 + 1e-4 = 1.0001.
+       - Since 1e-4 < epsilon (7.8e-3), the addition evaluates to 1.0 in BF16.
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound. BF16 prevents gradient overflow but strictly requires FP32 master weights to avoid losing small gradient updates.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -43,4 +48,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-created_at: '2026-03-23T23:38:52.596891'

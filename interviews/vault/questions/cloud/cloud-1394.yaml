@@ -8,10 +8,8 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Root-Causing HPCC Incast Drops in 400G Networks
-scenario: >
-  During an All-to-All communication phase in a 256-node GPU cluster (each with 8x 400Gbps NICs), you observe transient packet drops at the spine switches despite enabling High Precision Congestion Control (HPCC) over RoCEv2. The switches have 32MB of shared buffer. HPCC uses In-Network Telemetry (INT) to proactively adjust transmission rates and avoid PFC pauses. However, telemetry shows spine buffers overflowing before the sender's rate limiters adjust.
-question: >
-  Why is HPCC failing to prevent spine buffer drops during the 256-node All-to-All incast, and how should you tune it?
+scenario: During an All-to-All communication phase in a 256-node GPU cluster (each with 8x 400Gbps NICs), you observe transient packet drops at the spine switches despite enabling High Precision Congestion Control (HPCC) over RoCEv2. The switches have 32MB of shared buffer. HPCC uses In-Network Telemetry (INT) to proactively adjust transmission rates and avoid PFC pauses. However, telemetry shows spine buffers overflowing before the sender's rate limiters adjust.
+question: Why is HPCC failing to prevent spine buffer drops during the 256-node All-to-All incast, and how should you tune it?
 details:
   realistic_solution: |
     Analyze INT packet timestamps to measure the hardware feedback delay. If the telemetry RTT is greater than the buffer fill time, HPCC reacts too late. Lower the HPCC target utilization parameter (U) from 95% to 80% to reserve more buffer headroom for in-flight packets during the RTT window.
@@ -20,11 +18,16 @@ details:
     **The Rationale:** Engineers assume standard congestion control protocols magically prevent drops regardless of fabric latency.
     **The Consequence:** The underlying feedback delay remains unaddressed, meaning incast bursts will continuously overflow buffers, degrading collective communication performance.
   napkin_math: |
-    - Incast from 32 senders hitting a single spine port at 400Gbps = 12.8 Tbps (1.6 TB/s).
-    - Egress drain rate = 400Gbps (50 GB/s).
-    - Net fill rate = 1.6 TB/s - 0.05 TB/s = 1.55 TB/s.
-    - Time to fill 32MB buffer = 32MB / 1.55 TB/s ≈ 20.6 microseconds.
-    - **Result:** **If end-to-end INT feedback RTT > 20us, the buffer overflows before senders can reduce their rates.**
+    1. **Assumptions & Constraints:**
+       - Incast nodes: 32 senders hitting a single spine port.
+       - Sender bandwidth: 400Gbps (50 GB/s) per sender.
+       - Egress bandwidth: 400Gbps (50 GB/s).
+       - Switch buffer: 32MB.
+    2. **Calculations:**
+       - Incast influx rate = 32 * 50 GB/s = 1,600 GB/s (1.6 TB/s).
+       - Net fill rate = Influx (1.6 TB/s) - Egress (0.05 TB/s) = 1.55 TB/s.
+       - Time to overflow buffer = 32MB / 1.55 TB/s = 32e6 / 1.55e12 ≈ 20.6 μs.
+    3. **Conclusion & Interpretation:** **If the end-to-end INT feedback RTT exceeds 20.6μs, the 32MB buffer will inevitably overflow before senders can throttle, proving HPCC feedback is too slow for the latency domain.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,20 +8,24 @@ competency_area: memory
 bloom_level: create
 phase: training
 title: Designing Activation Offloading vs. Checkpointing Trade-off for Long-Sequence Training on H100
-scenario: You are training a 13B Transformer with sequence length 32K tokens on a single H100. Raw activation memory at batch size 1 exceeds 60 GB. You must choose between (A) gradient checkpointing every 4 layers — recomputing activations during backward — or (B) offloading activations to CPU DRAM over PCIe 5.0 (64 GB/s bidirectional).
+scenario: You are training a 13B Transformer with sequence length 32K tokens on a single GPU. Raw activation memory at batch size 1 exceeds 60 GB. You must choose between gradient checkpointing every 4 layers or offloading activations to CPU DRAM over PCIe 5.0 (64 GB/s bidirectional).
 question: Should you use checkpointing every 4 layers or PCIe 5.0 activation offload to keep the 32K-token step under 2 seconds, and why?
 details:
-  realistic_solution: 'To avoid recomputation, you must offload all intermediate activations required for the backward pass. With Flash Attention, this is approximately 16 × S × H elements per layer. For 4 layers with S=32K and H=5120 (typical for 13B), this is 4 × 16 × 32768 × 5120 × 2 bytes ≈ 21.47 GB. Sending and retrieving this over PCIe 5.0 (64 GB/s) takes 21.47 / 64 = 335 ms each way, totaling ~671 ms of PCIe bottleneck. Conversely, the recompute cost for 4 layers is the forward pass FLOPs: 4 × (24 × S × H² + 4 × S² × H). This is roughly 4 × 42.6 TFLOPs = 170.4 TFLOPs. At 989 TFLOPS, recomputation takes ~172 ms. Recomputation is significantly faster than PCIe offload for these sequence lengths. Use gradient checkpointing.'
+  realistic_solution: 'Recomputation is significantly faster than PCIe offload for these sequence lengths. Sending massive intermediate activations over PCIe 5.0 introduces a severe bottleneck. The recompute cost for 4 layers leverages the GPU''s massive TFLOPS advantage.'
   common_mistake: |
     **The Pitfall:** Assuming PCIe offload is always faster than recomputation due to high bandwidth.
     **The Rationale:** Engineers overlook that for long sequences (S=32K), intermediate activations are massive, bottlenecking PCIe, while TFLOPS handles recompute easily.
     **The Consequence:** Choosing the slower offload strategy and missing throughput targets.
   napkin_math: |
-    1. Calculate offload size (4 layers): 16 * 32768 * 5120 * 2 bytes * 4 = 21.47 GB.
-    2. Calculate offload time: 2 * 21.47 GB / 64 GB/s = 671 ms.
-    3. Calculate recompute FLOPs (4 layers): 4 * (24 * S * H^2 + 4 * S^2 * H) = 170.4 TFLOPs.
-    4. Calculate recompute time: 170.4 TFLOPs / 989 TFLOPS = 172.3 ms.
-    5. **Result: Checkpointing (172.3 ms) is nearly 4x faster than PCIe offload (671 ms).**
+    1. **Assumptions & Constraints:**
+       - 4 layers offload size = 21.47 GB.
+       - PCIe 5.0 bidirectional = 64 GB/s.
+       - Recompute = 170.4 TFLOPs at 989 TFLOPS.
+    2. **Calculations:**
+       - Offload time = (2 * 21.47 GB) / 64 GB/s = 671 ms.
+       - Recompute time = 170.4 TFLOPs / 989 TFLOPS = 172.3 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound recomputation (172.3 ms) easily beats PCIe I/O-Bound offload (671 ms).**
 status: published
 provenance: imported
 requires_explanation: true

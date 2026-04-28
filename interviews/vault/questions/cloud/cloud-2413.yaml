@@ -11,17 +11,21 @@ title: TPU Systolic Array Underutilization
 scenario: You are migrating a latency-sensitive 7B parameter LLM inference service from A100 GPUs to TPU v4 instances. On A100, at a batch size of 1, the latency is 35ms per token. On TPU v4, the latency spikes to 90ms per token at batch size 1, despite the TPU having higher peak theoretical TFLOPS. Profiling shows TPU Matrix eXecution Unit (MXU) utilization is below 5%.
 question: "Why is TPU v4 slower than A100 at batch size 1, and how would you co-design the serving stack to fix it?"
 details:
-  realistic_solution: The issue is a fundamental mismatch between the algorithm's batch size and the hardware's dataflow architecture. TPUs use a massive 128x128 systolic array (MXU) for matrix multiplications, optimized for high-throughput pipeline execution. At batch size 1, the matrix-vector multiplication cannot physically fill the spatial dimensions of the systolic array, leading to massive underutilization. The tradeoff here is latency versus throughput. To fix this through co-design, you must implement continuous batching (iteration-level scheduling) to force the effective batch size higher (e.g., >32), amortizing the MXU fill time. If strict single-batch latency is required, the algorithm should be mapped to smaller sub-arrays if supported, or routed back to SIMT architectures (GPUs) which are better suited for latency-sensitive, memory-bandwidth-bound vector operations.
+  realistic_solution: The issue is a fundamental mismatch between the algorithm's batch size and the hardware's dataflow architecture. TPUs use a massive 128x128 systolic array (MXU) for matrix multiplications, optimized for high-throughput pipeline execution. At batch size 1, the matrix-vector multiplication cannot physically fill the spatial dimensions of the systolic array, leading to massive underutilization. To fix this, implement continuous batching (iteration-level scheduling) to force the effective batch size higher (e.g., >32), amortizing the MXU fill time.
   common_mistake: |
     **The Pitfall:** Blaming the TPU compiler (XLA) for poor fusion and attempting to manually write low-level custom kernels.
     **The Rationale:** Engineers treat the TPU like a standard SIMT GPU, failing to recognize the rigid 128x128 spatial layout of a systolic array.
     **The Consequence:** Development time is wasted on low-level optimizations that cannot physically overcome the underfilled matrix math hardware at batch size 1.
   napkin_math: |
-    1. A TPU v4 Matrix eXecution Unit (MXU) is physically a 128x128 grid.
-    2. A batch size of 1 requires multiplying a 1xN vector by an NxM matrix.
-    3. Only 1 row of the 128x128 grid performs useful work per cycle.
-    4. Peak physical utilization is 1 / 128 ≈ 0.78%.
-    **To exceed 50% utilization on a TPU systolic array, continuous batching must enforce an effective batch size of at least 64.**
+    1. **Assumptions & Constraints:**
+       - TPU v4 MXU physical dimensions: 128x128 grid.
+       - Batch size: 1.
+    2. **Calculations:**
+       - A batch size of 1 requires multiplying a 1xN vector by an NxM matrix.
+       - Only 1 row of the 128x128 grid performs useful work per cycle.
+       - Peak physical utilization: 1 / 128 = ~0.78%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Utilization-Bound.** To exceed 50% utilization on a TPU systolic array, continuous batching must enforce an effective batch size of at least 64.
 status: published
 provenance: imported
 requires_explanation: false
@@ -34,8 +38,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -11,16 +11,22 @@ title: Diagnosing QAT Divergence in LLMs
 scenario: Your team is fine-tuning a 7B parameter causal LLM for a cloud-based code completion service. To deploy efficiently on T4 GPUs, you require INT8 weights and activations. Post-Training Quantization (PTQ) degraded accuracy. You initiate Quantization-Aware Training (QAT) simulating INT8 precision using the Straight-Through Estimator (STE). Within the first 500 steps, the training loss diverges completely. Telemetry shows layer norm outputs exhibiting extreme magnitude spikes (e.g., >120) that didn't destabilize FP16 training but are destroying the QAT process.
 question: Why does INT8 QAT diverge when layer norm outputs spike above 120, and what quantitative quantizer strategy would stabilize training?
 details:
-  realistic_solution: The divergence occurs because standard moving-average min/max observers fail to adapt instantly to sudden activation outliers, resulting in catastrophic clipping errors. The solution is to use Learned Step Size Quantization (LSQ) to make the scaling factor a differentiable parameter, initialize quantizer parameters using thorough PTQ calibration, and freeze the quantizer ranges for the first 1000 steps to allow weights to adapt to the simulated quantization noise before updating the step size with a 10x lower learning rate.
+  realistic_solution: 'The divergence occurs because standard moving-average min/max observers fail to adapt instantly to sudden activation outliers, resulting in catastrophic clipping errors. The solution is to use Learned Step Size Quantization (LSQ) to make the scaling factor a differentiable parameter, and freeze the quantizer ranges for the first 1000 steps to allow weights to adapt to the simulated quantization noise.'
   common_mistake: |
     **The Pitfall:** Attempting to fix divergence by modifying the STE logic or applying standard global gradient clipping.
     **The Rationale:** Candidates often ignore the interaction between sudden activation outliers and the dynamic range observers used in quantization.
     **The Consequence:** The core issue remains unaddressed, as moving-average min/max observers still fail to adapt instantly to extreme activation spikes, resulting in catastrophic clipping errors.
   napkin_math: |
-    - **Calculate scale factor:** If an observer's running max is 10, the INT8 scale factor is S = 10 / 127 \u2248 0.078.
-    - **Analyze outlier impact:** A sudden outlier of 120 is heavily clipped to 10, creating a massive forward error of 110.
-    - **Trace the gradient:** During backprop, the STE treats rounding as the identity function, passing the gradient of this massive error unmodified to preceding weights.
-    - **Identify explosive feedback loop:** The resulting weight update `\u0394w \u221d \u2207L * x` destabilizes subsequent layers.
+    1. **Assumptions & Constraints:**
+       - PTQ failed, switching to QAT using STE.
+       - Outlier magnitude: > 120.
+       - Running max observer value: 10.
+       - Quantization scheme: INT8 (max value 127).
+    2. **Calculations:**
+       - Scale factor (S): 10 / 127 ≈ 0.078.
+       - Outlier clipping: Value of 120 is clipped to 10 (max represented value).
+       - Forward error: 120 - 10 = 110.
+    3. **Conclusion & Interpretation:** **The massive forward error propagates back unchanged via STE, causing an Explosive Gradient Feedback Loop.**
 status: published
 provenance: imported
 requires_explanation: false

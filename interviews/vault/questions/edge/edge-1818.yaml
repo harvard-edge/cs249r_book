@@ -9,20 +9,25 @@ bloom_level: analyze
 phase: inference
 title: Edge TPU Layer Fusion and Operator Scheduling for INT8 Vision Model
 scenario: >-
-  You are designing an operator scheduling strategy for a real-time object detection model on a Google Coral Edge TPU (USB form factor). The Edge TPU delivers 4 TOPS of INT8 compute at 2W, but requires all operations to be fully INT8 quantized and has a restricted set of supported operators.
+  You are designing an operator scheduling strategy for a real-time object detection model on a Google Coral Edge TPU via a USB interface. The Edge TPU requires all operations to be fully INT8 quantized and has a restricted set of supported operators.
 question: How would you schedule and fuse operators on the Coral Edge TPU to keep intermediate tensors in SRAM and avoid USB CPU fallbacks?
 details:
   realistic_solution: 'Replace unsupported operators with supported INT8 approximations before scheduling to ensure full graph compilation. The scheduler must prioritize depth-first execution and layer fusion (e.g., Conv2D + BatchNorm + ReLU) to ensure intermediate feature maps stay entirely within the Edge TPU''s SRAM, completely avoiding host-device memory transfers over USB.'
   common_mistake: |
     **The Pitfall:** Relying on host CPU fallback for unsupported operations.
-    **The Rationale:** Candidates focus purely on the 4 TOPS compute capacity and assume the graph compiler will safely route unsupported math to the CPU.
+    **The Rationale:** Candidates focus purely on the compute capacity and assume the graph compiler will safely route unsupported math to the CPU without penalty.
     **The Consequence:** This breaks layer fusion, forcing multi-megabyte intermediate tensors to be shuttled back and forth over the sluggish USB interface, crashing throughput.
   napkin_math: |
-    1. **Theoretical Compute:** 4 TOPS. For a 2 GOPS INT8 model, max is 2,000 FPS.
-    2. **USB Bottleneck:** USB 3.0 provides ~625 MB/s.
-    3. **Fallback Penalty:** If scheduling fails to fuse 5 layers, and each layer requires a 2MB transfer to CPU and back (4MB total), we move `5 * 4 MB = 20 MB` per inference.
-    4. **Transfer Time:** `20 MB / 625 MB/s = 32 ms`.
-    5. **Result:** This data movement caps the system at **~31 FPS**, completely wasting the 4 TOPS hardware. Proper fusion keeps this 20MB on-chip.
+    1. **Assumptions & Constraints:**
+       - USB 3.0 bandwidth: ~625 MB/s.
+       - Compute: 4 TOPS INT8 (can handle thousands of FPS for a 2 GOPS model).
+       - Operator fallback: Fails to fuse 5 layers, each needing 2MB host-transfer (4MB round-trip).
+    2. **Calculations:**
+       - Data movement per inference: 5 layers * 4 MB = 20 MB.
+       - USB transfer time: 20 MB / 625 MB/s = 32 ms.
+       - Theoretical FPS based on USB limit: 1000 ms / 32 ms ≈ 31 FPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound (USB Bottleneck).** Without full layer fusion, multi-megabyte intermediate tensors traverse the slow USB interface, capping throughput at ~31 FPS and completely wasting the 4 TOPS hardware capability.
 status: published
 provenance: imported
 requires_explanation: true
@@ -31,8 +36,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The 'Napkin Math' section truncates the concluding statement about the wasted TOPS.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

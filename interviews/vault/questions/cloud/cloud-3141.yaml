@@ -8,21 +8,25 @@ competency_area: optimization
 bloom_level: create
 phase: inference
 title: Designing a Prefix Caching Strategy for RAG
-scenario: 'You run a RAG system on 4x A100-80GB serving a 13B model. 80% of requests share one of 50 system prompts (avg 2048 tokens each). Without prefix caching, every request recomputes the system prompt''s KV cache.'
+scenario: You run a RAG system on 4x A100-80GB serving a 13B model. 80% of requests share one of 50 system prompts (avg 2048 tokens each). Without prefix caching, every request recomputes the system prompt's KV cache.
 question: How would you design prefix caching for the 50 shared 2048-token prompts, and what memory cost, hit rate, and TTFT gain result?
 details:
-  realistic_solution: 'KV cache per prefix (2048 tokens, 40 layers, 40 heads, head_dim=128, FP16): 40 x 2 x 40 x 128 x 2048 x 2B = 1.6GB per prefix. 50 prefixes = 80GB total — exactly one A100. With tensor parallelism across 4 GPUs: 20GB/GPU for prefix cache. Model weights: 13B x 2B / 4 = 6.5GB/GPU. Remaining for active KV: 80 - 6.5 - 20 = 53.5GB/GPU. Prefill compute saved: 2048 tokens x 13B params x 2 FLOPs = 53 TFLOP. At 312 TFLOPS: 170ms saved per cache hit. With 80% hit rate: avg TTFT improvement = 0.8 x 170ms = 136ms.'
+  realistic_solution: 'Calculate KV cache size per prefix and distribute using tensor parallelism. Prefix caching saves the massive prefill compute, significantly reducing Time To First Token (TTFT).'
   common_mistake: |
     **The Pitfall:** Caching only the token embeddings.
     **The Rationale:** Engineers assume the embedding lookup is the bottleneck, forgetting the forward pass through all layers to generate KV pairs is the true cost.
     **The Consequence:** The caching system saves minimal compute and fails to improve TTFT.
   napkin_math: |
-    1. KV per prefix: 40 * 2 * 40 * 128 * 2048 * 2B = 1.6 GB.
-    2. Total cache for 50 prefixes across 4 GPUs: 50 * 1.6 / 4 = 20 GB/GPU.
-    3. Compute saved per prefill: 2048 * 13B * 2 = 53 TFLOPs.
-    4. Time saved (at 312 TFLOPS): 53 / 312 = 170 ms.
-    5. Average TTFT improvement (80% hit rate): 170 ms * 0.80 = 136 ms.
-    **Final Result: 20 GB/GPU memory cost yields a 136 ms average TTFT reduction.**
+    1. **Assumptions & Constraints:**
+       - KV cache per prefix (40 layers, 40 heads, dim=128, FP16) = 1.6 GB.
+       - 4 GPUs (Tensor Parallelism).
+    2. **Calculations:**
+       - Total cache size = 50 * 1.6 GB / 4 = 20 GB/GPU.
+       - Compute saved = 2048 * 13B * 2 = ~53 TFLOPs.
+       - Time saved (at 312 TFLOPS) = 53 / 312 = 170 ms.
+       - Avg TTFT gain (80% hit rate) = 170 ms * 0.8 = 136 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 20 GB/GPU memory cost yields 136 ms average TTFT reduction.**
 status: published
 provenance: imported
 requires_explanation: false

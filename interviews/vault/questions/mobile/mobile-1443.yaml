@@ -8,20 +8,26 @@ competency_area: reliability
 bloom_level: evaluate
 phase: inference
 title: Thermal Degradation for Video Segmentation on A17 Pro
-scenario: You are designing a real-time background blurring feature for a video conferencing app running on the Apple A17 Pro Neural Engine. The primary model delivers high-fidelity segmentation but under sustained use, the device hits thermal limits, dropping the SoC power budget from its ~5W peak and throttling the 16-core NPU.
+scenario: You are designing a real-time background blurring feature for a video conferencing app. The primary model delivers high-fidelity segmentation but under sustained use, the device hits thermal limits, throttling the NPU.
 question: How would you design a degradation ladder that transitions to a fallback state without dropping frames or exhausting unified memory?
 details:
-  realistic_solution: A robust design keeps a lightweight, lower-resolution fallback model permanently resident in the unified memory alongside the primary model, or uses a single model with early exits. When the OS thermal state API indicates throttling, the pipeline immediately routes frames to the fallback model or early exit, shedding compute load and maintaining the strict 30 FPS real-time deadline at the cost of edge mask precision.
+  realistic_solution: Design a fail-operational architecture by keeping a lightweight, sub-resolution fallback model permanently resident in unified memory. When the OS thermal state API broadcasts a throttling event, the pipeline must instantaneously route frames to the fallback model. This sheds immediate compute load to maintain the strict 30 FPS real-time deadline without incurring catastrophic memory I/O penalties.
   common_mistake: |
-    **The Pitfall:** Dynamically loading a smaller fallback model from storage when thermal throttling begins.
-    **The Rationale:** Developers want to save RAM and assume loading a tiny model is fast.
-    **The Consequence:** Loading new weights creates a massive memory bandwidth spike, actively generating more heat and causing severe frame drops during the transition exactly when the system is already distressed.
+    **The Pitfall:** Dynamically loading a smaller fallback model from persistent storage only when thermal throttling triggers.
+    **The Rationale:** Developers attempt to save RAM, assuming loading a tiny model from flash is virtually instantaneous.
+    **The Consequence:** Reading weights from disk creates a massive, blocking memory bandwidth spike, exacerbating heat generation and causing severe frame drops precisely when the system is already distressed.
   napkin_math: |
-    1. **Primary Model Compute:** 0.4 TOPS/frame * 30 FPS = 12 TOPS (fits within 35 TOPS peak).
-    2. **Fallback Model Compute:** 0.05 TOPS/frame * 30 FPS = 1.5 TOPS.
-    3. **Thermal Throttling Impact:** NPU capacity drops by 70% to ~10.5 TOPS. The primary model (12 TOPS) now misses the 33ms latency deadline.
-    4. **Memory Impact:** Keeping the fallback model permanently resident adds just 12 MB to the 8 GB footprint.
-    **Switching to the resident 1.5 TOPS fallback avoids flash I/O spikes and maintains 30 FPS during heavy throttling.**
+    1. **Assumptions & Constraints:**
+       - Target Framerate: 30 FPS (33ms latency budget).
+       - Primary Model: 0.4 TOPS/frame (12 TOPS required sustained).
+       - Fallback Model: 0.05 TOPS/frame (1.5 TOPS required sustained).
+       - Throttling Impact: NPU capacity drops 70% (35 TOPS -> 10.5 TOPS).
+    2. **Calculations:**
+       - Throttled state vs Primary: 10.5 TOPS available < 12 TOPS required (Fails 30 FPS deadline).
+       - Throttled state vs Fallback: 10.5 TOPS available > 1.5 TOPS required (Passes easily).
+       - Memory swap cost: Dynamically reading 50MB from flash spikes bandwidth and stalls rendering. Resident fallback requires only 12MB of static RAM.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute and Thermal-Bound.** Keeping a lightweight 1.5 TOPS model permanently resident bypasses disk I/O spikes and guarantees a perfectly smooth degradation ladder when thermal throttling crushes NPU capacity.
 status: published
 provenance: imported
 requires_explanation: false

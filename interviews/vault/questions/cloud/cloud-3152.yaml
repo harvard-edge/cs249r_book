@@ -8,18 +8,26 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: Multi-Query Attention vs GQA with FlashAttention
-scenario: 'You are choosing between MQA (1 KV head) and GQA-8 (8 KV heads) for a new 30B model deployed on 4x H100. Both use FlashAttention. For inference at batch=64, seq_len=4096, 48 query heads, head_dim=128, you must compare decode throughput, KV cache size, and quality implications.'
+scenario: 'You are choosing between MQA (1 KV head) and GQA-8 (8 KV heads) for a new 30B model deployed on 4x H100. Both use FlashAttention. For inference at batch=64, seq_len=4096, 48 query heads, head_dim=128, you must compare decode throughput, KV cache size, and quality.'
 question: How do MQA and GQA-8 compare for decode throughput, KV cache size, and quality at batch=64 and seq_len=4096?
 details:
   realistic_solution: 'KV cache at seq_len=4096 per request: MQA (1 KV head): 60 layers x 2 x 1 x 128 x 4096 x 2B = 120MB. GQA-8: 60 x 2 x 8 x 128 x 4096 x 2B = 960MB. 8x difference. For 64 concurrent: MQA = 7.5GB/GPU, GQA-8 = 60GB/GPU. GQA-8 barely fits (80-15GB model = 65GB). Decode bandwidth: MQA loads KV once = 120MB x 64 batch / 3.35 TB/s = 2.3ms. GQA-8: 960MB x 64 / 3.35 = 18.3ms. MQA is 8x faster decode. But quality: MQA-30B shows 2-3 perplexity points worse than GQA-8-30B on long-context benchmarks. Recommendation: GQA-4 as compromise - 4 KV heads, 480MB/request, 4x faster than full MHA, minimal quality loss.'
   common_mistake: |
     **The Pitfall:** Assuming MQA is strictly better because it minimizes the KV cache size.
-    **The Rationale:** MQA with a single KV head can create a bandwidth bottleneck where all 48 query heads compete for the same KV data, and it reduces model quality more than GQA.
+    **The Rationale:** Engineers focus exclusively on memory footprint, missing that MQA with a single KV head creates a bandwidth bottleneck where all 48 query heads compete for the same data.
     **The Consequence:** Significant model quality degradation (perplexity drop) with diminishing marginal returns on decode latency compared to GQA.
   napkin_math: |
-    - **MQA KV Size**: `120MB/req`. For batch 64: `7.5GB`. Decode IO: `2.3ms`. Quality: Loses 2-3 PPL.
-    - **GQA-8 KV Size**: `960MB/req`. For batch 64: `60GB`. Decode IO: `18.3ms`.
-    - **Final Result**: **GQA-4 is the sweet spot**, offering 480MB/req, 9.2ms decode latency, and `<0.5 PPL` loss, balancing speed and quality perfectly.
+    1. **Assumptions & Constraints:**
+       - Model: 30B, 60 layers, 48 Q heads, head_dim=128, 4x H100.
+       - Workload: batch=64, seq_len=4096, FlashAttention-2.
+       - Precision: FP16 (2 bytes/param). H100 Bandwidth: 3.35 TB/s.
+    2. **Calculations:**
+       - MQA KV size/req: 60 * 2 * 1 * 128 * 4096 * 2B = 125.8 MB (~120 MiB).
+       - MQA batch=64: 120 MiB * 64 = 7.68 GB. Decode IO: 7.68 GB / 3.35 TB/s = ~2.3ms.
+       - GQA-8 KV size/req: 60 * 2 * 8 * 128 * 4096 * 2B = 1006.6 MB (~960 MiB).
+       - GQA-8 batch=64: 960 MiB * 64 = 61.4 GB. Decode IO: 61.4 GB / 3.35 TB/s = ~18.3ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Quality-Latency Tradeoff.** MQA is exceptionally fast (2.3ms decode) but loses 2-3 PPL. GQA-4 is the optimal compromise, balancing speed and quality.
 status: published
 provenance: imported
 requires_explanation: false
@@ -32,8 +40,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

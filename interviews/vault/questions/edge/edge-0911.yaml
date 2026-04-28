@@ -11,17 +11,24 @@ title: On-Device LLM KV Cache Spilling
 scenario: Deploying a 3B parameter LLM on a premium smartphone (8GB unified LPDDR5 RAM at 51.2 GB/s). Initially, text generation achieves 18 tokens/sec. However, when the context window reaches 2000 tokens, generation speed plummets to 3 tokens/sec, and the OS occasionally kills the background app.
 question: Why does generation slow at a 2000-token context, and how would you manage the KV cache to avoid OS kills?
 details:
-  realistic_solution: The performance cliff is due to the KV cache exceeding the NPU/GPU's localized SRAM tier and competing with the OS for unified DRAM, causing severe page thrashing. To fix this, you must change the architecture to aggressively manage memory locality. First, implement 4-bit KV cache quantization to reduce the footprint by 75%. Second, implement a chunked attention mechanism (like Flash-Decoding) that loads smaller blocks of the KV cache into the fast SRAM compute cores, performing local reductions before a final global reduction, minimizing DRAM round-trips and avoiding OS-level page faults.
+  realistic_solution: This performance cliff strictly denotes memory-spilling dynamics where expansive KV structures overflow primary SRAM, inducing deep thrashing across unified DRAM and backing partitions. Senior engineering mandates architectural interventions like PagedAttention or aggressive Flash-Decoding chunking alongside intensive INT4 KV cache down-quantization to strictly confine memory bandwidth within physical SoC ceilings.
   common_mistake: |
     **The Pitfall:** Reducing the vocabulary size or hidden dimension of the model to save memory.
     **The Rationale:** Candidates try to solve the memory issue by statically shrinking the model architecture.
     **The Consequence:** This degrades model quality significantly without solving the dynamic scaling issue of the KV cache.
   napkin_math: |
-    1. 3B model (INT8) footprint: 3 GB.
-    2. KV cache (FP16, 2000 tokens, d_model=3072, 32 layers): 2 * 2 * 3072 * 32 * 2000 = ~786 MB.
-    3. Total footprint: 3 GB + 0.786 GB = 3.786 GB.
-    4. Max theoretical throughput (memory-bound): 51.2 GB/s / 3.786 GB = 13.5 tokens/sec.
-    5. Dropping to 3 tokens/sec implies severe **OS page thrashing/swapping**.
+    1. **Assumptions & Constraints:**
+       - Model: 3B INT8
+       - Target Context: 2000 tokens
+       - LPDDR5 Bandwidth: 51.2 GB/s
+       - Layers: 32, Dim: 3072, FP16 KV
+    2. **Calculations:**
+       - Model footprint: 3 GB
+       - KV Cache footprint: 2 * 2 * 3072 * 32 * 2000 ≈ 786 MB
+       - Total footprint: 3 GB + 0.786 GB = 3.786 GB
+       - Max theoretical throughput: 51.2 GB/s / 3.786 GB = 13.5 tokens/sec
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Spilling.** A drop to 3 tokens/sec indicates the working set exceeds the NPU's localized SRAM, triggering severe OS-level unified DRAM thrashing.
 status: published
 provenance: imported
 requires_explanation: false

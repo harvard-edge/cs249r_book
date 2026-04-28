@@ -8,19 +8,26 @@ competency_area: precision
 bloom_level: analyze
 phase: training
 title: H100 Mixed-Precision Training Instability and Performance Diagnosis
-scenario: A large language model training job on an NVIDIA GPU (80 GB, 989 TFLOPS FP16 dense, 3.35 TB/s memory bandwidth, 700W TDP) is encountering stability issues. After enabling mixed-precision training using FP16, the model occasionally diverges or produces NaN values during the backward pass. The team observes that while GPU utilization appears high, the training throughput does not consistently achieve the expected 989 TFLOPS. Additionally, they suspect that data loading might be bottlenecking the 3.35 TB/s bandwidth at certain stages.
+scenario: A large language model training job is encountering stability issues. After enabling mixed-precision training using FP16, the model occasionally diverges or produces NaN values during the backward pass. The team observes that while GPU utilization appears high, the training throughput does not consistently achieve the expected peak TFLOPS. Additionally, they suspect that data loading might be bottlenecking the memory bandwidth at certain stages.
 question: "How would you diagnose the root cause of these stability and performance issues, considering the specific hardware capabilities?"
 details:
-  realistic_solution: Implement dynamic loss scaling, adjusting the scale factor based on runtime gradient statistics to prevent underflow. Leverage framework-provided Automatic Mixed Precision (AMP) utilities (e.g., PyTorch AMP, TensorFlow mixed_precision). Profile the training loop (e.g., with NVIDIA Nsight Systems or PyTorch Profiler) to identify bottlenecks, especially focusing on memory access patterns to ensure optimal utilization of the 3.35 TB/s bandwidth.
+  realistic_solution: Implement dynamic loss scaling, adjusting the scale factor based on runtime gradient statistics to prevent underflow. Leverage framework-provided Automatic Mixed Precision (AMP) utilities (e.g., PyTorch AMP, TensorFlow mixed_precision). Profile the training loop (e.g., with nsys profiling or PyTorch Profiler) to identify bottlenecks, especially focusing on memory access patterns to ensure optimal utilization of memory bandwidth.
   common_mistake: |
     **The Pitfall:** Neglecting proper loss scaling or using an incorrect fixed scaling factor.
     **The Rationale:** Candidates enable FP16 but forget that backpropagation generates tiny gradients that fall below the FP16 minimum representable value, resulting in underflow (zeros).
     **The Consequence:** Silent gradient vanishing leading to NaN loss, model divergence, and ruined training runs.
   napkin_math: |
-    - **Throughput:** 989 TFLOPS = $989 \times 10^{12}$ floating-point operations per second.
-    - **Bandwidth:** At 3.35 TB/s, assuming 2 bytes per FP16 element, the hardware moves $1.675 \times 10^{12}$ elements per second.
-    - **Underflow:** If an unscaled gradient is $10^{-8}$ and the FP16 minimum normal value is $\approx 6 \times 10^{-8}$, the gradient becomes 0.
-    - **Solution:** A loss scale factor of $65536$ ($2^{16}$) scales the gradient to $6.55 \times 10^{-4}$, safely within the **FP16 representable range.**
+    1. **Assumptions & Constraints:**
+       - Peak throughput: 989 TFLOPS.
+       - Memory bandwidth: 3.35 TB/s.
+       - FP16 minimum subnormal value: ~5.96e-8.
+    2. **Calculations:**
+       - Example unscaled gradient: 1e-8.
+       - Underflow threshold: 1e-8 < 5.96e-8, so the value becomes 0.
+       - Loss scale factor: 65536 (2^16).
+       - Scaled gradient: 1e-8 * 65536 = 6.55e-4.
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound.** A loss scale factor safely shifts the gradient into the representable FP16 range, preventing silent underflow and NaN divergence without slowing down the peak throughput.
 status: published
 provenance: imported
 requires_explanation: false

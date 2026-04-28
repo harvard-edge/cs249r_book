@@ -8,11 +8,8 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The JNI Object Pinning Death
-scenario: You are passing camera frames (byte arrays) from Android Java to a C++ inference engine via
-  JNI using `GetByteArrayElements`. The ML model takes 15ms. The system runs perfectly at 30 FPS for a
-  minute. Suddenly, the entire Android UI stutters massively, dropping to 2 FPS for several seconds, before
-  recovering. What is JNI doing to the Android Garbage Collector?
-question: "Why does JNI GetByteArrayElements make Android UI drop to 2 FPS after pinning 3 MB camera frames at 30 FPS?"
+scenario: You are passing camera frames (byte arrays) from Android Java to a C++ inference engine via JNI using `GetByteArrayElements`. The ML model takes 15ms. The system runs perfectly at 30 FPS for a minute. Suddenly, the entire Android UI stutters massively, dropping to 2 FPS for several seconds, before recovering.
+question: Why does JNI GetByteArrayElements make Android UI drop to 2 FPS after pinning 3 MB camera frames at 30 FPS?
 details:
   realistic_solution: 'GetByteArrayElements pins the Java array in memory, preventing the GC from moving
     it during compaction. Pinning 3 MB frames 30 times/sec creates massive heap fragmentation. After ~60
@@ -20,11 +17,21 @@ details:
     for 200-500ms — destroying the 33ms frame deadline. Fix: use GetDirectBufferAddress with a pre-allocated
     DirectByteBuffer that lives outside the Java heap entirely. The GC never sees it, eliminating both
     copying and pinning. Alternatively, use Android''s HardwareBuffer for zero-copy camera-to-native pipelines.'
-  common_mistake: '"The C++ code has a memory leak." C++ memory leaks crash the app eventually; they don''t
-    cause periodic, recovering stutters.'
-  napkin_math: A 1080p NV21 frame is ~3 MB. Pinning 3 MB of memory 30 times a second creates massive roadblocks
-    for the concurrent GC. A Stop-The-World compaction on a fragmented 512 MB heap can easily take 200-500ms,
-    entirely destroying the 33ms frame deadline.
+  common_mistake: |
+    **The Pitfall:** Assuming the C++ code has a memory leak.
+    **The Rationale:** Candidates see degrading performance and assume native code is leaking memory.
+    **The Consequence:** C++ memory leaks crash the app eventually; they don't cause periodic, recovering stutters. The candidate wastes time debugging native code instead of fixing the JNI interface.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Frame Size: 1080p NV21 (~3 MB).
+       - Frame Rate: 30 FPS.
+       - JNI Mechanism: GetByteArrayElements (pins memory).
+    2. **Calculations:**
+       - Pinning rate = 3 MB * 30 times/sec = 90 MB/sec of fragmented, unmovable memory blocks.
+       - Time to severe fragmentation = ~60 seconds.
+       - Stop-The-World (STW) GC pause on fragmented 512 MB heap = 200ms to 500ms.
+    3. **Conclusion & Interpretation:**
+       **Result: GC Pause-Bound. Pinning 3 MB arrays 30 times a second fractures the heap space, eventually forcing the Garbage Collector into a 500ms Stop-The-World compaction that entirely destroys the 33ms frame deadline.**
 status: published
 provenance: imported
 requires_explanation: false

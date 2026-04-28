@@ -8,19 +8,24 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: FlashAttention Backward Pass Memory Savings for Training
-scenario: 'You are training a 13B model on 8x A100-80GB with seq_len=8192, micro_batch=2, 40 layers, 40 heads, head_dim=128. Standard attention stores the full N x N attention matrix for the backward pass.'
+scenario: 'You are training a 13B model on 8 GPUs with seq_len=8192, micro_batch=2, 40 layers, 40 heads, head_dim=128. Standard attention stores the full N x N attention matrix for the backward pass.'
 question: 'How much activation memory does FlashAttention save by recomputing attention for seq_len=8192, and does it enable a larger batch size?'
 details:
-  realistic_solution: 'Standard attention stores S = softmax(QK^T/sqrt(d)) per layer: 8192^2 x 2B x 40 heads x 2 micro_batch = 40 x 2 x 8192^2 x 2 = 80 x 128MB = 10GB per layer. Across 40 layers: 400GB — impossible on 8 GPUs (max 640GB, but model + optimizer already use ~400GB). FlashAttention stores only Q, K, V, O and softmax log-sum-exp (8192 x 4B per head): per layer = 4 x 8192 x 128 x 2B x 40 x 2 + 8192 x 4B x 40 x 2 = 640MB + 2.5MB ≈ 643MB per layer. Total: 40 x 643MB = 25.1GB. Savings: 400GB - 25.1GB = 374.9GB. This easily allows batch_size=4 instead of 2. Recomputation cost: ~33% more attention FLOPs in backward, but attention is typically 15-20% of total training FLOPs, so net overhead is ~5-7%.'
+  realistic_solution: 'Standard attention stores the massive S = softmax(QK^T) matrix per layer, requiring ~400GB total across 40 layers—impossible on an 8-GPU setup. FlashAttention-2 stores only the output O and softmax statistics (log-sum-exp), requiring merely ~25GB total. This massive 375GB savings enables doubling the batch size. Recomputation adds ~33% more FLOPs to the backward pass, but because attention is highly memory-bandwidth-bound, the net training time overhead is merely 5-7%.'
   common_mistake: |
     **The Pitfall:** Thinking FlashAttention's recomputation slows training significantly.
-    **The Rationale:** Candidates assume recomputation is heavily compute-bound, ignoring that attention is extremely memory bandwidth-bound, so recomputing on-chip is fast.
+    **The Rationale:** Candidates assume recomputation is heavily compute-bound, ignoring that attention is extremely memory-bandwidth-bound, so recomputing on-chip is fast.
     **The Consequence:** Avoiding FlashAttention or larger batch sizes out of an unfounded fear of recomputation latency overhead.
   napkin_math: |
-    * Standard attention memory per layer: 8192^2 × 2B × 40 heads × 2 batch = 10GB. 40 layers = 400GB.
-    * FlashAttention stores Q, K, V, O, and softmax stats: ~643MB per layer. 40 layers = 25GB.
-    * Savings: 400GB - 25GB = 375GB.
-    * **The 375GB savings enables doubling the batch size for a mere 5-7% compute overhead.**
+    1. **Assumptions & Constraints:**
+       - seq_len=8192, batch=2, 40 heads, 40 layers.
+       - Precision: FP16 (2 bytes).
+    2. **Calculations:**
+       - Standard memory: 8192^2 * 2B * 40 heads * 2 batch = 10GB/layer * 40 layers = 400GB.
+       - FlashAttention memory: stores Q,K,V,O + stats = ~643MB/layer * 40 layers = ~25GB.
+       - Savings: 400GB - 25GB = 375GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: A 375GB savings enables doubling the batch size with a trivial 5-7% compute overhead (Memory-Bound).**
 status: published
 provenance: imported
 requires_explanation: true

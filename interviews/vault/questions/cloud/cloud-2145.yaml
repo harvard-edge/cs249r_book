@@ -17,12 +17,17 @@ details:
     **The Rationale:** Candidates focus on the sub-millisecond latency requirement and default to GPU memory, failing to recognize this is a distributed systems throughput problem.
     **The Consequence:** An infeasible or astronomically expensive design that ignores the need for a tiered caching architecture.
   napkin_math: |
-    * Aggregate Read Bandwidth: 10M QPS × 5 lookups × 512 bytes = 25.6 GB/s.
-    * L1 hit rate (80%): Serves 20.5 GB/s from local RAM. Distributed across 200 nodes = ~100 MB/s per node (trivial).
-    * L2 hit rate (19%): Serves 4.9 GB/s across 16 Redis nodes = ~306 MB/s per node (well within 10 Gbps NIC = 1.25 GB/s).
-    * L3 hit rate (1%): Serves 256 MB/s across 32 SSD nodes = ~8 MB/s per node (trivial for NVMe).
-    * Serving fleet cost: 200 nodes × $0.50/hr = $100/hr = $876K/yr.
-    * **Conclusion: 5ms P99 SLA is achievable since 99% of lookups hit L1/L2 (< 1ms), and only 1% hit SSD-backed L3 (~3-4ms).**
+    1. **Assumptions & Constraints:**
+       - 10M QPS, 5 lookups/query, 256-dim FP16 (512 bytes).
+       - Total embedding size: 2.56 TB. P99 SLA: 5ms.
+    2. **Calculations:**
+       - Aggregate Read Bandwidth: 10M QPS * 5 lookups * 512 bytes = 25.6 GB/s.
+       - L1 hit rate (80%): Serves 20.5 GB/s from local RAM. Distributed across 200 nodes = ~100 MB/s per node.
+       - L2 hit rate (19%): Serves 4.9 GB/s across 16 Redis nodes = ~306 MB/s per node.
+       - L3 hit rate (1%): Serves 256 MB/s across 32 SSD nodes = ~8 MB/s per node.
+       - Serving fleet cost: 200 nodes * $0.50/hr = $100/hr = $876K/yr.
+    3. **Conclusion & Interpretation:**
+       - **Result: Feasible Architecture. 5ms P99 SLA is achievable since 99% of lookups hit L1/L2 (< 1ms).**
   options:
   - 'Use a 3-tier architecture: in-process hot cache (top 0.1% rows, ~2.56 GB, <0.1ms), distributed warm cache (top 5% rows, ~128 GB Redis, ~1ms), and SSD-backed cold store (full 2.56 TB, ~3ms); the 80/19/1 hit-rate split achieves P99 < 5ms across 200 serving nodes'
   - Serve all 2.56 TB from GPU HBM across 32 A100s (80 GB each) for sub-millisecond latency; GPU memory bandwidth of 2 TB/s can handle the 25.6 GB/s aggregate read load easily

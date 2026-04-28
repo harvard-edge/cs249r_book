@@ -11,15 +11,20 @@ title: Tinyml New 0003
 scenario: A newly trained model performs great with Post-Training Quantization (PTQ), but when Quantization-Aware Training (QAT) is applied to push accuracy higher, the deployed INT8 model on Cortex-M4 generates garbage outputs.
 question: What QAT conversion error most likely causes the deployed INT8 Cortex-M4 model to output garbage?
 details:
-  realistic_solution: The root cause is incorrect batch normalization folding during QAT. In QAT, BN layers must be folded into the convolutional weights before fake quantization nodes are evaluated. If BN parameters are updated after fake quantization or folded incorrectly during deployment conversion, the moving averages will not match the production inference path, leading to massive activation shifts.
+  realistic_solution: The fundamental failure is improperly folded Batch Normalization parameters during QAT graph evaluation. In QAT, BN layers must be strictly folded into convolutional weights prior to evaluating fake quantization nodes. If they are left distinct or collapsed late during edge compilation, the moving averages radically skew, injecting catastrophic activation shifts.
   common_mistake: |
-    **The Pitfall:** Using PTQ conversion scripts for a QAT model.
-    **The Rationale:** Developers often reuse existing pipelines and fail to correctly fuse the Batch Normalization layers before exporting to the edge device.
-    **The Consequence:** Moving averages do not match the production inference path, leading to massive activation shifts and garbage outputs.
+    **The Pitfall:** Blindly porting PTQ compilation scripts to process QAT checkpoint architectures.
+    **The Rationale:** Developers habitually reuse build pipelines, falsely assuming the framework auto-handles the complex BN-folding sequence for QAT metadata.
+    **The Consequence:** Evaluated outputs are drastically clipped by misaligned scaling parameters, rendering the model useless at the edge.
   napkin_math: |
-    - **Folded Weight Formula:** `W_fold = W * gamma / sqrt(var + eps)`.
-    - **Example:** If `var=0.01` and `gamma=0.5`, then `W_fold = W * 5`.
-    - **Conclusion:** If this 5x scale is missed during conversion, activations are scaled incorrectly, clipping everywhere.
+    1. **Assumptions & Constraints:**
+       - W_fold = W * gamma / sqrt(var + eps).
+       - Scenario variances: var=0.01, gamma=0.5.
+    2. **Calculations:**
+       - Scale factor = 0.5 / sqrt(0.01) = 0.5 / 0.1 = 5.0.
+       - Therefore: W_fold = W * 5.0.
+    3. **Conclusion & Interpretation:**
+       - **Result: Range Clipping Failure**. Missing this explicit 5x structural multiplier ruins the INT8 boundaries, turning inference into total noise.
 status: published
 provenance: imported
 requires_explanation: false

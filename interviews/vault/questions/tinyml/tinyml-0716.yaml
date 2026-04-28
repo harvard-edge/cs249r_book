@@ -8,22 +8,26 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Execute-in-Place vs Copy-to-SRAM for Model Weights
-scenario: Your TinyML model has 500 KB of INT8 weights stored in on-chip flash on an STM32H7 (Cortex-M7, 480 MHz, 1 MB SRAM, 2 MB flash). The default CMSIS-NN implementation reads weights directly from flash via XIP (execute-in-place). A colleague suggests copying all 500 KB of weights to SRAM before inference for faster access. Flash read latency is ~5 wait states at 480 MHz (~10ns effective), while SRAM is zero-wait-state (~2ns).
+scenario: Your TinyML model has 500 KB of INT8 weights stored in on-chip flash on an STM32H7. A colleague suggests copying all 500 KB to SRAM before inference to avoid flash wait states. Flash effective latency is ~10ns vs SRAM's ~2ns.
 question: Should the STM32H7 copy all 500 KB of INT8 weights to SRAM, or only the 350 KB of large layers that thrash the M7 D-cache?
 details:
-  realistic_solution: Selective SRAM copy beats both full XIP and full copy. The M7's ART accelerator caches sequential flash reads, so small layers (<16KB weights) already hit the D-cache at 95% — copying them to SRAM wastes memory for minimal gain. Large layers (>16KB) thrash the 16KB D-cache at only 20% hit rate. Copy only the 5 large layers (350KB) to SRAM: inference drops from 70ms (full XIP) to 37.5ms (1.87x speedup) using 350KB SRAM (35%). Full SRAM copy achieves identical 37.5ms but wastes 500KB (50%). The copy itself costs ~0.5ms via DMA — negligible. Profile per-layer cache hit rates to identify which layers benefit from SRAM placement.
+  realistic_solution: "Selective SRAM copy beats both full XIP and full copy. The M7's ART accelerator caches sequential flash reads, so small layers (<16KB weights) already hit the D-cache at 95% — copying them to SRAM wastes memory for minimal gain. Large layers (>16KB) thrash the 16KB D-cache at only 20% hit rate. Copy only the 5 large layers (350KB) to SRAM: inference drops from 70ms (full XIP) to 37.5ms (1.87x speedup) using 350KB SRAM (35%). Full SRAM copy achieves identical 37.5ms but wastes 500KB (50%). The copy itself costs ~0.5ms via DMA — negligible. Profile per-layer cache hit rates to identify which layers benefit from SRAM placement."
   common_mistake: |
     **The Pitfall:** Assuming that because SRAM is 5x faster than flash, copying weights to SRAM will give a 5x speedup.
     **The Rationale:** Candidates often ignore the M7's ART Accelerator (flash prefetch cache) and the sequential access pattern of weight reads.
     **The Consequence:** This wastes massive amounts of SRAM (500 KB) with no performance benefit over a selective copy.
   napkin_math: |
-    * **Small layers (< 16 KB):** 15 layers, 150 KB total, D-cache hit rate ~95%. Effective flash latency ~2ns.
-    * **Large layers (> 16 KB):** 5 layers, 350 KB total, D-cache hit rate ~20%. Effective flash latency ~10ns.
-    * **Flash XIP inference:** (15 layers * 2ms) + (5 layers * 8ms) = 70ms.
-    * **Selective SRAM copy (large only):** Copy 350 KB to SRAM. (15 layers * 2ms) + (5 layers * 1.5ms) = 37.5ms.
-    * **Speedup:** 70 / 37.5 = **1.87x**, costing 350 KB SRAM (35%).
-    * **Full SRAM copy:** All layers at ~2ns → (15 * 2ms) + (5 * 1.5ms) = 37.5ms.
-    * **Conclusion:** Selective copy yields the exact same **1.87x speedup** while saving 150 KB of SRAM.
+    1. **Assumptions & Constraints:**
+       - Small layers (<16 KB): 15 layers, 150 KB total, D-cache hit rate ~95% (effective latency ~2ns).
+       - Large layers (>16 KB): 5 layers, 350 KB total, D-cache thrashing yields ~20% hit rate (effective latency ~10ns).
+       - Baseline XIP latency: 15 small * 2ms + 5 large * 8ms = 70ms.
+    2. **Calculations:**
+       - Selective copy latency (only large layers to SRAM): 15 small * 2ms + 5 large * 1.5ms = 37.5ms.
+       - Full copy latency (all layers to SRAM): Identical 37.5ms (small layers were already caching perfectly).
+       - Speedup: 70ms / 37.5ms = 1.87x.
+    3. **Conclusion & Interpretation:**
+       - **Selective copy yields the same 1.87x speedup as full copy while saving 150 KB of SRAM.**
+       - **Result: Memory-Bandwidth-Bound.**
   options:
   - Copy all 500 KB of weights to SRAM before inference. SRAM is 5x faster than flash, so inference speeds up by 5x.
   - Selective SRAM copy. Copy only the 5 large layers (350 KB) to SRAM to achieve a 1.87x speedup while saving 150 KB compared to a full copy.

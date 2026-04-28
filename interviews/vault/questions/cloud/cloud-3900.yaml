@@ -8,19 +8,25 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: both
 title: Warp Size Divergence When Porting CUDA Kernels to AMD CDNA
-scenario: After porting a reduction kernel from CUDA to HIP for MI300X, correctness tests pass but performance is 40% worse than expected. The kernel uses __shfl_down_sync with a mask of 0xFFFFFFFF for warp-level reductions. The MI300X uses 64-wide wavefronts.
-question: Why is the HIP reduction kernel 40% slower on MI300X, and how should the shuffle reduction be fixed for 64-wide wavefronts?
+scenario: After porting a reduction kernel from CUDA to HIP for an AMD accelerator, correctness tests pass but performance is 40% worse than expected. The kernel uses __shfl_down_sync with a mask of 0xFFFFFFFF for warp-level reductions. The accelerator uses 64-wide wavefronts.
+question: Why is the HIP reduction kernel 40% slower on the AMD accelerator, and how should the shuffle reduction be fixed for 64-wide wavefronts?
 details:
-  realistic_solution: 'On CDNA3, wavefronts are 64 lanes wide. The mask must be 0xFFFFFFFFFFFFFFFF (64-bit). Additionally, the reduction tree depth changes: log2(64)=6 steps instead of log2(32)=5 steps. Update the kernel to use a 64-bit mask and add the 6th reduction step. Alternatively, use HIP''s __reduce_add_sync() which handles wavefront width automatically. The fixed kernel should recover to within 5% of proportional peak.'
+  realistic_solution: 'On CDNA architecture, wavefronts are 64 lanes wide. The mask must be 0xFFFFFFFFFFFFFFFF (64-bit). Additionally, the reduction tree depth changes: log2(64)=6 steps instead of log2(32)=5 steps. Update the kernel to use a 64-bit mask and add the 6th reduction step. Alternatively, use HIP''s __reduce_add_sync() which handles wavefront width automatically. The fixed kernel should recover to within 5% of proportional peak.'
   common_mistake: |
-    **The Pitfall:** Using a 32-bit mask (0xFFFFFFFF) for warp-level reductions on AMD CDNA.
+    **The Pitfall:** Using a 32-bit mask (0xFFFFFFFF) for warp-level reductions on AMD hardware.
     **The Rationale:** Candidates copy-paste standard CUDA code perfectly tuned for NVIDIA's 32-lane warps.
-    **The Consequence:** The upper 32 lanes of the 64-wide MI300X wavefront are excluded from the shuffle, wasting 50% of the lanes and returning incorrect partial reductions.
+    **The Consequence:** The upper 32 lanes of the 64-wide wavefront are excluded from the shuffle, wasting 50% of the lanes and returning incorrect partial reductions.
   napkin_math: |
-    - NVIDIA CUDA: 32-lane warp requires log2(32) = 5 shuffle steps.
-    - AMD CDNA: 64-lane wavefront requires log2(64) = 6 shuffle steps.
-    - Work per wavefront: 64 lanes do exactly 2x the work, balancing the extra step.
-    - **Conclusion:** The 32-bit mask drops 32 lanes, resulting in exactly a 50% efficiency loss on the wavefront level, mapping to the ~40% overall kernel degradation.
+    1. **Assumptions & Constraints:**
+       - NVIDIA CUDA: 32-lane warp. Mask 0xFFFFFFFF (32-bit).
+       - AMD CDNA: 64-lane wavefront. Mask required: 64-bit.
+    2. **Calculations:**
+       - CUDA shuffle steps: log2(32) = 5 steps.
+       - CDNA shuffle steps: log2(64) = 6 steps.
+       - 32-bit mask on 64-lane wavefront drops 32 lanes.
+       - Efficiency loss: 50% lane utilization directly impacts wavefront efficiency.
+    3. **Conclusion & Interpretation:**
+       - **Result: 32-bit mask causes exactly 50% lane drop, mapping to ~40% kernel degradation.** (Compute-Bound)
 status: published
 provenance: imported
 requires_explanation: false

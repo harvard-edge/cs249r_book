@@ -11,17 +11,20 @@ title: Cloud Megatron Parallelism L2 0
 scenario: "A colleague says Megatron splits weight matrices 'along columns in one layer and rows in the next'."
 question: "How does Megatron tensor parallelism split adjacent weight matrices, and why does the column-row pattern reduce communication?"
 details:
-  realistic_solution: "In a Transformer FFN: Y = GeLU(XA) × B, where A and B are weight matrices. Megatron splits A column-wise across N GPUs: each GPU holds A_i (1/N of columns) and computes Y_i = GeLU(XA_i) independently — no communication needed because GeLU is element-wise. Then B is split row-wise: each GPU holds B_i (1/N of rows) and computes Z_i = Y_i × B_i. Final output: Z = sum(Z_i) via an all-reduce. The column-then-row pattern ensures only ONE all-reduce per layer in the forward pass (after B). This conjugate splitting minimizes communication: 2 all-reduces per Transformer block in the forward pass (one for attention, one for FFN)."
+  realistic_solution: "In a Transformer FFN: Y = GeLU(XA) \times B, where A and B are weight matrices. Megatron splits A column-wise across N GPUs: each GPU holds A_i (1/N of columns) and computes Y_i = GeLU(XA_i) independently \u2014 no communication needed because GeLU is element-wise. Then B is split row-wise: each GPU holds B_i (1/N of rows) and computes Z_i = Y_i \times B_i. Final output: Z = sum(Z_i) via an all-reduce. The column-then-row pattern ensures only ONE all-reduce per layer in the forward pass (after B). This conjugate splitting minimizes communication: 2 all-reduces per Transformer block in the forward pass (one for attention, one for FFN)."
   common_mistake: |
     **The Pitfall:** Splitting both matrices the same way (e.g., both column-wise).
     **The Rationale:** It seems simpler or more consistent to shard every layer identically.
     **The Consequence:** This requires an all-gather between the two matmuls to reconstruct the intermediate activation, effectively doubling the communication overhead.
   napkin_math: |
-    *   **Setup:** 7B model, FFN dim 11008, hidden 4096, TP=4 GPUs.
-    *   **Matrix A Split:** 4096x11008 split to 4096x2752 per GPU (Column-wise).
-    *   **Matrix B Split:** 11008x4096 split to 2752x4096 per GPU (Row-wise).
-    *   **Communication:** Only 1 All-Reduce needed after B. Volume = `seq_len × batch_size × 4096 × 2B` per layer.
-    *   **Result:** **2 all-reduces per Transformer block (forward pass), or 128 all-reduces per step across 32 layers (forward + backward).**
+    1. **Assumptions & Constraints:**
+       - 7B model, FFN dim 11008, hidden 4096, TP=4 GPUs.
+    2. **Calculations:**
+       - Matrix A Split: 4096x11008 split to 4096x2752 per GPU (Column-wise).
+       - Matrix B Split: 11008x4096 split to 2752x4096 per GPU (Row-wise).
+       - Communication: 1 All-Reduce needed after B. Volume = seq_len * batch_size * 4096 * 2B per layer.
+    3. **Conclusion & Interpretation:**
+       **2 all-reduces per Transformer block. Result: Communication-Bound if not split correctly.**
 status: published
 provenance: imported
 requires_explanation: false

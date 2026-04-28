@@ -8,26 +8,29 @@ competency_area: precision
 bloom_level: analyze
 phase: training
 title: Optimizing LLM Deployment on Snapdragon 8 Gen 3 Hexagon NPU with Mixed Precision
-scenario: Your team is tasked with deploying a 7B parameter LLM for on-device inference on a Snapdragon 8 Gen 3 Hexagon NPU (45 TOPS INT8, 12-16 GB LPDDR5X). You are evaluating whether to quantize the FP32 model to FP16 or INT8.
-question: Which quantization approach is likely superior for this mobile deployment scenario, and why?
+scenario: Your team is tasked with deploying a 7B parameter LLM for on-device inference on a flagship NPU. You are evaluating whether to quantize the FP32 model to FP16 or INT8.
+question: Which quantization approach is mandatory for this mobile deployment scenario, and why?
 details:
   realistic_solution: |
-    A robust solution involves a multi-step approach:
-    1. **Profiling FP32 Baseline:** Establish a performance and accuracy baseline for the FP32 model on a proxy mobile CPU/GPU, and estimate its memory footprint.
-    2. **FP16 Quantization:** Apply standard FP16 quantization. Evaluate memory savings (halving model size) and potential throughput improvements due to reduced memory bandwidth. Perform a rigorous accuracy evaluation to identify any significant degradation.
-    3. **INT8 Quantization for Hexagon NPU:** Implement a post-training quantization (PTQ) or quantization-aware training (QAT) pipeline targeting INT8 for the Hexagon NPU. This would involve using vendor-specific tools (e.g., Qualcomm AI Engine Direct SDK) for calibration and deployment. Critically evaluate memory footprint (quartering model size relative to FP32), throughput leveraging the 45 TOPS INT8, and latency benefits. Assess accuracy with representative datasets to ensure it meets requirements.
-    4. **Hardware-Aware Benchmarking:** Benchmark both FP16 and INT8 quantized models directly on the Snapdragon 8 Gen 3 Hexagon NPU to get real-world performance, memory, and power consumption metrics.
-    5. **Trade-off Analysis:** Conduct a comprehensive trade-off analysis weighing accuracy, memory usage (12-16 GB LPDDR5X), latency, and power efficiency for both strategies. The INT8 approach, while potentially harder to implement and validate for accuracy, will likely offer significant performance and power benefits due to the NPU's dedicated INT8 hardware acceleration, which is usually more efficient than FP16 operations on general-purpose cores or even specialized FP16 units.
+    An INT8 deployment strategy is physically mandatory. 
+    1. **Memory Feasibility Check:** An FP32 7B model takes 28GB (Immediate OOM). Downcasting to FP16 drops this to 14GB, which still violently thrashes the strict OS memory limits (typically heavily capping background apps well below the physical 12-16 GB LPDDR5X limit).
+    2. **INT8 Quantization (PTQ/QAT):** Quantizing to INT8 drops the weight footprint to a safe 7GB, creating the necessary 2-3GB of headroom for KV caches and system OS pages.
+    3. **Hardware Affinitiy:** Flagship NPUs deploy massive, highly-tuned systolic arrays optimized specifically for INT8 matrix multiplications (e.g., hitting 45 TOPS). Deploying FP16 forces fallback to slower hardware pathways or unoptimized CPU delegates.
   common_mistake: |
-    **The Pitfall:** Assuming performance gains are proportional to bit reduction without accounting for hardware specifics.
-    **The Rationale:** Candidates overlook the overheads of quantization and fail to realize that the NPU specifically accelerates INT8 over FP16.
-    **The Consequence:** Suboptimal throughput and energy efficiency, or deploying models that exceed the LPDDR5X memory limits.
+    **The Pitfall:** Sizing the quantization requirement purely on theoretical compute throughput, ignoring physical memory bounds.
+    **The Rationale:** Candidates focus on how fast FP16 vs INT8 runs, completely failing to calculate that an FP16 7B model will physically crash the edge device before the first token is generated.
+    **The Consequence:** Wasting weeks trying to compile an FP16 model that fundamentally exceeds the device's LPDDR RAM constraints.
   napkin_math: |
-    - **FP32 Model Size:** 7B params * 4 bytes/param = 28 GB (OOM).
-    - **FP16 Model Size:** 7B params * 2 bytes/param = 14 GB (barely fits, high memory bandwidth pressure).
-    - **INT8 Model Size:** 7B params * 1 byte/param = 7 GB (fits comfortably).
-    - **INT8 Compute Capacity:** 45 TOPS INT8 = 45 * 10^12 operations/second.
-    - **Result:** **INT8 quantization is overwhelmingly superior, fitting safely into memory and fully utilizing the NPU's dedicated INT8 hardware.**
+    1. **Assumptions & Constraints:**
+       - Target Hardware Memory: ~12 GB effective usable LPDDR5X.
+       - Model: 7 Billion parameters.
+       - Hardware Compute: Dedicated INT8 hardware acceleration.
+    2. **Calculations:**
+       - FP32 Size: 7B * 4 bytes = 28 GB (OOM).
+       - FP16 Size: 7B * 2 bytes = 14 GB (Exceeds typical application allocation limits; guarantees OOM eviction).
+       - INT8 Size: 7B * 1 byte = 7 GB (Fits safely with remaining headroom for KV Cache).
+    3. **Conclusion & Interpretation:**
+       **Result: INT8 is mandatory (Memory-Capacity-Bound).** FP16 physically breaches mobile RAM limits; INT8 is structurally required to boot.
 status: published
 provenance: imported
 requires_explanation: false

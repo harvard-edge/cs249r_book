@@ -8,19 +8,24 @@ competency_area: architecture
 bloom_level: evaluate
 phase: training
 title: Hardware-Aware NAS Design for ARM Cortex-M4
-scenario: You are designing a hardware-aware Neural Architecture Search (NAS) pipeline for a visual wake word application targeting an ARM Cortex-M4. The platform features a 168 MHz clock, 256 KB of SRAM, 1 MB of flash, no FPU, and CMSIS-NN SIMD support (2x INT8 MACs/cycle). You need to architect the search space to maximize accuracy while strictly adhering to memory and compute limits.
-question: How do you construct the constraint estimators to evaluate peak memory and latency without deploying every candidate to physical hardware?
+scenario: You are designing a hardware-aware Neural Architecture Search (NAS) pipeline targeting an ARM Cortex-M4. The search space must maximize accuracy while rigorously enforcing memory and compute limitations.
+question: How must the NAS constraint estimators evaluate peak memory and latency without physically deploying every candidate architecture?
 details:
-  realistic_solution: The architecture must incorporate an analytical peak memory estimator that calculates the maximum lifecycle of tensors (input, output, weights, and residual buffers) per layer to strictly enforce the 256 KB SRAM limit. For latency, the NAS should use a lookup-table (LUT) based predictor built by profiling atomic block variants (e.g., MobileNet blocks) directly on the ARM Cortex-M4, natively accounting for CMSIS-NN's 2x INT8 SIMD MAC utilization efficiency rather than relying on raw FLOPs.
+  realistic_solution: The NAS architecture must implement an analytical memory estimator that calculates the peak concurrent tensor lifecycle (inputs, outputs, and intermediate scratch buffers) to mathematically guarantee it fits within the 256 KB SRAM constraint. For latency, substituting raw FLOP counts is fatal; the NAS must utilize a Lookup-Table (LUT) predictor built by profiling atomic blocks directly on the target hardware to natively account for CMSIS-NN's asymmetric 2x INT8 SIMD performance.
   common_mistake: |
-    **The Pitfall:** Using FLOPs as a direct proxy for latency.
-    **The Rationale:** Candidates incorrectly assume FLOPs correlate perfectly with latency across all architectures and forget to account for intermediate activation peaks.
-    **The Consequence:** The NAS proposes models that theoretically "fit" but immediately HardFault on the device because peak SRAM limits were ignored during execution.
+    **The Pitfall:** Utilizing raw FLOPs as a proxy for hardware latency.
+    **The Rationale:** Candidates incorrectly assume FLOPs correlate linearly with execution time and evaluate memory strictly by weight size, ignoring activation peaks.
+    **The Consequence:** The NAS proposes architectures that technically clear the FLOP budget but immediately throw HardFault exceptions in production because intermediate tensors exceed SRAM bounds.
   napkin_math: |
-    - Candidate latency: 2,500,000 MACs / (168 MHz * 2 MACs/cycle) = 7.44 ms.
-    - Inverted bottleneck layer takes a 64x64x16 input (65.5 KB) and expands by 4x to 64x64x64 (262 KB).
-    - Peak memory = 65.5 KB + 262 KB + weights = **>327 KB**.
-    - **SRAM overflow (>256 KB). The NAS must instantly reject this architecture.**
+    1. **Assumptions & Constraints**:
+       - 256 KB SRAM limit.
+       - Inverted bottleneck layer processes a 64x64x16 input.
+    2. **Calculations**:
+       - Input tensor size: 64 * 64 * 16 bytes = 65.5 KB.
+       - Expansion (4x) output size: 64 * 64 * 64 bytes = 262.1 KB.
+       - Peak Memory required: 65.5 KB + 262.1 KB = 327.6 KB.
+    3. **Conclusion & Interpretation**:
+       - **Result: Memory-Bound Overflow**. The activation tensors alone consume 327.6 KB, violently breaching the 256 KB SRAM limit and proving the architecture must be instantly rejected by the NAS.
 status: published
 provenance: imported
 requires_explanation: true

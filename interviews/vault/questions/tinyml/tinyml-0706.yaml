@@ -8,18 +8,24 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The DMA Channel Collision
-scenario: Your predictive maintenance system on an STM32F4 uses DMA to stream accelerometer data via SPI. You recently added an ML model whose weights are stored in external SPI Flash, using a second DMA channel to stream weights layer-by-layer during inference. When you run inference, the accelerometer data suddenly has gaps.
+scenario: Your predictive maintenance system uses DMA to stream accelerometer data via SPI. You added an ML model whose weights are streamed layer-by-layer during inference via a second DMA channel from external SPI Flash. When you run inference, the accelerometer data suddenly has gaps.
 question: How does the ML inference's DMA bandwidth requirement conflict with the sensor DMA, and how can priority inversion resolve it?
 details:
-  realistic_solution: The corruption comes from **DMA stream priority and bus arbitration** driven by the massive asymmetry in payload sizes. The accelerometer DMA requests 2 bytes every 300 µs. The ML inference DMA requests a massive burst of 16 KB (an entire convolutional layer's weights) as fast as the SPI bus allows. If both streams are on the same DMA controller, the ML weight transfer monopolizes the AHB bus matrix. The accelerometer's DMA request is held pending. If the hold exceeds the SPI peripheral's tiny hardware FIFO depth (4 bytes on STM32F4), the FIFO overflows and the sensor sample is permanently lost.
+  realistic_solution: The corruption stems from DMA stream priority and bus arbitration driven by the massive asymmetry in payload sizes. If both streams are on the same DMA controller, the ML weight transfer monopolizes the AHB bus matrix. The accelerometer's DMA request is held pending. If the hold exceeds the SPI peripheral's hardware FIFO depth, the FIFO overflows and the sensor sample is irrevocably lost. Priority inversion on the DMA channels is required to preempt the weight transfer.
   common_mistake: |
     **The Pitfall:** Assuming the DMA controller cannot handle two streams at once.
-    **The Rationale:** The STM32F4 has multiple DMA controllers and streams; the issue is not capacity, but bus arbitration and priority settings for massive block transfers versus real-time sensor streams.
-    **The Consequence:** Unnecessary architectural rewrites to avoid DMA, or accepting corrupt sensor data.
+    **The Rationale:** Candidates think the issue is capacity, rather than bus arbitration and priority settings for massive block transfers versus real-time sensor streams.
+    **The Consequence:** Unnecessary architectural rewrites to avoid DMA, or accepting corrupt sensor data in production.
   napkin_math: |
-    *   **SPI Accelerometer:** 3.2 kHz = 312.5 µs period. FIFO depth is 4 bytes (2 samples). If DMA is delayed >625 µs, FIFO overflows.
-    *   **ML Weight Transfer:** 16 KB layer at 20 MHz SPI = 16,384 bytes * 8 bits / 20,000,000 = 6.5 ms.
-    *   **Conclusion:** If the ML DMA holds the bus for 6.5 ms, it vastly exceeds the 625 µs sensor tolerance, guaranteeing a FIFO overflow and dropped sensor data. Priority inversion fixes this.
+    1. **Assumptions & Constraints:**
+       - SPI Accelerometer: 3.2 kHz = 312.5 µs period.
+       - Hardware FIFO depth: 4 bytes (2 samples).
+       - Max DMA delay before overflow: 625 µs.
+       - ML Weight Layer: 16 KB at 20 MHz SPI.
+    2. **Calculations:**
+       - ML Weight Transfer Time: 16,384 bytes * 8 bits/byte / 20,000,000 bits/s = 6.55 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound.** The 6.55 ms weight transfer vastly exceeds the 625 µs sensor tolerance, guaranteeing a FIFO overflow and dropped sensor data.
 status: published
 provenance: imported
 requires_explanation: false

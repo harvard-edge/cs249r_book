@@ -8,23 +8,28 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The SRAM Bank Conflict Slowdown
-scenario: Your audio classification model on a Cortex-M7 (STM32H7, 480 MHz, 1 MB SRAM split into DTCM + AXI SRAM) runs a depthwise separable Conv2D layer. When the input channels are 64, inference takes 2.1 ms. When you increase to 128 channels (2x compute), inference takes 5.8 ms — a 2.76x slowdown instead of the expected 2x. Profiling shows the MAC throughput drops from 1.8 GMAC/s to 1.3 GMAC/s.
+scenario: >
+  Your audio classification model on a Cortex-M7 runs a depthwise separable Conv2D layer. When the input channels are 64, inference takes 2.1 ms. When you increase to 128 channels (2x compute), inference takes 5.8 ms — a 2.76x slowdown instead of the expected 2x. Profiling shows the MAC throughput drops from 1.8 GMAC/s to 1.3 GMAC/s.
 question: Why does doubling STM32H7 depthwise channels from 64 to 128 cause a 2.76x slowdown instead of 2x?
 details:
-  realistic_solution: "The STM32H7's 1 MB SRAM is split into multiple banks:\n  - DTCM: 128 KB (2 x 64\ KB banks, single-cycle access, interleaved at 32-bit word boundaries)\n  - AXI SRAM: 512 KB (on\ the AXI bus, 1-2 cycle access depending on contention)\n  - SRAM1-3: additional banks on AHB"
+  realistic_solution: >
+    The STM32H7's DTCM SRAM uses two interleaved 64 KB banks on 32-bit boundaries to support single-cycle dual-issue reads. At 64 channels, the tensors are offset by an odd number of words, hitting alternating banks with 0% conflict. At 128 channels, the sizes are exact multiples of 32 words, perfectly aligning the tensors to the same bank. Both read pointers simultaneously hit Bank 0, causing a 50% conflict rate. Padding the allocations by 4 bytes purposefully misaligns the pointers, resolving the bank conflict and restoring the M7 dual-issue throughput.
   common_mistake: |
     **The Pitfall:** Blaming the slowdown on a "cache miss" or capacity limit.
     **The Rationale:** Developers accustomed to application processors assume any non-linear scaling is a cache effect.
     **The Consequence:** Wasting time trying to optimize loops for cache locality when the DTCM has no cache; it is single-cycle SRAM that suffers from architectural bank conflicts.
   napkin_math: |
-    - **DTCM Structure:** 2 * 64 KB banks, interleaved at 4-byte words.
-    - **Conflict at 64 Channels:** Tensors are offset by an odd number of words. Bank 0 and Bank 1 are read alternately (0% conflict).
-    - **Conflict at 128 Channels:** Sizes are multiples of 32 words. Tensors align perfectly to the same bank. Both pointers hit Bank 0 simultaneously (~50% conflict rate).
-    - **Stall Overhead:** 50% conflict * 40% memory-bound fraction = 20% raw overhead.
-    - **M7 Dual-Issue Penalty:** 20% * 1.9 = 38% effective overhead.
-    - **Calculated Scaling:** 2.0 (compute scaling) * 1.38 = 2.76x slowdown.
-    - **Expected Time:** 2.1 ms * 2.0 = 4.2 ms (not 5.8 ms).
-    - **Conclusion:** **Padding allocations by 4 bytes misaligns the pointers, resolving the bank conflict and restoring the expected 4.2 ms execution time.**
+    1. **Assumptions & Constraints:**
+       - M7 DTCM: 2 banks, 32-bit interleaved. Dual-issue capable.
+       - Expected scaling: 2.0x (4.2 ms).
+    2. **Calculations:**
+       - 128 channels aligns tensors to identical banks (~50% conflict rate).
+       - Stall Overhead: 50% conflict * 40% memory-bound fraction = 20% raw overhead.
+       - Dual-Issue Penalty: 20% * 1.9 = 38% effective overhead.
+       - Calculated Scaling: 2.0 (compute) * 1.38 = 2.76x slowdown.
+       - Expected Execution: 2.1 ms * 2.76 = 5.8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 2.76x slowdown due to SRAM bank conflict.** Padding allocations by 4 bytes misaligns the pointers, restoring the expected 4.2 ms time. **Bottleneck: Memory Bank Contention.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,21 +8,26 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Gradient Accumulation as Communication Reduction
-scenario: "Your 64-A100 cluster trains a 7B model with micro-batch size 4 per GPU. AllReduce of 14GB gradients (FP32) takes 280ms per iteration. Compute (forward + backward) takes 150ms per micro-batch. You decide to accumulate gradients over 4 micro-batches before AllReducing."
-question: "With 4x micro-batch accumulation on 64 A100s, what are the effective batch size, communication overhead reduction, and memory cost?"
+scenario: "Your 64-GPU cluster trains a 7B model with micro-batch size 4 per GPU. AllReduce of 14GB gradients (FP32) takes 280ms per iteration. Compute (forward + backward) takes 150ms per micro-batch. You decide to accumulate gradients over 4 micro-batches before AllReducing."
+question: "With 4x micro-batch accumulation on 64 GPUs, what are the effective batch size, communication overhead reduction, and memory cost?"
 details:
-  realistic_solution: "Without accumulation: Effective batch size = 64 GPUs × 4 = 256. Iteration time: 150ms compute + 280ms AllReduce = 430ms. Throughput: 256 samples / 430ms = 595 samples/sec. With 4x accumulation: Effective batch size = 64 × 4 × 4 = 1024. Iteration time: 4 × 150ms compute + 1 × 280ms AllReduce = 880ms. Throughput: 1024 samples / 880ms = 1163 samples/sec (1.95x improvement). Communication fraction: from 280/430 = 65.1% down to 280/880 = 31.8%. Memory cost: need persistent FP32 gradient buffer = 7B × 4 bytes = 28GB. This is in addition to the optimizer states (28GB for Adam momentum + 28GB for Adam variance) and the model weights (14GB FP16). Total per-GPU memory: 14 + 28 + 28 + 28 = 98GB — fits on A100-80GB only if activations are checkpointed. On MI300X with 192GB, this fits comfortably with room for large activation buffers."
+  realistic_solution: "Without accumulation: Effective batch size = 64 GPUs * 4 = 256. Iteration time: 150ms compute + 280ms AllReduce = 430ms. Throughput: 256 samples / 430ms = 595 samples/sec. With 4x accumulation: Effective batch size = 64 * 4 * 4 = 1024. Iteration time: 4 * 150ms compute + 1 * 280ms AllReduce = 880ms. Throughput: 1024 samples / 880ms = 1163 samples/sec (1.95x improvement). Communication fraction: from 280/430 = 65.1% down to 280/880 = 31.8%. Memory cost: need persistent FP32 gradient buffer = 7B * 4 bytes = 28GB."
   common_mistake: |
     **The Pitfall:** Not accounting for the memory overhead of gradient accumulation.
-    **The Rationale:** Believing accumulation is a "free" speedup.
+    **The Rationale:** Believing accumulation is a 'free' speedup.
     **The Consequence:** Encountering unexpected OOM errors because accumulated gradients must be stored in full FP32 to avoid precision loss.
   napkin_math: |
-    *   **No Accumulation:** Effective batch = 64 × 4 = 256. Time = 150ms + 280ms = 430ms.
-    *   **4x Accumulation:** Effective batch = 64 × 4 × 4 = 1024. Time = (4 × 150ms) + 280ms = 880ms.
-    *   **Throughput Gain:** 1024 / 880ms = 1163 samples/sec (1.95x improvement).
-    *   **Communication Overhead:** Drops from 65% (280/430) to 32% (280/880).
-    *   **Memory Cost:** Requires 28GB for persistent FP32 gradient buffer.
-    *   **Result:** **1.95x throughput gain, overhead drops to 32%, but requires 28GB extra memory.**
+    1. **Assumptions & Constraints:**
+       - Compute: 150ms. AllReduce: 280ms.
+       - Micro-batch = 4, GPUs = 64.
+    2. **Calculations:**
+       - No Accumulation: Effective batch = 256. Time = 150ms + 280ms = 430ms.
+       - 4x Accumulation: Effective batch = 1024. Time = (4 * 150ms) + 280ms = 880ms.
+       - Throughput Gain: 1024 / 880ms = 1163 samples/sec (1.95x improvement).
+       - Communication Overhead: Drops from 65% (280/430) to 32% (280/880).
+       - Memory Cost: 7B params * 4 bytes = 28GB persistent FP32 gradient buffer.
+    3. **Conclusion & Interpretation:**
+       **1.95x throughput gain, overhead drops to 32%, requires 28GB extra memory. Result: Memory-Capacity-Bound vs Communication tradeoff.**
 status: published
 provenance: imported
 requires_explanation: false

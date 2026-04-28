@@ -8,19 +8,23 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: The Qualcomm QNN SDK Delegation
-scenario: You're deploying a multi-modal model on a Snapdragon 8 Elite using the Qualcomm AI Engine (QNN SDK). QNN can delegate ops to the Hexagon NPU (50 TOPS), Adreno GPU, or Kryo CPU. Your model has 60 layers: Conv2D, LayerNorm, GELU, attention, and softmax.
-question: How should QNN delegate each model operation across Hexagon NPU, Adreno GPU, and Kryo CPU to minimize latency?
+scenario: 'You''re deploying a multi-modal model on a mobile SoC using the QNN SDK. QNN can delegate ops to the NPU, GPU, or CPU. Your model has 60 layers: Conv2D, LayerNorm, GELU, attention, and softmax.'
+question: 'How should QNN delegate each model operation across NPU, GPU, and CPU to minimize latency?'
 details:
-  realistic_solution: 'Build an explicit delegation plan by op type: Model: 60 layers. 46 Conv/MatMul → HTP (6ms). 12 attention + LayerNorm + GELU → GPU (8ms). 2 pre/post-processing → CPU (1ms). Partition boundaries: HTP→GPU (×2): 2 × 1.5ms = 3ms. GPU→HTP (×2): 2 × 1.5ms = 3ms. GPU→CPU (×1): 1ms. Total: 22ms. Then optimize by keeping more layers on HTP to eliminate boundary crossings.'
+  realistic_solution: 'Build an explicit delegation plan by op type via graph partitioning. Force approximate GELU on the NPU and fuse LayerNorm to eliminate boundary crossings. By minimizing CPU fallbacks and data transfers between NPU and GPU, overall latency is drastically reduced.'
   common_mistake: |
     **The Pitfall:** Setting a single backend (e.g., HTP) and letting the runtime figure it out.
     **The Rationale:** Candidates assume the SDK will magically optimize the graph.
     **The Consequence:** The runtime silently falls back unsupported ops to the CPU, creating massive partition boundaries that completely dominate latency.
   napkin_math: |
-    *   **Naive Delegation (22ms):** 46 Conv on HTP (6ms) + 12 Attn on GPU (8ms) + 2 pre/post on CPU (1ms) + Boundary Crossings (7ms).
-    *   **Optimized Delegation:** Force approximate GELU on HTP and fuse LayerNorm.
-    *   **Optimized Time:** 48 layers HTP (7ms) + 10 layers GPU (6ms) + 2 CPU (1ms) + 2 boundaries (3ms).
-    *   **Result:** **Latency drops from 22ms to 17ms, saving 5ms purely by eliminating partition boundaries.**
+    1. **Assumptions & Constraints:**
+       * Model: 60 layers. Unoptimized: 22ms latency.
+       * Partitions: NPU->GPU (1.5ms), GPU->NPU (1.5ms), GPU->CPU (1ms).
+    2. **Calculations:**
+       * Naive Delegation: 46 Conv (6ms) + 12 Attn (8ms) + 2 CPU (1ms) + Boundaries (7ms) = 22ms.
+       * Optimized Delegation: 48 NPU (7ms) + 10 GPU (6ms) + 2 CPU (1ms) + Boundaries (3ms) = 17ms.
+    3. **Conclusion & Interpretation:**
+       * **Result: I/O-Bound.** Latency drops from 22ms to 17ms, saving 5ms purely by eliminating partition boundaries.
 status: published
 provenance: imported
 requires_explanation: false

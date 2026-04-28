@@ -11,16 +11,22 @@ title: Optimizing a Memory-Bound Training Bottleneck
 scenario: Profiling reveals that 35% of your training step time is spent in batch normalization and elementwise operations, despite these accounting for only 2% of total FLOPs. You are on an A100 GPU.
 question: How would you design an optimization strategy to reduce this overhead by at least 50%?
 details:
-  realistic_solution: These operations are deeply memory-bound (AI < 1 FLOP/byte) - optimizing their compute is pointless since they spend >95% of time waiting for memory. Strategy: (1) Kernel fusion: fuse BatchNorm + ReLU + Dropout into a single kernel (1 read + 1 write instead of 3x(read+write), saving ~67% of memory traffic). (2) Use torch.compile which automatically fuses elementwise ops. (3) Replace BatchNorm with LayerNorm or RMSNorm which fuse better with attention operations. (4) Enable CUDA graphs to eliminate kernel launch overhead between small ops. Expected result: fusing 3-4 elementwise ops reduces their combined time by 60-70%, cutting total step time by 35% * 65% = ~23%.
+  realistic_solution: 'These operations are deeply memory-bound (AI < 1 FLOP/byte) - optimizing their compute is pointless since they spend >95% of time waiting for memory. Strategy: (1) Kernel fusion: fuse BatchNorm + ReLU + Dropout into a single kernel (1 read + 1 write instead of 3x(read+write), saving ~67% of memory traffic). (2) Use torch.compile which automatically fuses elementwise ops. (3) Replace BatchNorm with LayerNorm or RMSNorm which fuse better with attention operations. (4) Enable CUDA graphs to eliminate kernel launch overhead between small ops. Expected result: fusing 3-4 elementwise ops reduces their combined time by 60-70%, cutting total step time by 35% * 65% = ~23%.'
   common_mistake: |
     **The Pitfall:** Trying to optimize these operations in isolation using faster math kernels.
     **The Rationale:** Candidates fail to recognize that elementwise operations are deeply memory-bound, meaning their execution time is dictated entirely by HBM bandwidth.
     **The Consequence:** Spending weeks optimizing compute kernels that yield 0% speedup because the memory traffic remains identical.
   napkin_math: |
-    *   **Unfused Traffic:** 3 ops * 2 passes (read+write) = 6 HBM transactions.
-    *   **Fused Traffic:** 1 op * 2 passes = 2 HBM transactions.
-    *   **Speedup:** 3x less traffic -> ~3x faster.
-    *   **Total Reduction:** 35% of step time * 67% reduction = **~23% total step time speedup**.
+    1. **Assumptions & Constraints:**
+       - 35% of training step time is in batch norm and elementwise ops.
+       - Memory traffic for unfused vs. fused operations.
+    2. **Calculations:**
+       - Unfused Traffic: 3 operations * 2 passes (read+write) = 6 HBM transactions.
+       - Fused Traffic (Kernel Fusion): 1 operation * 2 passes = 2 HBM transactions.
+       - Memory traffic reduction: 6 to 2 = 3x less traffic.
+       - Time reduction: 35% of total step time * 67% reduction = ~23% total step time saved.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound.** Elementwise operations are deeply memory-bound, and fusing them yields a ~23% total step time speedup.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,21 +8,26 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Architecting an Efficient CNN for Exynos 2400 NPU
-scenario: You are tasked with designing a real-time object detection CNN for a flagship smartphone powered by the Samsung Exynos 2400 NPU. The system needs to process live 1080p video streams concurrently with heavy ISP tasks, relying on the dual-core NPU capable of 34.7 TOPS and sharing 12 GB of LPDDR5X memory with the CPU, GPU, and ISP.
+scenario: You are tasked with designing a real-time object detection CNN for a flagship smartphone. The system needs to process live 1080p video streams concurrently with heavy ISP tasks, relying on a shared unified memory pool.
 question: How should an Exynos 2400 object-detection CNN backbone reduce memory bandwidth while using the NPU effectively?
 details:
   realistic_solution: |
-    A strong L5 design evaluates the tradeoff between FLOPs and memory access costs (MAC), favoring architectures with higher arithmetic intensity that keep intermediate activations within the NPU's local SRAM. To mitigate the shared LPDDR5X memory bottleneck, the architecture should incorporate aggressive feature map resolution reduction early in the network (e.g., using a stem layer with a large stride) and utilize INT8 quantization to halve the activation memory footprint compared to FP16.
+    A strong L5 design evaluates the tradeoff between FLOPs and memory access costs (MAC), favoring architectures with higher arithmetic intensity that keep intermediate activations within the NPU's local SRAM. To mitigate the shared LPDDR5X memory bottleneck, the architecture should incorporate aggressive spatial downsampling early in the network (e.g., using a stem layer with a large stride) and utilize INT8 quantization (or W8A8) to halve the activation memory footprint compared to FP16, alongside operation fusion to prevent costly trips to main memory.
   common_mistake: |
     **The Pitfall:** Defaulting to standard depthwise separable convolutions (like MobileNetV2).
     **The Rationale:** Candidates rely on standard mobile architectures without considering modern NPU constraints.
     **The Consequence:** They ignore the shared 12 GB LPDDR5X memory pool, failing to account for severe bandwidth contention when the ISP is simultaneously active.
   napkin_math: |
-    - For real-time 30 FPS processing, the NPU has a theoretical compute budget of 34.7 TOPS / 30 FPS = 1.15 Tera-Operations per frame.
-    - A typical efficient CNN using 5 GOPS per frame leaves massive compute headroom, meaning memory bandwidth is the true constraint.
-    - A 1080p RGB input requires 1920 * 1080 * 3 = 6.22 MB.
-    - At 30 FPS, the input alone consumes 186.6 MB/s.
-    - If the network's intermediate activations require an additional 100 MB of reads/writes per frame to the shared memory, it demands **3 GB/s** of LPDDR5X bandwidth just for inference, significantly impacting the ISP's concurrent operations.
+    1. **Assumptions & Constraints:**
+       - Target: Real-time 30 FPS processing of 1080p RGB video.
+       - Compute budget: ~1.15 Tera-Operations per frame (34.7 TOPS / 30 FPS).
+       - Input size: 1920 * 1080 * 3 bytes = 6.22 MB.
+    2. **Calculations:**
+       - Input bandwidth at 30 FPS = 6.22 MB * 30 = 186.6 MB/s.
+       - If intermediate activations require 100 MB of reads/writes per frame: 100 MB * 30 FPS = 3.0 GB/s.
+       - Total inference bandwidth demand: >3.18 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bandwidth-Bound.** A typical efficient CNN using 5 GOPS leaves massive compute headroom. The true constraint is the >3 GB/s demand on shared LPDDR5X memory, which severely impacts concurrent ISP operations unless activation memory footprint is aggressively minimized via quantization and fusion.
 status: published
 provenance: imported
 requires_explanation: true

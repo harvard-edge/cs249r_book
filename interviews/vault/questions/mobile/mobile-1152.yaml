@@ -8,19 +8,25 @@ competency_area: reliability
 bloom_level: analyze
 phase: inference
 title: Diagnosing High Latency in On-Device Gemini Nano Sanitization
-scenario: "You are deploying Gemini Nano on the Google Tensor G3 to power a new on-device messaging assistant. To defend against prompt injection, user inputs are routed through a smaller, dedicated 'sanitizer' model before hitting the main LLM. However, telemetry shows that total response latency has spiked to over 1.5 seconds, even for short messages. The main Gemini Nano model is running optimally on the TPU, but the system is bottlenecking."
-question: "How would you analyze the interaction between the models and the hardware to identify the root cause of the latency?"
+scenario: You are deploying Gemini Nano on the Google Tensor G3. To defend against prompt injection, inputs route sequentially through a smaller 'sanitizer' model before hitting the main LLM. Telemetry shows latency spiked to over 1.5 seconds.
+question: How would you analyze the interaction between the models and the hardware to identify the root cause of the latency?
 details:
-  realistic_solution: The root cause is likely memory bandwidth contention and CPU overhead. While the Tensor G3 has a capable TPU (7.5 TOPS), running a sequential pipeline means context switching and moving activations between memory and the TPU. If the sanitizer model is running on the CPU or DSP while Gemini Nano is swapped into the TPU, or if both are competing for the 12 GB LPDDR5X bandwidth, the overhead of loading weights and activations sequentially dominates the actual inference time.
+  realistic_solution: The root cause is memory bandwidth contention and context switching overhead. While the Tensor G3 has a capable TPU, running a sequential pipeline forces the OS to swap activations and weights entirely in and out of the TPU's local SRAM over the LPDDR5X bus.
   common_mistake: |
-    **The Pitfall:** Assuming the TPU compute is too slow for two models.
-    **The Rationale:** Candidates assume the compute capacity is lacking or that prompt attacks add compute, without investigating the sequential memory swapping overhead.
-    **The Consequence:** Unnecessary model compression that fails to address the root cause.
+    **The Pitfall:** Assuming the TPU compute is simply too slow for two models.
+    **The Rationale:** Candidates assume the compute capacity is lacking or that prompt attacks add compute, completely missing the sequential memory swapping overhead.
+    **The Consequence:** Unnecessary model compression that fails to address the root I/O cause.
   napkin_math: |
-    - Assume the sanitizer model is 100M parameters (`100MB` in INT8) and Gemini Nano is 1.8B parameters (`1.8GB` in INT8).
-    - The Tensor G3 LPDDR5X has roughly 50 GB/s bandwidth.
-    - Swapping models sequentially adds `(100MB + 1.8GB) / 50 GB/s * 2 (read/write) = ~76ms` pure I/O overhead per turn.
-    - **Conclusion:** The **76ms memory context switch** dominates the actual compute time (which is only ~50ms).
+    1. **Assumptions & Constraints:**
+       - Sanitizer: 100M params (100MB INT8).
+       - Main LLM: 1.8B params (1.8GB INT8).
+       - LPDDR5X Bandwidth: 50 GB/s.
+    2. **Calculations:**
+       - Total weights per full turn: 100MB + 1.8GB = 1.9GB.
+       - Memory swap time (read/write overhead): (1.9 GB / 50 GB/s) * 2 = 76ms.
+       - Actual TPU compute time: ~50ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth-Bound (Context Switch)**. The 76ms pure I/O overhead heavily dominates the ~50ms compute time, proving the bottleneck is sequential memory swapping over the bus.
 status: published
 provenance: imported
 requires_explanation: false
@@ -30,7 +36,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 human_reviewed:

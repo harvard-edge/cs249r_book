@@ -8,26 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Diagnosing FlashAttention Regression on Short Sequences
-scenario: After enabling FlashAttention-2 on an H100 serving a 7B model, you observe
-  that latency for sequence length 64 is 5% slower than standard attention, while
-  seq_len=2048 is 2.3x faster. Both use FP16. Diagnose why FlashAttention can regress
-  on very short sequences.
-question: Why can FlashAttention-2 be slower than standard attention at seq_len=64
-  but much faster at seq_len=2048?
+scenario: After enabling FlashAttention-2 on an H100 serving a 7B model, you observe that latency for sequence length 64 is 5% slower than standard attention, while seq_len=2048 is 2.3x faster. Both use FP16.
+question: Why can FlashAttention-2 be slower than standard attention at seq_len=64 but much faster at seq_len=2048?
 details:
-  realistic_solution: At N=64, the attention matrix is 64x64x2B = 8KB per head — fits
-    entirely in L2 cache (50MB on H100). Standard attention's 'materialization to
-    HBM' never actually hits HBM; the hardware cache captures it. FlashAttention's
-    overhead — kernel launch, tile loop control, online softmax rescaling, reduced
-    parallelism from sequential tile processing — now exceeds the IO savings. At N=2048,
-    the matrix is 2048x2048x2B = 8MB per head x 32 heads = 256MB, blowing past L2
-    cache, making HBM IO the bottleneck that FlashAttention eliminates.
-  common_mistake: Assuming FlashAttention is universally faster. For short sequences,
-    the N x N matrix is small enough to fit in L2 cache, so the IO savings disappear
-    while the tiling/rescaling overhead remains.
-  napkin_math: 'N=64: attn matrix = 64^2 x 2B x 32 heads = 256KB << 50MB L2. N=2048:
-    2048^2 x 2B x 32 = 256MB >> 50MB L2. FlashAttention kernel overhead ~5-10us, which
-    matters when total compute is ~15us.'
+  realistic_solution: At N=64, the attention matrix is 64x64x2B = 8KB per head — fits entirely in L2 cache (50MB on H100). Standard attention's 'materialization to HBM' never actually hits HBM; the hardware cache captures it. FlashAttention's overhead — kernel launch, tile loop control, online softmax rescaling, reduced parallelism from sequential tile processing — now exceeds the IO savings. At N=2048, the matrix is 2048x2048x2B = 8MB per head x 32 heads = 256MB, blowing past L2 cache, making HBM IO the bottleneck that FlashAttention eliminates.
+  common_mistake: |
+    **The Pitfall:** Assuming FlashAttention is universally faster for all sequence lengths.
+    **The Rationale:** Candidates forget that for very short sequences, the attention matrix completely fits in the L2 cache, eliminating the HBM I/O bottleneck that FlashAttention solves.
+    **The Consequence:** Deploying FlashAttention for short-context workloads, resulting in net latency regressions due to kernel overhead.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - L2 cache on H100: 50 MB
+       - FP16 precision (2 bytes/element)
+       - 32 attention heads
+    2. **Calculations:**
+       - At N=64: Matrix size = 64 * 64 * 2 bytes * 32 heads = 262,144 bytes (~256 KB)
+       - At N=2048: Matrix size = 2048 * 2048 * 2 bytes * 32 heads = 268,435,456 bytes (~256 MB)
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound vs Memory-Bound crossover**. N=64 easily fits in the 50MB L2 cache (making FlashAttention's tiling overhead a penalty), whereas N=2048 exceeds L2, making FlashAttention's HBM avoidance critical.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,20 +8,18 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: The Autonomous Vehicle PCIe Stall
-scenario: 'You are an ML Systems Engineer on an autonomous vehicle team, tasked with diagnosing a latency regression. Your perception stack runs on a powerful GPU connected to the host CPU via a PCIe Gen5 x16 bus. After upgrading to a new high-resolution camera, your end-to-end ''photon-to-prediction'' latency jumped to 42ms, missing the hard 33ms real-time deadline.'
+scenario: 'You are an ML Systems Engineer on an autonomous vehicle team, tasked with diagnosing a latency regression. After upgrading to a new high-resolution camera, your end-to-end photon-to-prediction latency jumped to 42ms, missing the hard 33ms real-time deadline.'
 question: What is the most likely cause of the 42ms camera-to-GPU latency regression, and how would you fix it?
 details:
-  realistic_solution: 'The most likely cause is the `cudaMemcpy` call is operating on standard pageable host memory. Before the PCIe DMA engine can transfer the data to the GPU, the CPU must first perform a blocking copy of the entire 200MB frame from its initial pageable buffer into a pinned host buffer. This extra CPU-bound copy dominates the overall transfer time. The correct solution is to ensure the camera driver writes its data directly into a pre-allocated pinned memory region, enabling a ''zero-copy'' path.'
+  realistic_solution: 'The most likely cause is the `cudaMemcpy` call operating on standard pageable host memory. Before the PCIe DMA engine can transfer data to the GPU, the CPU must first perform a blocking copy of the entire 200MB frame from its initial pageable buffer into a pinned host buffer. This extra CPU-bound copy dominates the transfer time. The solution is to use `cudaHostAlloc` or ensure the camera driver writes its data directly into a pre-allocated pinned memory region, enabling a zero-copy path.'
   common_mistake: |
     **The Pitfall:** Blaming the hardware bandwidth of the PCIe bus.
     **The Rationale:** Engineers calculate the theoretical transfer time, see it's low, and get confused, forgetting that GPU drivers require data to be in 'pinned' memory for DMA.
     **The Consequence:** They wrongly recommend hardware upgrades instead of fixing the hidden CPU-bound copy inside `cudaMemcpy`.
   napkin_math: |
-    *   **Frame size:** 200 MB.
-    *   **CPU blocking copy speed (pageable to pinned):** ~10 GB/s.
-    *   **Copy Penalty:** 200 MB / 10 GB/s = 20ms.
-    *   **PCIe Transfer (Gen4 x16):** 200 MB / 32 GB/s = 6.25ms.
-    *   **Result:** **The blocking CPU copy creates a massive 20ms latency overhead before DMA even starts.**
+    1. **Assumptions & Constraints:** Frame size is 200 MB. CPU blocking copy speed (pageable to pinned) is ~10 GB/s. PCIe Gen5 x16 bandwidth is ~64 GB/s.
+    2. **Calculations:** Copy Penalty = 200 MB / 10 GB/s = 20ms. PCIe Transfer = 200 MB / 64 GB/s = 3.125ms.
+    3. **Conclusion & Interpretation:** **The blocking CPU copy creates a massive 20ms latency overhead before DMA even starts. Result: Host-to-Device Memory-Bound.**
   options:
   - The PCIe Gen5 bus is saturated. Moving 200MB is too slow and the system requires an upgrade to a wider bus or compression.
   - The GPU's HBM3 memory controller is overwhelmed, causing backpressure on the PCIe bus and slowing down the data ingress.

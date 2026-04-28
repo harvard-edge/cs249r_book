@@ -8,8 +8,7 @@ competency_area: memory
 bloom_level: apply
 phase: training
 title: On-Device Fine-Tuning Memory Constraints
-scenario: >-
-  You are implementing on-device fine-tuning for a 24-layer transformer model on a Jetson Orin Nano with 8GB of unified memory. The weights and optimizer state consume 4GB. During a standard forward pass, each layer produces 250MB of intermediate activations (totaling 6GB for 24 layers), leading to an OOM error. You implement gradient checkpointing, saving only the 25MB input tensor for each layer instead of all intermediates.
+scenario: You are implementing on-device fine-tuning for a 24-layer transformer model on a Jetson Orin Nano with 8GB of unified memory. The weights and optimizer state consume 4GB. During a standard forward pass, each layer produces 250MB of intermediate activations (totaling 6GB for 24 layers), leading to an OOM error. You implement gradient checkpointing, saving only the 25MB input tensor for each layer instead of all intermediates.
 question: With layer-wise gradient checkpointing, what is the new activation memory footprint and percentage increase in total training FLOPs?
 details:
   realistic_solution: 'Implement gradient checkpointing at every layer boundary. The new activation memory requires storing 24 layer inputs plus the intermediate activations for the single layer being recomputed during the backward pass. This dramatically reduces the footprint and prevents OOM, at the cost of one extra forward pass per layer.'
@@ -18,12 +17,19 @@ details:
     **The Rationale:** Candidates assume gradient checkpointing magically compresses all layers to just their input tensors.
     **The Consequence:** They under-calculate the true memory footprint by omitting the 250MB needed to hold the intermediates of the layer actively being recomputed during backprop.
   napkin_math: |
-    1. **Original Activations:** `24 * 250MB = 6000MB` (6GB).
-    2. **Checkpointed Activations:** `(24 layers * 25MB inputs) + 250MB (active intermediates) = 600MB + 250MB = 850MB`.
-    3. **Compute overhead:** 
-       - Standard step = 1 FWD + 1 BWD = 3 units of compute.
-       - Checkpointed step = 1 FWD + 1 Recompute + 1 BWD = 4 units.
-    4. **Result:** The memory drops to **850MB**, and compute increases by `4/3 = 1.33x`, a **33% increase** in total FLOPs.
+    1. **Assumptions & Constraints:**
+       - Target Architecture: 8GB unified memory
+       - Static Elements: 4GB Weights & Optimizer
+       - Forward Activations: 24 layers * 250MB = 6,000MB (6GB)
+       - Checkpoint Elements: 25MB inputs per layer
+    2. **Calculations:**
+       - Unoptimized Trajectory: 4GB + 6GB = 10GB (OOM Exception)
+       - O(sqrt(N)) Checkpoint Retain: 24 * 25MB = 600MB
+       - Backprop Reconstruction Boundary: 250MB execution buffer
+       - Total Final Footprint: 600MB + 250MB = 850MB
+       - Additional Hardware Cycle: 4 Compute Steps / 3 Standard Steps = +33%
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Capacity-Bound.** Structurally converting O(N) forward layers to explicitly persist only O(1) checkpoints elegantly collapses the 6GB stack into 850MB, resolving the OOM at a tolerable ~33% compute penalty.
 status: published
 provenance: imported
 requires_explanation: false

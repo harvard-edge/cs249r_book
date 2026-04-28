@@ -11,19 +11,22 @@ title: Smartwatch Gesture Personalization
 scenario: You are designing an on-device personalization system for a smartwatch gesture recognition model. The base model is a 5M parameter MobileNet-based CNN. The smartwatch OS restricts background ML training tasks to a strict 10MB memory budget. User data cannot leave the device.
 question: Should the smartwatch gesture model be fully fine-tuned or adapted with a frozen backbone and 50K-parameter head under the 10MB training budget?
 details:
-  realistic_solution: Implement a personalization layer architecture. By freezing the MobileNet backbone, it runs in standard inference mode, meaning intermediate activations are discarded immediately. Only the final layer's input activations and gradients are cached.
+  realistic_solution: "Deploy a personalization head over a frozen MobileNet backbone. Full FP32 fine-tuning requires caching massive intermediate activation tensors during the forward pass for backpropagation, causing an immediate OOM under the 10MB limit. By freezing the CNN backbone, inference activations are immediately evicted. Training only the 50K-parameter head restricts optimizer state and gradient memory to roughly 3MB, safely honoring the tight background OS budget."
   common_mistake: |
     **The Pitfall:** Assuming the primary bottleneck for on-device training is compute rather than memory.
     **The Rationale:** Full fine-tuning requires caching vast amounts of intermediate activations for backpropagation, which typically dwarfs the parameter memory footprint.
     **The Consequence:** The training process crashes with an Out-Of-Memory (OOM) error before completing a single batch.
   napkin_math: |
-    - Full fine-tuning (Batch Size=16): 5M params = 20MB.
-    - Full activations: ~10MB/sample * 16 = 160MB.
-    - Total full memory: 20MB + 160MB = 180MB (**Fails 10MB budget**).
-    - Frozen backbone peak inference memory: ~2MB.
-    - Personalization layer input caching (1024-dim): 1024 * 4B * 16 = 65.5KB.
-    - Optimizer state (50K params): ~800KB.
-    - Total personalization memory: < 3MB (**Fits 10MB budget**).
+    1. **Assumptions & Constraints:**
+       - Memory budget: 10MB.
+       - Base model: 5M parameters.
+       - Batch size: 16.
+    2. **Calculations:**
+       - Full fine-tuning: 5M params = 20MB. Activations ~160MB. Total ~180MB.
+       - Frozen backbone peak memory: ~2MB.
+       - Personalization head (50K params): Caching input (1024-dim * 4B * 16) ≈ 65.5KB. Optimizer state ≈ 800KB.
+    3. **Conclusion & Interpretation:**
+       - **Personalization layer fits (< 3MB). Full fine-tuning OOMs (180MB).**
   options:
   - The primary issue is insufficient hardware capability; upgrading to next-generation hardware will resolve the performance gap without software changes.
   - Assuming the primary bottleneck for on-device training is compute (FLOPs) rather than the memory required to store intermediate activations during the forward pass for backpropagation.

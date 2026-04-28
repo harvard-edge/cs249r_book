@@ -11,18 +11,25 @@ title: Diagnosing Accuracy Collapse in INT8 LLM Deployments
 scenario: You are deploying an INT8 post-training quantized Llama-2-70B model on a cluster of A100 GPUs to increase serving throughput. Despite applying per-channel quantization to the weights, you observe severe perplexity degradation and erratic generations. Upon inspecting the linear layers, you notice massive activation outliers (sometimes >100x the median magnitude) in a small percentage of channels.
 question: How do you analyze and resolve this bottleneck without incurring the massive latency overhead of dynamic per-channel activation quantization?
 details:
-  realistic_solution: Implement SmoothQuant to mathematically migrate the outlier difficulty from the activations to the weights offline. By introducing a per-channel scaling factor $s$, you divide the activations by $s$ (smoothing them) and multiply the weights by $s$. This allows standard per-tensor activation quantization to succeed without clipping, while preserving the original $Y = XW$ output.
+  realistic_solution: |
+    Implement SmoothQuant to mathematically migrate the outlier difficulty from the activations to the weights offline. By introducing a per-channel scaling factor `s`, you divide the activations by `s` (smoothing them) and multiply the weights by `s`. This allows standard per-tensor INT8 activation quantization to succeed without clipping, while preserving the original `Y = XW` output. Static INT8 quantization combined with SmoothQuant drastically lowers serving latency compared to dynamic activation tracking.
   common_mistake: |
     **The Pitfall:** Suggesting per-channel quantization for activations during live inference.
     **The Rationale:** Candidates logically extend weight quantization strategies to activations, failing to realize that dynamic accumulation and scaling per channel is exceptionally slow on Tensor Cores.
     **The Consequence:** The model's serving latency spikes catastrophically, negating any throughput benefits gained from INT8 compression.
   napkin_math: |
-    - **Equation:** Y = XW.
-    - **SmoothQuant Transformation:** Y = (X · diag(s)⁻¹) · (diag(s) · W) = X̂Ŵ.
-    - **Scaling Example:** Outlier activation X_max = 100. Corresponding weight W_max = 1.
-    - **Scale Factor (s):** s = sqrt(X_max) / sqrt(W_max) = 10 / 1 = 10.
-    - **Smoothed Values:** New activation max = 100 / 10 = 10. New weight max = 1 × 10 = 10.
-    - **Result:** Both tensors are mathematically scaled to fit comfortably within the strict INT8 dynamic range without clipping.
+    1. **Assumptions & Constraints:**
+       - Matrix Multiplication: Y = XW.
+       - Activation Outliers: X_max = 100 (in specific channels).
+       - Corresponding Weights: W_max = 1.
+       - Target format: INT8 (limited dynamic range of -128 to 127).
+    2. **Calculations:**
+       - SmoothQuant Transformation: Y = (X * diag(s)^-1) * (diag(s) * W) = X_hat * W_hat.
+       - Scale Factor (s): s = sqrt(X_max) / sqrt(W_max) = sqrt(100) / sqrt(1) = 10.
+       - Smoothed Activation: New X_max = 100 / 10 = 10.
+       - Smoothed Weight: New W_max = 1 * 10 = 10.
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound.** By mathematically migrating the outlier difficulty from activations to weights offline via SmoothQuant, both tensors fit comfortably within the strict INT8 dynamic range, eliminating dynamic per-channel quantization overhead during inference.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,43 +8,30 @@ competency_area: optimization
 bloom_level: create
 phase: training
 title: The Training Recipe Design
-scenario: 'You are architecting the full training recipe for a new 40B model. Your cluster has 1,024 H100-80GB
-  GPUs, 400 Gbps InfiniBand, and 3PB of training data (5T tokens). Design the complete training configuration:
-  precision format, optimizer, learning rate schedule, batch size ramp, parallelism strategy, and checkpoint
-  policy. Justify each choice with quantitative reasoning.'
-question: "What complete training configuration would you choose for the 40B model on 1,024 H100s, and how would you justify it quantitatively?"
+scenario: You are architecting a training recipe for a 40B model on 1,024 GPUs. You need to design precision, optimizer, batch size, parallelism, and checkpointing.
+question: What complete training configuration would you choose for the 40B model on 1,024 GPUs, and how would you justify it quantitatively?
 details:
-  realistic_solution: '**Precision**: BF16 mixed precision with FP32 master weights. BF16 over FP16 because
-    the 8-bit exponent prevents underflow without loss scaling complexity. FP8 (E4M3 forward, E5M2 backward)
-    if H100 Transformer Engine is stable for your architecture — saves 40% memory bandwidth. **Optimizer**:
-    AdamW with β1=0.9, β2=0.95, weight_decay=0.1. Per-param memory: 16 bytes (BF16 weights + FP32 master
-    + FP32 m + FP32 v + BF16 grads). Total optimizer state: 40B × 16 = 640 GB. **Parallelism**: 40B model
-    fits on 1 GPU for inference (80 GB > 40B × 2 = 80 GB), but not for training (640 GB optimizer). Use
-    FSDP (ZeRO-3): shard optimizer, gradients, and weights across 1,024 GPUs → 640 GB / 1024 = 0.625 GB/GPU.
-    Add tensor parallelism TP=4 within nodes for activation memory reduction. **Batch size**: Start with
-    512K tokens, ramp to 4M tokens over first 5% of training. B_crit for 40B models ≈ 2-4M tokens — stay
-    near this. **LR schedule**: WSD — warmup 2K steps to peak 3×10⁻⁴, stable phase until 80% of tokens,
-    then linear decay to 3×10⁻⁵. WSD allows extending if more data becomes available. **Checkpoints**:
-    every 1,000 steps (~30 min). Async checkpointing to NVMe tier first, then background copy to PFS.
-    Keep last 5 checkpoints for rollback. Estimated total time: 6 × 40B × 5T / (1024 × 989T × 0.4) ≈ 2.96
-    × 10⁶ s ≈ 34 days.'
-  common_mistake: Copying a recipe from a published paper without adapting to your specific hardware,
-    data budget, and model size. Each dimension interacts with the others.
-  napkin_math: 'FLOPS: 6 × 40e9 × 5e12 = 1.2e24 | Cluster TFLOPS: 1024 × 989 × 0.4 = 405K TFLOPS | Time:
-    1.2e24 / 4.05e17 = 2.96e6 s ≈ 34 days | Cost: 1024 × 34 × 24 × $3 = $2.5M compute | Memory/GPU: 0.625
-    GB optimizer + ~10 GB activations (w/ checkpointing, TP=4) + ~80 MB weights (sharded) ≈ 11 GB — plenty
-    of headroom'
+  realistic_solution: '**Precision**: BF16 mixed precision with FP32 master weights. BF16 over FP16 because the 8-bit exponent prevents underflow without loss scaling complexity. FP8 (E4M3 forward, E5M2 backward) if H100 Transformer Engine is stable for your architecture — saves 40% memory bandwidth. **Optimizer**: AdamW with β1=0.9, β2=0.95, weight_decay=0.1. Per-param memory: 16 bytes (BF16 weights + FP32 master + FP32 m + FP32 v + BF16 grads). Total optimizer state: 40B × 16 = 640 GB. **Parallelism**: 40B model fits on 1 GPU for inference (80 GB > 40B × 2 = 80 GB), but not for training (640 GB optimizer). Use FSDP (ZeRO-3): shard optimizer, gradients, and weights across 1,024 GPUs → 640 GB / 1024 = 0.625 GB/GPU. Add tensor parallelism TP=4 within nodes for activation memory reduction. **Batch size**: Start with 512K tokens, ramp to 4M tokens over first 5% of training. B_crit for 40B models ≈ 2-4M tokens — stay near this. **LR schedule**: WSD — warmup 2K steps to peak 3×10⁻⁴, stable phase until 80% of tokens, then linear decay to 3×10⁻⁵. WSD allows extending if more data becomes available. **Checkpoints**: every 1,000 steps (~30 min). Async checkpointing to NVMe tier first, then background copy to PFS. Keep last 5 checkpoints for rollback. Estimated total time: 6 × 40B × 5T / (1024 × 989T × 0.4) ≈ 2.96 × 10⁶ s ≈ 34 days.'
+  common_mistake: |
+    **The Pitfall:** Copying an academic recipe without adapting it to specific hardware topology.
+    **The Rationale:** Pre-existing recipes seem safe, ignoring the intricacies of memory bandwidth, cluster size, and failure rates.
+    **The Consequence:** Sub-optimal parallelism crashes the run with OOMs, and bad checkpoint policies lose weeks of compute progress.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 40B parameters, 5T tokens.
+       - 1,024 GPUs (989 TFLOPS peak, ~40% utilization).
+    2. **Calculations:**
+       - Optimizer memory (AdamW, BF16): 40B × 16 bytes = 640 GB.
+       - Sharded over 1,024 GPUs (ZeRO-3) = 0.625 GB/GPU.
+       - Total FLOPS = 6 × 40e9 × 5e12 = 1.2e24.
+       - Time = 1.2e24 / (1024 × 989e12 × 0.4) ≈ 2.96e6 seconds (34 days).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory & Compute-Bound.** FSDP ensures the 640 GB optimizer state fits into memory, while BF16 guarantees stability over the 34-day training cycle.
   options:
-  - 'Use speculative decoding: a small 7B draft model generates 5-8 candidate tokens autoregressively,
-    then the 70B target model verifies all candidates in a single forward pass; this converts sequential
-    decode steps into parallel verification, achieving 2-3x speedup without quality loss since rejected
-    tokens are resampled from the target distribution'
-  - Increase the batch size to amortize the memory-bandwidth cost of loading 140 GB of weights per token;
-    with batch size 256 the arithmetic intensity exceeds the roofline knee point
-  - Quantize the model to INT4 (35 GB) to double the effective memory bandwidth from 3.35 TB/s to 6.7
-    TB/s equivalent, directly doubling the token generation rate
-  - Use continuous batching to interleave prefill and decode phases across requests; this improves throughput
-    but does not reduce per-request latency for the single-user scenario described
+  - 'Use speculative decoding: a small 7B draft model generates 5-8 candidate tokens autoregressively, then the 70B target model verifies all candidates in a single forward pass; this converts sequential decode steps into parallel verification, achieving 2-3x speedup without quality loss since rejected tokens are resampled from the target distribution'
+  - Increase the batch size to amortize the memory-bandwidth cost of loading 140 GB of weights per token; with batch size 256 the arithmetic intensity exceeds the roofline knee point
+  - Quantize the model to INT4 (35 GB) to double the effective memory bandwidth from 3.35 TB/s to 6.7 TB/s equivalent, directly doubling the token generation rate
+  - Use continuous batching to interleave prefill and decode phases across requests; this improves throughput but does not reduce per-request latency for the single-user scenario described
   correct_index: 0
 status: published
 provenance: imported

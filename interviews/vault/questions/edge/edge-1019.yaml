@@ -8,23 +8,27 @@ competency_area: deployment
 bloom_level: analyze
 phase: both
 title: Analyzing RAG Feasibility on Jetson Orin for On-Device Retrieval
-scenario: A robotics team wants to deploy a RAG pipeline on Jetson Orin (32GB LPDDR5, 275 TOPS, 60W) for on-device document retrieval. The corpus is 50,000 technical manuals, each averaging 2000 tokens. A 384-dim embedding model produces vectors at 200 vectors/second on Orin. FAISS HNSW search on 50K vectors takes 8ms. The LLM is a quantized 3B model running at 12 tok/s.
+scenario: A robotics team wants to deploy a RAG pipeline on Jetson Orin for on-device document retrieval. The corpus is 50,000 technical manuals, each averaging 2000 tokens. A 384-dim embedding model produces vectors at 200 vectors/second on Orin. FAISS HNSW search on 50K vectors takes 8ms. The LLM is a quantized 3B model running at 12 tok/s.
 question: Is on-device RAG over 50,000 manuals feasible on Jetson Orin under a 3-second response budget, and what bottleneck dominates?
 details:
-  realistic_solution: 'Memory analysis: FAISS index 76.8MB + 3B model weights (INT8: 3GB) + KV cache (1024 tokens * 2*28layers*64dim*2bytes = 7.3MB) = ~3.1GB total. Well within 32GB. Latency: query embed (1/200s=5ms) + FAISS search (8ms) + context prep (5ms) + LLM generate 200 tokens (200/12=16.7s). LLM generation dominates at 16.7s — far exceeds 3s budget. Solution: limit generation to 36 tokens max (3s), use retrieval results directly for structured responses, or upgrade to INT4 (24 tok/s → 8.3s for 200 tokens).'
+  realistic_solution: On-device RAG is feasible for retrieval, but generation is severely bottlenecked. The memory footprint for the FAISS index, 3B INT8 model weights, and KV cache fits well within the 32GB LPDDR5 limit. However, the LLM generation phase dominates latency at 16.7 seconds for a 200-token response, obliterating the 3-second budget. The solution is to strictly limit generation to ~36 tokens, use retrieval results directly for structured responses, or upgrade to INT4 quantization to achieve 24 tok/s and expand the token output budget.
   common_mistake: |
-    **The Pitfall:** Focusing only on LLM inference speed and ignoring the memory competition footprint.
-    **The Rationale:** Candidates forget the LPDDR5 bandwidth bottleneck when the LLM and FAISS actively compete for memory.
-    **The Consequence:** Designing a RAG system that runs out of time because the LLM generation phase alone obliterates the strict response budget.
+    **The Pitfall:** Focusing only on the retrieval speed and ignoring the LLM generation latency.
+    **The Rationale:** Candidates calculate the FAISS search time (8ms) and assume RAG is fast, forgetting the auto-regressive decoding bottleneck of the LLM.
+    **The Consequence:** Designing a RAG system that times out because the LLM generation phase alone obliterates the strict response budget.
   napkin_math: |
-    1. **FAISS index:** 50,000 * 384 * 4 bytes = 76.8 MB.
-    2. **3B INT8 model footprint:** ~3.0 GB.
-    3. **Retrieval Pipeline Latency:** Query embed (5ms) + FAISS search (8ms) + Context prep (5ms) = 18ms.
-    4. **LLM Generation Latency (INT8):** `200 tokens / 12 tok/s = 16.7s`.
-    5. **Total Latency (INT8):** `16.7s + 0.018s >> 3s` (Fails budget).
-    6. **LLM Generation Latency (INT4):** `200 tokens / 24 tok/s = 8.3s`.
-    7. **Max output tokens inside 3s budget:** `3s * 24 tok/s = 72 tokens`.
-    **On-device RAG is unfeasible for 200-token responses; the generation phase dominates the latency budget, capping feasible outputs to ~72 tokens.**
+    1. **Assumptions & Constraints:**
+       - Corpus: 50,000 vectors, 384-dim, 4 bytes each.
+       - LLM Generation Latency (INT8): 12 tok/s.
+       - Budget: 3 seconds.
+    2. **Calculations:**
+       - FAISS index size: 50,000 * 384 * 4 bytes = 76.8 MB (Fits memory easily).
+       - Retrieval Pipeline Latency: Query embed (5ms) + FAISS search (8ms) + Context prep (5ms) = 18ms.
+       - LLM Generation Latency (200 tokens): 200 / 12 tok/s = 16.7s.
+       - Total Latency: 16.7s + 0.018s = ~16.7s (Fails 3s budget).
+       - Max output tokens inside 3s budget: 3s * 12 tok/s = 36 tokens.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (Auto-regressive Decoding)**. RAG is unfeasible for 200-token responses; the generation phase dominates the latency budget, capping feasible outputs to ~36 tokens.
 status: published
 provenance: imported
 requires_explanation: false

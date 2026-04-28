@@ -8,34 +8,27 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: Local SGD vs AllReduce at Scale
-scenario: 'Compare two gradient synchronization strategies for a 2048-MI300X cluster
-  training a 70B LLM: (A) AllReduce every iteration with 4GB gradients, and (B) Local
-  SGD where each GPU trains independently for K=16 iterations, then synchronizes by
-  averaging model weights. Evaluate wall-clock time, convergence, and network utilization.'
-question: For the 2048-MI300X 70B LLM run, how do AllReduce every iteration and Local
-  SGD with K=16 compare in time, convergence, and network use?
+scenario: 'Compare two gradient synchronization strategies for a 2048-GPU cluster training a 70B LLM: (A) AllReduce every iteration with 4GB gradients, and (B) Local SGD where each GPU trains independently for K=16 iterations, then synchronizes by averaging model weights.'
+question: "Evaluate wall-clock time, convergence, and network utilization to determine whether AllReduce or Local SGD is superior for this run."
 details:
-  realistic_solution: 'Strategy A (AllReduce every iteration): Communication per iteration:
-    2 × 2047/2048 × 4GB / 50GB/s = 160ms. Computation: ~300ms for 70B model forward+backward
-    on MI300X. Iteration time: max(300, 160) with ~85% overlap = 300 + 160×0.15 =
-    324ms. Strategy B (Local SGD, K=16): Communication every 16 iterations: model
-    weight sync = 70B × 2 bytes FP16 = 140GB AllReduce = 2 × 2047/2048 × 140GB / 50GB/s
-    = 5.6 seconds. Amortized per iteration: 5.6s/16 = 350ms. Local iteration time:
-    300ms (no communication). Effective iteration time: 300 + 21.9ms = 321.9ms — similar!
-    But convergence: Local SGD with K=16 on a 70B model typically requires 1.5-2×
-    more total iterations, so 170K vs 100K. Total network traffic for Local SGD: 170K/16
-    × 140GB = 1,487 TB vs AllReduce 400 TB — Local SGD uses 3.7× more total bandwidth.
-    Net wall-clock: A = 324ms × I. B = 321.9ms × 1.7I — B is 1.69× slower. Verdict:
-    AllReduce wins for 70B LLMs.'
-  common_mistake: Assuming Local SGD and AllReduce produce identical models. Local
-    SGD allows model replicas to diverge for K iterations, which introduces implicit
-    regularization but can also cause model divergence if K is too large or learning
-    rate is too high.
-  napkin_math: 'AllReduce: 324ms/iter × 100K iters = 9 hours. Local SGD: 322ms/iter
-    × 170K iters = 15.2 hours. Network traffic: AllReduce = 4GB × 100K = 400 TB. Local
-    SGD = 170K/16 × 140GB = 140GB × 10,625 syncs = 1,487 TB. Local SGD uses 3.7× more
-    network traffic despite communicating less frequently because it syncs full weights
-    (140GB) instead of gradients (4GB), and requires 1.7× more iterations.'
+  realistic_solution: Strategy A (AllReduce every iteration) is superior. While Local SGD reduces synchronization frequency, it requires transmitting the full model weights (140GB for FP16) rather than gradients (4GB) at each sync. Furthermore, Local SGD on massive LLMs typically requires 1.5-2x more total iterations to converge due to implicit regularization divergence.
+  common_mistake: |
+    **The Pitfall:** Assuming Local SGD always reduces network overhead just because it syncs less frequently.
+    **The Rationale:** Candidates focus on the K=16 interval but forget that Local SGD must synchronize the full weights (140GB) rather than gradients (4GB), and ignores the convergence penalty (1.5-2x more iterations).
+    **The Consequence:** Choosing an architecture that severely inflates network traffic and extends total training wall-clock time.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 2048 GPUs, 70B LLM.
+       - AllReduce gradients: 4 GB per iteration.
+       - Local SGD weights: 140 GB per sync, every 16 iterations.
+       - Convergence: Local SGD needs ~1.7x more iterations (170K vs 100K).
+    2. **Calculations:**
+       - AllReduce traffic: 4 GB * 100,000 = 400 TB total.
+       - Local SGD syncs: 170,000 / 16 = 10,625 syncs.
+       - Local SGD traffic: 10,625 * 140 GB = 1,487 TB total.
+       - Network traffic multiplier: 1,487 TB / 400 TB = ~3.7x more traffic.
+    3. **Conclusion & Interpretation:**
+       - **Result: AllReduce Wins.** Local SGD is **Network-Bound** overall, consuming 3.7x more total bandwidth and taking ~1.69x longer wall-clock time to converge.
 status: published
 provenance: imported
 requires_explanation: false
@@ -49,8 +42,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Calculated Local SGD network traffic using 100K iterations (100K/16) instead of
-  the 170K iterations actually required for convergence, underestimating total traffic.
+- Calculated Local SGD network traffic using 100K iterations (100K/16) instead of the 170K iterations actually required for convergence, underestimating total traffic.
 human_reviewed:
   status: not-reviewed
   by: null

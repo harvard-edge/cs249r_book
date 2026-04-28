@@ -8,23 +8,27 @@ competency_area: reliability
 bloom_level: apply
 phase: training
 title: 'Fault Tolerance: Implement Atomic Model Swap for Zero-Downtime Mobile Update'
-scenario: Implement an atomic model update mechanism for a 1B LLM (4-bit quantized, 500MB) on a mobile device. The update must not interrupt an in-progress inference request and must be rollback-capable within 5 seconds of a crash.
-question: How should an atomic mobile model swap update a 500MB LLM without interrupting in-flight inference and still support rollback?
+scenario: "Implement an atomic model update mechanism for a 1B LLM (4-bit quantized, 500MB) on a mobile device. The update must not interrupt an in-progress inference request and must be rollback-capable within 5 seconds of a crash."
+question: "How should an atomic mobile model swap update a 500MB LLM without interrupting in-flight inference and still support rollback?"
 details:
   realistic_solution: |
-    Use memory-mapped model files. New model: download to temp path → verify SHA256 → mmap new file → atomic symlink swap → mmap old file stays valid for in-flight inferences → unmap old after all requests complete.
+    Exploit memory-mapped files (mmap) and atomic POSIX symlink swaps. Download the new model payload to a temporary path and verify its SHA256 hash. Execute an atomic `rename()` syscall to update the symlink. In-flight requests safely retain their mmap references to the old file descriptor until completion. If a crash occurs, a rapid symlink swap back to the old model completes in milliseconds, providing zero-downtime rollback.
   common_mistake: |
     **The Pitfall:** Replacing the model file in-place while inference is running.
-    **The Rationale:** Candidates do not use memory-mapped files that allow for an atomic pointer swap.
-    **The Consequence:** File corruption and crashed in-flight inference requests.
+    **The Rationale:** Candidates do not use memory-mapped files that allow for an atomic pointer swap via symlinks.
+    **The Consequence:** File corruption, segmentation faults, and crashed in-flight inference requests.
   napkin_math: |
-    - **Download:** 500MB at LTE 12.5 MB/s = 40 seconds (background).
-    - **SHA256 verify:** 500MB at 1 GB/s = 0.5 seconds.
-    - **mmap new file:** OS maps 500MB virtual address space instantly (no actual read until accessed).
-    - **Symlink swap:** rename() syscall = atomic on POSIX = 0 microseconds.
-    - **In-flight requests:** Old mmap held until refcount = 0. At 10 req/sec, each 100ms: max 1 overlapping request = 100ms drain time.
-    - **Rollback:** On crash (detected in 1s), atomic rename model_prev.bin -> active (1ms).
-    - **Result:** **Total rollback takes ~1.001 seconds, well under the 5-second target.**
+    1. **Assumptions & Constraints:**
+       - Model size: 500MB.
+       - Background download speed: 12.5 MB/s.
+       - Inference drain time: ~100ms.
+    2. **Calculations:**
+       - Download: 500MB / 12.5 MB/s = 40s.
+       - SHA256 Verification: ~0.5s.
+       - Symlink rename syscall: <1ms.
+       - Crash rollback rename: <1ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~1ms atomic swap.** Using mmaps and symlinks eliminates the **I/O blocking bottleneck**, easily satisfying the sub-5-second rollback constraint.
 status: published
 provenance: imported
 requires_explanation: false

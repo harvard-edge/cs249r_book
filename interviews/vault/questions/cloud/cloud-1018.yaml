@@ -8,18 +8,23 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: LLM Deployment VRAM Constraint Propagation
-scenario: A team spends $200k training a standard 7B parameter LLM (Llama-2 architecture, 32 layers, 32 attention heads, 128 head dimension) in BF16 for customer support. During production deployment, they are constrained to cost-effective instances with single T4 GPUs (16GB VRAM). They discover that to support the target concurrency (Batch Size 16, 2048 sequence length), the deployment completely OOMs. Even after INT8 quantizing the weights to ~7GB, the system still crashes.
-question: What caused the OOM on 16GB T4s despite INT8 weights, and how should the serving constraints have propagated back into architecture design?
+scenario: A team spends $200k training a standard 7B parameter LLM (Llama-2 architecture, 32 layers, 32 attention heads, 128 head dimension) in BF16 for customer support. During production deployment, they are constrained to cost-effective single T4 GPUs. They discover that to support the target concurrency (Batch Size 16, 2048 sequence length), the deployment completely OOMs. Even after INT8 quantizing the weights to ~7GB, the system still crashes.
+question: What caused the OOM on the T4s despite INT8 weights, and how should the serving constraints have propagated back into architecture design?
 details:
-  realistic_solution: The workflow violated constraint propagation by not anchoring the architecture design to the deployment hardware. The T4's 16GB limit must constrain both weights and KV cache. The KV cache alone at BS=16 and SeqLen=2048 consumes 16GB, filling the entire VRAM regardless of weight quantization. The team should have selected an architecture with Multi-Query Attention (MQA), which reduces the KV cache by 32x to ~0.5GB, or used Grouped-Query Attention (GQA) to achieve a practical middle ground.
+  realistic_solution: The workflow violated constraint propagation by not anchoring the architecture design to the deployment hardware. The T4's VRAM limit must constrain both weights and KV cache. The KV cache alone at BS=16 and SeqLen=2048 consumes 16 GiB, filling the entire VRAM regardless of weight quantization. The team should have selected an architecture with Multi-Query Attention (MQA), which reduces the KV cache by 32x to ~0.5 GiB, or used Grouped-Query Attention (GQA) to achieve a practical middle ground.
   common_mistake: |
     **The Pitfall:** Focusing solely on aggressively quantizing model weights to fit into memory.
     **The Rationale:** Teams often obsess over the static size of the `.safetensors` file while completely ignoring dynamic memory allocations.
     **The Consequence:** OOM-ing in production because the explosive growth of the KV cache at serving-time batch sizes and sequence lengths fills the VRAM.
   napkin_math: |
-    - **KV Cache per token:** 2 (K&V) * 32 layers * 32 heads * 128 head_dim * 2 bytes = 524,288 bytes (~0.5 MB).
-    - **Total KV Cache:** For BS=16 and SeqLen=2048: 0.5 MB * 16 * 2048 = 16,384 MB &approx; 16 GB.
-    - **Conclusion:** **The KV cache alone exceeds the T4's 16GB VRAM, regardless of weight quantization. With MQA (1 KV head), the cache would drop 32x to ~0.5 GB.**
+    1. **Assumptions & Constraints:**
+       - Llama-2 7B: 32 layers, 32 heads, 128 head_dim.
+       - Batch Size 16, SeqLen 2048.
+       - T4 GPU with 16 GiB VRAM.
+    2. **Calculations:**
+       - KV Cache per token = 2 (K&V) * 32 layers * 32 heads * 128 head_dim * 2 bytes = 524,288 bytes (~0.5 MiB).
+       - Total KV Cache = 0.5 MiB * 16 * 2048 = 16,384 MiB ≈ 16 GiB.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bound (Capacity)**. The KV cache alone exceeds the T4's 16 GiB VRAM, regardless of weight quantization. With MQA, the cache drops 32x to ~0.5 GiB.
 status: published
 provenance: imported
 requires_explanation: false
@@ -34,7 +39,3 @@ math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
-  by: null
-  date: null
-  notes: null
-created_at: '2026-03-23T21:29:38.055441'

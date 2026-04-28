@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The AMD MI300X Memory Advantage
-scenario: You are serving Llama-2-70B. On H100 80GB, you need 2-way tensor parallelism. AMD offers MI300X nodes with 192GB HBM3. A sales rep claims you can now serve 70B on a single GPU.
+scenario: You are serving Llama-2-70B. On an H100, you need 2-way tensor parallelism. A sales rep claims you can now serve 70B on a single MI300X.
 question: Is this true, and what's the real systems impact of going from 2 GPUs to 1?
 details:
   realistic_solution: 'On H100, Llama-2-70B in FP16 requires 140 GB for weights alone. With KV-cache for even a modest batch, you exceed 80 GB and must shard across 2 GPUs using tensor parallelism (TP=2). TP introduces two costs: (1) an AllReduce after every attention and FFN block — 160 AllReduces per forward pass for an 80-layer model, each paying NVLink latency (~5 μs) plus transfer time; (2) you halve the effective memory bandwidth because each GPU only holds half the weights but must synchronize at every layer. On MI300X with 192 GB HBM3, the 140 GB of weights fit on a single GPU with 52 GB remaining for KV-cache and activations. Eliminating TP removes all inter-GPU communication, reduces tail latency variance (no synchronization jitter), and the MI300X''s 5.3 TB/s HBM3 bandwidth (vs H100''s 3.35 TB/s) directly accelerates the memory-bound decode phase.'
@@ -17,10 +17,17 @@ details:
     **The Rationale:** Engineers treat VRAM purely as a static capacity constraint.
     **The Consequence:** Failing to realize that eliminating Tensor Parallelism removes immense inter-GPU communication overhead, heavily altering batch economics.
   napkin_math: |
-    - **H100 (TP=2)**: Weights = 140 GB (70 GB/GPU). Max batch limited by 10GB free space ≈ **7 requests**. Communication overhead adds 1.6 ms per token.
-    - **MI300X (TP=1)**: Weights = 140 GB on 1 GPU. Free memory = 52 GB. Max batch = 52 / 1.34 ≈ **38 requests**.
-    - **Decode Speed**: H100 (sharded, 3.35 TB/s) ≈ 22.5 ms. MI300X (unsharded, 5.3 TB/s) ≈ 26.4 ms.
-    - **Conclusion**: Single-GPU MI300X is 17% slower per token but handles **5× the batch size**, drastically shifting throughput per dollar.
+    1. **Assumptions & Constraints:**
+       - Model: Llama-2-70B in FP16 (140 GB weights).
+       - H100: 80 GB VRAM. Requires TP=2. Bandwidth: 3.35 TB/s.
+       - MI300X: 192 GB VRAM. TP=1. Bandwidth: 5.3 TB/s.
+       - KV Cache cost per request: ~1.34 GB.
+    2. **Calculations:**
+       - H100 TP=2 Free Memory: 160 GB - 140 GB = 20 GB (10 GB/GPU).
+       - H100 Max Batch: 10 GB / 1.34 GB ≈ 7 requests.
+       - MI300X TP=1 Free Memory: 192 GB - 140 GB = 52 GB.
+       - MI300X Max Batch: 52 GB / 1.34 GB ≈ 38 requests.
+    3. **Conclusion & Interpretation:** **~5x larger batch size (Memory Capacity-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

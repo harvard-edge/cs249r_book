@@ -8,22 +8,27 @@ competency_area: power
 bloom_level: create
 phase: inference
 title: Asymmetric Dual-Core ML Power Partitioning
-scenario: You are architecting an always-on wearable fall-detection monitor using the Nordic nRF5340. The system features a 128 MHz app core, a 64 MHz net core, 256 KB SRAM, 1 MB flash, and BLE 5.3 connectivity, drawing ~5mA in active mode. It is powered by a 220mAh coin cell and must operate continuously for at least 1 year. The IMU samples at 50Hz, and the system must run a sliding-window ML inference every 1 second.
-question: How should nRF5340 partition DMA, DSP, ML inference, BLE, and sleep states to meet a one-year fall-detection battery budget?
+scenario: You are architecting an always-on wearable fall-detection monitor using an edge MCU with a 128 MHz app core and a 64 MHz net core. It is powered by a 220mAh coin cell and must operate continuously for at least 1 year. The IMU samples at 50Hz, and the system must run a sliding-window ML inference every 1 second.
+question: How should the system partition DMA, DSP, ML inference, BLE, and sleep states to meet a one-year fall-detection battery budget?
 details:
-  realistic_solution: The optimal L6+ architecture uses hardware DMA to route IMU data directly into the 256 KB SRAM without waking either CPU. Once the 1-second buffer is full, the system wakes the 128 MHz app core to execute the inference as fast as possible. Because dynamic power dominates (race-to-sleep), running the 128 MHz core for a shorter duration is more efficient than running the 64 MHz core longer, especially given the ~5mA active draw. The 64 MHz net core is strictly isolated to handle the BLE 5.3 stack asynchronously, avoiding OS context-switching overhead on the ML core.
+  realistic_solution: 'The optimal L6+ architecture uses hardware DMA to route IMU data directly into SRAM without waking either CPU. Once the 1-second buffer is full, the system wakes the 128 MHz app core to execute the inference as fast as possible. Because dynamic power dominates (race-to-sleep), running the 128 MHz core for a shorter duration is more efficient than running the 64 MHz core longer. The 64 MHz net core is strictly isolated to handle the BLE stack asynchronously, avoiding OS context-switching overhead on the ML core.'
   common_mistake: |
     **The Pitfall:** Relying on the slower core to save power during inference.
-    **The Rationale:** Candidates often default to keeping the 64 MHz net core awake for sensor polling or inference, assuming lower clock speed equates to less energy.
-    **The Consequence:** They fail to translate battery capacity into a strict CPU cycle budget and miss the efficiency of race-to-sleep and hardware DMA, causing the battery to drain too quickly.
+    **The Rationale:** Candidates default to keeping the 64 MHz net core awake for sensor polling or inference, assuming lower clock speed equates to less energy consumption.
+    **The Consequence:** They miss the efficiency of race-to-sleep and hardware DMA, causing the MCU to spend too much time active and draining the battery well before the 1-year mark.
   napkin_math: |
-    - Calculate 1 year in hours: 8760 hours.
-    - Calculate target average current: 220 mAh / 8760 h = 25.1 µA.
-    - Deduct sleep state and BLE connection baseline: assume 5.1 µA baseline, leaving exactly 20.0 µA for ML processing.
-    - App core draws ~5 mA (5000 µA) active. Calculate max allowed duty cycle: 20 µA / 5000 µA = 0.004 (0.4%).
-    - At 1 inference per second, the active time budget is 4 ms per inference.
-    - Calculate cycle budget at 128 MHz: 128,000,000 * 0.004 = 512,000 CPU cycles.
-    - **Conclusion:** A well-optimized 150k MAC CNN takes ~300k cycles (using DSP instructions), safely fitting within the 512k cycle constraint.
+    1. **Assumptions & Constraints:**
+       - Battery: 220 mAh for 1 year (8760 hours).
+       - App core active draw: ~5 mA (5000 µA).
+       - Base sleep/BLE current: 5.1 µA.
+    2. **Calculations:**
+       - Target average current: 220 mAh / 8760 h = 25.1 µA.
+       - Budget strictly for ML processing: 25.1 µA - 5.1 µA = 20.0 µA.
+       - Max allowed active duty cycle: 20 µA / 5000 µA = 0.004 (0.4%).
+       - Active time budget at 1 inference/sec: 0.004 * 1000 ms = 4 ms per inference.
+       - Cycle budget at 128 MHz: 128,000,000 * 0.004 = 512,000 cycles.
+    3. **Conclusion & Interpretation:**
+       - **Result: Energy-Bound Architecture.** A highly optimized 150k MAC CNN takes ~300k cycles via DSP instructions, comfortably fitting the 512k cycle constraint if run on the 128 MHz core via a race-to-sleep strategy.
 status: published
 provenance: imported
 requires_explanation: true

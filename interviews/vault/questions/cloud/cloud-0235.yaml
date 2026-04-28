@@ -15,13 +15,18 @@ details:
   common_mistake: |
     **The Pitfall:** Thinking that PagedAttention compresses the KV cache to save memory.
     **The Rationale:** "Paged" sounds like a compression or virtualization technique that reduces total footprint rather than just fixing allocation geometry.
-    **The Consequence:** Misunderstanding the performance tradeoffs—PagedAttention eliminates fragmentation but doesn't change the underlying tensor size per token.
+    **The Consequence:** Misunderstanding the performance tradeoffs\u2014PagedAttention eliminates fragmentation but doesn't change the underlying tensor size per token.
   napkin_math: |
-    *   **Setup:** 13B model, 40 layers, 40 heads, head_dim=128, FP16.
-    *   **KV Cache per Token:** 40 layers × 2 (K+V) × 40 heads × 128 dim × 2B = 819 KB/token.
-    *   **Without Paging:** Pre-allocate max_seq_len=2048 per request = 819 KB × 2048 = 1.6 GB. 50 concurrent requests = 80 GB (saturates an H100).
-    *   **With PagedAttention:** Allocate only for actual tokens used (e.g., avg 512). 819 KB × 512 = 0.4 GB/request. 50 requests = 20 GB.
-    *   **Result:** Memory waste drops from ~60% to <5%, **freeing 60 GB** for additional concurrent requests.
+    1. **Assumptions & Constraints:**
+       * Setup: 13B model, 40 layers, 40 heads, head_dim=128, FP16.
+       * Workload: 50 concurrent requests.
+       * Max sequence length: 2048 tokens. Average used length: 512 tokens.
+    2. **Calculations:**
+       * KV Cache per Token: 40 layers \times 2 (K+V) \times 40 heads \times 128 dim \times 2B = 819.2 KB/token.
+       * Without Paging: Pre-allocate max_seq_len=2048 per request = 819.2 KB \times 2048 = 1.67 GB. For 50 requests = 83.5 GB.
+       * With PagedAttention: Allocate only for actual tokens used (512). 819.2 KB \times 512 = 0.42 GB/request. For 50 requests = 21 GB.
+    3. **Conclusion & Interpretation:**
+       * Memory waste drops from ~75% to negligible levels, **freeing 62.5 GB** for additional concurrent requests. **Result: Memory-Capacity-Bound (Internal Fragmentation)**.
   options:
   - It compresses the key and value tensors using quantization before storing them in the cache.
   - It partitions the KV cache into non-contiguous fixed-size blocks, eliminating external fragmentation and allowing dynamic memory allocation per token.

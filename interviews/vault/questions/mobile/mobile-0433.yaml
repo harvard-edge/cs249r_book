@@ -8,25 +8,29 @@ competency_area: precision
 bloom_level: apply
 phase: inference
 title: The Night Vision Quantization Failure
-scenario: You are optimizing a sign detection model for a Snapdragon 8 Gen 3 phone. To meet power budgets, you quantized the FP32 model to INT8 using post-training static quantization with 10,000 daytime images. The model now fails to detect stop signs at night.
+scenario: You are optimizing a sign detection model for a modern smartphone. To meet power budgets, you quantized the FP32 model to INT8 using post-training static quantization calibrated entirely on 10,000 daytime images. The model now completely fails to detect stop signs at night.
 question: Why does daytime-only INT8 calibration make a sign detector miss red stop signs at night?
 details:
-  realistic_solution: The root cause is a calibration-inference data mismatch. The dynamic range of activations from nighttime images is much smaller than for daytime images. The INT8 scale factor, calculated from the wide-range daytime data, is too coarse to represent the fine-grained details in the low-light activations.
+  realistic_solution: The root cause is calibration-inference distribution skew. The dynamic range of activations from nighttime images is much narrower. The INT8 scale factor, computed from wide-range daytime tensors, is too coarse, effectively crushing fine-grained low-light activations to zero due to quantization noise.
   common_mistake: |
-    **The Pitfall:** Blaming NPU hardware bugs or model architecture.
-    **The Rationale:** Failing to understand how activation dynamic range differs across lighting conditions.
-    **The Consequence:** Wasting time debugging hardware when the quantization scaling factor is simply crushing low-light signals.
+    **The Pitfall:** Blaming NPU hardware anomalies or suggesting a full architectural rewrite.
+    **The Rationale:** Failing to understand the mathematical relationship between the activation dynamic range and the static quantization scale factor.
+    **The Consequence:** Wasting engineering cycles debugging drivers when the scaling factor is simply zeroing out low-light signal.
   napkin_math: |
-    - Daytime layer activations: -8.0 to +8.0.
-    - INT8 scale: 16.0 / 255 = ~0.0627.
-    - Nighttime layer activations: -0.5 to +0.5.
-    - Mapped levels: 1.0 / 0.0627 = ~16 levels.
-    - **The nighttime signal uses only 16 out of 256 INT8 values, destroying feature information via quantization noise.**
+    1. **Assumptions & Constraints:**
+       - Daytime activations range: [-8.0, 8.0] (Span: 16.0).
+       - Nighttime activations range: [-0.5, 0.5] (Span: 1.0).
+       - Quantization: Static INT8 (256 discrete levels).
+    2. **Calculations:**
+       - INT8 scale factor (daytime): 16.0 / 255 ≈ 0.0627 per bin.
+       - Bins used by nighttime signal: 1.0 span / 0.0627 ≈ 15.9 bins.
+    3. **Conclusion & Interpretation:**
+       **Result: Precision-Bound. The nighttime signal utilizes a mere 16 out of 256 available INT8 bins, destroying spatial feature information via severe quantization noise.**
   options:
-  - The model's activations are experiencing integer overflow because nighttime images have higher-intensity pixels from headlights.
-  - The Snapdragon 8 Gen 3 Hexagon DSP has a documented bug with INT8 matrix multiplications, requiring a switch to FP16.
-  - The INT8 scale factor, calculated from the daytime calibration set, is too coarse for the narrow dynamic range of activations from nighttime images, causing excessive quantization noise.
-  - The training dataset needs to be augmented with more varied lighting conditions and the entire FP32 model must be retrained from scratch.
+  - Nighttime pixels cause integer overflow because the 255 max bin is exceeded by aggressive ISP sensor gain. 
+  - The Snapdragon Hexagon DSP requires asymmetric quantization for low-light scenarios, which was omitted during export.
+  - The INT8 scale factor of 0.0627 mapped from daytime data forces the 1.0 nighttime dynamic range into only ~16 levels, causing severe quantization noise.
+  - The 10,000 calibration images exhausted the limited TFLite calibration buffer, forcing a stealth fallback to INT16.
   correct_index: 2
 status: published
 provenance: imported

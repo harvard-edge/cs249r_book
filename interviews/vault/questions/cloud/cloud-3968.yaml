@@ -8,33 +8,29 @@ competency_area: parallelism
 bloom_level: analyze
 phase: both
 title: Overlapping Collective Permute with MoE Expert Computation on TPU
-scenario: On a TPU v5e pod (256 chips), your MoE model uses collective_permute (TPU's equivalent of All-to-All) to route tokens to expert chips. XLA profiles show collective_permute takes 12ms per MoE layer, and expert computation takes 8ms. Unlike GPUs, TPU has no separate communication engine — ICI transfers are managed by the same compute fabric.
+scenario: Your MoE model uses collective_permute to route tokens to expert chips on a TPU v5e pod. XLA profiles show collective_permute takes 12ms per MoE layer, and expert computation takes 8ms.
 question: Can overlap still work between ICI transfers and expert computation on TPU v5e?
 details:
-  realistic_solution: 'XLA''s approach to overlap on TPU: (1) XLA analyzes data dependencies in the HLO graph and identifies computation that is independent of the collective_permute output. (2) Non-MoE layers (attention, LayerNorm) between MoE layers can be scheduled during the collective_permute of the next MoE layer. (3) XLA uses ''async collectives'': the collective_permute is decomposed into start and done operations. Compute can be scheduled between start and done. (4) However, TPU''s ICI shares bandwidth with HBM access, so heavy computation (which needs HBM bandwidth) can slow down ICI transfers. Unlike GPU where NVLink and HBM are independent. (5) Effective overlap on TPU: 40-60% of collective_permute can be hidden, vs 80-90% on GPU with dedicated NVLink.'
+  realistic_solution: 'XLA''s approach to overlap on TPU: (1) XLA analyzes data dependencies in the HLO graph and identifies computation independent of collective_permute output. (2) Non-MoE layers between MoE layers can be scheduled during collective_permute. (3) XLA uses ''async collectives''. (4) TPU''s ICI shares bandwidth with HBM access, so heavy computation can slow down ICI transfers. (5) Effective overlap on TPU: 40-60% of collective_permute can be hidden, vs 80-90% on GPU.'
   common_mistake: |
     **The Pitfall:** Assuming TPU cannot overlap compute and communication because it lacks a separate DMA engine like GPU's copy engine.
     **The Rationale:** Candidates often know GPUs use dedicated copy engines for overlap and assume the lack of this on TPU means strict serialization.
     **The Consequence:** Failing to realize XLA's compiler can schedule ICI transfers to overlap with independent computations, leading to inaccurate performance modeling.
   napkin_math: |
-    - **Unoverlapped Time:** 12ms (collective_permute) + 8ms (compute) = 20ms.
-    - **TPU Overlap (60% hidden):** 12ms * 60% = 7.2ms hidden. Exposed communication = 12ms - 7.2ms = 4.8ms.
-    - **TPU Total Time:** 4.8ms exposed + 8ms compute = **12.8ms per MoE layer**.
-    - **GPU Overlap (90% hidden):** 12ms * 90% = 10.8ms hidden. Exposed = 1.2ms.
-    - **GPU Total Time:** 1.2ms + 8ms = **9.2ms per MoE layer**.
-    - **Conclusion:** TPU pays a 39% penalty vs GPU on MoE layers due to shared fabric, but compensates with lower $/TFLOP.
+    1. **Assumptions & Constraints:**
+       - collective_permute takes 12ms.
+       - Expert computation takes 8ms.
+       - TPU hides 60% of communication.
+       - GPU hides 90% of communication.
+    2. **Calculations:**
+       - Unoverlapped Time: 12ms + 8ms = 20ms.
+       - TPU Overlap: 12ms * 60% = 7.2ms hidden.
+       - TPU Exposed: 12ms - 7.2ms = 4.8ms.
+       - TPU Total Time: 4.8ms exposed + 8ms compute = 12.8ms per layer.
+       - GPU Overlap: 12ms * 90% = 10.8ms hidden.
+       - GPU Exposed: 12ms - 10.8ms = 1.2ms.
+       - GPU Total Time: 1.2ms exposed + 8ms compute = 9.2ms per layer.
+       - Penalty: (12.8ms - 9.2ms) / 9.2ms = 39%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Communication-Bound.** TPU pays a 39% penalty vs GPU on MoE layers due to shared fabric, but compensates with lower $/TFLOP.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 8
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-opus-4-6
-math_verified: true
-math_status: UNCHECKED
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

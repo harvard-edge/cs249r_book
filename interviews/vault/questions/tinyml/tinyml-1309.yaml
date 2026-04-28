@@ -8,29 +8,29 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Designing a Static Tensor Arena for Wake-Word CNN
-scenario: You are tasked with deploying a quantized wake-word detection model onto an ARM Cortex-M4 (STM32F4) microcontroller operating at 168 MHz. The device has strict memory constraints with 256 KB of SRAM and 1 MB of flash, and relies on CMSIS-NN SIMD (2x INT8 MACs/cycle) since there is no FPU.
+scenario: You are deploying a quantized wake-word detection model onto an STM32F4 (168 MHz) with 256 KB of SRAM and 1 MB of flash, relying on CMSIS-NN SIMD.
 question: How should the static memory allocation be designed to fit the tensor arena in SRAM and handle model parameters?
 details:
-  realistic_solution: The correct approach involves static memory planning to create a single contiguous tensor arena in SRAM for all intermediate activations. Since memory is only needed for the inputs and outputs of the currently executing operator, the arena size is determined by the maximum sum of adjacent layer activation sizes across the network. Weights and biases must be compiled directly into the 1 MB flash memory as read-only data, preserving the limited SRAM.
+  realistic_solution: |
+    Allocate a single contiguous static tensor arena in SRAM sized to the maximum sum of adjacent layer activations. Compile the weights directly into the 1 MB flash memory as read-only data (XIP), entirely bypassing SRAM for parameter storage.
   common_mistake: |
-    **The Pitfall:** Proposing dynamic memory allocation or moving weights to SRAM.
-    **The Rationale:** Candidates assume dynamic allocation is standard, failing to realize fragmentation risks on bare-metal MCUs. They also forget weights are read-only and can stay in flash.
-    **The Consequence:** The model is incorrectly deemed too large to fit, or the proposed solution incurs massive latency and fragmentation overhead.
+    **The Pitfall:** Relying on dynamic memory allocation (`malloc`) or copying weights to SRAM.
+    **The Rationale:** Candidates rely on standard OS paradigms and fail to leverage Execute-in-Place (XIP) flash memory.
+    **The Consequence:** Heap fragmentation causes unpredictable OOM crashes, or SRAM is artificially exhausted by storing static weights.
   napkin_math: |
-    *   **Activation Memory**: Layer A produces 100 KB, Layer B produces 120 KB. To compute Layer B, both must coexist, requiring a peak of 220 KB of SRAM.
-    *   **Remaining SRAM**: Out of 256 KB total SRAM, 256 KB - 220 KB = 36 KB is left for the RTOS, stack, and application state.
-    *   **Model Weights**: **The 800 KB of INT8 weights fit safely within the 1 MB flash memory as read-only data.**
+    1. **Assumptions & Constraints:**
+       - Max adjacent activations (e.g., Layer A + B) = 100 KB + 120 KB = 220 KB
+       - Model weights: 800 KB (INT8)
+       - Hardware: 256 KB SRAM, 1 MB Flash
+    2. **Calculations:**
+       - SRAM Used = 220 KB (Activations)
+       - SRAM Free = 256 KB - 220 KB = 36 KB
+       - Flash Used = 800 KB (Weights)
+       - Flash Free = 1024 KB - 800 KB = 224 KB
+    3. **Conclusion & Interpretation:**
+       - **Result: 36 KB SRAM margin. Memory-Bound.** Static allocation reliably fits the activations while XIP safely stores weights.
 status: published
 provenance: imported
 requires_explanation: true
 expected_time_minutes: 10
 validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed

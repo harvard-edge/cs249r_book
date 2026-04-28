@@ -8,21 +8,25 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Evaluate SRAM vs Flash Tensor Arena Placement
-scenario: You are deploying a vision model to an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system featuring a 480 MHz M7 and 512 KB of shared SRAM. You must choose between two tensor arena allocation strategies for a memory-intensive layer. Strategy A maps all intermediate activations to the shared SRAM, resulting in a peak memory of 460 KB. Strategy B modifies the operator schedule to spill a 200 KB intermediate activation tensor to execute-in-place (XIP) external flash, reducing peak SRAM to 260 KB.
+scenario: >
+  You are deploying a vision model to an ARM Cortex-M7 + Ethos-U55 system. You must choose between two tensor arena allocation strategies for a memory-intensive layer. Strategy A maps all intermediate activations to the shared SRAM, resulting in a peak memory of 460 KB. Strategy B modifies the operator schedule to spill a 200 KB intermediate activation tensor to execute-in-place (XIP) external flash, reducing peak SRAM to 260 KB.
 question: Which memory planning strategy yields better system performance, and what are the architectural tradeoffs?
 details:
-  realistic_solution: Strategy A is the correct approach because the Ethos-U55 requires fast, shared SRAM access to sustain its 128-512 MAC/cycle throughput. While 460 KB of peak SRAM usage is aggressive and leaves only 52 KB for the M7 stack and heap, placing intermediate activations in external flash introduces a massive memory wall that negates the NPU's hardware acceleration. If 52 KB is strictly insufficient for the application, the correct system-level decision is to rewrite the network using operator cascading or memory-efficient blocks to lower the peak arena size, rather than spilling activations to slow flash.
+  realistic_solution: >
+    Strategy A is strictly correct. The Ethos-U55 NPU relies entirely on high-bandwidth shared SRAM to sustain its MAC throughput. Placing activations in external flash (Strategy B) introduces a catastrophic memory wall, starving the NPU. If leaving only 52 KB for the RTOS is unacceptable, the correct systems-level fix is operator cascading or model re-architecture, not spilling high-bandwidth activations to slow Flash.
   common_mistake: |
     **The Pitfall:** Choosing Strategy B to leave more headroom in SRAM for the RTOS.
     **The Rationale:** Candidates prioritize general-purpose memory availability over accelerator requirements, failing to realize the NPU relies entirely on high-bandwidth shared SRAM.
     **The Consequence:** The NPU stalls waiting for slow flash reads, negating the benefit of hardware acceleration and degrading inference latency.
   napkin_math: |
-    - U55 compute (256 MACs/cycle at 480 MHz) = 122.8 GMACs/sec.
-    - Shared SRAM bandwidth (32-bit AXI at 480 MHz) = ~1.9 GB/s.
-    - Flash bandwidth (quad-SPI) = ~50 MB/s.
-    - Fetch 200 KB from SRAM = 204,800 bytes / 1.9 GB/s = ~0.105 ms.
-    - Fetch 200 KB from Flash = 204,800 bytes / 50 MB/s = ~4.0 ms.
-    - **Final Result:** Fetching from flash increases data movement time by **38x**, almost entirely stalling the NPU. Strategy A is required.
+    1. **Assumptions & Constraints:**
+       - SRAM Bandwidth: ~1.9 GB/s. Flash Bandwidth: ~50 MB/s.
+       - Payload: 200 KB intermediate activation.
+    2. **Calculations:**
+       - Fetch 200 KB from SRAM: 204,800 bytes / 1,900,000,000 B/s = ~0.108 ms.
+       - Fetch 200 KB from Flash: 204,800 bytes / 50,000,000 B/s = ~4.09 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Flash fetching takes ~38x longer.** Spilling to Flash completely stalls the NPU. Strategy A is mandatory. **Bottleneck: I/O Bandwidth.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,27 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: The nRF5340 Network Core Split
-scenario: 'You''re deploying a keyword spotting model on the Nordic nRF5340, which has two Cortex-M33
-  cores: an application core (128 MHz, 512 KB flash, 256 KB SRAM) and a network core (64 MHz, 256 KB flash,
-  64 KB SRAM) dedicated to BLE. Your model needs 180 KB SRAM for the tensor arena. The product must stream
-  classification results over BLE. How do you partition memory and processing, and what happens if the
-  BLE stack on the network core needs to interrupt the application core mid-inference?'
-question: "How do you partition memory and processing, and what happens if the BLE stack on the network core needs to interrupt the application core mid-inference?"
+scenario: "You're deploying a keyword spotting model on the Nordic nRF5340, which has two Cortex-M33 cores: an application core (128 MHz, 512 KB flash, 256 KB SRAM) and a network core (64 MHz, 256 KB flash, 64 KB SRAM) dedicated to BLE. Your model needs 180 KB SRAM for the tensor arena. The product must stream classification results over BLE."
+question: How do you partition memory and processing, and what happens if the BLE stack on the network core needs to interrupt the application core mid-inference?
 details:
-  realistic_solution: 'Run inference exclusively on the application core (128MHz, 256KB SRAM) — the 180KB
-    tensor arena only fits there. BLE runs on the dedicated network core (64MHz, 64KB SRAM). Use IPC (shared
-    RAM mailbox) to send the 1-byte classification result from app core to network core. This architecture
-    eliminates BLE interrupt jitter during inference: app core sees 0 interrupts (vs ~4 per inference
-    on single-core nRF52840). Inference: 30ms deterministic. IPC + BLE transmit: 2ms. Total pipeline:
-    32ms end-to-end with <1us jitter — a major reliability improvement over single-core designs.'
-  common_mistake: '"Run inference on the network core to keep the application core free for the app logic."
-    The network core only has 64 KB SRAM — the 180 KB tensor arena doesn''t fit. Also, the network core''s
-    256 KB flash is mostly consumed by the BLE softdevice (~150 KB).'
-  napkin_math: 'Single-core (nRF52840): 30ms inference + 4 BLE interrupts × 3ms = 42ms effective latency.
-    Jitter: ±12ms. Dual-core (nRF5340): 30ms inference + 0 interrupts = 30ms. Jitter: ±1 µs. IPC overhead:
-    1 µs signal + 2ms BLE transmit = 2.001ms from classification to over-the-air. Total pipeline: 30ms
-    inference + 2ms BLE = 32ms end-to-end. Power: app core active 30ms at 30 mW = 0.9 mJ. Network core:
-    3 mW always-on for BLE = 3 mJ/s. At 1 inference/s: 0.9 + 3.0 = 3.9 mJ/cycle.'
+  realistic_solution: Run inference exclusively on the 128 MHz application core, as the 180 KB tensor arena physically cannot fit in the network core's 64 KB SRAM. Run the BLE stack entirely on the network core. Use IPC (shared RAM mailbox) to dispatch the 1-byte classification result. This dual-core architecture eliminates BLE interrupt jitter on the application core, ensuring deterministic end-to-end latency.
+  common_mistake: |
+    **The Pitfall:** Attempting to offload inference to the network core to keep the application core "free."
+    **The Rationale:** Candidates assume lower-priority ML tasks should run on the slower core without validating memory constraints.
+    **The Consequence:** The model fundamentally fails to compile or load due to OOM errors on the 64 KB SRAM network core.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - App core: 256 KB SRAM. Net core: 64 KB SRAM.
+       - Tensor Arena: 180 KB.
+       - App core inference latency: 30 ms.
+    2. **Calculations:**
+       - SRAM check: 180 KB > 64 KB (Net core OOM). 180 KB < 256 KB (App core fits).
+       - Dual-core Pipeline: 30 ms inference + 1 us IPC + 2 ms BLE transmit = 32 ms end-to-end.
+       - Jitter: ±1 µs (Zero BLE interrupts on app core).
+    3. **Conclusion & Interpretation:**
+       - **Result: Application-Core Bound.** The model must run on the App core. Dual-core isolation guarantees deterministic 32 ms latency.
 status: published
 provenance: imported
 requires_explanation: false

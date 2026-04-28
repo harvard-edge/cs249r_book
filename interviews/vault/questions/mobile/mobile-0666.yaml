@@ -8,38 +8,27 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: The App Memory Pressure Levels
-scenario: You're building an iOS app that runs a 1.2 GB CoreML model on an iPhone 15 with 6 GB RAM. During testing, the app works fine in isolation but gets killed when the user switches to Safari and back.
+scenario: You are building an iOS app that runs a 1.2 GB CoreML model on a device with 6 GB RAM. During testing, the app works fine in isolation but gets killed when the user switches to Safari and back.
 question: Why can a 1.2GB CoreML model be killed under iOS memory pressure, and how should weights be loaded to avoid Jetsam?
 details:
-  realistic_solution: iOS memory management aggressively kills background apps to ensure foreground fluidity. On a 6 GB device, the OS reserves ~1.8 GB, setting a hard Jetsam limit around 3 GB per app. With ~750 MB of base app overhead (UI, Swift runtime, image buffers), the realistic model budget is 3.0 GB - 0.75 GB = 2.25 GB (absolute maximum) or 1.75 GB (safe). A 1.2 GB model works perfectly in isolation. However, when the user switches to Safari, your app is backgrounded and the Jetsam limit drops dramatically. To fix this, load the model weights using `mmap()` (the default for CoreML in recent iOS versions, but must be configured correctly). Mmapped memory can be cleanly evicted by the OS when backgrounded and reloaded when paged back in, preventing the app from being killed.
+  realistic_solution: iOS memory management aggressively issues Jetsam events to kill background apps, ensuring foreground fluidity. On a 6 GB device, the OS sets a hard Jetsam limit around 3 GB per app. With ~750 MB of base app overhead, the realistic foreground model budget is 2.25 GB. A 1.2 GB model works perfectly in isolation. However, when backgrounded, the Jetsam limit drops dramatically. To fix this, load the model weights using `mmap()`. Mmapped memory can be cleanly evicted by the OS when backgrounded and reloaded via page faults when brought to the foreground, preventing an OOM crash.
   common_mistake: |
     **The Pitfall:** Believing that "iOS has 6 GB, my model is 1.2 GB, so I have 4.8 GB free."
-    **The Rationale:** This ignores that iOS reserves substantial memory for the kernel and system daemons, and the foreground app gets only a fraction of total RAM.
+    **The Rationale:** This ignores that iOS reserves substantial memory for the kernel and system daemons, and background apps face draconian memory ceilings.
     **The Consequence:** The app inevitably crashes or gets killed in the background when the Jetsam limit drops.
   napkin_math: |
-    - 6 GB device. OS reserves: ~1.8 GB.
-    - Jetsam limit: ~3 GB.
-    - App overhead: ~750 MB.
-    - Model budget: 3.0 - 0.75 = **2.25 GB** (aggressive) or 2.5 - 0.75 = **1.75 GB** (safe with headroom).
-    - A 2 GB model works in isolation but gets jetsammed under memory pressure.
-    - **Use `mmap()` for weights — the OS can evict and reload pages without killing the app.**
+    1. **Assumptions & Constraints:**
+       - Device RAM: 6.0 GB.
+       - OS reserved RAM: ~1.8 GB.
+       - Foreground Jetsam limit: ~3.0 GB.
+       - App overhead: ~0.75 GB.
+    2. **Calculations:**
+       - Foreground budget = 3.0 GB - 0.75 GB = 2.25 GB.
+       - Model size = 1.2 GB (fits easily in 2.25 GB foreground budget).
+       - Background Jetsam limit < 1.95 GB (triggers kill).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Capacity).** Use `mmap()` for weights so the OS can evict and reload pages without killing the app via Jetsam.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 4
-chains:
-- id: mobile-chain-069
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

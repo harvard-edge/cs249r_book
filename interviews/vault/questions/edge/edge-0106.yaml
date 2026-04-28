@@ -11,16 +11,23 @@ title: The Memory Pressure Leak
 scenario: Your autonomous monitoring system crashes with an 'Out of Memory' error after 30 minutes of operation in a hot environment. You check your code and find no traditional memory leaks.
 question: Based on the producer-consumer diagram, why is your memory usage increasing over time?
 details:
-  realistic_solution: 'The system crashes because the Producer (Camera) and Consumer (NPU) are decoupled without backpressure. As the device heats up, thermal throttling slows the NPU (from 25ms to 100ms per frame). Since the camera stays at a rigid 30 FPS, frames pile up in the queue until the device hits an OOM. The fix is Backpressure or Frame Dropping: actively drop new frames or step down the camera framerate when thermal throttling engages.'
+  realistic_solution: The producer (Camera) and consumer (NPU) are coupled via an unbounded queue. Thermal throttling decreases NPU throughput, while the camera persistently generates 30 FPS. The missing architectural component is active backpressure. The queue must be bounded (e.g., ring buffer) and the system must dynamically drop incoming frames when the NPU is saturated, avoiding OOM events at the cost of transient frame drops.
   common_mistake: |
     **The Pitfall:** Assuming the physical heatsink is simply too small.
     **The Rationale:** Engineers correctly identify thermal throttling as the trigger, but treat it purely as a hardware problem.
     **The Consequence:** A bigger heatsink merely delays the throttling. The software architecture is fundamentally flawed and will still crash eventually.
   napkin_math: |
-    1. **Rates:** Arrival is 30 FPS; Throttled service drops to 10 FPS.
-    2. **Accumulation:** System leaks 20 frames/sec into the queue.
-    3. **Data Volume:** At 24 MB per 4K frame, you are "leaking" 20 * 24 = 480 MB/sec.
-    4. **OOM Point:** An 8GB Jetson will Out-Of-Memory in just **~16.6 seconds** once throttling hits.
+    1. **Assumptions & Constraints:**
+       - Camera input rate: 30 FPS.
+       - Throttled NPU processing rate: 10 FPS.
+       - Frame size (4K): 24 MB.
+       - Available system RAM: 8 GB.
+    2. **Calculations:**
+       - Frame accumulation rate: 30 FPS - 10 FPS = +20 frames/sec.
+       - Memory leak rate: 20 frames * 24 MB = 480 MB/sec.
+       - Time to OOM: 8000 MB / 480 MB/sec ≈ 16.6 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 480 MB/s memory leak.** Without backpressure, thermal throttling causes an immediate divergence between producer and consumer rates, rapidly exhausting system memory.
 status: published
 provenance: imported
 requires_explanation: false

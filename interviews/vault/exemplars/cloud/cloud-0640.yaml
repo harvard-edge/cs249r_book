@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-0640
+title: The Half-Baked Speedup
+topic: quantization-fundamentals
+status: published
+provenance: human
+scenario: You've been tasked with optimizing a large language model's training throughput. You successfully converted most of your model to use BF16 (bfloat16) precision instead of FP32. You expected a near 2x speedup in training time, but you're only observing about a 1.4x improvement.
+question: What is the technical explanation for this discrepancy between expected and observed speedup?
+details:
+  realistic_solution: 'The 1.4x speedup (rather than the expected 2x) is explained by the fact that training involves a **mix of compute-bound and memory-bound operations**, and only some benefit fully from BF16. **Compute-bound operations** (large GEMMs in attention and FFN layers): These see a near-2x speedup because the Tensor Cores can process twice as many BF16 operations per cycle as FP32. **Memory-bound operations** (layer normalization, activation functions, softmax, embedding lookups, optimizer steps): These are bottlenecked by memory bandwidth, not compute. Halving the data size from FP32 to BF16 roughly halves the bytes transferred, giving up to a ~2x bandwidth speedup. However, mixed-precision training requires maintaining an FP32 master copy of weights for the optimizer update step. This means the optimizer step still operates on FP32 data, and the weight update involves reading FP32 master weights, applying FP32 gradients, then casting back to BF16. This FP32 overhead in the optimizer reduces the memory-bound speedup. **The critical factor**: Not all operations run in BF16. Mixed-precision training deliberately keeps loss scaling, gradient accumulation, and optimizer states in FP32 to maintain numerical stability. If ~60% of wall-clock time is in BF16-accelerated GEMMs (2x speedup) and ~40% is in FP32 overhead (1x speedup), the effective speedup by Amdahl''s Law is: 1 / (0.4/1 + 0.6/2) = 1 / (0.4 + 0.3) = **1.43x** — closely matching the observed 1.4x.'
+  common_mistake: |
+    **The Pitfall:** Believing that changing the data type instantly doubles the speed of the entire computational graph.
+    **The Rationale:** Misunderstanding Amdahl's Law and ignoring the FP32 operations mandatorily retained for mixed-precision stability.
+    **The Consequence:** Frustration and misdirected optimization efforts (like aggressive kernel tuning) when the system is actually behaving correctly under mixed-precision constraints.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Forward GEMMs (40% of time) and Backward GEMMs (30% of time) scale 2x in BF16.
+       - Optimizer step (15% of time) and Communication (10% of time) remain 1x in FP32.
+    2. **Calculations:**
+       - Time fraction in BF16 = 0.70. Time fraction in FP32 = 0.25. Mixed layers = 0.05.
+       - Amdahl's Law = 1 / (0.15/1 + 0.10/1 + 0.05/1.5 + 0.40/2 + 0.30/2).
+       - Speedup = 1 / (0.15 + 0.10 + 0.033 + 0.20 + 0.15) = 1 / 0.633 ≈ 1.58×.
+    3. **Conclusion & Interpretation:**
+       - **Result: Amdahl's-Law-Bound.** Overhead from FP32 casting, loss scaling, and unscaling further degrades the theoretical 1.58× toward the observed 1.4×.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

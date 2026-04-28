@@ -8,21 +8,23 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Safe Deployment for Latency-Sensitive Generation Models
-scenario: A global translation API handles 5,000 QPS with a strict SLA of 200ms P99 latency. A new model version (V2) uses a deeper transformer with speculative decoding. Deploying it via a 10% Canary causes downstream client timeouts because V2's tail latency spikes to 350ms under cache misses, breaking the SLA for thousands of users.
+scenario: A translation API handles 5,000 QPS with a 200ms P99 latency SLA. A V2 model using speculative decoding spikes to 350ms tail latency during a 10% Canary, breaking the SLA.
 question: Should you continue the 10% canary or switch to shadow deployment for V2 under the 200 ms SLA, and why?
 details:
-  realistic_solution: "Evaluate the tradeoff between a Canary deployment (affects real users, provides exact latency/quality feedback) and a Shadow deployment (safe for users, but doubles compute cost and lacks synchronous user feedback). Because the strict 200ms SLA is actively being violated, you must shift to an asynchronous Shadow deployment pattern. Mirror a subset of production traffic (e.g., 5%) to a shadow cluster running V2. The primary cluster returns V1 responses synchronously to meet the SLA. An asynchronous observability service compares V1 and V2 outputs (BLEU scores) and latency profiles offline. This isolates users from P99 spikes while allowing you to debug the speculative decoding cache misses."
+  realistic_solution: "Shift immediately to a Shadow deployment pattern. Mirror traffic asynchronously to avoid synchronously impacting the 200ms SLA. This provides high-fidelity production inference data to diagnose speculative decoding KV cache misses without violating user contracts."
   common_mistake: |
     **The Pitfall:** Increasing the canary timeout threshold or simply rolling back without capturing tail latency profiles.
     **The Rationale:** Trying to quickly hide the error without fundamentally altering the deployment safety pattern.
     **The Consequence:** Either accepting continuous SLA violations for live users, or flying blind and abandoning V2 entirely without the data needed to debug speculative decoding.
   napkin_math: |
-    * 10% Canary traffic: 500 QPS.
-    * SLA violations (P99 at 350ms): 1% of 500 = 5 requests/sec.
-    * Violations per minute: 5 req/s * 60s = 300 bad experiences/min.
-    * Shadowing 5% (250 QPS): Requires dedicated hardware.
-    * Assuming 1 GPU handles 20 req/sec, shadow pool needs: 250 / 20 = 12.5 (~13) extra GPUs.
-    * **SLA violations drop to 0 while preserving high-fidelity production data.**
+    1. **Assumptions & Constraints:**
+       - Canary: 10% of 5,000 QPS = 500 QPS
+       - SLA Violation (P99): 1% of 500 QPS
+    2. **Calculations:**
+       - Violations: 5 req/s * 60s = 300 bad experiences/min
+       - Shadow capacity for 5%: 250 QPS / 20 req/s/GPU = 12.5 GPUs
+    3. **Conclusion & Interpretation:**
+       - **Result: SLA-Violation Bound**
 status: published
 provenance: imported
 requires_explanation: false

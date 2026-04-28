@@ -8,25 +8,25 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: TTFT Latency Spike Diagnosis
-scenario: Your LLM serving system shows P50 TTFT (time to first token) of 150ms but P99 spikes to 4 seconds.
-  GPU utilization averages 65%. The model is 70B INT8 on 2× A100 with TP=2. No code changes were made
-  recently. Diagnose the root cause.
-question: "How would you diagnose the root cause?"
+scenario: Your LLM serving system shows P50 TTFT (time to first token) of 150ms but P99 spikes to 4 seconds. GPU utilization averages 65%. The model is 70B INT8 on 2 GPUs. No code changes were made recently.
+question: How would you diagnose the root cause of the TTFT latency spike?
 details:
-  realistic_solution: 'The 27x gap between P50 and P99 TTFT with only 65% GPU utilization points to request
-    queuing behind long-context prefills. Root cause: a small fraction of requests have very long prompts
-    (e.g., 32K tokens). Prefill is compute-bound and takes proportional time: 32K tokens on 70B INT8 ≈
-    2 × 70B × 32K FLOPs / (2 × 312T × 0.5 MFU) = 14.3 seconds total prefill. Without chunked prefill,
-    this long request blocks the GPU for 14.3s, causing all queued requests to wait. Even with 65% average
-    utilization, these occasional long prefills create head-of-line blocking. Fix: (1) implement chunked
-    prefill (chunk_size=512) to interleave decode requests, (2) add a priority queue that promotes short-context
-    requests, (3) set a max prompt length or route long prompts to dedicated capacity. Expected result:
-    P99 drops from 4s to ~500ms.'
-  common_mistake: Blaming the model or GPU for slow inference. P50 is fine (150ms), so the model and GPU
-    are healthy. The P99 spike points to queuing or scheduling issues, not compute.
-  napkin_math: 'Long prompt (32K tokens) prefill: 2 × 70B × 32K / (312T × 2 GPUs × 0.5) = 14.3s. Short
-    prompt (512 tokens): 0.22s. If 5% of requests are 32K: P99 ≈ 14.3s queuing. Chunked (512 tokens):
-    max block time = 0.22s.'
+  realistic_solution: 'The 27x gap between P50 and P99 TTFT with only 65% GPU utilization points to request queuing behind long-context prefills. Root cause: a small fraction of requests have very long prompts (e.g., 32K tokens). Prefill is compute-bound and takes proportional time: 32K tokens on 70B INT8 ≈ 2 × 70B × 32K FLOPs / (2 × 312T × 0.5 MFU) = 14.3 seconds total prefill. Without chunked prefill, this long request blocks the GPU for 14.3s, causing all queued requests to wait. Even with 65% average utilization, these occasional long prefills create head-of-line blocking. Fix: (1) implement chunked prefill (chunk_size=512) to interleave decode requests, (2) add a priority queue that promotes short-context requests, (3) set a max prompt length or route long prompts to dedicated capacity. Expected result: P99 drops from 4s to ~500ms.'
+  common_mistake: |
+    **The Pitfall:** Blaming the model or GPU for slow inference because of the P99 latency spike.
+    **The Rationale:** Assuming slow latency always maps to compute bottlenecks, ignoring the healthy 150ms P50 and 65% utilization.
+    **The Consequence:** Wasting time profiling attention kernels when the issue is actually head-of-line blocking in the request queue.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 70B INT8 on 2 GPUs (TP=2).
+       - Peak Compute: 312 TFLOPS/GPU, 50% MFU.
+       - Rare long prompt: 32K tokens.
+    2. **Calculations:**
+       - Prefill compute time for 32K: 2 * 70B * 32K FLOPs / (2 * 312T * 0.5) ≈ 14.3 seconds.
+       - Short prompt (512 tokens) prefill: ~0.22 seconds.
+       - A single 32K request blocks the queue for 14.3s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 14.3s blocking time. Queue-Bound due to lack of chunked prefill.**
 status: published
 provenance: imported
 requires_explanation: false

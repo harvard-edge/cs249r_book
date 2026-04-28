@@ -8,21 +8,27 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Distillation versus Unstructured Pruning on Dataflow Accelerators
-scenario: You are optimizing a vision model for deployment on a Hailo-8 edge accelerator (26 TOPS INT8, 2.5W, no local DRAM, streams weights and activations from host memory). The baseline model requires 100 GOPS per frame. The team attempts to double the throughput using 50% unstructured pruning (reducing theoretical compute to 50 GOPS). However, profiling shows the pruned model runs at the exact same latency as the baseline. The team then uses knowledge distillation to train a dense student model also requiring 50 GOPS, which successfully doubles the frame rate.
+scenario: You are optimizing a vision model for deployment on a Hailo-8 edge accelerator. The baseline model requires 100 GOPS per frame. The team attempts to double the throughput using 50% unstructured pruning (reducing theoretical compute to 50 GOPS). However, profiling shows the pruned model runs at the exact same latency as the baseline. The team then uses knowledge distillation to train a dense student model also requiring 50 GOPS, which successfully doubles the frame rate.
 question: Why does 50% unstructured pruning not speed up the Hailo-8 model while a 50-GOPS dense distilled model doubles FPS?
 details:
-  realistic_solution: The Hailo-8 is a dataflow accelerator that maps networks spatially and relies on continuous, dense streams of weights from host memory due to its lack of local DRAM. Unstructured pruning leaves the overall matrix dimensions unchanged, forcing the hardware to stream zeroed weights and execute zero-multiplications. Knowledge distillation produces a genuinely smaller, dense student model. This smaller dense architecture reduces the actual tensor dimensions, allowing the compiler to optimize spatial mapping and physically halve both the required compute operations and the host-to-accelerator memory bandwidth per frame.
+  realistic_solution: 'The Hailo-8 is a dataflow accelerator that maps networks spatially and relies on continuous, dense streams of weights from host memory due to its lack of local DRAM. Unstructured pruning leaves the overall matrix dimensions unchanged, forcing the hardware to stream zeroed weights and execute zero-multiplications. Knowledge distillation produces a genuinely smaller, dense student model. This smaller dense architecture reduces the actual tensor dimensions, allowing the compiler to optimize spatial mapping and physically halve both the required compute operations and the host-to-accelerator memory bandwidth per frame.'
   common_mistake: |
     **The Pitfall:** Assuming fewer non-zero weights automatically maps to lower latency.
     **The Rationale:** Candidates fail to recognize that edge accelerators without native sparse-compute support must still process the zeros.
     **The Consequence:** They pursue unstructured pruning strategies that offer zero benefit because the dense memory bandwidth required to stream weights from the host is unaffected.
   napkin_math: |
-    1. **Baseline Latency:** 100 GOPS / 6500 GOPS/s (effective) = ~15.4 ms (65 FPS).
-    2. **Host Memory Bandwidth Required:** 20 MB * 65 FPS = 1.3 GB/s.
-    3. **Pruned Model (50% unstructured):** Matrix dimensions and 20 MB footprint are unchanged. Hardware processes zeros. Latency remains 15.4 ms (65 FPS).
-    4. **Distilled Model (50 GOPS dense):** Footprint halved to 10 MB. Latency = `50 GOPS / 6500 GOPS/s = ~7.7 ms` (130 FPS).
-    5. **Bandwidth Check:** `10 MB * 130 FPS = 1.3 GB/s`.
-    **The distilled model physically halves both computation and streaming bandwidth, doubling FPS without hitting the PCIe limit.**
+    1. **Assumptions & Constraints:**
+       - Accelerator: Hailo-8 (Dataflow architecture, no local DRAM).
+       - Baseline model compute: 100 GOPS per frame. Effective TOPS: ~6.5 TOPS.
+       - Host memory streaming required: 20 MB per frame.
+    2. **Calculations:**
+       - Baseline Latency: 100 GOPS / 6500 GOPS/s = ~15.4 ms (65 FPS).
+       - Baseline Host Bandwidth: 20 MB * 65 FPS = 1.3 GB/s.
+       - Pruned Model (50% unstructured): Dimensions unchanged, streams zeros. Latency = 15.4 ms (65 FPS).
+       - Distilled Model (50 GOPS dense): Footprint halved to 10 MB. Latency = 50 GOPS / 6500 GOPS/s = ~7.7 ms (130 FPS).
+       - Distilled Bandwidth Check: 10 MB * 130 FPS = 1.3 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound.** The distilled model physically halves both computation and streaming bandwidth, doubling FPS without hitting the PCIe limit, unlike unstructured pruning which leaves bandwidth unchanged.
 status: published
 provenance: imported
 requires_explanation: false

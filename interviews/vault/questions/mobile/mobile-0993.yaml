@@ -8,21 +8,28 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: 'Model Size Estimation: Master Full On-Device LLM Memory Audit for Production iOS App'
-scenario: Perform a complete on-device memory audit for a production iOS app (A17 Pro, 8GB) running a 1B-parameter INT4 LLM for real-time conversation. Account for: iOS memory ceiling for apps (~5GB practical), model weights, KV-cache with multi-turn context (10 turns × 512 tokens each = 5120 tokens), tokenizer and model metadata, CoreML framework overhead, and application heap.
+scenario: Perform a complete on-device memory audit for a production iOS app running a 1B-parameter INT4 LLM for real-time conversation. Account for a multi-turn context (10 turns x 512 tokens each).
 question: How would you verify the system stays under the 5GB practical ceiling?
 details:
-  realistic_solution: 'iOS practical ceiling: 5GB (above this, OS sends memory warnings and may kill app). iOS Metal/NE framework: 200MB. CoreML model: 500MB (INT4 1B). Model metadata (tokenizer, vocab, config): 50MB. App heap (SwiftUI, networking, audio): 300MB. KV-cache (5120 tokens, 32 layers, 32 heads, 64 dim): 5120×262KB=1.34GB (FP16). Current turn activation buffer: ~50MB. Total: 200+500+50+300+1340+50=2,440MB = 2.38GB. Under 5GB ceiling ✓ with 2.6GB headroom.'
+  realistic_solution: Execute a meticulous byte-level audit mapped against the strict 5GB iOS Jetsam ceiling. Standard overhead (CoreML, Swift heap, metadata) creates an unavoidable ~600MB floor. While the 1B INT4 base model occupies a static 500MB, the mathematically critical variable is the dynamically inflating FP16 KV-cache. The architect must verify that at the extreme long-tail of a conversational session, the cumulative token buildup strictly aborts or truncates before crossing the 5GB high-water mark.
   common_mistake: |
-    **The Pitfall:** Assuming a 10-turn conversation uses tokens uniformly (e.g., 10 × 512 = 5120 tokens).
-    **The Rationale:** Engineers fail to model the cumulative nature of the KV-cache as context builds over multi-turn interactions.
-    **The Consequence:** Memory estimates are too low, causing the app to crash (OOM) deep into a conversation when the full history must be retained.
+    **The Pitfall:** Statistically analyzing a long multi-turn conversation as independent chunks of identical memory cost.
+    **The Rationale:** Engineers completely fail to model the mathematically cumulative, ever-expanding nature of the autoregressive KV-cache.
+    **The Consequence:** The system validates correctly under short tests but consistently crashes via fatal OS Out-Of-Memory (OOM) triggers deep into real-world conversational user flows.
   napkin_math: |
-    - **Model Footprint (1B INT4):** 500 MB
-    - **Fixed Overhead:** iOS Metal (200 MB) + Metadata (50 MB) + App Heap (300 MB) + Activations (50 MB) = 600 MB
-    - **KV Cache per Token (FP16):** 2 (K,V) × 32 layers × 32 heads × 64 dim × 2 bytes = 262 KB/token
-    - **10 Turns (5120 tokens):** 5120 × 262 KB = 1.34 GB. Total RAM = 500 + 600 + 1340 = **2.44 GB** (48.8% of ceiling).
-    - **20 Turns (10,240 tokens):** 10240 × 262 KB = 2.68 GB. Total RAM = 500 + 600 + 2680 = **3.78 GB** (75.6% of ceiling).
-    - **30 Turns (15,360 tokens):** 15360 × 262 KB = 4.02 GB. Total RAM = 500 + 600 + 4020 = **5.12 GB** (Exceeds 5GB ceiling).
+    1. **Assumptions & Constraints:**
+       - Strict App Memory Ceiling: 5.0 GB.
+       - Model Footprint (1B INT4): 500 MB.
+       - Fixed Overhead: 600 MB (Metal + Metadata + Heap + Activations).
+       - KV Cache (FP16): 32 layers, 32 heads, 64 dim (262 KB/token).
+    2. **Calculations:**
+       - Target tokens (10 turns * 512 tokens): 5,120 tokens.
+       - KV Cache memory: 5,120 * 262 KB = 1.34 GB.
+       - Total Audit Footprint: 500 MB + 600 MB + 1.34 GB = 2.44 GB.
+       - 20 Turns (10,240 tokens): Total RAM = 3.78 GB.
+       - 30 Turns (15,360 tokens): Total RAM = 5.12 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** The 10-turn target (2.44 GB) sits safely below the 5.0 GB limit. However, the dynamically expanding KV cache mathematically guarantees a fatal OS OOM kill around the 30th conversational turn.
 status: published
 provenance: imported
 requires_explanation: true

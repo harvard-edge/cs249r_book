@@ -11,18 +11,23 @@ title: Optimizing KV Cache for Long-Context on Orin
 scenario: We are deploying a 7B parameter Transformer model on an NVIDIA Jetson Orin for a local long-document summarization task. As the context length approaches 8,192 tokens during autoregressive generation, the time to first token is acceptable, but the decoding latency per token spikes severely and we observe heavy memory bandwidth utilization.
 question: Diagnose the architectural bottleneck causing this degradation and quantify the optimization impact of using Grouped-Query Attention (GQA) and INT8 KV-cache quantization.
 details:
-  realistic_solution: The bottleneck is the memory traffic required to load the KV cache for every single token generated. The optimal fix is to reduce the size of the KV cache. By applying INT8 quantization to the KV cache and changing the architecture to use Grouped-Query Attention (GQA), we drastically reduce the memory footprint and the required bandwidth per decoding step, allowing the Orin to maintain high token generation rates.
+  realistic_solution: 'Autoregressive generation is strictly bounded by memory bandwidth. At 8K context, loading the 4.3 GB FP16 KV cache for every single generated token saturates the Orin''s LPDDR5 bandwidth. The solution is twofold: implement Grouped-Query Attention (GQA) to structurally reduce the number of key/value heads, and apply INT8 quantization to the KV cache. Combined, these drastically reduce memory footprint and bus traffic, restoring fast decoding latency.'
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is compute capacity.
     **The Rationale:** Candidates often assume the 275 TOPS INT8 compute capacity is the bottleneck and suggest weight pruning or migrating layers to the DLA accelerator.
     **The Consequence:** They fail to realize that autoregressive decoding is memory-bandwidth bound, and the growing KV cache is overwhelming the LPDDR5 bandwidth.
   napkin_math: |
-    1. For a 7B model (32 layers, d_model=4096) with FP16 KV cache: Size per token = 2 (K & V) * 2 bytes * 32 layers * 4096 = 524 KB.
-    2. Total KV cache at 8k context = 8192 * 524 KB = 4.3 GB.
-    3. Loading 4.3 GB per generated token exhausts the Jetson Orin's memory bandwidth.
-    4. Applying INT8 KV quantization reduces precision to 1 byte, cutting cache to 2.15 GB.
-    5. Implementing GQA with a 4:1 ratio (8 KV heads instead of 32) reduces the cache by another factor of 4.
-    6. **Final optimized KV cache = 2.15 GB / 4 = 537 MB, reducing memory traffic by 8x.**
+    1. **Assumptions & Constraints:**
+       - 7B model: 32 layers, d_model=4096.
+       - Precision: FP16 (2 bytes per parameter).
+       - Context length: 8,192 tokens.
+    2. **Calculations:**
+       - FP16 KV cache size per token: 2 (K&V) * 2 bytes * 32 layers * 4096 = 524 KB.
+       - Total FP16 KV cache at 8K context: 8192 * 524 KB = 4.3 GB.
+       - INT8 quantization reduction: 4.3 GB / 2 = 2.15 GB.
+       - GQA (8 KV heads, 4:1 ratio) reduction: 2.15 GB / 4 = 537 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 8x memory footprint reduction (537 MB).** The autoregressive decoding phase is bottlenecked by LPDDR5 memory bandwidth, heavily burdened by loading the 4.3 GB KV cache for every token.
 status: published
 provenance: imported
 requires_explanation: false

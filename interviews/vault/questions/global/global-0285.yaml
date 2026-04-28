@@ -8,37 +8,25 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: Memory Budget for High-Concurrency LLM Serving
-scenario: Design the memory allocation strategy for serving Llama-2-70B on 2x A100-80GB (TP=2) with a target of 256 concurrent requests at 4096 max context length. You have 160 GB total VRAM.
+scenario: Design the memory allocation strategy for serving Llama-2-70B on 2x A100 (TP=2) with a target of 256 concurrent requests at 4096 max context length. You have 160 GB total VRAM.
 question: What is the binding constraint that prevents serving 256 concurrent requests, and how would you resolve it?
 details:
-  realistic_solution: 'Memory budget: (1) Model weights (INT8): 70B x 1B = 70 GB, split TP=2: 35 GB/GPU. (2) CUDA context + framework overhead: ~4 GB/GPU. (3) Activation workspace: for batch=256, seq=4096, hidden=8192: chunked prefill (chunk=512): 256 x 512 x 8192 x 2B = 2 GB. Split TP=2: 1 GB/GPU. (4) Available for KV cache: 80 - 35 - 4 - 1 = 40 GB/GPU. (5) KV cache per token: 2 x 80 layers x 8 KV heads x 128 dim x 2B = 320 KB total. Split TP=2: 160 KB/GPU per token. (6) Max tokens in KV cache: 40 GB / 160 KB = 262,144 tokens total maximum length. (7) 256 requests x 4096 tokens = 1,048,576 tokens needed. Available: 262K — only supports 64 concurrent requests at full context! Binding constraint: KV cache. Solutions: (a) use INT8 KV cache (halves to 80 KB/token -> 524K tokens, supports 128 concurrent), (b) reduce max context to 1024 (supports 256 concurrency), or scale out TP to TP=8.'
+  realistic_solution: 'Memory budget: (1) Model weights (INT8): 70B x 1B = 70 GB, split TP=2: 35 GB/GPU. (2) CUDA context + framework overhead: ~4 GB/GPU. (3) Activation workspace: for batch=256, seq=4096, hidden=8192: chunked prefill (chunk=512): 2 GB total. Split TP=2: 1 GB/GPU. (4) Available for PagedAttention KV cache: 80 - 35 - 4 - 1 = 40 GB/GPU. (5) KV cache per token: 2 x 80 layers x 8 KV heads x 128 dim x 2B = 320 KB total. Split TP=2: 160 KB/GPU per token. (6) Max tokens in KV cache: 40 GB / 160 KB = 262,144 tokens total maximum length. (7) 256 requests x 4096 tokens = 1,048,576 tokens needed. Available: 262K - only supports 64 concurrent requests at full context! Binding constraint: KV cache. Solutions: (a) use INT8 KV cache (halves to 80 KB/token), (b) reduce max context to 1024, or scale out TP to TP=8.'
   common_mistake: |
-    **The Pitfall:** Allocating all remaining memory to the KV cache.
+    **The Pitfall:** Allocating all remaining memory to the PagedAttention KV cache.
     **The Rationale:** Forgetting to reserve space for activations, CUDA contexts, and memory fragmentation.
     **The Consequence:** Catastrophic Out-of-Memory (OOM) crashes under peak load when context lengths grow.
   napkin_math: |
-    - Total VRAM per GPU: 80 GB.
-    - Model weights per GPU (INT8): 35 GB.
-    - Overhead & activations per GPU: 5 GB.
-    - Budget for KV cache per GPU: 80 - 35 - 5 = 40 GB.
-    - KV per token (TP=2): 160 KB.
-    - Max tokens: 40 GB / 160 KB = 262,144 tokens across the sequence.
-    - Target requirement: 256 requests × 4096 tokens = **1,048,576 tokens**.
-    - **Deficit:** ~786K tokens. The system can only support 64 concurrent requests.
+    1. **Assumptions & Constraints:**
+       - Total VRAM per GPU: 80 GB.
+       - Target: 256 requests at 4096 tokens.
+    2. **Calculations:**
+       - Model weights per GPU (INT8): 35 GB.
+       - Overhead & activations per GPU: 5 GB.
+       - Budget for KV cache per GPU: 80 - 35 - 5 = 40 GB.
+       - KV per token (TP=2): 160 KB.
+       - Max tokens: 40 GB / 160 KB = 262,144 tokens.
+       - Target requirement: 256 requests * 4096 tokens = 1,048,576 tokens.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** Deficit of ~786K tokens. The system can only support 64 concurrent requests.
 status: published
-provenance: imported
-requires_explanation: true
-expected_time_minutes: 20
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

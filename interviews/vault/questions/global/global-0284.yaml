@@ -8,21 +8,24 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Training Observability Dashboard Design
-scenario: Design a monitoring system for a 256-GPU training run of a 70B model expected to take 21 days. Requirements: detect hardware failures within 60 seconds, detect training instability (loss spikes, gradient explosions) within 5 minutes, provide MFU tracking, and support post-mortem analysis.
+scenario: Design a monitoring system for a 256-GPU training run of a 70B model expected to take 21 days.
 question: What metrics, alerts, and dashboards do you build?
 details:
-  realistic_solution: "Four-layer monitoring stack: (1) Hardware layer (60s detection): per-GPU metrics every 10s — temperature, power draw, HBM utilization, ECC error count, NVLink/IB link status. Alert: temperature > 83°C (throttling), ECC errors > 0 (impending failure), any link down. Use DCGM exporter -> Prometheus -> PagerDuty. (2) Communication layer: per-step AllReduce time, per-rank gradient norm, straggler detection (any rank > 2σ from mean step time). Alert: AllReduce time > 2x baseline (network degradation), step time variance > 20% (straggler). (3) Training dynamics layer (5-min detection): loss (per-step + 100-step EMA), gradient norm (global + per-layer), learning rate, batch throughput (samples/sec), MFU = actual_FLOPS / theoretical_peak. Alert: loss spike > 3σ from EMA, gradient norm > 10x baseline, MFU drop > 15%. Compute MFU: actual_tokens_per_sec * 6 * model_params / (num_GPUs * peak_FLOPS). (4) Data pipeline layer: dataloader queue depth, prefetch buffer occupancy, disk I/O wait. Alert: queue depth = 0 (starvation). Dashboard: real-time panel with loss curve + grad norm + MFU + GPU temps, plus a Gantt-chart view showing per-step breakdown (forward/backward/allreduce/idle) for identifying bottlenecks."
+  realistic_solution: "Construct a multi-layer telemetry stack. Hardware: 10s DCGM exports (temps, ECC, NVLink status). Comm: AllReduce step-time variance for straggler isolation. Dynamics: Gradient norm tracking and Model FLOPs Utilization (MFU) drop alarms. Pipeline: Dataloader queue depth. Overlay this data chronologically to expose silent MFU killers."
   common_mistake: |
     **The Pitfall:** Only monitoring loss curves and basic GPU utilization percentages.
     **The Rationale:** These are the most visible high-level indicators of whether training is "working."
     **The Consequence:** Missing subtle, silent efficiency killers like thermal throttling, stragglers, or data pipeline stalls that waste 10-20% of compute over a $500k training run.
   napkin_math: |
-    * Metric velocity: 256 GPUs * 10 metrics * (1 sample / 10s) = 256 samples/sec.
-    * Daily ingestion: 256 samples/sec * 86,400s = ~22M samples/day.
-    * Storage per day (at 100 bytes/sample): ~2.2 GB/day.
-    * Total 21-day storage: 21 * 2.2 GB = 46.2 GB.
-    * MFU Target (H100): 256 GPUs * 989 TFLOPS * 50% = 126.6 PFLOPS effective.
-    * **Metrics overhead is easily manageable while providing critical diagnostic fidelity.**
+    1. **Assumptions & Constraints:**
+       - 256 GPUs, 10 metrics at 10s intervals
+       - Payload: 100 bytes/sample
+    2. **Calculations:**
+       - Velocity: 256 * 10 / 10s = 256 samples/sec
+       - Daily Volume: 256 * 86,400s * 100 bytes = ~2.2 GB/day
+       - 21-day storage: 21 * 2.2 GB = 46.2 GB
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Feasible (Minimal Telemetry Overhead)**
 status: published
 provenance: imported
 requires_explanation: true

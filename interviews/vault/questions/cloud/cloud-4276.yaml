@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: 'Adapter Serving Infrastructure: S-LoRA Paged Memory Design'
-scenario: You are building a multi-adapter serving system to handle 1000 LoRA adapters on a cluster of 8 H100s. Only 50 adapters are active at any given time.
+scenario: You are building a multi-adapter serving system to handle 1000 LoRA adapters on a cluster of 8 GPUs. Only 50 adapters are active at any given time.
 question: How would you design S-LoRA-style paged adapter memory for 1000 LoRA adapters with only 50 active, and what is the overhead?
 details:
   realistic_solution: "Use paged adapter management: maintain a GPU-resident adapter pool of 50 slots (650 MB, covering the peak active count). Evict LRU adapters to CPU pinned memory (latency ~0.8ms for 13 MB at PCIe 4.0 16 GB/s). On cache miss, evict LRU and load from CPU. For the 50 concurrently active adapters, group requests by adapter to minimize swaps. Track adapter hotness via request frequency; top-50 hot adapters never evict (covers ~95% of traffic in power-law distribution)."
@@ -17,12 +17,19 @@ details:
     **The Rationale:** Opting for the simplest implementation to avoid the complexity of dynamic memory management and swapping.
     **The Consequence:** 1000 adapters at 13 MB each consume 13 GB of VRAM, which is a massive waste of precious GPU memory when only 50 are active.
   napkin_math: |
-    *   **Adapter Size:** Rank-16 on a 13B base model $\approx$ 13 MB per adapter.
-    *   **Total Capacity:** 1000 adapters × 13 MB = 13 GB total.
-    *   **Active Pool:** 50 adapters × 13 MB = 650 MB.
-    *   **Miss Cost:** 13 MB / 16 GB/s (PCIe 4.0) = 0.8ms per miss.
-    *   **Overhead Calculation:** At 1000 RPS with a 5% miss rate, there are 50 misses/sec. 50 × 0.8ms = 40ms total eviction latency/sec.
-    *   **Average Overhead:** 40ms / 1000 requests = **0.04ms average overhead per request**.
+    1. **Assumptions & Constraints:**
+       * Adapter Size: Rank-16 on a 13B base model \approx 13 MB per adapter.
+       * Total Capacity: 1000 adapters. Active Pool: 50 adapters.
+       * Target workload: 1000 RPS with 5% miss rate.
+       * PCIe 4.0 bandwidth: 16 GB/s.
+    2. **Calculations:**
+       * Total Capacity memory: 1000 \times 13 MB = 13 GB.
+       * Active Pool memory: 50 \times 13 MB = 650 MB.
+       * Miss Cost: 13 MB / 16 GB/s = 0.8ms per miss.
+       * Miss rate per sec: 1000 RPS \times 5% = 50 misses/sec.
+       * Total eviction latency/sec: 50 \times 0.8ms = 40ms.
+    3. **Conclusion & Interpretation:**
+       * Average overhead: 40ms / 1000 requests = **0.04ms average overhead per request**. **Result: Memory-Bandwidth-Bound (PCIe)**.
 status: published
 provenance: imported
 requires_explanation: false

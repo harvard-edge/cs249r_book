@@ -8,20 +8,26 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: Gemini Nano TTFT Decomposition on Tensor G3
-scenario: You are deploying Gemini Nano (a 2-billion parameter INT8 model) for text summarization on the Tensor G3 (7.5 TOPS, 12 GB LPDDR5X). Telemetry reveals that when processing a 1000-token input prompt, the Time To First Token (TTFT) is exactly 600ms.
-question: What components make up the 600ms Gemini Nano TTFT on Tensor G3, and which hardware limit dominates?
+scenario: You are deploying an edge LLM (a 2-billion parameter INT8 model) for text summarization on a mobile NPU. Telemetry reveals that when processing a 1000-token input prompt, the Time To First Token (TTFT) is exactly 600ms.
+question: What components make up the 600ms TTFT on the NPU, and which hardware limit dominates?
 details:
   realistic_solution: |
-    End-to-end TTFT decomposes into preprocessing (text normalization and tokenization), the prefill forward pass (loading weights and computing activations), and postprocessing (sampling the first token). During the prefill forward pass, the model processes all 1000 input tokens in parallel. Because it matrix-multiplies the entire weight matrix against a large activation matrix, the compute requirements scale linearly with the input sequence length. The Google Tensor G3's TPU ceiling of 7.5 TOPS strictly limits how fast these operations can execute, making raw compute the dominant bottleneck that accounts for the vast majority of the 600ms TTFT.
+    End-to-end TTFT decomposes into preprocessing (text normalization and tokenization), the prefill forward pass (loading weights and computing activations), and postprocessing (sampling the first token). During the prefill forward pass, the model processes all 1000 input tokens in parallel. Because it matrix-multiplies the entire weight matrix against a large activation matrix, the compute requirements scale linearly with the input sequence length. The NPU's TOPS ceiling strictly limits how fast these operations can execute, making raw arithmetic throughput the dominant bottleneck that accounts for the vast majority of the 600ms TTFT.
   common_mistake: |
-    **The Pitfall:** Assuming TTFT is bottlenecked by LPDDR5X memory bandwidth.
-    **The Rationale:** Candidates fail to apply the mathematical formula for prefill compute and miss that processing a large batch of tokens is heavily compute-bound on mobile TPUs.
-    **The Consequence:** Misidentifying the bottleneck and applying memory optimizations instead of compute optimizations.
+    **The Pitfall:** Assuming TTFT is strictly bottlenecked by memory bandwidth like the autoregressive decoding phase.
+    **The Rationale:** Candidates know LLMs are notoriously memory-bound, failing to distinguish between the parallel arithmetic intensity of the prefill stage and the serial nature of decode.
+    **The Consequence:** Misidentifying the bottleneck and misapplying optimizations (e.g., extreme quantization) when NPU compute scheduling is the actual fix.
   napkin_math: |
-    - **Total Compute Operations:** 2 * 2,000,000,000 params * 1000 tokens = 4,000,000,000,000 operations (4 TOPS).
-    - **Compute Time:** 4 TOPS / 7.5 TOPS peak = 0.533 seconds (533 ms).
-    - **Latency Decomposition:** TTFT (600 ms) = Preprocessing (~33 ms) + TPU Prefill Compute (533 ms) + LPDDR5X Memory I/O/Postprocessing (~34 ms).
-    - **Result:** **TPU Compute directly accounts for ~89% of the TTFT latency.**
+    1. **Assumptions & Constraints:**
+       - Hardware: Mobile NPU rated at ~7.5 TOPS INT8 compute.
+       - Model: 2 Billion parameters, INT8 precision.
+       - Input Prompt: 1000 tokens.
+    2. **Calculations:**
+       - Total Compute Operations (Prefill): 2 * 2,000,000,000 params * 1000 tokens = 4,000,000,000,000 operations (4 Tera-ops).
+       - Compute Time: 4 TOps / 7.5 TOPS peak = 0.533 seconds (533 ms).
+       - Unaccounted Overhead: 600 ms TTFT - 533 ms = 67 ms (preprocessing, KV cache init, sampling).
+    3. **Conclusion & Interpretation:**
+       **Result: 89% of TTFT is Prefill Compute (Compute-Bound).** NPU raw execution directly dominates latency; memory bandwidth is only the primary bottleneck during token generation.
 status: published
 provenance: imported
 requires_explanation: false

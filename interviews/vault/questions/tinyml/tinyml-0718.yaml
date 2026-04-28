@@ -8,27 +8,29 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Multi-Model SRAM Partitioning
-scenario: Your smart home sensor hub on a Cortex-M7 (512 KB SRAM, 480 MHz) runs three models: (1) voice activity detection (VAD, 20 KB weights, 8 KB peak activations, runs continuously at 16 kHz), (2) keyword spotting (KWS, 80 KB weights, 45 KB peak activations, runs when VAD triggers), (3) command classification (CMD, 120 KB weights, 60 KB peak activations, runs when KWS triggers).
+scenario: 'Your smart home sensor hub on a Cortex-M7 runs three models: (1) voice activity detection (VAD, 8 KB peak activations, runs continuously), (2) keyword spotting (KWS, 45 KB peak activations, runs on VAD trigger), and (3) command classification (CMD, 60 KB peak activations, runs on KWS trigger).'
 question: Can VAD, KWS, and command models with 8 KB, 45 KB, and 60 KB arenas coexist in 512 KB Cortex-M7 SRAM?
 details:
-  realistic_solution: 'Exploit the cascading trigger pattern: VAD runs continuously, KWS only when VAD triggers, CMD only when KWS triggers. Since KWS and CMD never run simultaneously, share one arena: max(45KB, 60KB) = 60KB. Total activation SRAM: 8KB (VAD, always resident) + 60KB (shared KWS/CMD) = 68KB. Compare naive allocation: 8+45+60 = 113KB (40% more). Scheduling: VAD runs every 100ms. On VAD trigger, swap the shared arena to KWS context. On KWS match, swap to CMD. Time-multiplexed approach uses 88KB total SRAM (17% of 512KB), leaving 424KB for firmware, BLE buffers, and potential expansion to a 4th model.'
+  realistic_solution: Exploit the mutually exclusive cascading trigger pattern. KWS and CMD will never run simultaneously and can time-multiplex a single shared SRAM arena.
   common_mistake: |
     **The Pitfall:** Adding up all weights and activations as if they must all be simultaneously resident in SRAM.
     **The Rationale:** Ignoring that weights typically live in Flash memory on MCUs, and forgetting that sequentially triggered models can share a single activation arena.
     **The Consequence:** Dramatically overestimating SRAM requirements, leading to the selection of more expensive, power-hungry hardware.
   napkin_math: |
-    1. **Separate Arenas (Naive):** 8 KB + 45 KB + 60 KB = 113 KB.
-    2. **Cascading Logic:** KWS and CMD never run simultaneously. They can share an arena.
-    3. **Shared Arena Size:** max(45, 60) = 60 KB.
-    4. **Total Activation SRAM:** 8 KB (VAD, always resident) + 60 KB (shared KWS/CMD) = **68 KB**.
-    5. **Savings:** 113 KB - 68 KB = 45 KB (40% reduction).
-    6. **Total SRAM Used:** 68 KB + ~20 KB (OS/buffers) = 88 KB.
-    7. **Conclusion:** 88 KB is only 17% of 512 KB. They easily coexist with 424 KB headroom.
+    1. **Assumptions & Constraints:**
+       - SRAM: 512 KB.
+       - VAD: 8 KB (continuous). KWS: 45 KB (triggered). CMD: 60 KB (triggered).
+    2. **Calculations:**
+       - Naive Allocation: 8 + 45 + 60 = 113 KB.
+       - Shared Arena (KWS/CMD mutually exclusive): max(45, 60) = 60 KB.
+       - Optimized Allocation: 8 KB (VAD) + 60 KB (Shared) = 68 KB.
+    3. **Conclusion & Interpretation:**
+       **Result: 68 KB total (40% reduction).** The memory footprint is **Lifecycle-Bound**, solved by time-multiplexing the memory arenas.
   options:
-  - Load all three models' weights into SRAM (20 + 80 + 120 = 220 KB) plus three separate activation arenas (8 + 45 + 60 = 113 KB) = 333 KB total. Fits in 512 KB with 179 KB headroom.
-  - Exploit the cascading trigger pattern: VAD runs continuously, KWS only on VAD trigger, CMD only on KWS trigger. Since KWS and CMD never run simultaneously, share one arena: max(45, 60) = 60 KB. Total activation SRAM: 8 KB (VAD, always resident) + 60 KB (shared KWS/CMD) = 68 KB. Weights live in flash (220 KB), not SRAM. Total SRAM: 88 KB (17% of 512 KB), leaving 424 KB for expansion.
-  - All three models must have dedicated, simultaneously-allocated arenas because the audio pipeline requires continuous processing and cannot be interrupted for context switching.
-  - Use a single 60 KB arena for all three models, swapping model weights from flash between each inference. The 0.5ms weight-loading overhead is negligible compared to inference time.
+  - 'Load all three models'' weights into SRAM (20 + 80 + 120 = 220 KB) plus three separate activation arenas (8 + 45 + 60 = 113 KB) = 333 KB total. Fits in 512 KB with 179 KB headroom.'
+  - 'Exploit the cascading trigger pattern: VAD runs continuously, KWS only on VAD trigger, CMD only on KWS trigger. Since KWS and CMD never run simultaneously, share one arena: max(45, 60) = 60 KB. Total activation SRAM: 8 KB (VAD, always resident) + 60 KB (shared KWS/CMD) = 68 KB. Weights live in flash (220 KB), not SRAM. Total SRAM: 88 KB (17% of 512 KB), leaving 424 KB for expansion.'
+  - 'All three models must have dedicated, simultaneously-allocated arenas because the audio pipeline requires continuous processing and cannot be interrupted for context switching.'
+  - 'Use a single 60 KB arena for all three models, swapping model weights from flash between each inference. The 0.5ms weight-loading overhead is negligible compared to inference time.'
   correct_index: 1
 status: published
 provenance: imported

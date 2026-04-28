@@ -8,35 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Edge TPU Model Quantization and Footprint Optimization
-scenario: Your team is porting a custom MobileNetV2-based object detection model (originally
-  3.4M parameters in FP32) to run on a Google Coral Edge TPU via a USB accelerator.
-  The device provides 4 TOPS for INT8 operations within a strict 2W power budget,
-  but your initial compilation attempt fails because unsupported operations are falling
-  back to the host CPU, causing severe latency spikes. You need to diagnose the model
-  graph to identify the CPU fallback bottleneck, quantify the memory footprint reduction
-  from full INT8 quantization, and verify if the fully mapped model will execute efficiently
-  on the hardware.
-question: How would you diagnose Edge TPU CPU fallbacks in the MobileNetV2 graph and
-  verify the fully INT8 model fits and runs efficiently?
+scenario: Your team is porting a custom MobileNetV2-based object detection model to run on a Google Coral Edge TPU via a USB accelerator. Your initial compilation attempt fails because unsupported operations are falling back to the host CPU, causing severe latency spikes.
+question: How would you diagnose Edge TPU CPU fallbacks in the MobileNetV2 graph and verify the fully INT8 model fits and runs efficiently?
 details:
-  realistic_solution: The candidate should analyze the model architecture to identify
-    and replace unsupported operations (e.g., replacing Hardswish with ReLU6) to ensure
-    the entire graph compiles exclusively for the Edge TPU's limited operator set.
-    After ensuring full compatibility, they should calculate the INT8 parameter size
-    and estimate the peak activation memory to verify the model avoids expensive host-device
-    memory transfers and sustains the 4 TOPS throughput.
-  common_mistake: Candidates often assume that applying post-training quantization
-    is sufficient to run the model on the Edge TPU, ignoring that certain activation
-    functions (like Swish or Hardswish) or custom layers are unsupported and force
-    a CPU fallback. They also frequently forget to account for the memory required
-    for intermediate activation tensors alongside the parameter weights.
-  napkin_math: 'Original FP32 parameter footprint: 3.4M × 4 bytes = 13.6 MB. Fully
-    quantized INT8 parameter footprint: 3.4M × 1 byte = 3.4 MB (a 4x reduction). Peak
-    activation memory for the largest feature map (112×112×32 INT8): 112 × 112 × 32
-    × 1 byte = 401,408 bytes ≈ 392 KB. Total on-device memory during inference: 3.4
-    MB (weights) + 0.39 MB (activations) ≈ 3.8 MB. With the entire 3.8 MB INT8 footprint
-    executing on the Coral Edge TPU, the system can fully leverage the 4 TOPS engine
-    under the 2W limit.'
+  realistic_solution: Utilize the Edge TPU Compiler log analyzer to pinpoint graph partitions. Perform operator lowering by substituting unsupported activations (e.g., HardSwish) with TPU-native equivalents (ReLU6). Following QAT (Quantization-Aware Training), compute the cumulative INT8 parameter and activation footprint to guarantee the model remains entirely resident in the accelerator's SRAM, avoiding PCIe/USB bus stalls.
+  common_mistake: |
+    **The Pitfall:** Assuming post-training INT8 quantization automatically guarantees Edge TPU compilation.
+    **The Rationale:** Candidates conflate datatype precision (INT8) with operator support (e.g., missing that custom activations force graph breaks).
+    **The Consequence:** Graph partitioning occurs, resulting in catastrophic I/O latency as intermediate tensors thrash across the USB bus.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Original FP32 parameters: 3.4M
+       - Peak activation tensor: 112x112x32
+       - Precision: Fully INT8 quantized
+    2. **Calculations:**
+       - INT8 Weights: 3.4M * 1 byte = 3.4 MB
+       - Peak INT8 Activation: 112 * 112 * 32 * 1 byte = 401,408 bytes = ~0.39 MB
+       - Total On-Device Memory: 3.4 MB + 0.39 MB = ~3.8 MB
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity Bound. The 3.8 MB footprint allows full execution on the TPU without host fallback.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -49,11 +39,3 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Mathematical mismatch: ''112x112x32 * 1 byte INT8'' is roughly 401 KB (0.4 MB),
-  not 2 MB. The example does not support the 2 MB estimate.'
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

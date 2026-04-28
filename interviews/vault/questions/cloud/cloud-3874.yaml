@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: Disaggregated Prefill vs Hedged Requests for TTFT
-scenario: We serve a 30B parameter LLM on single A100 GPUs. Our strict SLA requires a P99 Time-To-First-Token (TTFT) of 150ms. Currently, our P50 TTFT is 60ms, but P99 is 250ms because long-context prefill requests cause head-of-line blocking. We evaluate two alternatives. Option A: Hedged Requests (if no tokens in 80ms, duplicate request). Option B: Disaggregated Prefill (separate Prefill/Decode nodes, transfer KV cache over 50 GB/s InfiniBand).
+scenario: We serve a 30B parameter LLM on single GPUs. Our strict SLA requires a P99 Time-To-First-Token (TTFT) of 150ms. Currently, our P50 TTFT is 60ms, but P99 is 250ms because long-context prefill requests cause head-of-line blocking. We evaluate Hedged Requests or Disaggregated Prefill.
 question: Which architecture is better for guaranteeing the SLA for a prompt that produces a 2 GB KV cache?
 details:
   realistic_solution: "Disaggregated Prefill (Option B) is the superior architectural choice. It physically isolates the bursty, compute-heavy prefill phase from the memory-bandwidth-bound decode phase, eliminating the head-of-line blocking that causes the P99 latency spikes. The InfiniBand network is fast enough to transfer the KV cache with minimal overhead, keeping the total TTFT comfortably under the SLA. Option A would waste massive compute resources and likely fail the SLA regardless due to the initial delay."
@@ -17,14 +17,15 @@ details:
     **The Rationale:** Applying standard web-service microservice patterns to LLM serving without realizing LLM prefill is heavily compute-bound.
     **The Consequence:** Hedging expensive prefill operations under high load causes a cascading failure by exponentially increasing cluster utilization and exacerbating queuing delays.
   napkin_math: |
-    *   **Option B (Disaggregated Prefill):**
-        *   KV Transfer Time = 2 GB / 50 GB/s = 0.04s = 40ms.
-        *   Total TTFT = 60ms (Prefill) + 40ms (Transfer) = **100ms** (Beats 150ms SLA).
-    *   **Option A (Hedged Requests):**
-        *   Wait time = 80ms.
-        *   Hedged Prefill = 60ms.
-        *   Total TTFT = 80ms + 60ms = **140ms minimum**.
-        *   Leaves only 10ms for queuing, while wasting 18.7 TFLOPs per hedge, rapidly saturating the cluster.
+    1. **Assumptions & Constraints:**
+       * Disaggregated Prefill network: 50 GB/s InfiniBand. KV Cache: 2 GB.
+       * Hedged Request Wait: 80ms. Prefill: 60ms. SLA: 150ms.
+    2. **Calculations:**
+       * Option B (Disaggregated) KV Transfer: 2 GB / 50 GB/s = 40ms.
+       * Option B Total TTFT: 60ms (Prefill) + 40ms (Transfer) = 100ms.
+       * Option A (Hedged) Total TTFT: 80ms (Wait) + 60ms (Prefill) = 140ms minimum (no queue tolerance).
+    3. **Conclusion & Interpretation:**
+       * Disaggregated prefill completes in **100ms**, easily clearing the 150ms SLA without cluster-saturating hedged retries. **Result: Head-of-Line-Blocking-Bound**.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Serving Latency vs. Model Freshness Tradeoff
-scenario: You can deploy one of two update strategies: (A) Synchronous online learning — every 1000 requests update the model and immediately swap it into serving (update latency: 2 seconds, serving latency increase: +20 ms during swap). (B) Asynchronous shadow updates — model updates accumulate in shadow weights, applied every 5 minutes via atomic weight swap (no serving latency impact). At 100k QPS, evaluate the CTR impact of each strategy, considering that recommendation quality decays 0.5% per minute of staleness.
+scenario: 'You can deploy one of two update strategies: (A) Synchronous online learning — every 1000 requests update the model and immediately swap it into serving (update latency: 2 seconds, serving latency increase: +20 ms during swap). (B) Asynchronous shadow updates — model updates accumulate in shadow weights, applied every 5 minutes via atomic weight swap (no serving latency impact). At 100k QPS, evaluate the CTR impact of each strategy, considering that recommendation quality decays 0.5% per minute of staleness.'
 question: At 100k QPS, how do synchronous online updates compare with 5-minute shadow updates for CTR staleness and serving latency?
 details:
   realistic_solution: 'Strategy A: Model updated every 1000 requests / 100k QPS = 0.01 seconds = every 10 ms. At 2s update latency, during those 2s: 200k requests served on stale model. During swap: 20 ms serving latency increase affects all in-flight requests. P99 latency during swap: baseline P99 + 20 ms. Swaps happen every 10 ms — system is in ''swap'' state 2× → constant elevated latency. CTR: ~0.01 min staleness average = essentially fresh. Strategy B: max staleness = 5 minutes = 2.5% CTR decay on average. CTR loss = 0.05% absolute. Revenue impact: 0.05% × 100k QPS × $0.001/click × 86400s = $4,320/day. Verdict: Strategy A is unsustainable at 100k QPS. Fix: increase batch to 100k requests (1 second batch) and use zero-downtime weight swap (double-buffering). Then swap every 1s with atomic swap <1ms overhead. Or use Strategy B with 1-minute updates instead of 5-minute.'
@@ -17,12 +17,20 @@ details:
     **The Rationale:** Candidates prioritize the theoretical CTR gains of zero-staleness without accounting for the catastrophic serving latency and throughput penalties of constant weight swapping at high QPS.
     **The Consequence:** The system violates strict P99 latency SLOs and collapses under load due to blocking swap operations.
   napkin_math: |
-    - Strategy A (Sync): At 100k QPS, 1000 requests arrive every 10 ms. Swapping takes 2s, but occurs every 10ms. The system completely collapses, violating latency SLOs constantly.
-    - Strategy B (Shadow): Average staleness = 2.5 minutes.
-    - CTR decay model: CTR loss = 2.5 min * 0.5%/min = 1.25% relative decay.
-    - Absolute CTR loss (assuming a 2% baseline CTR): 2% * 1.25% = 0.025% absolute drop.
-    - Revenue impact: 0.00025 * 100,000 QPS * $0.001/click * 86400s = $2,160/day.
-    - **Conclusion: Strategy A is functionally impossible at 100k QPS. Strategy B is stable, and the staleness cost is minimal compared to systemic collapse.**
+    1. **Assumptions & Constraints:**
+       - QPS: 100k.
+       - Sync swap: every 1000 requests, 2s latency, +20ms serving latency.
+       - Shadow swap: 5 minutes, 0ms impact.
+       - CTR decay: 0.5% relative drop per minute of staleness.
+       - Baseline CTR: 2%, CPC: $0.001.
+    2. **Calculations:**
+       - Strategy A (Sync) frequency: 1000 requests / 100k QPS = 10 ms. (Swap takes 2s, triggered every 10ms - systemic collapse).
+       - Strategy B (Shadow) staleness: 2.5 mins average.
+       - CTR decay: 2.5 min * 0.5%/min = 1.25% relative decay.
+       - Absolute CTR loss: 2% * 1.25% = 0.025% absolute drop.
+       - Daily revenue impact: 0.00025 * 100,000 QPS * $0.001/click * 86400s = $2,160/day.
+    3. **Conclusion & Interpretation:**
+       - **Result: Throughput-Bound. Strategy A is functionally impossible at 100k QPS. Strategy B is stable, and the $2,160/day staleness cost is minimal compared to systemic collapse.**
 status: published
 provenance: imported
 requires_explanation: false

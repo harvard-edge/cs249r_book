@@ -8,18 +8,19 @@ competency_area: data
 bloom_level: analyze
 phase: training
 title: ESP32-S3 Camera Sensor Domain Gap Diagnosis
-scenario: You deployed an INT8 visual wake-word model on an ESP32-S3 (240 MHz dual-core Xtensa, 512 KB SRAM, 8 MB PSRAM) connected to an inexpensive SPI camera. During dataset curation, annotators labeled a massive dataset of high-res web-scraped images downscaled to 96x96, and the quantized model achieved 98% offline accuracy. However, in production under standard office lighting, the ESP32-S3 model continuously outputs false negatives and exhibits highly erratic predictions.
-question: What dataset curation failure occurred, and how does the hardware architecture explain this symptom?
+scenario: 'You deployed an INT8 visual wake-word model on an ESP32-S3 connected to an inexpensive SPI camera. During dataset curation, annotators labeled a massive dataset of high-res web-scraped images downscaled to 96x96, and the quantized model achieved 98% offline accuracy. However, in production under standard office lighting, the ESP32-S3 model continuously outputs false negatives and exhibits highly erratic predictions.'
+question: 'What dataset curation failure occurred, and how does the hardware architecture explain this symptom?'
 details:
-  realistic_solution: The root cause is a domain shift because the ESP32-S3 lacks a dedicated hardware Image Signal Processor (ISP) to perform white balance, demosaicing, and noise reduction. The curation pipeline annotated cleanly processed, ISP-corrected web images, but the edge model is ingesting raw, noisy sensor data. The solution is to restructure the annotation workflow to label data collected directly from the ESP32-S3's SPI camera in target environments, or to aggressively augment the web dataset with synthesized CMOS noise and low dynamic range artifacts.
+  realistic_solution: 'The root cause is a domain shift because the ESP32-S3 lacks a dedicated hardware Image Signal Processor (ISP) to perform white balance, demosaicing, and noise reduction. The curation pipeline annotated cleanly processed, ISP-corrected web images, but the edge model is ingesting raw, noisy sensor data. The solution is to restructure the annotation workflow to label data collected directly from the ESP32-S3''s SPI camera in target environments, or to aggressively augment the web dataset with synthesized CMOS noise and low dynamic range artifacts.'
   common_mistake: |
-    **The Pitfall:** Blaming the INT8 vector quantization or memory limits instead of domain shift.
-    **The Rationale:** Candidates often jump to blaming the INT8 vector quantization process for dropping precision, or they suspect a memory leak in the 512 KB SRAM.
-    **The Consequence:** They fail to connect the predictive symptom to a massive dataset bias caused by the lack of edge-native sensor data.
+    **The Pitfall:** Blaming the INT8 vector quantization or memory limits instead of identifying the domain shift.
+    **The Rationale:** Candidates often jump to suspecting a memory leak or precision drop during quantization because they ignore the physical sensor pipeline.
+    **The Consequence:** They fail to connect the predictive symptom to a massive dataset bias caused by the lack of edge-native sensor data, wasting weeks tuning hyperparameters.
   napkin_math: |
-    1. Memory: A 96x96 RGB input tensor consumes 96 * 96 * 3 = 27.6 KB of the 512 KB SRAM.
-    2. Compute Overhead: Writing a software-based ISP to clean the image before inference requires roughly 100 instructions per pixel.
-    3. Total ISP cycles: 96 * 96 * 100 = 921,600 cycles.
-    4. Latency added: On the 240 MHz Xtensa core, this adds ~3.84 ms of compute overhead per frame.
-    5. Result: Because the team skipped the software ISP to save cycles, the model is fed **raw, noisy 27.6 KB buffers** that entirely mismatch the curated training distribution.
+    1. **Assumptions & Constraints:** 96x96 RGB input tensor. ESP32-S3 at 240 MHz. ISP software takes ~100 instructions/pixel.
+    2. **Calculations:**
+       - Memory: 96 * 96 * 3 = 27,648 bytes = ~27.6 KB of the 512 KB SRAM.
+       - Total ISP cycles: 96 * 96 * 100 = 921,600 cycles.
+       - Latency added: 921,600 cycles / 240,000,000 Hz = 0.00384 seconds = 3.84 ms per frame.
+    3. **Conclusion & Interpretation:** **To save 3.84 ms of compute, the team skipped the software ISP, feeding raw, noisy 27.6 KB buffers into the model.** Result: Data-Bound Failure.
 status: published

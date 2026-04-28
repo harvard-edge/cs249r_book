@@ -11,17 +11,23 @@ title: Evaluating Networked Serving vs Embedded Deployment
 scenario: You are evaluating whether to extract an image embedding model from a monolithic application into a standalone networked microservice (using Triton Inference Server) on NVIDIA T4 GPUs. Currently, the monolith processes requests unbatched on the GPU, taking 15ms per image. The proposed microservice adds a 4ms network RPC round-trip overhead but enables dynamic batching across all incoming traffic. On the T4, processing a batch of 8 images takes 20ms. Peak traffic is 400 QPS, and the strict P99 latency SLA is 50ms.
 question: Should you extract the image embedding model into a Triton microservice, how many T4 GPUs are needed at 400 QPS, and what max batch delay meets 50ms p99?
 details:
-  realistic_solution: The networked microservice is highly justified as it reduces required GPUs from 6 to 1. To meet the 50ms SLA, the max batch delay must be configured to <= 26ms (50ms SLA - 20ms execution - 4ms RPC). Setting a 20ms batch delay is optimal, as it exactly accumulates a batch of 8 at 400 QPS.
+  realistic_solution: 'The networked microservice is highly justified. Implement Triton with dynamic batching, configuring the max_queue_delay to perfectly accumulate batches within the SLA bounds.'
   common_mistake: |
     **The Pitfall:** Rejecting the networked architecture purely due to the 4ms RPC latency penalty.
     **The Rationale:** Candidates hyper-focus on the added network hop and miss the throughput benefits of dynamic batching.
     **The Consequence:** They configure the maximum batch delay to >26ms, violating the 50ms SLA, or they deploy 6 GPUs instead of 1.
   napkin_math: |
-    - Unbatched Capacity: 1000ms / 15ms = ~66.6 QPS per GPU. Requires ceil(400/66.6) = 6 GPUs.
-    - Batched Capacity: 1000ms / 20ms = 50 batches/sec * 8 reqs = 400 QPS. Requires 1 GPU.
-    - Latency Budget: 50ms (SLA) - 4ms (RPC) - 20ms (Exec) = 26ms max wait time.
-    - At 400 QPS (1 req / 2.5ms), waiting 20ms collects exactly 8 requests.
-    - **Total P99 latency = 20ms (wait) + 20ms (exec) + 4ms (RPC) = 44ms.**
+    1. **Assumptions & Constraints:**
+       - Peak traffic: 400 QPS. P99 latency SLA: 50ms.
+       - Unbatched (1 image): 15ms. Batched (8 images): 20ms.
+       - RPC Overhead: 4ms.
+    2. **Calculations:**
+       - Unbatched capacity: 1000ms / 15ms = ~66.6 QPS/GPU. Requires ceil(400 / 66.6) = 6 GPUs.
+       - Batched capacity: 1000ms / 20ms = 50 batches/s * 8 reqs = 400 QPS/GPU. Requires 1 GPU.
+       - Latency budget: 50ms (SLA) - 4ms (RPC) - 20ms (Execution) = 26ms max batch wait time.
+       - Batching time at 400 QPS (2.5ms/req) for 8 reqs: 20ms wait time. Total latency: 20+20+4 = 44ms (<50ms).
+    3. **Conclusion & Interpretation:**
+       - **Result: 1 GPU required with 26ms max delay. The networked architecture optimizes a Compute-Bound workload via dynamic batching while respecting the SLA.**
 status: published
 provenance: imported
 requires_explanation: false

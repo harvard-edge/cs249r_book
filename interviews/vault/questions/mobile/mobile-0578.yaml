@@ -8,18 +8,25 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The NNAPI Fragmentation Problem
-scenario: "You deploy the same TFLite INT8 model across three Android flagships: Snapdragon 8 Gen 3, Tensor G3, and Exynos 2400. Using NNAPI delegation, you measure 6ms, 9ms, and 22ms respectively."
-question: "Why does the same TFLite INT8 model run in 6 ms on Snapdragon 8 Gen 3 but 22 ms on Exynos 2400?"
+scenario: "You deploy the same TFLite INT8 model across three Android flagships. Using NNAPI delegation, you measure 6ms, 9ms, and 22ms respectively depending on the hardware platform."
+question: "Why does the same TFLite INT8 model exhibit a massive 3x latency regression (22ms vs 6ms) on a specific flagship Exynos NPU?"
 details:
-  realistic_solution: 'Three fragmentation layers compound: (1) Op coverage — Snapdragon runs 95% on NPU, Exynos only 70% (missing depthwise variants). (2) Quantization — Exynos adds 20% overhead on asymmetric INT8. (3) Compiler maturity — Qualcomm fuses aggressively; Samsung leaves ops unfused. Snapdragon: 6ms (5ms NPU + 0.5ms CPU + 0.5ms transfer). Exynos: 22ms (8.3ms NPU + 3ms CPU + 10.7ms transfers). Fix: ship simplified model variant for Exynos using only well-supported ops.'
+  realistic_solution: |
+    Fragmentation in NNAPI driver OP coverage forces severe graph partitioning. On the slower device, unsupported depthwise variants or asymmetric INT8 operations cause the compiler to fallback to the CPU, introducing massive tensor transfer overheads (DMA) and breaking kernel fusion. Resolve this by deploying a simplified model graph containing only widely supported, standard operators to minimize cross-device variance.
   common_mistake: |
     **The Pitfall:** Assuming NPU hardware speed solely dictates execution latency.
-    **The Rationale:** Engineers often blame a "slower NPU," failing to recognize compiler maturity and OP coverage fragmentation.
-    **The Consequence:** Poorly optimized models on specific devices.
+    **The Rationale:** Engineers often blame a "slower NPU," failing to recognize compiler maturity and OP coverage fragmentation across Android SoC vendors.
+    **The Consequence:** Poorly optimized models, unpredictable regressions, and battery drain on specific devices.
   napkin_math: |
-    - Snapdragon: 95% NPU (`5ms`) + 5% CPU (`0.5ms`) + 1 transfer (`0.5ms`) = `6ms`.
-    - Exynos: 70% NPU (`6ms * 1.2 quant * 1.15 compiler = 8.3ms`) + 30% CPU (`3ms`) + 10 transfers (`10.7ms`) = `22ms`.
-    - **Conclusion:** The **transfer overhead** from poor OP coverage dominates the Exynos latency.
+    1. **Assumptions & Constraints:**
+       - Fast NPU (Snapdragon): 95% coverage, 1 subgraph transition (0.5ms overhead).
+       - Slow NPU (Exynos): 70% coverage, 10 subgraph transitions (10.7ms overhead).
+       - Base NPU compute latency: ~5-6ms. CPU fallback: ~0.5-3ms.
+    2. **Calculations:**
+       - Fast Latency: 5ms (NPU) + 0.5ms (CPU) + 0.5ms (DMA) = 6ms.
+       - Slow Latency: 8.3ms (NPU) + 3ms (CPU) + 10.7ms (DMA) = 22ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 10.7ms DMA overhead.** Graph partitioning creates a massive **memory-transfer bottleneck** due to poor OP coverage, overriding compute capabilities.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,8 +8,8 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Spot Instance Strategy for Training Resilience
-scenario: You are training a 13B model on 32 MI300X spot instances at 70% discount. Spot interruptions occur on average every 2 hours with a 2-minute warning.
-question: What checkpointing strategy maximizes cost savings while minimizing wasted compute for a 13B model on 32 spot instances?
+scenario: 'You are training a 13B model on 32 spot instances at a 70% discount. Spot interruptions occur on average every 2 hours with a 2-minute warning.'
+question: 'What checkpointing strategy maximizes cost savings while minimizing wasted compute for a 13B model on 32 spot instances?'
 details:
   realistic_solution: 'Optimal checkpoint interval (Young''s approximation): interval = sqrt(2 × mean_time_between_failures × checkpoint_cost). Checkpoint cost for 13B model: 13B × 2B (BF16) = 26 GB to write. At NVMe write speed of 3 GB/s: ~9 seconds. Plus optimizer states: 13B × 12B = 156 GB across 32 GPUs (ZeRO-sharded), so each GPU writes ~4.9 GB → 1.6 s. Total checkpoint time ≈ 10 seconds. MTBF = 2 hours = 7200 s. Optimal interval = sqrt(2 × 7200 × 10) = sqrt(144000) ≈ 380 seconds ≈ 6.3 minutes. Strategy: checkpoint every 6 minutes to local NVMe, async upload to S3 every 30 minutes. On 2-minute interruption warning: immediately checkpoint (10 s) and gracefully shut down. Expected wasted compute per interruption: 6/2 = 3 minutes average (half the checkpoint interval). At 3 interruptions/day: 9 GPU-minutes wasted. Cost savings: 32 GPUs × $3/hr × 0.7 discount × 24h = $1,612/day saved. Wasted compute cost: negligible.'
   common_mistake: |
@@ -17,13 +17,15 @@ details:
     **The Rationale:** Candidates either focus solely on minimizing wasted compute without considering checkpoint overhead, or they ignore the high frequency of spot interruptions.
     **The Consequence:** Either excessive time and bandwidth are spent on checkpointing, or nearly all progress is lost upon interruption.
   napkin_math: |
-    1. **Checkpoint cost:** 13B × 2B (BF16) = 26 GB to write. At NVMe write speed of 3 GB/s: ~9 seconds.
-    2. **Optimizer states:** 13B × 12B = 156 GB across 32 GPUs (ZeRO-sharded), so each GPU writes ~4.9 GB → 1.6 s.
-    3. **Total checkpoint time:** ≈ 10 seconds.
-    4. **Optimal interval (Young's):** sqrt(2 × 7200s × 10s) = sqrt(144000) ≈ 380 seconds ≈ 6.3 minutes.
-    5. **Overhead:** 10 s every 6 min = 2.8% overhead.
-    6. **Waste per interruption:** 3 min average.
-    **Conclusion:** Spot saves $1,612/day vs ~$4.50/day in wasted compute.
+    1. **Assumptions & Constraints:**
+       - Model: 13B parameters.
+       - NVMe write speed: 3 GB/s. MTBF: 2 hours (7200 s).
+    2. **Calculations:**
+       - Checkpoint payload = 13B * 2B (weights) + 13B * 12B (ZeRO-sharded optim states) / 32 GPUs = ~4.9 GB per GPU.
+       - Total checkpoint time = ~9s (weights) + ~1.6s (states) = ~10 seconds.
+       - Optimal interval (Young's) = sqrt(2 * 7200s * 10s) = sqrt(144,000) = ~380 seconds = 6.3 minutes.
+       - Waste per interruption = 3 min average (half interval).
+    3. **Conclusion & Interpretation:** **Result: Reliability-Bound**. Spot saves ~$1,612/day vs ~$4.50/day in wasted compute overhead with a ~6-minute checkpoint interval.
 status: published
 provenance: imported
 requires_explanation: false

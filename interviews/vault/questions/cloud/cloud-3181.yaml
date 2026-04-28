@@ -8,19 +8,25 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Parallel Draft and Target Execution Scheduling
-scenario: In standard speculative decoding, draft generation and target verification are serial: draft runs, then target verifies. On a 4x H100 system with the target using TP=4 and a 1B draft, you need to design a pipelining scheme that overlaps draft generation of round N+1 with target verification of round N.
-question: "How would you overlap draft generation of round N+1 with target verification of round N on 4x H100, and what rollback issue arises?"
+scenario: In standard speculative decoding, draft generation and target verification are serial. On a 4-GPU system with the target using TP=4 and a 1B draft, you need to design a pipelining scheme to optimize throughput.
+question: How would you overlap draft generation of round N+1 with target verification of round N, and what rollback issue arises?
 details:
-  realistic_solution: 'Approach: use GPU-0 for both draft (when target is verifying) since during target verification with TP=4, each GPU runs 1/4 of the work — GPU-0 has spare SM capacity. Target verification at batch=1: each GPU uses ~30% of SMs (memory-bound). Draft on GPU-0: 1B model needs ~5% of SMs. Can coexist. Pipeline: Round N: [Draft_N generates K tokens] -> [Target verifies K tokens (GPU 0-3) | Draft_N+1 generates K tokens (GPU-0, different stream)] -> [Accept/reject N, Draft_N+1 ready]. Timing: target verify (140GB over 4 GPUs = 35GB/GPU at 3.35 TB/s) = 10.5ms. Draft K=5 = 5ms. Draft finishes within verification window. But: draft generation for round N+1 must use SPECULATIVE tokens from round N (not yet confirmed). If round N rejects at position 3, draft N+1''s tokens from position 4+ are invalid. Fix: run draft N+1 from the last confirmed position (conservative) or speculatively assume full acceptance (optimistic, requires rollback). Optimistic approach: full acceptance happens alpha^5 = 0.8^5 ≈ 33% of the time. 67% of time: wasted 5ms of draft compute.'
+  realistic_solution: Use GPU-0 for both draft (when target is verifying) since during target verification with TP=4, each GPU runs 1/4 of the work leaving spare SM capacity on GPU-0. The rollback issue is that draft generation for round N+1 must use SPECULATIVE tokens from round N. If round N rejects a token, draft N+1's tokens are invalid requiring an optimistic execution model.
   common_mistake: |
-    **The Pitfall:** Running draft and target kernels concurrently on the same GPUs.
+    **The Pitfall:** Running draft and target kernels concurrently on the same GPUs without resource partitioning.
     **The Rationale:** Candidates assume CUDA streams on the same GPU will perfectly parallelize without contention.
-    **The Consequence:** The concurrent kernels compete for SMs and memory bandwidth, slowing down both processes.
+    **The Consequence:** The concurrent kernels compete for SMs and memory bandwidth, slowing down both processes and increasing total latency.
   napkin_math: |
-    - Serial time: 10.5ms (verify) + 5ms (draft) = 15.5ms per round.
-    - Optimistic rollback waste: 67% chance of rejection * 5ms = 3.35ms average penalty.
-    - Net pipelined time: 10.5ms + 3.35ms = 13.85ms.
-    - **Net improvement: 15.5ms vs 13.85ms = 10.6% speedup.**
+    1. **Assumptions & Constraints:**
+       - Target verification time: 10.5ms.
+       - Draft generation time (K=5): 5ms.
+       - Rejection probability per sequence: ~67%.
+    2. **Calculations:**
+       - Serial time = 10.5ms + 5ms = 15.5ms.
+       - Wasted draft time on optimistic rollback = 67% chance of rejection * 5ms = 3.35ms.
+       - Net pipelined time = 10.5ms + 3.35ms = 13.85ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** Pipelining improves latency by ~10.6% (15.5ms vs 13.85ms) even accounting for the optimistic rollback penalty.
 status: published
 provenance: imported
 requires_explanation: true

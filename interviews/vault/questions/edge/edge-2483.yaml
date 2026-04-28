@@ -8,19 +8,25 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Vision Transformer Memory Spillage
-scenario: An L4 autonomous driving module uses a Jetson AGX Orin. It receives 10 GB/s of uncompressed sensor data. The local unified memory has a 204.8 GB/s bandwidth limit.
+scenario: An L4 autonomous driving module receives 10 GB/s of uncompressed sensor data. The local unified memory has a 204.8 GB/s bandwidth limit.
 question: Evaluate why memory bandwidth bottlenecks a 50-GFLOP Vision Transformer despite the 204.8 GB/s limit, and propose a memory-fusion strategy.
 details:
-  realistic_solution: 'Memory bandwidth is saturated by intermediate activation reads/writes between un-fused transformer layers, not the raw input. The attention mechanism causes quadratic activation memory traffic. Solution: Implement kernel fusion (e.g., FlashAttention) to keep the attention matrix strictly in local SRAM.'
+  realistic_solution: "The 204.8 GB/s LPDDR bandwidth ceiling is annihilated by the quadratic read/write overhead of un-fused multi-head self-attention. While the 10 GB/s sensor input is trivial, constantly spilling massive intermediate activation tensors to DRAM between 50 transformer layers generates catastrophic internal memory traffic. Implementing kernel fusion techniques (e.g., FlashAttention) restricts the N^2 attention matrix strictly to local SRAM, rescuing throughput."
   common_mistake: |
     **The Pitfall:** Assuming the uncompressed 10 GB/s sensor data stream is the primary memory bottleneck.
     **The Rationale:** Candidates look at the large input pipe and ignore the quadratic read/write amplification of un-fused intermediate activations.
     **The Consequence:** Optimizations focus on input compression rather than implementing flash attention or kernel fusion.
   napkin_math: |
-    - Intermediate activations per layer: 20MB read + 20MB write = 40MB traffic.
-    - 50 Transformer layers: 50 * 40MB = 2GB traffic per frame.
-    - At 60 FPS: 2GB * 60 = 120 GB/s internal traffic.
-    - This consumes over 50% of the **204.8 GB/s budget** strictly on intermediate self-attention state.
+    1. **Assumptions & Constraints:**
+       - Memory bandwidth: 204.8 GB/s.
+       - Input stream: 10 GB/s.
+       - Compute: 50-GFLOP Vision Transformer (50 layers).
+    2. **Calculations:**
+       - Intermediate activations/layer = 20MB read + 20MB write = 40MB.
+       - Internal traffic (50 layers) = 50 * 40MB = 2 GB/frame.
+       - Bandwidth at 60 FPS = 2 GB * 60 = 120 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **120 GB/s internal traffic.** Un-fused self-attention creates quadratic read/write amplification that quickly saturates memory.
 status: published
 provenance: llm-draft
 expected_time_minutes: 14

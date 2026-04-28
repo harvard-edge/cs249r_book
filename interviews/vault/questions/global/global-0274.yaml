@@ -8,19 +8,26 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: GPU vs CPU Data Preprocessing for Training
-scenario: Your image classification training pipeline spends 40% of wall-clock time waiting for data preprocessing (resize, augment, normalize) on 32 CPU cores. The GPU sits idle during this time.
-question: "How would you compare doubling CPU cores, GPU preprocessing, and offline preprocessed shards for this training pipeline?"
+scenario: Your image classification training pipeline spends 40% of wall-clock time waiting for data preprocessing on 32 CPU cores. The GPU sits idle during this time.
+question: How would you compare doubling CPU cores, GPU preprocessing, and offline preprocessed shards for this training pipeline?
 details:
-  realistic_solution: 'Option A (64 CPUs): Doubles preprocessing throughput. If 32 cores → 40% idle, 64 cores → ~20% idle (Amdahl''s Law: speedup = 1/(0.6 + 0.4/2) = 1.25x overall). Cost: ~$0.50/hr for 32 extra vCPUs. Reduces wall time from T to 0.8T. Option B (GPU DALI): Moves preprocessing to GPU, eliminating CPU→GPU data copy latency. GPU preprocessing is 10-50x faster than CPU for image operations. Training time: ~0.62T (eliminates 38% of the 40% idle, some overhead). Cost: zero extra — uses same GPU. Caveat: uses 2-5 GB VRAM for preprocessing buffers. Option C (Pre-process offline): Eliminates runtime preprocessing entirely. Training time: 0.6T (removes all CPU preprocessing wait). Cost: 2-10x storage (augmented copies), plus offline preprocessing compute. Only works for deterministic augmentation — random crop/flip must still be applied online. Best approach: B for random augmentations (GPU handles them in the pipeline), C for expensive fixed transforms (tokenization, feature extraction). Avoid A unless GPU memory is critically constrained.'
+  realistic_solution: Doubling CPUs provides a 1.25x speedup for added cost. Moving to GPU (DALI) provides a ~1.6x speedup at no extra cost, but consumes VRAM. Offline preprocessing provides the best speedup but costs significant storage and only works for deterministic augmentation. GPU is best for random augmentations.
   common_mistake: |
-    **The Pitfall:** Automatically choosing GPU preprocessing.
-    **The Rationale:** GPUs are universally faster at matrix operations like image resizing.
-    **The Consequence:** Precious GPU memory is consumed by preprocessing buffers, reducing the available batch size for actual training.
+    **The Pitfall:** Automatically choosing GPU preprocessing without evaluating memory limits.
+    **The Rationale:** GPUs are universally recognized as faster at matrix operations like image resizing.
+    **The Consequence:** Precious GPU memory is consumed by preprocessing buffers, forcing a reduction in batch size that outweighs the preprocessing gains.
   napkin_math: |
-    - Option A (64 CPUs): Idle drops to 20%, 1.25x speedup, +$0.50/hr.
-    - Option B (GPU DALI): Idle drops to ~2%, 1.6x speedup, no extra cost (but uses VRAM).
-    - Option C (Offline shards): Idle drops to 0%, 1.67x speedup, 2-10x storage cost.
-    - **Option B gives the best cost-performance ratio for random augmentations.**
+    1. **Assumptions & Constraints:**
+       - Baseline: 60% GPU active, 40% CPU preprocessing wait.
+       - Option A (64 CPUs): 2x CPU throughput.
+       - Option B (GPU DALI): ~10x-50x faster preprocessing, uses VRAM.
+       - Option C (Offline shards): 0% online CPU wait.
+    2. **Calculations:**
+       - Option A: Wait time drops from 40% to 20%. Speedup = 1 / (0.6 + 0.2) = 1.25x.
+       - Option B: Wait time drops to ~2%. Speedup = 1 / (0.6 + 0.02) = 1.61x.
+       - Option C: Wait time drops to 0%. Speedup = 1 / 0.6 = 1.67x.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (CPU).** Moving to GPU DALI provides a 1.61x speedup at no extra hourly hardware cost, optimizing the cost-performance ratio for random augmentations.
 status: published
 provenance: imported
 requires_explanation: false

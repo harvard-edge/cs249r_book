@@ -8,20 +8,26 @@ competency_area: deployment
 bloom_level: apply
 phase: both
 title: Hailo-8 CI/CD Pipeline Bandwidth Bottleneck
-scenario: You are investigating a performance anomaly for a model deployed on a Hailo-8 accelerator (26 TOPS INT8, 2.5W, no local DRAM). The hardware-in-the-loop pipeline reports that while the accelerator's compute utilization is under 2%, the system is capped at 50 frames per second. The model processes 4MB uncompressed input frames per inference.
+scenario: You are investigating a performance anomaly for a model deployed on a Hailo-8 accelerator. The hardware-in-the-loop pipeline reports that while the accelerator's compute utilization is under 2%, the system is capped at 50 frames per second. The model processes 4MB uncompressed input frames per inference.
 question: Why does the Hailo-8 stay under 2% compute utilization yet cap at 50 FPS on 4MB input frames?
 details:
-  realistic_solution: The MLOps pipeline accurately reflects a deeply memory-bound system where the Hailo-8 dataflow accelerator is starving for data. Because there is no local DRAM to cache inputs or intermediate tensors, every single inference requires streaming 4MB across the host interface. The bottleneck is the host memory or PCIe bandwidth, not the accelerator's compute. To resolve this, preprocessing steps like resizing should run on the host CPU to reduce the payload size before streaming to the Hailo-8.
+  realistic_solution: |
+    The edge system is catastrophically I/O bound. Dataflow accelerators like the Hailo-8 lack local DRAM, meaning every tensor must be streamed synchronously from host memory across the PCIe/USB bus. Streaming 4MB of raw pixels per frame immediately saturates the host bus interface, leaving the 26 TOPS NPU starved for data. The architectural fix is to push the spatial preprocessing (resizing, cropping) upstream to the host CPU or Image Signal Processor (ISP), drastically reducing the payload size before it hits the external bus.
   common_mistake: |
     **The Pitfall:** Assuming poor INT8 quantization or inefficient model compilation is to blame.
     **The Rationale:** Fixating on the 26 TOPS compute spec and ignoring the explicit "no local DRAM" hardware constraint.
     **The Consequence:** Wasting engineering cycles optimizing math kernels instead of addressing the massive host-to-device streaming I/O bottleneck.
   napkin_math: |
-    * **Compute Capacity**: 26 TOPS = 26,000 GOPS.
-    * **Theoretical FPS limit**: Assuming an 8 GOPS model, 26,000 / 8 = 3,250 FPS.
-    * **Observed Compute Utilization**: 50 FPS × 8 GOPS = 400 GOPS (400 / 26,000 = ~1.5%).
-    * **Memory Bandwidth Required**: 50 FPS × 4 MB/frame = 200 MB/s.
-    * **Conclusion**: The host connection (e.g., PCIe Gen2 x1 or USB 3.0) is maxing out at **~200 MB/s**, entirely starving the compute units.
+    1. **Assumptions & Constraints:**
+       - Accelerator: 26 TOPS INT8.
+       - Input Size: 4 MB per frame.
+       - Observed FPS: 50.
+    2. **Calculations:**
+       - Current Bandwidth Used: 50 FPS * 4 MB = 200 MB/s.
+       - Theoretical Max FPS (Compute): 26,000 GOPS / 8 GOPS/frame = 3,250 FPS.
+       - Compute Utilization: 50 FPS / 3250 FPS = ~1.5%.
+    3. **Conclusion & Interpretation:**
+       - **Result: The bus is maxed at 200 MB/s. Bottleneck: I/O Bandwidth-Bound (Bus Starvation).**
 status: published
 provenance: imported
 requires_explanation: false

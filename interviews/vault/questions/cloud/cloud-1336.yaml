@@ -8,20 +8,23 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: Graph Tracing Control Flow OOM
-scenario: You are deploying a custom Transformer on a 16GB VRAM GPU. The model's `forward` method contains data-dependent control flow: `if seq_len > 512: return flash_attn(x)` else `return standard_attn(x)`. You compile the model using `torch.jit.trace` with a dummy input of shape `[batch=1, seq_len=128]`. The `standard_attn` path consumes 0.5GB at `seq_len=128` and scales quadratically. During peak hours, a request with `seq_len=1024` arrives.
+scenario: You are deploying a custom Transformer on a GPU. The model's `forward` method contains data-dependent control flow conditionally calling flash attention. You compile the model using `torch.jit.trace` with a dummy input of shape `[batch=1, seq_len=128]`. The standard attention path consumes 0.5GB at `seq_len=128` and scales quadratically. During peak hours, a request with `seq_len=1024` arrives.
 question: What happens when the traced Transformer compiled at seq_len 128 receives seq_len 1024, and how much VRAM does it require?
 details:
-  realistic_solution: '`torch.jit.trace` only records the sequence of operations executed by the dummy input, silently omitting unexecuted control flow branches. The trace bakes in the `standard_attn` path. The `seq_len=1024` request will be forced through `standard_attn`, which requires 32GB of VRAM. Since the T4 only has 16GB, it will trigger an Out-Of-Memory (OOM) crash. The correct approach is to use `torch.jit.script` (which parses Python AST to preserve control flow) or modern compilers like `torch.compile`.'
+  realistic_solution: '`torch.jit.trace` only records the sequence of operations executed by the dummy input, silently omitting unexecuted control flow branches. The trace bakes in the standard attention path. The `seq_len=1024` request will be forced through standard attention, which requires 32GB of VRAM. This will trigger an Out-Of-Memory (OOM) crash. The correct approach is to use `torch.jit.script` (which parses Python AST to preserve control flow) or modern compilers like `torch.compile`.'
   common_mistake: |
     **The Pitfall:** Assuming the traced model dynamically evaluates the `if` statement at runtime.
     **The Rationale:** Developers confuse `torch.jit.trace` (which blindly records the specific ops executed by the dummy input) with `torch.jit.script` or AST-parsing compilers that preserve control flow.
     **The Consequence:** Production OOM crashes when edge cases hit code paths that the trace entirely erased.
   napkin_math: |
-    *   **Sequence Length Scale Factor:** 1024 / 128 = 8x.
-    *   **Scaling Complexity:** Standard attention memory scales quadratically O(N^2).
-    *   **Expected VRAM:** 0.5 GB * (8^2) = 0.5 GB * 64 = 32 GB.
-    *   **GPU Limit Check:** 32 GB > 16 GB available.
-    *   **Final Result:** **The traced model ignores the flash_attn branch, forcing the 1024-length request through standard attention, requiring 32 GB and causing an OOM crash.**
+    1. **Assumptions & Constraints:**
+       * `seq_len=128` requires 0.5GB VRAM.
+       * Memory scaling is quadratic O(N^2).
+    2. **Calculations:**
+       * Sequence Length Scale Factor: 1024 / 128 = 8x.
+       * Expected VRAM: 0.5 GB * (8^2) = 0.5 GB * 64 = 32 GB.
+    3. **Conclusion & Interpretation:**
+       * **Result: OOM Crash.** The traced model ignores the flash_attn branch, forcing the 1024-length request through standard attention, requiring 32 GB and causing an OOM crash.
 status: published
 provenance: imported
 requires_explanation: false

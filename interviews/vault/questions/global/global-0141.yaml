@@ -7,48 +7,28 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: The Paged Attention OOM
-scenario: 'You are deploying a high-throughput translation service using an 8B parameter model on a single
-  80GB A100. Average requests are extremely short: 15 prompt tokens and 15 decode tokens. To maximize
-  contiguous memory reads, you configure PagedAttention with a block size of 512 tokens. However, the
-  system OOMs at just 64 concurrent requests, falling drastically short of the expected >1000 QPS theoretical
-  capacity.'
+title: The PagedAttention OOM
+scenario: 'You are deploying a high-throughput translation service using an 8B parameter model. Average requests are extremely short: 15 prompt tokens and 15 decode tokens. To maximize contiguous memory reads, you configure PagedAttention with a block size of 512 tokens. However, the system OOMs at just 64 concurrent requests.'
 question: "Why does 512-token PagedAttention block sizing OOM at 64 short translation requests on an 80GB A100?"
 details:
-  realistic_solution: The root cause is severe internal memory fragmentation due to an oversized PagedAttention
-    block size. PagedAttention allocates memory in fixed-size blocks. If a request only needs a few tokens,
-    it still consumes an entire block. With a block size of 512 tokens and an average sequence length
-    of 30 tokens, each request allocates a full 512-token block, leaving 482 tokens of KV cache capacity
-    completely wasted. At 64 concurrent requests, this internal fragmentation wastes gigabytes of VRAM,
-    prematurely exhausting the KV cache pool and causing an OOM. The solution is to reduce the block size
-    to 16 or 32 tokens, which tightly packs the short sequences and virtually eliminates internal fragmentation,
-    restoring the expected >1000 QPS capacity.
-  common_mistake: Assuming the OOM is caused by the model weights or activation memory during the forward
-    pass.
-  napkin_math: KV size per token (8B model, 32 layers, 8 KV heads, 128 dim) = 32 * 8 * 128 * 2 (K+V) *
-    2 bytes = 128 KB. Block size = 512 tokens. Memory per block = 512 * 128 KB = 64 MB. For a 30-token
-    request, we use 30 * 128 KB = 3.8 MB, but allocate 64 MB. Wasted memory per request = 60.2 MB. For
-    64 requests, wasted memory = 64 * 60.2 MB = ~3.8 GB. While 3.8 GB doesn't seem like enough to OOM an 80GB
-    card on its own, if the KV cache pool was conservatively sized (e.g., 5GB allocated after weights/activations),
-    this internal fragmentation instantly depletes it.
+  realistic_solution: 'The root cause is severe internal memory fragmentation due to an oversized PagedAttention block size. PagedAttention allocates memory in fixed-size blocks. If a request needs a few tokens, it consumes an entire block. With a block size of 512 tokens and average length of 30 tokens, each request wastes 482 tokens of KV cache capacity. At 64 concurrent requests, this internal fragmentation wastes gigabytes of VRAM, prematurely exhausting the KV cache pool and causing an OOM. The solution is to reduce the block size to 16 or 32 tokens.'
+  common_mistake: |
+    **The Pitfall:** Assuming the OOM is caused by the model weights or activation memory during the forward pass.
+    **The Rationale:** Candidates overlook internal fragmentation caused by a PagedAttention block size far larger than the average sequence length.
+    **The Consequence:** Futile attempts to reduce batch size or quantize weights instead of tuning the block size.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 8B model: 32 layers, 8 KV heads, 128 dim.
+       - Block size = 512 tokens. Request length = 30 tokens.
+    2. **Calculations:**
+       - KV size per token = 32 * 8 * 128 * 2 * 2 = 128 KB.
+       - Memory per block = 512 * 128 KB = 64 MB.
+       - Required per request = 30 * 128 KB = 3.8 MB.
+       - Wasted memory per request = 64 MB - 3.8 MB = 60.2 MB.
+       - Wasted for 64 requests = 64 * 60.2 MB = ~3.8 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound OOM.** Internal fragmentation instantly depletes the available KV cache pool.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-tags:
-- memory-fragmentation
-- llm-serving
-- throughput

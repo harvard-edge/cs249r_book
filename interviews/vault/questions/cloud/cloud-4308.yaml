@@ -8,36 +8,24 @@ competency_area: deployment
 bloom_level: understand
 phase: inference
 title: Continuous vs. Static Batching in Decode Pool
-scenario: Explain why continuous batching (also called iteration-level scheduling)
-  significantly improves decode GPU utilization compared to static batching, specifically
-  in the context of a disaggregated serving system where new sequences arrive from
-  the prefill pool asynchronously. What is the key scheduling event that enables continuous
-  batching?
-question: Why does continuous batching improve decode utilization for asynchronous
-  prefill arrivals, and what scheduling event enables it?
+scenario: You are analyzing a disaggregated serving system where new sequences arrive from the prefill pool asynchronously. The system must optimize decode GPU utilization.
+question: Why does continuous batching improve decode utilization for asynchronous prefill arrivals, and what scheduling event enables it?
 details:
-  realistic_solution: 'Static batching waits until a full batch of new sequences is
-    available before starting a decode run; all sequences must finish before the next
-    batch starts. This means the GPU is idle after sequences of varying length finish,
-    waiting for the slowest sequence. Continuous batching inserts new sequences into
-    the running batch at each decode step boundary. The key event: at the end of each
-    decode step, the scheduler checks for completed sequences (those that emitted
-    EOS) and newly arrived KV-caches from prefill. It evicts completed slots and inserts
-    new sequences in a single atomic swap. This maximizes GPU occupancy because the
-    batch size stays approximately constant throughout the decode pool''s lifetime.
-    In a disaggregated system, KV-caches arrive from prefill nodes asynchronously;
-    continuous batching is the mechanism that absorbs this asynchrony without GPU
-    stalls.'
-  common_mistake: Saying continuous batching just 'keeps the GPU busy' without explaining
-    the mechanism. The key is the per-step insertion point, not simply avoiding idle
-    time.
-  napkin_math: 'Static batching efficiency: if batch size = 32 and sequences have
-    uniform geometric output length with mean μ=200 tokens, the expected idle time
-    per batch = time waiting for slowest sequence. With geometric distribution, max
-    of 32 geometric(1/200) RVs ≈ 200 × ln(32) = 200 × 3.47 = 694 tokens before batch
-    ends. GPU runs at 100% for first 200 tokens on avg, then partially idle as sequences
-    complete. Wasted steps ≈ 50%. Continuous batching: GPU always has ≈ 32 active
-    sequences, near 100% occupancy. Throughput improvement: ~2×.'
+  realistic_solution: 'Static batching waits until a full batch of new sequences is available before starting a decode run; all sequences must finish before the next batch starts. This means the GPU is idle after sequences of varying length finish, waiting for the slowest sequence. Continuous batching inserts new sequences into the running batch at each decode step boundary. The key event: at the end of each decode step, the scheduler checks for completed sequences (those that emitted EOS) and newly arrived KV-caches from prefill. It evicts completed slots and inserts new sequences in a single atomic swap. This maximizes GPU occupancy because the batch size stays approximately constant throughout the decode pool''s lifetime. In a disaggregated system, KV-caches arrive from prefill nodes asynchronously; continuous batching is the mechanism that absorbs this asynchrony without GPU stalls.'
+  common_mistake: |
+    **The Pitfall:** Stating continuous batching simply "keeps the GPU busy" without explaining the mechanism.
+    **The Rationale:** Candidates fail to identify that the per-step sequence insertion and eviction at the iteration boundary is the core enabler.
+    **The Consequence:** Designing schedulers that only batch at the request level, completely failing to handle the asynchronous arrival of KV-caches from prefill nodes.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Batch size: 32
+       - Sequences follow a geometric output length distribution (mean \mu=200 tokens)
+    2. **Calculations:**
+       - Expected idle time per batch = waiting for the slowest sequence
+       - Max of 32 geometric RVs = ~200 * ln(32) = ~694 tokens
+       - Wasted steps in static batching = (694 - 200) / 694 = ~71% (or ~50% average across varying completions)
+    3. **Conclusion & Interpretation:**
+       - **Result: Occupancy-Bound**. Static batching wastes ~50% of compute cycles waiting for the tail sequence, whereas continuous batching maintains near 100% GPU occupancy, yielding a ~2x throughput improvement.
 status: published
 provenance: imported
 requires_explanation: false

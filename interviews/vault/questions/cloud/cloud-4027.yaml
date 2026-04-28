@@ -8,20 +8,27 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: Micro-Burst Detection for ML Traffic
-scenario: Your monitoring system samples switch counters every 5 seconds, showing 30% average link utilization on your H100 cluster's spine switches. But training jobs report intermittent 10ms stalls. You suspect micro-bursts are saturating links at sub-second timescales.
+scenario: Your monitoring system samples switch counters every 5 seconds, showing 5% average link utilization on your cluster's spine switches. But training jobs report intermittent 10ms stalls. You suspect micro-bursts are saturating links at sub-second timescales.
 question: What 400Gbps micro-burst can hide inside 5-second switch-counter samples, and how would you detect it?
 details:
-  realistic_solution: 'At 400Gbps, in a 5-second window: maximum data transfer = 400 Gbps × 5s = 250 GB. With 30% average utilization = 75 GB transferred. This 75 GB could arrive as a uniform 30% load OR as a 1.5s burst at line rate followed by 3.5s of silence — both show 30% average. Even a much smaller 250ms burst generates 12.5 GB of instantaneous queuing pressure (showing 5% average over the 5s window). Detection methods: (1) Enable per-port histogram counters (available on Spectrum-4 and Tomahawk-5) that record buffer occupancy distribution at µs granularity. (2) Use INT (In-band Network Telemetry) to piggyback queue depth on every data packet — each AllReduce packet reports the queue depth it observed. (3) Reduce polling interval to 100ms using streaming telemetry (gNMI). (4) Deploy ECN counters: count ECN-marked packets per second. A spike in ECN marks without a spike in average utilization confirms micro-bursts.'
+  realistic_solution: 'At 400Gbps, in a 5-second window: maximum data transfer = 400 Gbps × 5s = 250 GB. With 5% average utilization = 12.5 GB transferred. This 12.5 GB could arrive as a uniform 5% load OR as a 250ms burst at line rate followed by 4.75s of silence — both show 5% average. Even a 250ms burst generates 12.5 GB of instantaneous queuing pressure. Detection methods: (1) Enable per-port histogram counters (available on modern switches) that record buffer occupancy distribution at µs granularity. (2) Use INT (In-band Network Telemetry). (3) Deploy ECN counters.'
   common_mistake: |
     **The Pitfall:** Trusting 5-second averaged counters to represent instantaneous load.
     **The Rationale:** Engineers often assume that average utilization metrics reflect the maximum pressure on the network, forgetting that network traffic is bursty.
-    **The Consequence:** A link can be idle for 4.9 seconds and fully saturated for 100ms, showing low average utilization while causing significant congestion, packet loss, and latency spikes.
+    **The Consequence:** A link can be idle for 4.75 seconds and fully saturated for 250ms, causing significant congestion, packet loss, and latency spikes that are invisible on standard dashboards.
   napkin_math: |
-    - **Calculate burst size:** A 250ms burst at 400Gbps transfers 400 Gbps * 0.25s = 100 Gigabits.
-    - **Convert to Bytes:** 100 Gigabits / 8 = 12.5 GB.
-    - **Calculate average utilization:** 100 Gigabits over 5 seconds = 20 Gbps.
-    - **Determine percentage:** 20 Gbps / 400 Gbps = 5% average utilization over the 5s window.
-    - **Calculate buffer oversubscription:** 12.5 GB (12,500 MB) / 64MB switch buffer &approx; **195&times; oversubscription**.
+    1. **Assumptions & Constraints:**
+       - Network link = 400 Gbps.
+       - Polling window = 5 seconds.
+       - Micro-burst duration = 250ms (0.25s) at line rate.
+       - Switch buffer = 64 MB.
+    2. **Calculations:**
+       - Burst size: 400 Gbps * 0.25s = 100 Gigabits.
+       - Convert to Bytes: 100 Gigabits / 8 = 12.5 GB.
+       - Average utilization over 5s: 100 Gigabits / 5s = 20 Gbps (5% of 400 Gbps).
+       - Buffer oversubscription: 12.5 GB (12,500 MB) / 64 MB ≈ 195x oversubscription.
+    3. **Conclusion & Interpretation:**
+       - **Result: Severe micro-bursting causing 195x buffer oversubscription.** A 5% average load can easily hide catastrophic instantaneous congestion.
 status: published
 provenance: imported
 requires_explanation: false
@@ -31,11 +38,9 @@ validation_status: OK
 validation_date: '2026-04-02'
 validation_model: claude-opus-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 12.5 GB of data equals 100 Gigabits. Averaged over 5 seconds, this is 20 Gbps, which is 5% of a 400Gbps link, not 2.5%.
 human_reviewed:
   status: not-reviewed
   by: null

@@ -8,29 +8,27 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: MoE vs Dense Arithmetic Intensity
-scenario: You are replacing a 30B parameter dense LLM with an 8x10B Mixture of Experts (MoE) model. The
-  MoE model routes each token to 2 experts, resulting in roughly 20B active parameters per token. Since
-  20B < 30B, the MoE model requires fewer FLOPs per token. However, during serving at a batch size of
-  64, the MoE model's decode throughput (tokens/sec) is 30% lower than the dense model on the same hardware.
-  Why?
-question: "Why?"
+scenario: You are replacing a 30B parameter dense LLM with an 8x10B Mixture of Experts (MoE) model. The MoE model routes each token to 2 experts, resulting in roughly 20B active parameters per token. During serving at a batch size of 64, the MoE model's decode throughput (tokens/sec) is 30% lower than the dense model on the same hardware.
+question: Why is the MoE decode throughput 30% lower despite having fewer active parameters per token?
 details:
-  realistic_solution: The bottleneck is the drastic reduction in effective Arithmetic Intensity. In a
-    dense model, the 30B parameters are loaded from HBM once and applied to all 64 tokens in the batch.
-    In the MoE model, tokens route to different experts. To process the batch, the hardware must load
-    the weights for all activated experts. At batch size 64, it is highly probable that almost all experts
-    (80B parameters total) are activated by at least one token. Therefore, the system loads ~80B parameters
-    from HBM to do the math for 64 tokens, whereas the dense model loads 30B parameters for 64 tokens.
-    The MoE model's arithmetic intensity is significantly lower, pushing it further down the memory-bound
-    slope of the Roofline model. The hardware spends more time waiting for HBM reads, resulting in lower
-    throughput despite fewer total FLOPs.
-  common_mistake: Blaming the routing network's compute overhead or network communication latency without
-    analyzing the memory bandwidth degradation.
-  napkin_math: 'Dense 30B: Batch size 64. Weights read = 60GB (FP16). FLOPs = 2 * 30B * 64 = 3.84 TFLOPs.
-    Intensity I = 3.84e12 / 60e9 = 64 FLOPs/byte. MoE 8x10B (2 active): Batch size 64. Assume all 8 experts
-    are hit across the batch. Weights read = 160GB (80B params). FLOPs = 2 * 20B * 64 = 2.56 TFLOPs. Intensity
-    I = 2.56e12 / 160e9 = 16 FLOPs/byte. The MoE model requires 2.6x more memory bandwidth per step, reducing
-    throughput by ~30-60% depending on HBM limits.'
+  realistic_solution: The bottleneck is the drastic reduction in effective Arithmetic Intensity. In a dense model, the 30B parameters are loaded from HBM once and applied to all 64 tokens in the batch. In the MoE model, tokens route to different experts. To process the batch, the hardware must load the weights for all activated experts. At batch size 64, it is highly probable that almost all experts (80B parameters total) are activated by at least one token. Therefore, the system loads ~80B parameters from HBM to do the math for 64 tokens, whereas the dense model loads 30B parameters for 64 tokens. The MoE model's arithmetic intensity is significantly lower, pushing it further down the memory-bound slope of the Roofline model. The hardware spends more time waiting for HBM reads, resulting in lower throughput despite fewer total FLOPs.
+  common_mistake: |
+    **The Pitfall:** Blaming the routing network's compute overhead or cross-node communication latency without analyzing memory bandwidth degradation.
+    **The Rationale:** Assuming the extra logic of routing tokens is the bottleneck, ignoring the massive memory footprint of the inactive experts.
+    **The Consequence:** Wasting time optimizing the small routing kernel while the GPU starves waiting for gigabytes of expert weights to load.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Batch size: 64.
+       - Dense model: 30B params (60 GB FP16).
+       - MoE: 8x10B = 80B total params (160 GB FP16). 2 active experts/token.
+    2. **Calculations:**
+       - Dense FLOPs/step: 2 * 30B * 64 = 3.84 TFLOPs.
+       - Dense Intensity (I): 3.84 TFLOPs / 60 GB = 64 FLOPs/byte.
+       - MoE FLOPs/step: 2 * 20B * 64 = 2.56 TFLOPs.
+       - MoE Memory read: At batch=64, almost all 8 experts are hit, loading 160 GB.
+       - MoE Intensity (I): 2.56 TFLOPs / 160 GB = 16 FLOPs/byte.
+    3. **Conclusion & Interpretation:**
+       - **Result: MoE demands 2.6x more memory bandwidth per step. Memory-Bandwidth-Bound degradation.**
 status: published
 provenance: imported
 requires_explanation: false

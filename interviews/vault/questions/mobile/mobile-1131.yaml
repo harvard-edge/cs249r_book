@@ -8,20 +8,28 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: inference
 title: On-Device Intersectional Fairness Telemetry Pipeline
-scenario: You are designing an on-device fairness evaluation telemetry system for a visual avatar feature running on the Apple A17 Pro. The system must compute demographic parity and equalized odds across 5 intersectional subgroups locally, without sending raw user images to the cloud. The A17 Pro features a 16-core Neural Engine (35 TOPS, ~5W) and shares 8 GB of unified memory with the CPU/GPU, which is heavily utilized by the main application.
-question: How would you architect the evaluation pipeline, detailing how you schedule the evaluation models, manage memory contention, and aggregate subgroup metrics securely?
+scenario: You are designing an on-device fairness evaluation telemetry system for a visual avatar feature running on an Apple A17 Pro. The system must compute demographic parity and equalized odds across 5 intersectional subgroups locally, without sending raw user images to the cloud. The A17 Pro features a 16-core Neural Engine and shares 8 GB of unified memory with the CPU/GPU, which is heavily utilized by the main application.
+question: "How would you architect the evaluation pipeline, detailing how you schedule the evaluation models, manage memory contention, and aggregate subgroup metrics securely?"
 details:
-  realistic_solution: The system should use asynchronous, opportunistic evaluation running during device idle times (e.g., plugged in). The evaluation models (e.g., lightweight INT8 classifiers for subgroup detection) should be scheduled explicitly on the 16-core A17 Pro Neural Engine. To protect privacy, local metrics should be aggregated using local differential privacy (LDP) before transmission, ensuring individual demographic performance data is mathematically protected.
+  realistic_solution: The system should use asynchronous, opportunistic evaluation running during device idle times (e.g., plugged in). The evaluation models (e.g., lightweight INT8 classifiers for subgroup detection) should be scheduled explicitly on the Neural Engine. To protect privacy, local metrics should be aggregated using local differential privacy (LDP) before transmission, ensuring individual demographic performance data is mathematically protected.
   common_mistake: |
-    **The Pitfall:** Designing a synchronous pipeline that runs immediately after inference.
-    **The Rationale:** Engineers often try to evaluate fairness synchronously, without considering the strict memory constraints of the unified memory architecture.
-    **The Consequence:** Causing severe UI stutter by competing for shared memory, and risking privacy leaks by transmitting fine-grained subgroup performance logs.
+    **The Pitfall:** Designing a synchronous pipeline that evaluates fairness immediately after primary inference.
+    **The Rationale:** Engineers focus purely on the evaluation logic, completely ignoring the strict limits of the device's shared unified memory architecture.
+    **The Consequence:** Crashing the foreground app via memory contention, causing massive UI stutter, and risking privacy leaks by transmitting raw metrics.
   napkin_math: |
-    - Memory constraint: Main app uses ~5 GB of the 8 GB unified memory. A quantized INT8 subgroup classifier is ~50 MB.
-    - Compute cost: 2 GOPS evaluation pass per image on the A17 Pro Neural Engine (35 TOPS) takes theoretically ~0.057 ms (2 / 35,000).
-    - Daily batch: Evaluating 500 cached interactions requires 1 TOPS total (500 * 2 GOPS).
-    - Time required: ~0.028 seconds of continuous execution.
-    - **This easily fits within the 5W thermal budget during idle charging, showing the design constraint is memory isolation, not compute.**
+    1. **Assumptions & Constraints:**
+       - Available RAM: < 3 GB (App uses ~5 GB of 8 GB).
+       - Subgroup Classifier: ~50 MB INT8 model.
+       - Workload: 500 cached interactions/day.
+       - Compute Limit: 35 TOPS (5W thermal budget).
+    2. **Calculations:**
+       - Single Pass Compute: 2 GOPS.
+       - Theoretical Latency: 2 / 35,000 = ~0.057 ms.
+       - Daily Evaluation Workload: 500 images * 2 GOPS = 1 TOPS total.
+       - Execution Time: ~0.028 seconds of continuous NPU load.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Contention)**
+       - Compute and thermal overheads (1 TOPS total) are trivial. The architecture must prioritize memory isolation, deferring execution to background periods to prevent crashing the main application.
 status: published
 provenance: imported
 requires_explanation: true

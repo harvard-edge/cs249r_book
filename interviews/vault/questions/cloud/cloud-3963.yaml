@@ -11,17 +11,25 @@ title: Prefill-Decode Disaggregation Overlap in Production LLM Serving
 scenario: Your LLM serving cluster disaggregates prefill (compute-bound, H100s) from decode (memory-bandwidth-bound, MI300X with 192GB). After prefill generates the KV cache, it must be transferred to a decode GPU. With 8192-token contexts, KV cache is 4GB for a 70B model. Transfer over 100 Gbps Ethernet takes 320ms — longer than the prefill itself (200ms).
 question: How would you overlap a 4GB KV-cache transfer over 100 Gbps Ethernet to minimize time-to-first-token in disaggregated serving?
 details:
-  realistic_solution: 'Streaming KV transfer with incremental decode start: (1) Transfer KV cache layer-by-layer. Each of the 80 layers is ~50MB. Transfer per layer: 50MB / 12.5 GB/s = 4ms. (2) As each layer''s KV arrives on the decode GPU, it can begin decode processing for that layer. (3) Pipeline: transfer(layer_i+1) || decode(layer_i). Decode per layer: ~0.6ms (memory-bound on MI300X). Since transfer (4ms) > decode (0.6ms), transfer is the bottleneck. (4) Optimization: use NVLink or InfiniBand instead of Ethernet. At 400 Gbps IB: 50MB/50 GB/s = 1ms per layer, closer to compute time. (5) Further: start transferring KV as soon as each layer''s prefill completes (before full prefill finishes). This overlaps KV transfer with remaining prefill computation. Time-to-first-token: prefill_time + max(transfer_per_layer, decode_per_layer) = 200ms + 4ms = 204ms instead of 200ms + 320ms = 520ms.'
+  realistic_solution: |
+    Implement streaming KV transfer with incremental decode start. Instead of waiting for the full 4GB block, stream the KV cache layer-by-layer as the prefill completes. As each 50MB layer arrives on the decode GPU, immediately begin decode processing for that layer. Pipelining network transfer against decoding significantly masks latency, but the underlying 100 Gbps Ethernet remains an architectural bottleneck that warrants 400 Gbps InfiniBand.
   common_mistake: |
     **The Pitfall:** Waiting for the entire KV cache transfer to complete before starting the decode phase.
-    
     **The Rationale:** Engineers default to sequential request processing flows, treating KV cache materialization as an atomic dependency rather than a streamable resource that can be pipelined layer-by-layer.
-    
     **The Consequence:** The 320ms network transfer dominates the critical path, making disaggregation significantly slower than colocated serving and destroying Time-to-First-Token (TTFT) SLAs.
   napkin_math: |
-    - **Sequential TTFT**: 200ms prefill + 320ms transfer + 48ms decode (80 layers × 0.6ms) = 568ms TTFT.
-    - **Layer-Streamed TTFT**: 200ms prefill (KV streams concurrently) + 4ms transfer (first layer) + 80 × max(4ms transfer, 0.6ms decode) = 200 + 4 + 320 = 524ms (Still heavily network bottlenecked).
-    - **IB 400G Optimization**: 200ms + 1ms + 80 × max(1ms, 0.6ms) = **281ms TTFT**.
+    1. **Assumptions & Constraints:**
+       - KV Cache: 4 GB (70B model, 8192 tokens).
+       - Network: 100 Gbps Ethernet (12.5 GB/s).
+       - Pre-fill compute: 200 ms.
+       - Decode per layer: 0.6 ms (80 layers).
+    2. **Calculations:**
+       - Sequential Transfer: 4 GB / 12.5 GB/s = 320 ms transfer time.
+       - Sequential TTFT: 200ms prefill + 320ms transfer + 48ms decode = 568ms.
+       - Pipelined Transfer: 50 MB per layer / 12.5 GB/s = 4 ms per layer.
+       - Pipelined TTFT: 200ms prefill + 4ms (first layer transfer) + (80 * max(4ms, 0.6ms)) = 200 + 4 + 320 = 524ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** Even with layer-by-layer streaming, the 4ms transfer time dominates the 0.6ms decode time per layer. Migrating to a 400 Gbps InfiniBand network drops layer transfer to 1ms, slicing TTFT down to 281ms.
 status: published
 provenance: imported
 requires_explanation: true

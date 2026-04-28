@@ -9,18 +9,21 @@ bloom_level: understand
 phase: both
 title: Backward-Triggered Gradient Accumulation with Deferred AllReduce
 scenario: With gradient accumulation over K=4 micro-steps, PyTorch DDP by default performs AllReduce after every backward pass. A colleague says you can defer AllReduce to only the last micro-step, doing one AllReduce instead of four.
-question: What are the overlap tradeoffs of deferring DDP AllReduce to only the last micro-step for K=4 gradient accumulation?
+question: "What are the overlap tradeoffs of deferring DDP AllReduce to only the last micro-step for K=4 gradient accumulation?"
 details:
-  realistic_solution: 'Tradeoff analysis: (1) Default (AllReduce every step): 4 AllReduces of M bytes, each overlapped with backward. Overlap efficiency: high if each AllReduce < backward time. (2) Deferred (AllReduce on last step only): 1 AllReduce of M bytes (gradients accumulated locally). No communication during micro-steps 1-3 (wasted network bandwidth). The single AllReduce is the same size M (accumulated gradients) but cannot start until the last backward finishes — no overlap possible for the AllReduce itself. (3) PyTorch''s no_sync() context manager: use model.no_sync() for micro-steps 1-3 (skips AllReduce, saves communication hooks overhead), then normal backward on micro-step 4 with AllReduce. This is correct approach — saves hook overhead on 3/4 of micro-steps while maintaining overlap on the final AllReduce.'
+  realistic_solution: 'Tradeoff analysis: (1) Default: 4 AllReduces overlapped with backward. (2) Deferred: 1 AllReduce of M bytes. No communication during micro-steps 1-3. The single AllReduce cannot start until the last backward finishes — no overlap possible for the AllReduce itself. (3) PyTorch''s no_sync() context manager skips AllReduce on steps 1-3 while maintaining overlap on the final AllReduce.'
   common_mistake: |
     **The Pitfall:** Always deferring AllReduce to the last micro-step to reduce total communication volume.
     **The Rationale:** Candidates intuitively believe that fewer network calls means better performance, ignoring the mechanics of computation-communication overlap.
     **The Consequence:** Accidentally exposing the entire communication latency at the end of the step instead of hiding it perfectly behind the backward pass compute.
   napkin_math: |
-    - Assume AllReduce = 5ms, Backward pass = 50ms.
-    - **Default:** 4 × 5ms AllReduce, perfectly overlapped with 4 × 50ms backward. Exposed communication = **0ms**.
-    - **Deferred:** 1 × 5ms AllReduce *after* the final backward pass. No overlap possible. Exposed communication = **5ms**.
-    - **Conclusion:** Default is better for overlap if AllReduce time < backward time, but `no_sync()` on the first 3 steps with normal AllReduce on the 4th is the optimal hybrid.
+    1. **Assumptions & Constraints:**
+       - AllReduce = 5ms, Backward pass = 50ms.
+    2. **Calculations:**
+       - Default: 4 * 5ms AllReduce perfectly overlapped with 4 * 50ms backward. Exposed = 0ms.
+       - Deferred: 1 * 5ms AllReduce *after* final backward. Exposed = 5ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Overhead-Bound**. Default is better for overlap if AllReduce < backward time.
 status: published
 provenance: imported
 requires_explanation: false

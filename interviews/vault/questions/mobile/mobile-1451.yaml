@@ -8,21 +8,27 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Exynos 2400 NPU Delegation and Operator Fallback
-scenario: You are deploying a 2B parameter autoregressive model on the Samsung Exynos 2400. After converting the model to TFLite, you discover that a custom fused attention operator is unsupported by the NPU delegate and falls back to the CPU. Given the Exynos 2400 features a dual-core NPU capable of 34.7 TOPS and shares 12 GB of LPDDR5X memory with the CPU, GPU, and ISP.
+scenario: You are deploying a 2B parameter autoregressive model on the Samsung Exynos 2400. After converting to TFLite, a custom fused attention operator is unsupported by the NPU delegate and falls back to the CPU.
 question: How would you rewrite an Exynos 2400 model graph to avoid NPU delegation fallback?
 details:
-  realistic_solution: The optimal strategy is to unfuse the attention block and rewrite it using primitive operators (e.g., standard MatMul, Softmax) that are natively supported by the Samsung NPU delegate. Keeping the entire subgraph on the NPU avoids the high context-switching and memory-syncing overhead of CPU fallbacks, maximizing the utilization of the 34.7 TOPS NPU.
+  realistic_solution: The optimal strategy is to unfuse the attention block and rewrite it using primitive operators (e.g., standard MatMul, Softmax) natively supported by the Samsung NPU delegate. Keeping the entire subgraph on the NPU strictly avoids the high context-switching and memory-syncing overhead of CPU fallbacks.
   common_mistake: |
     **The Pitfall:** Suggesting writing a custom NPU operator without checking SDK limits.
     **The Rationale:** Candidates ignore vendor limitations and the severe latency penalty of crossing the CPU-NPU boundary multiple times per token.
-    **The Consequence:** A massive performance drop, effective throughput plummets due to synchronization overheads.
+    **The Consequence:** A massive performance drop; effective throughput plummets due to synchronization overheads dominating compute.
   napkin_math: |
-    - INT8 2B model takes 2 GB of RAM.
-    - LPDDR5X offers ~60 GB/s bandwidth.
-    - NPU-bound baseline: 60 GB/s / 2 GB = 30 tokens/s.
-    - Fallback in a 32-layer model requires 64 memory syncs per token.
-    - 64 syncs * 0.5ms per transfer = 32ms pure overhead per token.
-    - **Overhead drops effective throughput to under 15 tokens/s, destroying the 30 tokens/s baseline.**
+    1. **Assumptions & Constraints:**
+       - Model: 2B INT8 parameters (2 GB RAM).
+       - Memory Bandwidth: ~60 GB/s.
+       - Layers: 32 layers.
+       - Sync overhead: 0.5ms per CPU-NPU transfer.
+    2. **Calculations:**
+       - Baseline NPU-bound throughput: 60 GB/s / 2 GB = 30 tokens/s (33.3ms/token).
+       - Syncs per token (Fallback): 2 syncs per layer * 32 layers = 64 syncs.
+       - Fallback overhead: 64 * 0.5ms = 32ms pure overhead per token.
+       - Total latency per token: 33.3ms + 32ms = 65.3ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU-NPU Synchronization-Bound**. The context-switching overhead drops effective throughput from 30 tokens/s to ~15 tokens/s, destroying performance.
 status: published
 provenance: imported
 requires_explanation: false

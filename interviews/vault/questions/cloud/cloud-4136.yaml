@@ -8,32 +8,24 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Gang Scheduling in Kubernetes with Volcano
-scenario: You need to run a 32-GPU distributed training job across 4 Kubernetes nodes.
-  Default kube-scheduler may schedule pods one at a time, leading to partial allocation
-  where 3 nodes have pods but the 4th node does not have available GPUs. How does
-  Volcano scheduler solve this?
+scenario: You are deploying a 32-GPU distributed training job across 4 Kubernetes nodes. The default kube-scheduler often schedules pods sequentially, leading to partial allocation deadlocks where 3 nodes secure pods but the 4th lacks available GPUs.
 question: How does Volcano scheduler solve this?
 details:
-  realistic_solution: 'Volcano introduces the PodGroup CRD (Custom Resource Definition)
-    and a gang-scheduling plugin. Setup: (1) Create a PodGroup with minMember=4 (all
-    4 pods must be schedulable). (2) Each pod references the PodGroup via annotations:
-    scheduling.volcano.sh/group-name=training-job-1. (3) Volcano''s gang plugin: when
-    a pod arrives, it checks if ALL pods in the PodGroup can be scheduled simultaneously.
-    If not, none are scheduled — they wait. If yes, all are bound atomically. (4)
-    Queue management: Volcano maintains job queues with fair-share scheduling. Jobs
-    are evaluated as units, not individual pods. This prevents: (a) partial allocation
-    deadlocks (Job A has 3/4 nodes, Job B has 1/4, neither can proceed), (b) GPU waste
-    from partially-started distributed training, (c) NCCL timeout from staggered process
-    launch. Alternative: Kubernetes 1.27+ has native PodSchedulingContext for DRA
-    (Dynamic Resource Allocation), which provides some gang-like semantics. But Volcano
-    remains the production standard for ML workloads due to its mature queue management
-    and fair-share scheduling. Kueue (from Google) is a newer alternative that integrates
-    with Kubernetes'' native scheduler.'
-  common_mistake: Thinking Kubernetes' default scheduler handles multi-pod atomicity.
-    The default scheduler evaluates and binds pods independently — there is no concept
-    of 'all or nothing' for a group of pods.
-  napkin_math: 'Without gang scheduling: 4 pods scheduled over 15 minutes. First 3
-    pods idle for 15 min × 3 × 8 GPUs = 360 GPU-minutes. With gang: 0 waste.'
+  realistic_solution: 'Volcano introduces the PodGroup CRD and a gang-scheduling plugin. Create a PodGroup with minMember=4 (all 4 pods must be schedulable). Volcano maintains job queues with fair-share scheduling and evaluates jobs as units, preventing partial allocation deadlocks.'
+  common_mistake: |
+    **The Pitfall:** Believing the default Kubernetes scheduler handles multi-pod atomicity.
+    **The Rationale:** Users assume Kubernetes automatically understands that distributed ML pods are interdependent.
+    **The Consequence:** Severe GPU waste and NCCL timeouts, as partially scheduled jobs block resources indefinitely while waiting for the remaining pods.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 4 pods requiring 8 GPUs each (32 GPUs total).
+       - Default scheduler binds one pod at a time.
+    2. **Calculations:**
+       - Without gang scheduling: 3 pods bind to 24 GPUs and idle for 15 minutes waiting for the 4th node.
+       - Wasted compute = 3 pods * 8 GPUs * 15 minutes = 360 GPU-minutes.
+       - With Volcano gang scheduling: PodGroup minMember=4 ensures "all-or-nothing" atomic binding.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduling-Bound.** Volcano's gang scheduling guarantees atomic allocation, eliminating partial allocation deadlocks and reducing wasted compute to 0.
 status: published
 provenance: imported
 requires_explanation: true

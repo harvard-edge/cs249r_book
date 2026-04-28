@@ -8,19 +8,24 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: The Cross-Platform Confidence Divergence
-scenario: You train a single PyTorch image classification model and deploy it as CoreML on iOS and TFLite on Android. Both use INT8 quantization. For the same test image, the iOS model outputs 87% confidence for 'golden retriever' while the Android model outputs 71% confidence. The predicted class is the same, but the confidence gap causes your app's UX to behave differently.
+scenario: You train a single PyTorch image classification model and deploy it as CoreML on iOS and TFLite on Android. Both use INT8 quantization. For the same test image, the iOS model outputs 87% confidence while the Android model outputs 71% confidence.
 question: Where do CoreML and TFLite INT8 conversion differences make iOS show 87% confidence while Android shows 71%?
 details:
-  realistic_solution: 'Three conversion steps introduce divergence: (1) Logit quantization differences: TFLite and CoreML use different quantization schemas and calibration logic, shifting the raw logits. (2) Softmax implementation: INT8 TFLite often approximates exp() using lookup tables (LUTs) with limited precision, while CoreML usually runs softmax in FP16 on the Apple Neural Engine. (3) The exponential nature of softmax: small logit shifts (e.g., from 4.2 down to 3.6) are exponentiated, turning a minor pre-softmax difference into a massive 16% post-softmax confidence drop. The confidence gap is real, but the predicted class remains robust.'
+  realistic_solution: |
+    Conversion steps introduce platform-specific numerical divergence. 1) Quantization schemas: TFLite vs CoreML use different asymmetric calibration, shifting raw logits. 2) Hardware LUTs: TFLite INT8 softmax uses limited-precision Lookup Tables for exp(), while CoreML promotes to FP16. 3) Exponentiation: Small logit discrepancies are magnified by the softmax exponential, causing a massive post-softmax confidence shift. Fix by applying temperature scaling or threshold calibration per-platform.
   common_mistake: |
     **The Pitfall:** Assuming requantizing with the same calibration data guarantees identical outputs across platforms.
     **The Rationale:** Developers often treat quantization as a deterministic mathematical function, ignoring vendor-specific LUTs and compiler optimizations.
     **The Consequence:** Unexplained UX divergences and silent accuracy regressions across iOS and Android.
   napkin_math: |
-    1. FP32 reference logits [12.5, 12.4, 0.1] yield Softmax = [0.525, 0.475, 0.000].
-    2. CoreML FP16 softmax uses high precision, retaining the true distribution.
-    3. TFLite INT8 softmax uses a 256-entry lookup table where exp(12.5) saturates at 127.
-    4. **Result:** Both top classes hit the 127 ceiling, forcing a [0.50, 0.50, 0.00] distribution and swinging confidence by 5%.
+    1. **Assumptions & Constraints:**
+       - FP32 Logits: [12.5, 12.4, 0.1]
+       - TFLite INT8 Softmax LUT saturation limit: 127
+    2. **Calculations:**
+       - Reference Softmax: exp(12.5) vs exp(12.4) yields [0.525, 0.475, 0.000]
+       - INT8 TFLite: Both 12.5 and 12.4 hit the 127 LUT ceiling
+       - Truncated output: [0.500, 0.500, 0.000]
+    3. **Conclusion & Interpretation:** **LUT saturation swings confidence by 5% alone. Result: Precision/Math-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

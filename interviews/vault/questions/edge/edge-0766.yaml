@@ -11,17 +11,23 @@ title: The CAN Bus Telemetry Flood
 scenario: Your autonomous forklift runs pallet detection and publishes results over the vehicle's CAN bus at 20 Hz. The forklift has 15 other ECUs sharing the same 500 Kbps CAN bus. After adding ML telemetry (detection count, confidence, latency, model version) to the CAN traffic, the safety system starts missing emergency stop messages.
 question: What went wrong, and how do you fix it without removing the telemetry?
 details:
-  realistic_solution: The ML telemetry is **saturating the CAN bus bandwidth**, causing lower-priority messages to be arbitrated out. CAN uses priority-based arbitration — lower message IDs win. If the ML telemetry messages have lower IDs (higher priority) than the safety system, they'll starve safety messages. Even if safety messages have higher priority, the bus utilization is the problem.
+  realistic_solution: |
+    The ML telemetry payload is saturating the physical bandwidth of the CAN bus. Because CAN employs priority-based arbitration via message IDs, high bus utilization causes low-priority messages to be persistently delayed or dropped. Even if safety messages hold higher priority, the sheer volume of high-frequency ML data creates arbitration contention and queue overflows at the CAN controller level. The architectural fix is to decouple high-bandwidth ML telemetry from the deterministic control plane by routing it over Automotive Ethernet or a dedicated CAN-FD network.
   common_mistake: |
     **The Pitfall:** Increasing the CAN bus baud rate (e.g., to 1 Mbps) to handle the extra traffic.
     **The Rationale:** Treating it as a simple bandwidth problem without understanding automotive engineering constraints.
     **The Consequence:** Triggering a massive 6-month re-certification effort for every single ECU on the vehicle to qualify them for the new baud rate.
   napkin_math: |
-    * **CAN Bus Capacity**: 500 Kbps ≈ 3,846 standard frames/sec.
-    * **Current Load**: Safety (800 frames/sec, 21%) + Other ECUs (1,700 frames/sec, 44%) = 65% utilization.
-    * **Max Safe Utilization**: Standard CAN reliability threshold is ~70%.
-    * **Original ML Telemetry**: 240 frames/sec. Total utilization becomes (800 + 1700 + 240) / 3846 = 71.2%.
-    * **Conclusion**: The bus is saturated. The fix is to transition the detailed ML telemetry to an **Ethernet link** (100 Mbps), utilizing only 0.05% bandwidth.
+    1. **Assumptions & Constraints:**
+       - CAN Bus Bandwidth: 500 Kbps (~3,846 standard frames/sec).
+       - Original Load: 2,500 frames/sec (65% utilization).
+       - Max Safe Utilization: 70%.
+    2. **Calculations:**
+       - Added ML Telemetry Load: 240 frames/sec.
+       - Total Load: 2,500 + 240 = 2,740 frames/sec.
+       - New Bus Utilization: 2,740 / 3,846 = 71.2%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Bus utilization exceeds the 70% safety threshold. Bottleneck: Network Bandwidth-Bound (CAN Bus Saturation).**
 status: published
 provenance: imported
 requires_explanation: false

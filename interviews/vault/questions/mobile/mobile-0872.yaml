@@ -8,21 +8,24 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Designing a Resilient Agent Fallback Architecture for Intermittent Connectivity on Snapdragon 8 Gen 3
-scenario: A mobile app uses a cloud-first compound AI agent (200ms cloud latency) with an on-device fallback (1B LLM, 8 tok/s). Network connectivity drops for 15% of session time. You need to design a graceful degradation architecture with SLAs of <500ms cloud response and <2s on-device response.
+scenario: A mobile app uses a cloud-first compound AI agent (200ms cloud latency) with an on-device fallback (1B LLM, 40 tok/s). Network connectivity drops for 15% of session time. You need to design a graceful degradation architecture with SLAs of <500ms cloud response and <2s on-device response.
 question: How should a mobile compound AI agent switch gracefully between cloud and on-device modes during intermittent connectivity?
 details:
-  realistic_solution: 'Predictive mode switching: Dual-path: launch cloud call AND start on-device embedding simultaneously. If cloud responds < 500ms, cancel on-device. If cloud fails, on-device is already 200ms ahead. Keep last 5 turns of conversation in a compressed context buffer for instant on-device context restoration.'
+  realistic_solution: 'Implement speculative execution (predictive mode switching): launch the cloud request AND simultaneously execute the on-device prefill. If the cloud returns under 500ms, abort the local run. If the cloud times out at 300ms, the local model is already actively generating. Maintain a rolling compressed KV cache of the last 5 turns to ensure zero-latency local context restoration.'
   common_mistake: |
-    **The Pitfall:** Implementing a simple try/catch that switches to on-device on the first timeout.
-    **The Rationale:** Waiting for a 3-second cloud timeout before even starting the heavy on-device prefill.
-    **The Consequence:** Causing multi-second delays during the cloud-to-device transition, ruining the user experience.
+    **The Pitfall:** Implementing a strict sequential try/catch that only spins up the local model after the cloud request explicitly times out.
+    **The Rationale:** Attempting to save local battery life at the absolute expense of tail latency.
+    **The Consequence:** The user experiences a multi-second delay during the transition (Cloud Timeout + Local Prefill + Local Generate), breaking the conversational SLA and ruining UX.
   napkin_math: |
-    - Cloud path: 200ms latency + 100ms gen = 300ms.
-    - On-device decode (50 tokens @ 40 tok/s): 1250 ms.
-    - On-device prefill (512 tokens): 57 ms.
-    - Total on-device: 1307 ms.
-    - Dual-path switch: If cloud fails at 300ms, on-device has already finished prefill and 243ms of decode.
-    - **Effective user latency on cloud failure is only 300ms (wait) + 1007ms (remaining) = ~1.3s.**
+    1. **Assumptions & Constraints:**
+       - Cloud SLA: 200ms TTFT + 100ms generation = 300ms total.
+       - Local Model SLA: 512 tokens prefill (57ms) + 50 tokens generation at 40 tok/s (1250ms) = 1307ms total.
+    2. **Calculations:**
+       - Dual-path switch timing: Cloud fails precisely at the 300ms timeout mark.
+       - Background progress: During that 300ms, local on-device completed the 57ms prefill and 243ms of decode (approx 9 tokens).
+       - Remaining local time: 1307ms - 300ms = 1007ms.
+    3. **Conclusion & Interpretation:**
+       **Result: Latency-Bound (Mitigated). Speculative execution hides the 300ms cloud failure wait, allowing the local fallback to complete its sequence within ~1.3 seconds, safely under the strict 2.0s SLA.**
 status: published
 provenance: imported
 requires_explanation: true

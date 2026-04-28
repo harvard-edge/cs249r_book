@@ -11,17 +11,20 @@ title: The One-Replica Meltdown
 scenario: You have 8 replicas of a 7B model behind an L7 load balancer, each on its own A100. Monitoring shows total QPS is normal, but P99 latency spiked from 80 ms to 2.4 seconds. One replica's average latency is 18 seconds, while seven are healthy.
 question: Why is one slow replica destroying the P99 for the entire fleet?
 details:
-  realistic_solution: 'Round-robin sends exactly 1/8 of all requests to the slow replica. P99 means 1% of requests exceed the threshold. If 12.5% of requests (those hitting the slow replica) have 18-second latency, then *all* of those requests are in the worst 12.5% — far exceeding the 1% P99 threshold. The P99 is entirely determined by the slow replica. Worse, the slow replica creates *cascading* damage: (1) clients waiting 18 seconds for the slow replica hold open HTTP connections, consuming connection pool slots on the load balancer; (2) if clients have a 5-second timeout and retry, the retried request has a 1/8 chance of hitting the slow replica again, amplifying load; (3) the slow replica''s request queue grows, making each subsequent request even slower (queuing theory: latency → ∞ as utilization → 1). Fix: (1) switch from round-robin to least-connections or latency-weighted routing — the slow replica naturally receives fewer requests; (2) implement health-check-based ejection: if a replica''s P50 exceeds 2× the fleet median, remove it from the pool; (3) add client-side hedging: send the request to 2 replicas simultaneously and take the first response.'
+  realistic_solution: 'Round-robin sends exactly 1/8 of all requests to the slow replica. P99 means 1% of requests exceed the threshold. If 12.5% of requests (those hitting the slow replica) have 18-second latency, then *all* of those requests are in the worst 12.5% - far exceeding the 1% P99 threshold. The P99 is entirely determined by the slow replica. Worse, the slow replica creates *cascading* damage: (1) clients waiting 18 seconds for the slow replica hold open HTTP connections, consuming connection pool slots on the load balancer; (2) if clients have a 5-second timeout and retry, the retried request has a 1/8 chance of hitting the slow replica again, amplifying load; (3) the slow replica''s request queue grows, making each subsequent request even slower. Fix: (1) switch from round-robin to least-connections routing; (2) implement health-check-based ejection; (3) add client-side hedging.'
   common_mistake: |
     **The Pitfall:** Believing that round-robin distribution limits the impact of one slow replica to only a small fraction of requests.
     **The Rationale:** Percentiles aggregate the worst-case times. If 12.5% of requests hit the slow replica, they make up the entirety of the worst 1% (P99).
     **The Consequence:** A single bad node causes severe cascading latency failures across the entire service.
   napkin_math: |
-    1. **Traffic Split:** 8 replicas = 12.5% of traffic per replica.
-    2. **P99 Definition:** The slowest 1% of all requests.
-    3. **Impact:** Since 12.5% of requests take 18s, the entire 1% threshold is composed of requests to the slow replica.
-    4. **Steady State Connections:** 125 QPS * 18s = 2250 connections on the slow node vs 125 * 0.04s = 5 on healthy nodes.
-    5. **Result: Least-connections routing drops P99 back to ~80ms by draining the slow replica.**
+    1. **Assumptions & Constraints:**
+       - 8 replicas, 1 slow replica at 18s latency.
+       - Healthy replica latency: ~40ms. Total load: 1000 QPS (125 QPS/replica).
+    2. **Calculations:**
+       - Traffic Split: 8 replicas = 12.5% of traffic per replica.
+       - Steady State Connections: 125 QPS * 18s = 2250 connections on slow node vs 125 * 0.04s = 5 on healthy nodes.
+    3. **Conclusion & Interpretation:**
+       - **Least-connections routing drops P99 back to ~80ms by draining the slow replica. Result: Concurrency-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

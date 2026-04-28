@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-0596
+title: The Prefetch Buffer Sizing
+topic: memory-hierarchy-design
+status: published
+provenance: human
+scenario: You're training a vision model on ImageNet where GPU batch processing takes 50ms, but utilization periodically drops to 0%. A colleague suggests increasing the PyTorch DataLoader workers from 2 to 32.
+question: Why might increasing workers make things worse, and what is the optimal way to size the prefetch pipeline?
+details:
+  realistic_solution: "Understand that massive `num_workers` scaling triggers systemic RAM consumption, allocating `workers * prefetch * batch_size`. Compute the exact ratio of dataload-to-compute speed, setting workers precisely to saturate the GPU without inducing fatal OS disk swapping."
+  common_mistake: |
+    **The Pitfall:** Mindlessly escalating `num_workers` to mirror total CPU thread counts.
+    **The Rationale:** Confusing CPU core availability with the physical limitations of the host machine's pinned DRAM.
+    **The Consequence:** The entire node locks up as the operating system aggressively pages gigabytes of buffer arrays out to NVMe.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - GPU Step: 50 ms.
+       - CPU Fetch/Augment: 200 ms.
+       - Payload: 256 images (224x224x3 FP32, ~154 MB).
+       - PyTorch Prefetch Factor: 2.
+    2. **Calculations:**
+       - Minimum Workers Needed = 200 ms / 50 ms = 4 workers.
+       - Memory at 4 Workers = 4 * 2 * 154 MB = 1.23 GB.
+       - Memory at 32 Workers = 32 * 2 * 154 MB = ~9.9 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound**. Scaling to 32 workers needlessly demands 10GB of RAM to process a 50ms task, instantly threatening cluster stability.
+last_modified: '2026-04-01'
+tags:
+- scope:Single Machine

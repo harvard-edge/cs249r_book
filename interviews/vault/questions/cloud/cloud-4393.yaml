@@ -8,12 +8,28 @@ competency_area: power
 bloom_level: evaluate
 phase: both
 title: Workload Consolidation to Improve GPU Utilization and Power Efficiency
-scenario: 'A cloud ML platform has 1,000 H100 GPUs allocated to batch inference jobs that average 35% GPU utilization. Power metering shows each GPU drawing 280W (idle + partial load). The platform team proposes consolidating workloads to run 350 GPUs at 100% utilization and powering off the remaining 650 GPUs. Evaluate this proposal: calculate the power savings, identify the risks of this strategy, and propose a hybrid approach using MIG (Multi-Instance GPU) or time-slicing.'
-question: How much power would consolidating 1,000 underutilized H100s save, what risks does it create, and how would MIG or time-slicing improve it?
+scenario: A cloud ML platform has 1,000 GPUs allocated to batch inference jobs that average 35% GPU utilization. Power metering shows each GPU drawing 280W. The platform team proposes consolidating workloads to run 350 GPUs at 100% utilization (drawing 700W) and powering off the remaining 650 GPUs (5W standby).
+question: "How much power would consolidating 1,000 underutilized GPUs save, what risks does it create, and how would MIG or time-slicing improve it?"
 details:
-  realistic_solution: 'Current: 1,000 GPUs × 280W = 280 kW. Consolidation: Packing jobs using Multi-Process Service (MPS) or time-slicing requires 350 GPUs at 100% utilization (700W). 350 × 700W = 245 kW. Powering off 650 GPUs (5W standby) adds 3.25 kW. Total = 248.25 kW (11.3% savings). Risk: Colocating batch jobs can cause OOMs if memory spikes, and waking GPUs from sleep takes 30-60s during sudden demand. MIG alternative: Use 3g.40gb MIG profiles (2 per H100) to strictly isolate jobs. 1000 jobs / 2 = 500 GPUs at ~70% load (~500W). 500 × 500W + 500 × 5W = 252.5 kW. This provides strict hardware isolation but slightly worse power efficiency than full MPS packing.'
-  common_mistake: Assuming that powering off GPUs saves 100% of their power. GPUs in deep sleep or powered off still draw ~30-50W for keep-alive, NVLink heartbeat, and PCIe power. Also, candidates ignore the wake latency cost when demand spikes.
-  napkin_math: 'Baseline: 1000 × 280W = 280 kW. Full consolidation (MPS): 350 × 700W + 650 × 5W = 248.25 kW. Savings: 31.75 kW (11.3%). MIG isolation (2 jobs/GPU): 500 × 500W + 500 × 5W = 252.5 kW. Savings: 27.5 kW (9.8%). Conclusion: Powering off idle GPUs saves much less than expected because GPUs draw only ~45W idle, whereas a 100% loaded GPU draws up to 700W. The non-linear power curve means running 3 GPUs at 35% (3 × 280W = 840W) actually consumes MORE power than 1 GPU at 100% (700W).'
+  realistic_solution: Consolidating via Multi-Process Service (MPS) to 100% utilization yields ~11.3% power savings (from 280kW down to 248kW). The non-linear power curve of GPUs means running three at 35% draws more power than one at 100%. The risks are severe OOMs if collocated jobs spike in memory, and the 30-60 second latency to wake sleeping nodes during traffic spikes. A hybrid approach using Multi-Instance GPU (MIG) hardware partitioning provides strict memory/compute isolation at a slightly lower power efficiency compared to full MPS, acting as a safer middle ground.
+  common_mistake: |
+    **The Pitfall:** Assuming linear power scaling and overestimating savings from "powering off" nodes.
+    **The Rationale:** Engineers linearly extrapolate that 65% idle time means 65% power waste, forgetting that base PCIe, memory, and board components consume substantial static power.
+    **The Consequence:** Initiating a massive, complex orchestration rewrite that yields negligible power savings while introducing catastrophic OOMs and cold-start latency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 1000 GPUs at 35% utilization (280W each).
+       - Max power (100% load): 700W. Standby: 5W.
+       - Consolidation: 350 GPUs at 100%.
+       - MIG: 500 GPUs at 70% load (~500W).
+    2. **Calculations:**
+       - Baseline Power: 1,000 * 280W = 280,000 W (280 kW).
+       - Full MPS Consolidation: (350 * 700W) + (650 * 5W) = 245,000 + 3,250 = 248.25 kW.
+       - MPS Savings: 280 - 248.25 = 31.75 kW (11.3%).
+       - MIG Consolidation: (500 * 500W) + (500 * 5W) = 250,000 + 2,500 = 252.5 kW.
+       - MIG Savings: 280 - 252.5 = 27.5 kW (9.8%).
+    3. **Conclusion & Interpretation:**
+       - **Result: ~11% Power Savings.** The GPU power curve is **Non-Linear**. The static overhead limits consolidation savings, making strict isolation via MIG the safer choice.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,36 +8,25 @@ competency_area: deployment
 bloom_level: create
 phase: both
 title: Multi-Tenant LoRA Serving Architecture on MI300X
-scenario: You are hosting 1,000 different LoRA adapters for a 30B parameter base model on a fleet of MI300X (192GB HBM3) GPUs. Strict latency SLAs mandate p99 < 50ms.
-question: How do you manage memory and request batching to serve all adapters without reloading the base model on the 192GB MI300X?
+scenario: You are hosting 1,000 different LoRA adapters for a 30B parameter base model on a fleet of MI300X GPUs. Strict latency SLAs mandate p99 < 50ms.
+question: How do you manage memory and request batching to serve all adapters without reloading the base model?
 details:
-  realistic_solution: 'The 30B base model occupies ~60GB (FP16), leaving ~132GB free. Create an architecture using S-LoRA/Punica: load the 60GB base model once into HBM. Store all LoRA adapters in a pinned host memory pool. When requests arrive, JIT-transfer the specific adapter weights over PCIe 5.0 (64 GB/s) taking <2ms per 100MB adapter. Use continuous batching to fuse the base model matrix multiplications across requests, while applying the specific LoRA low-rank updates individually using custom triton kernels.'
+  realistic_solution: 'Create an architecture using PagedAttention and S-LoRA/Punica: load the 60GB base model once into HBM. Store all LoRA adapters in a pinned host memory pool. When requests arrive, JIT-transfer the specific adapter weights over PCIe 5.0 (64 GB/s). Use continuous batching to fuse the base model matrix multiplications across requests, while applying the specific LoRA low-rank updates individually using custom Triton kernels.'
   common_mistake: |
     **The Pitfall:** Replicating the full 30B base model for each adapter in memory.
     **The Rationale:** Treating each fine-tuned model as a completely separate artifact.
     **The Consequence:** Immediate Out-of-Memory errors and inability to scale past 2-3 adapters per GPU.
   napkin_math: |
-    - Base model: 30B parameters × 2 bytes (FP16) = 60 GB.
-    - Available memory: 192 GB (total) - 60 GB (base) = **132 GB** for KV cache and JIT LoRAs.
-    - JIT Transfer: 100 MB adapter / 64 GB/s PCIe 5.0 = **~1.5ms**, easily meeting the 50ms SLA.
+    1. **Assumptions & Constraints:**
+       - Base model: 30B parameters.
+       - Precision: FP16 (2 bytes/param).
+       - Hardware: MI300X (192GB HBM3 total).
+       - JIT Transfer speed: 64 GB/s PCIe 5.0.
+       - Target SLA: p99 < 50ms.
+    2. **Calculations:**
+       - Base model: 30B parameters x 2 bytes (FP16) = 60 GB.
+       - Available memory: 192 GB (total) - 60 GB (base) = 132 GB for PagedAttention KV cache and JIT LoRAs.
+       - JIT Transfer: 100 MB adapter / 64 GB/s PCIe 5.0 = ~1.5ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Bandwidth-Bound.** ~1.5ms easily meets the 50ms SLA.
 status: published
-provenance: llm-draft
-expected_time_minutes: 12
-requires_explanation: true
-validated: true
-math_verified: true
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-tags:
-- gemini-generated
-- target-specification-L6+
-created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

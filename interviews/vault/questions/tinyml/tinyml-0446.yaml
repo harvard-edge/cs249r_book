@@ -11,18 +11,23 @@ title: The SRAM Budget Overflow
 scenario: You are shrinking a CNN layer for a person-detection model on a Cortex-M7 with 2MB of SRAM. The layer takes a 48x48x64 feature map and uses a 3x3 kernel to produce a 48x48x128 output. A colleague suggests replacing it with a depthwise separable convolution to solve an SRAM overflow.
 question: Does replacing the layer with a depthwise separable convolution solve peak activation SRAM usage?
 details:
-  realistic_solution: 'The described layer''s peak activation memory is ~432 KiB (input 144 KiB + output 288 KiB for INT8), which fits comfortably within the 2 MB SRAM of the Cortex-M7. There is no SRAM overflow to solve for this specific layer. A depthwise separable convolution reduces parameters by 8.4× (73,728 → 8,768) and FLOPs by ~8×, but does NOT reduce peak activation memory — the input and output tensor sizes remain identical. To actually reduce peak SRAM usage, you would need to: (1) reduce spatial resolution (add stride-2 or pooling before this layer), (2) reduce channel count, or (3) use in-place operations or operator fusion (e.g., TFLite Micro''s memory planner can reuse buffers across non-overlapping lifetimes).'
+  realistic_solution: 'The described layer''s peak activation memory fits comfortably within the 2 MB SRAM. A depthwise separable convolution drastically reduces parameters and FLOPs, but does NOT reduce peak activation memory. The input and output tensor dimensions remain identical. Real SRAM reduction requires smaller spatial resolution, fewer channels, or in-place operation memory planning.'
   common_mistake: |
     **The Pitfall:** Assuming parameter reduction equals activation memory reduction.
     **The Rationale:** Engineers correctly calculate an 8.4x parameter reduction but wrongly assume it shrinks the input/output tensors.
     **The Consequence:** They perform complex NAS searches that reduce flash footprint but do absolutely nothing to reduce peak SRAM usage.
   napkin_math: |
-    - **Input Size:** 48 * 48 * 64 * 1 B (INT8) = 144 KiB.
-    - **Output Size:** 48 * 48 * 128 * 1 B (INT8) = 288 KiB.
-    - **Peak Activation Memory:** 144 KiB + 288 KiB = 432 KiB.
-    - **SRAM Constraint:** 2 MB. 432 KiB easily fits.
-    - **Depthwise Parameter Reduction:** Standard 3x3 weights = 73,728. Depthwise = 8,768 (8.4x reduction).
-    - **Conclusion:** The premise is flawed. Peak activation memory is identical at **432 KiB**, which already comfortably fits in the 2 MB SRAM.
+    1. **Assumptions & Constraints:**
+       - SRAM Limit: 2 MB.
+       - Data format: INT8 (1 byte).
+       - Dimensions: 48x48x64 in, 48x48x128 out.
+    2. **Calculations:**
+       - Input Tensor Size: 48 * 48 * 64 * 1 byte = 144 KB.
+       - Output Tensor Size: 48 * 48 * 128 * 1 byte = 288 KB.
+       - Peak Activation: 144 KB + 288 KB = 432 KB.
+       - Depthwise Params: 8.4x smaller, but tensors are unchanged.
+    3. **Conclusion & Interpretation:**
+       - **Result: False Premise.** Peak memory remains 432 KB, which easily fits in 2 MB. Depthwise convolutions do not solve activation memory limits.
   options:
   - The parameter count is reduced by ~8.4x, so both memory and latency will decrease by ~8.4x, solving the problem.
   - The layer is memory-bound; since parameters are stored in Flash, not SRAM, the change has no effect on the memory issue.
@@ -30,26 +35,3 @@ details:
   - The FLOPs are reduced from ~339 MFLOPS to ~40 MFLOPS, but this increases latency because more, smaller operations are less efficient.
   correct_index: 2
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 4
-chains:
-- id: tinyml-chain-041
-  position: 2
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The scenario's premise is flawed; the described layer's activations (peak usage ~1.7MB) fit within the 2MB SRAM, so there is no 'SRAM Budget Overflow' to solve.
-- The 'Napkin Math' section discusses FLOPs and latency, which is irrelevant to the question about memory usage.
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -8,22 +8,27 @@ competency_area: architecture
 bloom_level: create
 phase: inference
 title: 'Mastery: explain compound scaling failure modes for mobile deployment'
-scenario: Your team successfully deploys EfficientNet-B0 on Snapdragon 8 Gen 3 (B0: 224×224, 0.39 GFLOPs). A PM requests scaling to B3 (300×300, 1.8 GFLOPs) for better accuracy without changing the SLA of <5ms.
+scenario: Your team deployed an EfficientNet-B0 model (224x224, 0.39 GFLOPs) meeting a 5ms NPU SLA. A PM requests scaling up to B3 (300x300, 1.8 GFLOPs) for better accuracy while strictly maintaining the <5ms SLA.
 question: Does EfficientNet-B3 fit the unchanged 5ms mobile NPU SLA, and where does compound scaling break down?
 details:
   realistic_solution: |
-    B3 feature maps: stage 1 at 150×150 (vs B0 112×112), intermediate maps proportionally larger. Hexagon HTP SRAM ~8MB. B3 peak activation: ~96×19×19 (stage 6) = 34.6KB × 1B → still fits. Resolution increase: HTP spatial tiling becomes less efficient at 300×300 vs 224×224 — tile count scales as (300/224)² = 1.79×. Latency scaling: 1.5ms × 4.6× FLOPs × 1.2× (tiling overhead) = 8.3ms → exceeds 5ms SLA. Break point: B2 (260×260, 1.0 GFLOPs). B2: 1.5 × (1.0/0.39) × 1.1 = 4.2ms — just under 5ms. B3 fails the SLA.
+    EfficientNet-B3 severely violates the 5ms SLA. Compound scaling breaks down on mobile NPUs because spatial resolution scaling fundamentally alters the hardware tiling strategy. High-resolution intermediate feature maps exceed the capacity of the NPU's localized SRAM (e.g., Hexagon HTP). This forces the compiler to slice the tensors into smaller spatial tiles, drastically increasing DMA transfers and scheduling overhead. While theoretical FLOPs increase by 4.6x, the non-linear tiling overhead scales quadratically with resolution, pushing latency far beyond linear projections.
   common_mistake: |
     **The Pitfall:** Projecting B3 latency purely by multiplying by the FLOP ratio.
     **The Rationale:** Candidates assume NPU latency scales linearly with theoretical FLOPs.
     **The Consequence:** They ignore that resolution scaling changes the NPU tiling strategy and that larger intermediate feature maps may exceed on-chip SRAM.
   napkin_math: |
-    - B0 -> B3 scaling factors: depth 1.73x, width 1.33x, resolution 1.52x.
-    - FLOPs: 0.39 * 2^3 = 3.1x -> 1.2 GFLOPs (actual B3: 1.8 GFLOPs).
-    - Resolution 300 vs 224: (300/224)^2 = 1.79x spatial overhead.
-    - Hexagon at B3: 1.5ms * (1.8G/0.39G) FLOPs ratio * 1.15 tiling factor = **8.8ms** (exceeds 5ms SLA).
-    - Memory: B3 max activation 38x38x192 = 277KB (fits HTP SRAM 8MB).
-    - Bottleneck is compute + tiling, not memory.
+    1. **Assumptions & Constraints:**
+       - Baseline B0 latency: 1.5 ms (0.39 GFLOPs, 224x224).
+       - Target B3: 1.8 GFLOPs, 300x300 resolution.
+       - Target SLA: < 5 ms.
+    2. **Calculations:**
+       - Linear FLOP ratio = 1.8 GFLOPs / 0.39 GFLOPs = 4.6x.
+       - Spatial resolution overhead = (300/224)^2 = 1.79x increase in spatial tile count.
+       - Tiling penalty multiplier (empirical): ~1.15x to 1.2x.
+       - Projected B3 Latency = 1.5 ms * 4.6 (FLOPs) * 1.15 (tiling penalty) = 7.93 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute & Tiling-Bound.** Projecting latency purely via FLOPs fails. The quadratic increase in spatial tiling overhead pushes the latency to ~8ms, definitively breaking the 5ms SLA. B2 (260x260) is the absolute limit.
 status: published
 provenance: imported
 requires_explanation: true

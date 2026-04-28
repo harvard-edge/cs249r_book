@@ -11,18 +11,25 @@ title: The Context Parallelism for Long Sequences
 scenario: You need to train a model with a 1M token context window. With a hidden dimension of 8192 and FP16 precision, standard self-attention requires O(n^2) memory, meaning a single attention head's score matrix for 1M tokens would be 2 TB, far exceeding a single GPU's memory.
 question: How do you distribute the sequence across GPUs, and what's the communication pattern?
 details:
-  realistic_solution: 'Use **Ring Attention** (context parallelism). Split the 1M sequence into P chunks across P GPUs. Each GPU holds queries for its chunk and iteratively receives key-value blocks from other GPUs in a ring pattern. In each ring step, a GPU: (1) computes attention between its local queries and the current KV block, (2) sends its KV block to the next GPU in the ring, (3) receives the next KV block from the previous GPU. After P steps, every GPU has attended to all KV pairs. The key insight: computation of attention on the current KV block overlaps with communication of the next KV block.'
+  realistic_solution: 'Use Ring Attention (context parallelism). Split the 1M sequence into P chunks across P GPUs. Each GPU holds queries for its chunk and iteratively receives key-value blocks from other GPUs in a ring pattern. The computation of attention on the current KV block overlaps with communication of the next KV block.'
   common_mistake: |
     **The Pitfall:** Assuming FlashAttention alone solves the infinite context problem.
     **The Rationale:** Candidates know FlashAttention reduces activation memory to O(n) and mistakenly think it scales infinitely.
     **The Consequence:** They fail to realize the computation is still O(n^2) and the KV cache across all heads still exceeds VRAM, causing an OOM error at 1M tokens.
   napkin_math: |
-    - **Calculate KV Cache:** 1M tokens, 128 heads, head_dim=64, FP16. KV for all heads = `1M * 64 * 128 * 2 (K+V) * 2B \u2248 30.5 GiB`.
-    - **Apply Ring Attention:** Split across P=32 GPUs. Local KV per GPU = `30.5 GiB / 32 = 0.95 GiB`.
-    - **Analyze Ring Communication:** Each step sends 0.95 GiB. Intra-node at 900 GB/s takes `0.95 / 900 = 1.06 ms`. Inter-node at 50 GB/s takes `0.95 / 50 = 19 ms`.
-    - **Calculate Attention FLOPs:** FLOPs per block is `4 * 31.25K * 31.25K * 64 * 128 = 32 TFLOP`.
-    - **Analyze Compute Time:** On H100 (989 TFLOPS), compute takes `32 / 989 = 32.4 ms`.
-    - **Conclusion:** Because 32.4 ms (compute) > 19 ms (network), communication is fully hidden behind compute.
+    1. **Assumptions & Constraints:**
+       - Context window: 1M tokens.
+       - Model dimensions: 128 heads, head_dim=64.
+       - Precision: FP16 (2 bytes).
+       - Ring size (GPUs): P=32.
+       - Hardware: H100 (989 TFLOPS), NVLink (900 GB/s), InfiniBand (50 GB/s).
+    2. **Calculations:**
+       - Total KV Cache: 1M * 64 * 128 * 2 (K+V) * 2 bytes ≈ 32.7 GB.
+       - Local KV per GPU (chunk size): 32.7 GB / 32 ≈ 1.02 GB.
+       - Inter-node transfer time (chunk): 1.02 GB / 50 GB/s = 20.4 ms.
+       - FLOPs per block: 4 * (1M/32) * (1M/32) * 64 * 128 ≈ 32.7 TFLOPs.
+       - Compute time: 32.7 TFLOPs / 989 TFLOPS = 33.1 ms.
+    3. **Conclusion & Interpretation:** **Compute time (33.1 ms) completely hides inter-node communication time (20.4 ms), making Ring Attention Compute-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

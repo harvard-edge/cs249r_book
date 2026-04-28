@@ -11,15 +11,22 @@ title: Evaluating Gang Scheduling for LLM Training
 scenario: You are orchestrating a distributed training job for a 70B parameter LLM across 128 A100 GPUs (16 nodes) using PyTorch FSDP. The shared Kubernetes cluster has 256 nodes and runs at 90% utilization. Your 16-node jobs frequently hang indefinitely during NCCL initialization, holding onto the nodes they successfully acquired but failing to start because the remaining nodes are unavailable.
 question: Should you use an all-or-nothing gang scheduler or app-level timeouts for these 16-node FSDP jobs, and what is the compute waste impact?
 details:
-  realistic_solution: Implement an atomic Gang Scheduler (e.g., Volcano or Kube-batch). It queues the 16-node job until all 128 GPUs are available simultaneously, leaving partially free nodes available for smaller workloads and entirely eliminating partial-allocation deadlocks.
+  realistic_solution: 'Implement an atomic Gang Scheduler (e.g., Volcano or Kube-batch). It queues the 16-node job until all 128 GPUs are available simultaneously, leaving partially free nodes available for smaller workloads and entirely eliminating partial-allocation deadlocks.'
   common_mistake: |
     **The Pitfall:** Relying on application-level timeouts (e.g., NCCL_TIMEOUT) to manage distributed resources.
     **The Rationale:** Candidates think simple timeouts are sufficient to recover from hangs.
     **The Consequence:** The job kills itself after a delay, but partially acquired nodes are locked and left idle for the entire timeout duration, causing severe resource fragmentation and wasted compute.
   napkin_math: |
-    - **Calculate App-level timeout waste:** If a job acquires 12 nodes, waits 30m for 4 more, and then times out, the wasted compute is 12 nodes * 8 GPUs/node * 0.5 hours = **48 GPU-hours**.
-    - **Calculate cost impact:** At $2/hr per GPU, this is **$96 wasted per attempt**.
-    - **Calculate Gang Scheduler waste:** An all-or-nothing scheduler queues the job until all nodes are ready, resulting in **0 GPU-hours wasted** on partial allocations.
+    1. **Assumptions & Constraints:**
+       - Job size: 16 nodes (128 GPUs).
+       - Wait time for remaining nodes: 30 mins (0.5 hours).
+       - Partial allocation: 12 nodes successfully acquired but blocked.
+       - Cost per GPU: $2/hr.
+    2. **Calculations:**
+       - Wasted compute with App-level timeout: 12 nodes * 8 GPUs/node * 0.5 hours = 48 GPU-hours.
+       - Wasted cost per attempt: 48 GPU-hours * $2/hr = $96.
+       - Wasted compute with Gang Scheduler: 0 GPU-hours (allocates atomically).
+    3. **Conclusion & Interpretation:** **Gang scheduling completely eliminates partial allocation waste, resolving the Resource Deadlock.**
 status: published
 provenance: imported
 requires_explanation: false

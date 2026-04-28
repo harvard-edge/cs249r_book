@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The Throughput-Optimized Cascade Failure
-scenario: You are tasked with optimizing a Llama-70B serving cluster for maximum cost-efficiency. You profile the system and find that a large static batch size of 64 maximizes throughput (TPOT) and achieves 95% GPU utilization. You deploy this configuration, but during the daily traffic peak, the entire service collapses: request queues grow infinitely, all requests time out, and the system requires a full restart.
+scenario: 'You are tasked with optimizing a Llama-70B serving cluster for maximum cost-efficiency. You profile the system and find that a large static batch size of 64 maximizes throughput (TPOT) and achieves 95% GPU utilization. You deploy this configuration, but during the daily traffic peak, the entire service collapses: request queues grow infinitely, all requests time out, and the system requires a full restart.'
 question: Why did optimizing for a peak hardware metric (TPOT) lead to a catastrophic system-level failure?
 details:
   realistic_solution: 'The team optimized for the wrong metric. While high TPOT and GPU utilization are good for offline batch processing, they are often toxic for an online, interactive service. A large static batch size fundamentally imposes a high Time-To-First-Token (TTFT) because every request must wait for the batch to fill. This initial wait time is the ''W'' in Little''s Law ($L = \lambda W$). By fixing the batch size at 64, you guaranteed a multi-second wait time (`W = 64 / \lambda`) even before the request hits the GPU. When real users experience high TTFT, they often retry or abandon the session, which ironically increases the arrival rate ($\lambda$). This creates a vicious cycle: higher arrival rate -> longer time to fill the *next* batch (if the server is saturated) -> even higher TTFT -> more retries -> runaway queue length (L). The system didn''t just get slow; it entered a positive feedback loop and became unstable. The correct approach is to prioritize P99 TTFT as the primary SLO and use a dynamic or continuous batching strategy that minimizes wait time, even at the cost of slightly lower peak GPU utilization.'
@@ -17,10 +17,14 @@ details:
     **The Rationale:** Engineers default to assuming GPUs are underpowered or code is flawed, missing the underlying queueing theory dynamics.
     **The Consequence:** Applying patches (like a slightly smaller static batch) without fixing the core static batching paradigm.
   napkin_math: |
-    1. **Little's Law:** L = λ W.
-    2. **Wait Time (W):** With a fixed batch of 64, W = 64 / λ.
-    3. **Cycle:** High TTFT increases retries, artificially inflating λ.
-    4. **Result:** The system enters a **positive feedback loop** causing runaway queue length.
+    1. **Assumptions & Constraints:**
+       - Static batch size: 64.
+       - Little's Law: L = λ W.
+    2. **Calculations:**
+       - Wait Time (W): 64 / λ.
+       - High TTFT increases retries, artificially inflating λ.
+       - Inflated λ further increases W if system is saturated.
+    3. **Conclusion & Interpretation:** **Result: Queueing-Collapse.** The system enters a positive feedback loop causing runaway queue length and catastrophic failure.
 status: published
 provenance: imported
 requires_explanation: false

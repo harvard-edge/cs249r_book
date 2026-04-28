@@ -8,21 +8,25 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The Real-Time Vision Stall
-scenario: You are an ML Systems Engineer on an automotive team, tasked with optimizing a driver-drowsiness detection model running on a Jetson AGX Orin. The system has a hard real-time requirement to process frames at 30 FPS (33.3ms deadline). Your model is meeting the deadline on average, but you observe frequent latency spikes that miss the deadline. You run the profiler and see the GPU timeline is a long sequence of dozens of tiny, distinct kernels (e.g., Conv2D, BatchNorm, ReLU) separated by small but significant gaps. Each individual operation is very fast (< 15µs), but the end-to-end latency is too high.
+scenario: You are an ML Systems Engineer on an automotive team, tasked with optimizing a driver-drowsiness detection model running on a Jetson AGX Orin. Your model is meeting the 30 FPS deadline on average, but you observe frequent latency spikes. You run the profiler and see the GPU timeline is a long sequence of dozens of tiny, distinct kernels (e.g., Conv2D, BatchNorm, ReLU) separated by small but significant gaps. Each individual operation is very fast (< 15µs).
 question: Given this profile, what is the most effective optimization to consistently meet the deadline?
 details:
   realistic_solution: The correct solution is to apply **Operator Fusion**. The profiler is clearly indicating that kernel launch overhead is a dominant factor. Each time the CPU schedules a kernel on the GPU, there's a fixed latency cost (typically 5-10µs). When operations are very fast (e.g., an element-wise ReLU), this launch overhead can be as large or larger than the actual computation. Operator fusion, typically done with a graph compiler like NVIDIA's TensorRT or Apache TVM, combines a sequence of layers (like Conv2D -> BatchNorm -> ReLU) into a single, larger, more efficient kernel. This fused kernel is launched only once, drastically reducing the total launch overhead. As a critical secondary benefit, the intermediate data between the fused ops can be kept in fast on-chip SRAM/registers instead of being written out to and read back from much slower LPDDR5 DRAM, which significantly reduces memory access latency and power consumption.
   common_mistake: |
     **The Pitfall:** Misdiagnosing kernel launch overhead as a model size issue.
-    **The Rationale:** Engineers might see a 'death by a thousand cuts' and assume the model is simply too large, leading them to apply pruning or quantization, which doesn't solve the launch overhead issue.
-    **The Consequence:** Wasting time on model compression techniques that degrade accuracy without actually fixing the latency spikes caused by CPU-GPU synchronization.
+    **The Rationale:** Engineers see tiny delays and assume the model is too large, leading them to apply pruning instead of addressing CPU-GPU synchronization.
+    **The Consequence:** Wasting time on model compression techniques that degrade accuracy without fixing the latency spikes caused by launch overhead.
   napkin_math: |
-    * **Assume:** Conservative kernel launch overhead of 5µs on Orin.
-    * **Unfused Block (Conv -> BN -> ReLU):** 3 launches * 5µs = 15µs overhead. If compute is 2µs/op, total = 3 * (2µs + 5µs) = 21µs.
-    * **Fused Block:** 1 launch * 5µs = 5µs overhead. Compute = 6µs. Total = 11µs.
-    * **Across 50 blocks:**
-      * Unfused: 50 * 21µs = 1.05ms
-      * Fused: 50 * 11µs = **0.55ms** (Nearly 2x faster execution by eliminating gaps).
+    1. **Assumptions & Constraints:**
+       - Target deadline: 33.3ms (30 FPS).
+       - Kernel launch overhead on Orin: ~5µs.
+       - Operations are tiny (e.g., 2µs compute).
+    2. **Calculations:**
+       - Unfused Block (Conv -> BN -> ReLU): 3 launches * 5µs = 15µs overhead. Compute = 3 * 2µs = 6µs. Total = 21µs.
+       - Fused Block: 1 launch * 5µs = 5µs overhead. Compute = 6µs. Total = 11µs.
+       - Across 50 blocks: Unfused = 50 * 21µs = 1.05ms. Fused = 50 * 11µs = 0.55ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Overhead-Bound.** Operator fusion nearly halves execution time by eliminating CPU-GPU synchronization gaps and kernel launch delays.
   options:
   - Aggressively prune more filters from the convolutional layers to reduce the model's overall FLOPs.
   - Increase the GPU's clock frequency to reduce the execution time of each individual kernel.

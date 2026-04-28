@@ -8,22 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: Depthwise Convolution Latency Discrepancy
-scenario: You deployed a vision model on an ESP32-S3 (240 MHz dual-core Xtensa, 512 KB SRAM) utilizing its INT8 vector extensions. After converting a standard 3x3 convolution layer (32 input channels, 64 output channels, 16x16 feature map) to a depthwise separable convolution, the theoretical MAC operations dropped by nearly 8x. However, the measured execution latency only improved by 2x, and peak SRAM usage during the layer's execution actually increased.
+scenario: You deployed a vision model utilizing INT8 vector extensions. After converting a standard 3x3 convolution layer (32 input channels, 64 output channels, 16x16 feature map) to a depthwise separable convolution, the theoretical MAC operations dropped by nearly 8x. However, the measured execution latency only improved by 2x, and peak SRAM usage during the layer's execution actually increased.
 question: Why does the latency improvement not match the MAC reduction, and why did the SRAM footprint grow on this architecture?
 details:
-  realistic_solution: The discrepancy occurs because depthwise convolutions are severely memory-bandwidth bound. While the ESP32-S3's INT8 vector extensions process MACs rapidly, depthwise layers have very low arithmetic intensity per input activation (9 MACs vs 576 for standard conv), causing the 240 MHz Xtensa cores to stall waiting for SRAM reads. Furthermore, splitting the standard convolution into depthwise and pointwise operations forces the system to allocate and write an intermediate activation tensor to the 512 KB SRAM, causing the observed increase in peak memory footprint and adding costly memory roundtrip latency.
+  realistic_solution: "The discrepancy occurs because depthwise convolutions are severely memory-bandwidth bound. While the INT8 vector extensions process MACs rapidly, depthwise layers have very low arithmetic intensity per input activation, causing the core to stall waiting for SRAM reads. Splitting the standard convolution into depthwise and pointwise operations forces the system to allocate and write an intermediate activation tensor to the SRAM, adding memory roundtrip latency."
   common_mistake: |
     **The Pitfall:** Assuming execution latency scales perfectly with MAC count.
     **The Rationale:** Missing the impact of memory bandwidth bottlenecks on microcontrollers and the concept of arithmetic intensity.
     **The Consequence:** Overestimating the performance gains of depthwise convolutions and encountering unexpected out-of-memory errors due to intermediate tensor materialization.
   napkin_math: |
-    1. **Standard 3x3 MACs:** 3 * 3 * 32 * 64 * 16 * 16 = 4,718,592 MACs.
-    2. **Depthwise MACs:** 3 * 3 * 32 * 1 * 16 * 16 = 73,728 MACs.
-    3. **Pointwise MACs:** 1 * 1 * 32 * 64 * 16 * 16 = 524,288 MACs.
-    4. **Total DSConv MACs:** 73,728 + 524,288 = 598,016 MACs.
-    5. **MAC Reduction Factor:** 4,718,592 / 598,016 = **7.89x**.
-    6. **Arithmetic Intensity (MACs per input activation loaded):** Standard = 9 * 64 = 576; Depthwise = 9 * 1 = 9.
-    7. **Note:** MACs per weight loaded is 256 (16x16 spatial reuse) for both. The bottleneck shift is due to reduced output-channel reuse, not weight reuse.
+    1. **Assumptions & Constraints:**
+       - Standard Conv: 3x3, 32 C_in, 64 C_out, 16x16 spatial.
+       - INT8 Vector Extensions accelerate compute.
+    2. **Calculations:**
+       - Standard MACs: 3 * 3 * 32 * 64 * 16 * 16 = 4,718,592.
+       - Separable MACs: (3*3*32*16*16) + (1*1*32*64*16*16) = 598,016.
+       - MAC Reduction Factor: 4,718,592 / 598,016 = 7.89x.
+       - Activation Reuse (MACs per input activation): Standard = 9 * 64 = 576; Depthwise = 9 * 1 = 9.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Low arithmetic intensity per activation stalls the CPU waiting for SRAM).**
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,8 +39,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Arithmetic intensity incorrectly calculated or mislabeled. 576 and 9 are MACs per input activation, not MACs per weight loaded. True MACs per weight loaded is 256 for both.
 human_reviewed:
   status: not-reviewed
   by: null

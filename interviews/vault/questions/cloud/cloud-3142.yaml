@@ -13,17 +13,21 @@ question: How does MI300X's 64KB LDS change FlashAttention tile size for head_di
 details:
   realistic_solution: 'With 64KB LDS, budget: Q tile + K tile + V tile + O tile + stats. Using B_r=B_c=64: Q = 64x128x2B = 16KB, K = 16KB, V = 16KB, O = 16KB = 64KB total — exactly at limit. Compared to H100''s B_r=B_c=128, this means 4x more tiles per attention computation. More tiles = more loop iterations = more overhead. However, MI300X has 5.3 TB/s bandwidth vs H100''s 3.35 TB/s (1.58x more). For memory-bound operations, MI300X can compensate. But for FlashAttention (compute-bound after tiling), smaller tiles mean lower matmul efficiency: 64x64x128 GEMMs achieve ~70% of peak vs 128x128x128 at ~85%. Net: MI300X FlashAttention throughput ~85% of H100 despite higher bandwidth.'
   common_mistake: |
-    **The Pitfall:** Assuming the same tile sizes that work on NVIDIA will work on AMD.
-    **The Rationale:** Failing to account for architectural differences in SRAM per Compute Unit between different hardware accelerators.
-    **The Consequence:** OOM errors on SRAM/LDS or severe performance degradation, as the 4x smaller SRAM per CU fundamentally changes the required tile geometry and loop structure.
+    **The Pitfall:** Assuming the exact same tile sizes that work on NVIDIA will work on AMD.
+    **The Rationale:** Failing to account for architectural differences in SRAM per Compute Unit between accelerators.
+    **The Consequence:** OOM errors on SRAM/LDS or severe performance degradation, as the 4x smaller SRAM fundamentally changes required loop geometry.
   napkin_math: |
-    - MI300X tile: 64x64 = 4K elements per tile.
-    - H100 tile: 128x128 = 16K elements per tile.
-    - MI300X needs 4x more tiles.
-    - GEMM efficiency at 64x64x128: ~70% vs ~85% at 128x128x128.
-    - MI300X peak: 1307 TFLOPS FP16 x 0.70 = 915 effective TFLOPS.
-    - H100 peak: 989 TFLOPS FP16 x 0.85 = 841 effective TFLOPS.
-    - **MI300X FlashAttention throughput is competitive but ultimately limited by smaller tiles despite higher peak FLOPs and bandwidth.**
+    1. **Assumptions & Constraints:**
+       - MI300X LDS: 64 KB. MI300X Peak FP16: 1307 TFLOPS.
+       - H100 SMEM: 256 KB. H100 Peak FP16: 989 TFLOPS.
+       - Head dimension: 128, FP16 (2 bytes).
+    2. **Calculations:**
+       - MI300X Tile (64x64): Q+K+V+O = (64×128×2)×4 = 65.5 KB (fits LDS limit).
+       - H100 Tile (128x128): fits within 256 KB easily.
+       - GEMM Efficiency: 64x64x128 achieves ~70%. 128x128x128 achieves ~85%.
+       - MI300X Effective: 1307 × 0.70 = 915 TFLOPS.
+       - H100 Effective: 989 × 0.85 = 841 TFLOPS.
+    3. **Conclusion & Interpretation:** **Result: Compute-Bound.** While MI300X requires 4x more tiles due to LDS limits, its higher raw compute compensates, yielding roughly competitive FlashAttention throughput (~915 vs 841 effective TFLOPS).
 status: published
 provenance: imported
 requires_explanation: false

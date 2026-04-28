@@ -8,7 +8,7 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Edge Storage Format for Hailo-8
-scenario: 'You are designing an edge ML system for a smart city node. During off-peak hours, the system runs batch inference on stored sensor data using a Hailo-8 accelerator (26 TOPS INT8, 2.5W). The Hailo-8 has no local DRAM and streams data directly from host memory. You must choose a storage format for the accumulated data: Parquet with Snappy compression, TFRecord with GZIP, or uncompressed raw binary. The host system has a low-power ARM CPU and eMMC storage limited to 100 MB/s read bandwidth.'
+scenario: 'You are designing an edge ML system for a smart city node. During off-peak hours, the system runs batch inference on stored sensor data using a Hailo-8 accelerator. The Hailo-8 has no local DRAM and streams data directly from host memory. You must choose a storage format for the accumulated data: Parquet with Snappy compression, TFRecord with GZIP, or uncompressed raw binary. The host system has a low-power ARM CPU and eMMC storage limited to 100 MB/s read bandwidth.'
 question: Which storage format should you use to keep the Hailo-8 fed from 100 MB/s eMMC, and why?
 details:
   realistic_solution: 'A row-based format with fast decompression (like TFRecord with Snappy/LZ4) is required. Uncompressed binary bottlenecks on eMMC read speeds, while GZIP bottlenecks on ARM CPU decompression. A row-based layout ensures the host CPU can stream decompressed frames directly into host memory for the Hailo-8 dataflow architecture without costly memory reorganization.'
@@ -17,11 +17,16 @@ details:
     **The Rationale:** Candidates know Parquet is the industry standard for big data and assume it applies to edge accelerators.
     **The Consequence:** Parquet is a columnar format; reconstructing row-based tensors incurs massive CPU overhead, heavily starving the Hailo-8.
   napkin_math: |
-    *   **Accelerator Demand:** 100 GOPS model on 26 TOPS accelerator = 260 inf/sec. Requires 260 MB/s streaming for 1 MB inputs.
-    *   **Uncompressed:** Limited by 100 MB/s eMMC (100 inf/sec, 38% utilization).
-    *   **TFRecord + GZIP:** Limited by ARM CPU decompression at ~50 MB/s (19% utilization).
-    *   **TFRecord + Snappy:** 3x compression allows 100 MB/s eMMC to deliver 300 MB/s decompressed.
-    *   **Result:** **Snappy easily saturates the Hailo-8 at 100% utilization without columnar overhead.**
+    1. **Assumptions & Constraints:**
+       - Accelerator Compute: 260 inferences/sec (requires 260 MB/s for 1 MB inputs).
+       - Storage Bandwidth: eMMC limited to 100 MB/s.
+       - CPU Bottleneck: ARM CPU limits GZIP decompression to ~50 MB/s.
+    2. **Calculations:**
+       - Uncompressed Throughput: Limited by eMMC to 100 MB/s (100 inf/sec, 38% utilization).
+       - TFRecord + GZIP Throughput: Limited by CPU to 50 MB/s (19% utilization).
+       - TFRecord + Snappy Throughput: 3x compression allows 100 MB/s eMMC to yield 300 MB/s decompressed.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound.** Snappy compression on a row-based format (TFRecord) easily saturates the Hailo-8 at 100% utilization, overcoming the eMMC limits without the columnar reconstruction overhead of Parquet.
 status: published
 provenance: imported
 requires_explanation: false

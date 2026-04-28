@@ -11,17 +11,21 @@ title: Exynos 2400 NPU Heterogeneous Pipeline Design
 scenario: You must design the inference architecture for a novel real-time computational photography pipeline running on the Samsung Exynos 2400. The workload mixes dense convolutions, dynamic control-flow sparse operations, and transformer blocks. You need to distribute these tasks across the NPU, CPU, and GPU while managing contention on the shared memory to guarantee a 33.3ms latency budget.
 question: How should an Exynos 2400 heterogeneous pipeline map dense, dynamic, and preprocessing work across its processors?
 details:
-  realistic_solution: A mastery-level design partitions the workload strictly according to the programmability-efficiency spectrum. Dense, static convolutions and matrix multiplications are pinned to the highly efficient dual-core NPU. Dynamic control flow or sparse operations are explicitly routed to the more programmable CPU or GPU. Crucially, the architect will implement zero-copy buffers within the shared 12 GB LPDDR5X memory pool, allowing the ISP, NPU, and CPU to pass large activation tensors without initiating expensive memory copies between processing domains.
+  realistic_solution: A mastery-level design partitions the workload strictly according to the programmability-efficiency spectrum. Dense, static convolutions and matrix multiplications are pinned to the highly efficient dual-core NPU. Dynamic control flow or sparse operations are explicitly routed to the more programmable CPU or GPU. Crucially, the architect will implement zero-copy buffers via Android HardwareBuffers within the shared 12 GB LPDDR5X memory pool, allowing the ISP, NPU, and CPU to pass large activation tensors without initiating expensive DMA memory copies between processing domains.
   common_mistake: |
     **The Pitfall:** Attempting to compile the entire monolithic model exclusively for the NPU.
-    **The Rationale:** Engineers chase the 34.7 TOPS peak performance, ignoring the fact that dynamic control flow and unstructured sparsity will stall the NPU.
+    **The Rationale:** Engineers chase the 34.7 TOPS peak performance, ignoring the fact that dynamic control flow and unstructured sparsity will stall the NPU's dense MAC arrays.
     **The Consequence:** Severe bandwidth contention from concurrent CPU/GPU/ISP memory access, leading to pipeline stalls and massive frame drops.
   napkin_math: |
-    1. **Target Latency:** 30 FPS requires exactly 33.3ms per frame.
-    2. **NPU Compute Time:** 200 GOPS dense workload on 34.7 TOPS NPU = 5.76ms (theoretical).
-    3. **Memory Transfer (FP16):** 1.5 GB model + 500MB activations at ~60 GB/s = 33.3ms (blows budget).
-    4. **Quantization to INT8:** Halving model to 750MB reduces transfer to 12.5ms.
-    5. **Conclusion:** Realistic NPU compute (14.4ms) + INT8 memory transfer (12.5ms) = 26.9ms. This leaves a **6.4ms** margin for CPU/GPU fallback tasks.
+    1. **Assumptions & Constraints:**
+       - Target Latency: 30 FPS (33.3ms per frame budget).
+       - NPU Peak: 34.7 TOPS. Dense workload: 200 GOPS.
+       - Memory bandwidth: ~60 GB/s. Model size: 1.5 GB. Activations: 500 MB.
+    2. **Calculations:**
+       - NPU Compute: 200 GOPS / 34,700 GOPS/sec = 5.76ms.
+       - FP16 Transfer: (1.5 GB + 0.5 GB) / 60 GB/s = 33.3ms (exhausts budget).
+       - INT8 Transfer: Halving model to 750MB reduces transfer to 1.25 GB / 60 GB/s = 20.8ms.
+    3. **Conclusion & Interpretation:** Realistic NPU compute (5.76ms) + INT8 memory transfer (20.8ms) = 26.56ms. This leaves a **6.7ms margin** for CPU/GPU fallback, confirming the pipeline is **Memory-Bound**.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,36 +8,23 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Gradient Accumulation Memory Reduction Discrepancy
-scenario: 'An ML engineer is fine-tuning a 3B parameter model using mixed precision (FP16) and the Adam optimizer on a single H100 GPU (80 GB HBM3). At a batch size of 64, training crashes with an Out-of-Memory (OOM) error because the system requires 88 GB of memory. To resolve this, the engineer applies gradient accumulation with a micro-batch size of 16 (4 accumulation steps), expecting the total memory usage to drop by roughly 75% to around 22 GB. Instead, training successfully runs but consumes 58 GB of memory.'
-question: 'Why does gradient accumulation with micro-batches of 16 reduce memory from 88 GB to 58 GB instead of the expected 22 GB?'
+scenario: 'Fine-tuning a 3B model at batch size 64 OOMs because it requires 88 GB of memory. Applying gradient accumulation with a micro-batch of 16 (4 steps) drops memory usage to 58 GB, not the expected 22 GB.'
+question: 'Why does gradient accumulation reduce memory to 58 GB instead of 22 GB?'
 details:
-  realistic_solution: 'Total memory is the sum of model weights, gradients, optimizer states, and forward activations. Gradient accumulation only reduces the activation memory by shrinking the micro-batch size. The model weights, accumulated gradients, and optimizer states remain fixed regardless of the micro-batch size. Therefore, only the activation memory portion was reduced by a factor of 4, while the substantial static memory overhead remained constant.'
+  realistic_solution: 'Gradient accumulation only shrinks dynamic activation memory. Static memory (weights, accumulated gradients, Adam optimizer states) remains completely fixed regardless of micro-batch size.'
   common_mistake: |
-    **The Pitfall:** Assuming that total GPU memory usage scales linearly with batch size.
-    **The Rationale:** Candidates fail to separate memory into static components (weights, optimizer, gradients) and dynamic components (activations).
-    **The Consequence:** Miscalculating required memory budgets and applying insufficient mitigation strategies for OOM errors.
+    **The Pitfall:** Assuming total GPU memory usage scales linearly with batch size.
+    **The Rationale:** Candidates fail to separate static state from dynamic activations.
+    **The Consequence:** Miscalculating memory budgets and failing to resolve OOMs.
   napkin_math: |
-    - **Static Memory (Independent of Batch Size):**
-      - Weights (FP16) = 3B × 2 bytes = 6 GB.
-      - Gradients (FP16) = 3B × 2 bytes = 6 GB.
-      - Adam Optimizer (FP32 master, momentum, variance) = 3B × 12 bytes = 36 GB.
-      - Total Static Memory = **48 GB**.
-    - **Activation Memory (Scales with Batch Size):**
-      - At BS=64, activations = 88 GB (Total) - 48 GB (Static) = 40 GB.
-      - At micro-batch BS=16, activations drop by 75% = 40 GB / 4 = 10 GB.
-    - **Result:** Total memory at BS=16 is 48 GB (Static) + 10 GB (Activations) = **58 GB**.
-status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 5
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: UNCHECKED
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - 3B model, FP16 weights/grads, FP32 Adam.
+       - Total memory at BS=64 is 88 GB.
+    2. **Calculations:**
+       - Static: Weights(6 GB) + Gradients(6 GB) + Adam(36 GB) = 48 GB.
+       - Activations at BS=64: 88 - 48 = 40 GB.
+       - Activations at BS=16: 40 / 4 = 10 GB.
+       - Total at BS=16: 48 + 10 = 58 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 58 GB Total Memory.**
+       - **Conclusion: Memory-Bound; static state dominates, making linear scaling assumptions invalid.**

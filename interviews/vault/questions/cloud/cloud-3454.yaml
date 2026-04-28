@@ -8,21 +8,24 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: 'Optimizing MoE LLM Training on H100s: Diagnosing and Fixing Interconnect Bottlenecks'
-scenario: Your team is training a colossal Mixture-of-Experts (MoE) Large Language Model with 1.5 trillion parameters, distributed across 64 NVIDIA H100 GPUs. Each H100 boasts 80 GB HBM3 memory and delivers 989 TFLOPS FP16 dense compute, with an HBM3 bandwidth of 3.35 TB/s. The GPUs are arranged in eight nodes (8 H100s per node), interconnected using NVLink within nodes and InfiniBand HDR (200 Gb/s per link, with 4 links per node) between nodes, forming a fat-tree topology. You observe that during the expert dispatch phase, the training throughput is significantly lower than expected, and GPU utilization dips to 40-50% across multiple nodes, despite ample compute capacity.
-question: How would you diagnose and fix the MoE expert-dispatch bottleneck on 64 H100s, and quantify the expected throughput improvement?
+scenario: You are training a 1.5 trillion parameter MoE model on 64 GPUs. The GPUs are in 8 nodes connected by InfiniBand HDR (200 Gb/s). During the expert dispatch phase, training throughput is low and GPU utilization dips to 40-50%.
+question: How would you diagnose and fix the MoE expert-dispatch bottleneck on 64 GPUs, and quantify the expected throughput improvement?
 details:
-  realistic_solution: '1. **Diagnosis**: Utilize NVIDIA Nsight Systems (`nsys`) to profile GPU kernel execution times and communication operations (e.g., `all_to_all`, `send`/`recv` for expert activations) across the entire cluster. Monitor InfiniBand statistics using `ibstat`, `smpquery`, or Mellanox `mlx_tools` to check link utilization, error rates, and queue depths on switches and Host Channel Adapters (HCAs) during the expert dispatch phase. Analyze NCCL logs for communication patterns and potential retries. Look for high network queuing delays or dropped packets. 2. **Proposed Fixes**: If InfiniBand HDR links are consistently saturated (>80% utilization) and latency is high, recommend upgrading the inter-node fabric to InfiniBand NDR (400 Gb/s). Explore optimizing MoE expert placement and routing algorithms to minimize cross-node communication. Consider fine-tuning NCCL parameters (e.g., `NCCL_IB_HCA_PAGESIZE`, `NCCL_IB_QPS_PER_RAW_QP`, `NCCL_NET_GDRCOPY_ENABLE`) and communication collectives. If the cluster permits, evaluate non-blocking network topologies or NVSwitch-based fabrics for inter-node communication to reduce latency and increase aggregate bandwidth for MoE''s irregular traffic patterns.'
+  realistic_solution: 'Use nsys to profile kernel execution and IB stats. The inter-node expert dispatch uses AllToAll. Upgrading the fabric from HDR to NDR doubles bandwidth, drastically reducing network stall time.'
   common_mistake: |
-    **The Pitfall:** Focusing solely on individual GPU compute or memory utilization.
-    **The Rationale:** Engineers ignore inter-GPU communication patterns and network fabric congestion.
+    **The Pitfall:** Focusing solely on individual GPU compute utilization.
+    **The Rationale:** Engineers ignore inter-GPU AllToAll communication patterns caused by expert routing.
     **The Consequence:** Misattributing the bottleneck to CPU overhead and failing to optimize the network.
   napkin_math: |
-    1. Estimate expert data: Assuming 64 GPUs and 1.5T model, expert dispatch requires moving ~50 GB per step.
-    2. Current HDR network (200 Gb/s): Effective bandwidth ~100 GB/s. Dispatch time = 50 GB / 100 GB/s = 500 ms.
-    3. Upgraded NDR network (400 Gb/s): Effective bandwidth ~200 GB/s. Dispatch time = 50 GB / 200 GB/s = 250 ms.
-    4. Time saved: 250 ms per 2-second step.
-    5. Speedup: 2.0s / 1.75s ≈ 1.14x.
-    **Final Result: Upgrading to NDR yields a 14% improvement in training throughput.**
+    1. **Assumptions & Constraints:**
+       - Expert data payload = 50 GB per step.
+       - HDR effective bandwidth = 100 GB/s. NDR = 200 GB/s.
+    2. **Calculations:**
+       - HDR dispatch time = 50 GB / 100 GB/s = 500 ms.
+       - NDR dispatch time = 50 GB / 200 GB/s = 250 ms.
+       - Speedup = 2.0s (total HDR step) / 1.75s (total NDR step) = 1.14x.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound (NDR upgrade yields a 14% throughput improvement).**
 status: published
 provenance: imported
 requires_explanation: false

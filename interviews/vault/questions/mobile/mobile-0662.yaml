@@ -11,21 +11,24 @@ title: The AR Navigation Preemption Crisis
 scenario: An AR navigation feature renders guidance over a camera feed at 30 FPS. A 'Vision Query' feature triggers a 2B parameter VLM.
 question: How do you schedule a 400ms VLM inference without starving a 30 FPS navigation task on a non-preemptible NPU?
 details:
-  realistic_solution: The core challenge is that a long-running, low-priority task
-    (VLM) must not starve a short, high-priority, real-time task (Navigation) on shared,
-    non-preemptible hardware like an NPU. The architecture must create the *illusion*
-    of preemption.
+  realistic_solution: 'The core challenge is that a long-running, low-priority task (VLM) must not starve a short, high-priority, real-time task (Navigation) on shared, non-preemptible hardware like an NPU. The architecture must create the illusion of preemption by chunking the VLM inference into fine-grained execution blocks.'
   common_mistake: |
     **The Pitfall:** Using a simple FIFO queue for NPU scheduling.
     **The Rationale:** Assuming the OS or hardware will magically multiplex tasks, ignoring that NPUs generally run coarse-grained workloads to completion.
-    **The Consequence:** The 400ms VLM prefill blocks the navigation task, causing a dangerous 12-frame visual stutter in a driving application.
+    **The Consequence:** The 400ms VLM prefill blocks the navigation task, causing a dangerous 12-frame visual stutter in a critical driving application.
   napkin_math: |
-    - **Navigation Budget:** 33 ms/frame. Nav inference takes 8 ms.
-    - **VLM Prefill:** 400 ms total.
-    - **Chunking Strategy:** Split VLM into chunks of 23 ms. 
-    - **Overhead:** ~2 ms for DRAM spill/restore per chunk.
-    - **Total Frame Time:** 8 ms (Nav) + 23 ms (VLM) + 2 ms (Overhead) = 33 ms.
-    - **Result:** Navigation stays at 30 FPS, while the VLM completes in **~594 ms** (18 chunks * 33 ms).
+    1. **Assumptions & Constraints:**
+       - Navigation Framerate: 30 FPS (33 ms budget/frame).
+       - Nav Inference Time: 8 ms per frame.
+       - VLM Prefill Total Time: 400 ms.
+       - NPU is non-preemptible.
+    2. **Calculations:**
+       - Remaining frame budget for VLM: 33 ms - 8 ms = 25 ms.
+       - Safe chunk size for VLM (leaving 2ms overhead): 23 ms.
+       - Number of VLM chunks needed: 400 ms / 23 ms/chunk ≈ 17.4 (18 chunks).
+       - Total wall-clock time for VLM: 18 chunks * 33 ms/frame = 594 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduling-Bound. Chunking the 400ms VLM into 23ms blocks maintains 30 FPS navigation, stretching VLM completion to 594ms.**
 status: published
 provenance: imported
 requires_explanation: true
@@ -37,10 +40,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The 'Napkin Math' section is empty and does not provide the quantitative reasoning
-  to support the solution.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -8,22 +8,26 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Debugging Autograd Memory Bottlenecks
-scenario: You are training a custom sequence model on an 80GB A100 GPU. The model parameters and optimizer
-  states consume only 4GB. Each sequence step produces 100MB of intermediate activations. With a sequence
-  length of T=1000, the forward pass completes, but the backward pass consistently throws a CUDA Out of
-  Memory error. Diagnose the root cause of this memory failure in the automatic differentiation engine
-  and architect a solution to train the model without reducing the sequence length or batch size.
+scenario: You are training a custom sequence model on an 80GB GPU. The model parameters and optimizer states consume only 4GB. Each sequence step produces 100MB of intermediate activations. With a sequence length of T=1000, the forward pass completes, but the backward pass consistently throws a CUDA Out of Memory error.
 question: "Why does the backward pass OOM with T=1000 activations, and how can you train without reducing sequence length or batch size?"
 details:
-  realistic_solution: Diagnose that reverse-mode AD caches 100GB of activations (100MB * 1000), exceeding
-    the 80GB VRAM limit. Implement gradient checkpointing (activation recomputation) to store only a subset
-    of activations and recompute the rest during the backward pass.
-  common_mistake: Suggesting mixed precision or smaller batch sizes without addressing the fundamental
-    O(T) memory complexity of reverse-mode AD caching all intermediate activations.
-  napkin_math: During a sequence length T=1000, storing 100MB of activations per step for the backward
-    pass requires 1000 * 100MB = 100GB of VRAM, instantly OOMing the 80GB A100. Using gradient checkpointing
-    every k=32 steps, we only store 1000/32 = 31 anchor points (3.1GB), plus the local 32 steps during
-    recalculation (3.2GB). Total VRAM drops from 100GB to 6.3GB for a mere 33% compute tax!
+  realistic_solution: Diagnose that reverse-mode AD caches 100GB of activations, exceeding VRAM. Implement gradient checkpointing (activation recomputation) to store only a subset of activations and recompute the rest during the backward pass.
+  common_mistake: |
+    **The Pitfall:** Suggesting mixed precision or smaller batch sizes to fix the memory issue.
+    **The Rationale:** Candidates do not address the fundamental O(T) memory complexity of reverse-mode AD caching all intermediate activations.
+    **The Consequence:** Failing to fix the OOM error for long sequences, ultimately forcing a reduction in model capabilities.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Sequence length T=1000.
+       - 100MB of activations per step.
+       - 80GB VRAM limit.
+    2. **Calculations:**
+       - 1000 * 100MB = 100GB of VRAM (OOMs the 80GB GPU).
+       - Gradient checkpointing every k=32 steps: store 1000/32 = 31 anchor points (3.1GB).
+       - Local 32 steps recomputed = 3.2GB.
+       - Total VRAM = 3.1GB + 3.2GB = 6.3GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound mitigation**. Total VRAM drops from 100GB to 6.3GB for a mere 33% compute tax.
 status: published
 provenance: imported
 requires_explanation: false

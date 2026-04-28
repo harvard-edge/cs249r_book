@@ -8,29 +8,29 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Diagnosing Elastic Scaling Collapse
-scenario: You are observing an elastic pre-training job for a 13B parameter LLM on a cluster of 8x A100 (80GB) nodes. The job uses a strict static global batch size of 2048 sequences to maintain statistical efficiency. When the cluster scheduler dynamically scales the job from 64 to 128 GPUs, the global throughput (tokens/sec) only increases by 15%, drastically flattening the scaling efficiency curve. The network is verified to be fully operational with non-blocking 400Gbps InfiniBand per node.
-question: "Why does throughput rise only 15% when scaling from 64 to 128 GPUs with a static global batch size, and what should the scheduler do?"
+scenario: You are observing an elastic pre-training job for a 13B parameter LLM. The job uses a strict static global batch size of 2048 sequences. When the cluster scheduler dynamically scales the job from 64 to 128 GPUs, the global throughput only increases by 15%. The network is verified to be fully operational.
+question: Why does throughput rise only 15% when scaling from 64 to 128 GPUs with a static global batch size, and what should the scheduler do?
 details:
-  realistic_solution: With a static global batch size, doubling the GPU count halves the micro-batch size per GPU. This decreases the arithmetic intensity (compute per byte) on the A100s, causing the compute time to shrink so much that the fixed AllReduce communication latency dominates the step time. To fix this, the scheduler should continuously profile the empirical scaling efficiency curve and set a strict upper bound on worker allocation for this job (e.g., cap at 64 GPUs) once marginal throughput falls below a configured efficiency threshold (e.g., 80%), freeing the remaining GPUs for other workloads.
+  realistic_solution: With a static global batch size, doubling the GPU count halves the micro-batch size per GPU. This decreases the arithmetic intensity, causing the compute time to shrink so much that the fixed AllReduce communication latency dominates the step time. To fix this, the scheduler should continuously profile the empirical scaling efficiency curve and set a strict upper bound on worker allocation.
   common_mistake: |
     **The Pitfall:** Assuming an undetected network failure or straggler node.
     **The Rationale:** Candidates often jump to hardware or network anomalies rather than mathematically analyzing the impact of static batching on per-GPU utilization as worker counts increase.
     **The Consequence:** Misdiagnosing the throughput collapse, leading to unnecessary hardware troubleshooting instead of fixing the scheduler policy.
   napkin_math: |
-    - **64 GPUs:** Global Batch Size = 2048. Micro-Batch Size (MBS) = 32.
-    - **Step Time at 64 GPUs:** Assume Compute Time = 40ms, AllReduce = 15ms. Step Time = max(40, 15) = 40ms.
-    - **Throughput at 64 GPUs:** 2048 / 0.040s = 51,200 seq/s.
-    - **128 GPUs:** MBS = 16. Compute Time = 20ms. AllReduce time remains ~15ms (or slightly grows).
-    - **Step Time at 128 GPUs:** If perfectly overlapped, max(20, 15) = 20ms, but exposed communication and pipeline bubbles result in ~35ms practical step times.
-    - **Throughput at 128 GPUs:** 2048 / 0.035s = 58,514 seq/s.
-    - **Result:** **We doubled the GPUs (2x cost) but only gained ~14% throughput (matching the ~15% observed).**
+    1. **Assumptions & Constraints:**
+       - Global Batch Size: 2048.
+       - 64 GPUs: MBS = 32. 128 GPUs: MBS = 16.
+       - AllReduce time ~15ms.
+    2. **Calculations:**
+       - 64 GPUs: Compute = 40ms. Step = max(40, 15) = 40ms. Throughput = 2048 / 0.040 = 51,200 seq/s.
+       - 128 GPUs: Compute = 20ms. Step = max(20, 15) = 20ms (practical ~35ms). Throughput = 2048 / 0.035 = 58,514 seq/s.
+       - Gain: 58,514 / 51,200 = ~1.14x (+14%).
+    3. **Conclusion & Interpretation:**
+       - **Result: Doubling GPUs only yields ~14% throughput gain due to fixed communication latency dominating shrunken compute time. Bottleneck: Communication Latency-Bound.**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 8
-chains:
-- id: cloud-chain-349
-  position: 1
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'
@@ -39,9 +39,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-created_at: '2026-03-24T00:50:29.288222'

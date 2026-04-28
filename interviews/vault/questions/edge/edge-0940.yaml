@@ -8,20 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Edge New 0001
-scenario: Deploying a 7B parameter LLM on an edge server with a single T4 GPU (16GB GDDR6, 320GB/s). The system must serve requests at minimum latency.
+scenario: Deploying a 7B parameter LLM on an edge server with a single T4 GPU. The system must serve requests at minimum latency.
 question: What is the latency and throughput tradeoff between batch size 1 and batch size 8 for autoregressive decoding on the T4?
 details:
-  realistic_solution: For auto-regressive decoding, the workload is overwhelmingly memory-bandwidth bound. A 7B model tightly fits the 16GB T4. At batch size 1, the GPU reads 14GB per token, heavily underutilizing compute. At batch size 8, it reads the identical 14GB but processes 8 tokens simultaneously. The optimal tradeoff favors batch size 8 to dramatically multiply overall throughput without significantly impacting individual per-token generation latency.
+  realistic_solution: Autoregressive generation for a 7B model on a T4 is strictly memory-bandwidth bound. The 14 GB of FP16 weights must be streamed from GDDR6 for every generated token. Increasing batch size from 1 to 8 incurs near-zero additional latency because the compute units are underutilized; the same 14 GB read simply services 8 tokens simultaneously, effectively yielding an 8x throughput multiplier with flat per-token latency.
   common_mistake: |
     **The Pitfall:** Assuming compute (TFLOPS) is the bottleneck for generation.
     **The Rationale:** Engineers mistakenly analyze the generation phase using the same compute-bound logic as the prompt processing phase.
     **The Consequence:** Fearing latency degradation, they deploy with Batch Size 1 and throw away 8x potential system throughput.
   napkin_math: |
-    1. **Model Size:** 7B parameters in FP16 = 14 GB.
-    2. **Read Latency:** 14 GB / 320 GB/s bandwidth = 43.75 ms to read weights once.
-    3. **BS=1 Throughput:** 1000 ms / 43.75 ms = ~22.8 tokens/s.
-    4. **BS=8 Throughput:** Reading weights once generates 8 tokens. 8 * 22.8 = **~183 tokens/s**.
-    5. **Tradeoff:** Computation overhead for BS=8 is mathematically negligible, meaning per-sequence latency stays flat while overall throughput increases **8x**.
+    1. **Assumptions & Constraints:**
+       - Model size: 7B parameters.
+       - Precision: FP16 (14 GB footprint).
+       - Memory bandwidth: 320 GB/s.
+    2. **Calculations:**
+       - Memory read latency per step: 14 GB / 320 GB/s = 43.75 ms.
+       - Batch Size 1 Throughput: 1000 ms / 43.75 ms ≈ 22.8 tokens/s.
+       - Batch Size 8 Throughput: 8 tokens * 22.8 cycles/s ≈ 183 tokens/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 8x throughput scaling (183 tokens/s).** Autoregressive decoding is heavily memory-bandwidth bound. Batching amortizes the massive memory read latency across multiple sequences with negligible compute overhead.
 status: published
 provenance: imported
 requires_explanation: false

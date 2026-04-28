@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: The Gradient Overflow
-scenario: 'You''re training a 13B model in mixed-precision (FP16 forward/backward, FP32 optimizer) on 32 GPUs. At step 35,000, you start seeing `Inf` values in the loss, but only on 3 of 32 GPUs. After the AllReduce, all GPUs have `Inf` loss.'
+scenario: You're training a 13B model in mixed-precision (FP16 forward/backward, FP32 optimizer) on 32 GPUs. At step 35,000, you start seeing `Inf` values in the loss, but only on 3 of 32 GPUs. After the AllReduce, all GPUs have `Inf` loss.
 question: "What's happening on those 3 GPUs, and why does it infect the entire cluster?"
 details:
   realistic_solution: 'The 3 GPUs received data-parallel micro-batches containing outlier sequences. In FP16, the maximum representable value is 65,504. When a slightly larger outlier activation passes through residual connections and is multiplied by a typical loss scaling factor during the backward pass, the resulting gradient magnitude exceeds the FP16 limit, producing `Inf`. The AllReduce averages gradients across all GPUs. One `Inf` in any GPU''s gradient poisons the entire AllReduce, corrupting the update globally. Fix: cap loss scale, clip gradients before AllReduce, or add activation clamping.'
@@ -17,13 +17,9 @@ details:
     **The Rationale:** Engineers assume `Inf` values across a cluster imply global misconfiguration or hardware degradation.
     **The Consequence:** Wasting time replacing nodes or ruining training schedules without addressing the data-dependent FP16 overflow root cause.
   napkin_math: |
-    1. **FP16 Limit:** Maximum value is 65,504.
-    2. **Residual Growth:** ~1.02× per layer. After 80 layers: 1.02^80 ≈ 4.88.
-    3. **Outlier Impact:** An outlier embedding with magnitude 15.
-    4. **The Overflow:** Magnitude 15 × 4.88 × 1024 (loss scale factor) ≈ 74,886.
-    5. **Result:** 74,886 > 65,504, causing an immediate `Inf`.
-    
-    **Final Result: A data-dependent magnitude spike multiplied by the loss scale exceeds 65,504, infecting the global AllReduce ring with Inf.**
+    1. **Assumptions & Constraints:** FP16 max limit is 65,504.
+    2. **Calculations:** Residual growth ~1.02x per layer. After 80 layers: 1.02^80 ≈ 4.88. Magnitude 15 * 4.88 * 1024 (loss scale) ≈ 74,886.
+    3. **Conclusion & Interpretation:** **Result: Precision-Bound.** 74,886 > 65,504, infecting the global AllReduce ring with Inf.
 status: published
 provenance: imported
 requires_explanation: false

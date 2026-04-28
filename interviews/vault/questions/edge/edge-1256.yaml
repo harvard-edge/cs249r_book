@@ -8,22 +8,26 @@ competency_area: reliability
 bloom_level: evaluate
 phase: both
 title: Adversarial Defense Architecture on Hailo-8 Dataflow Accelerator
-scenario: You are designing an autonomous delivery robot's perception system using a Hailo-8 accelerator (26 TOPS INT8, no local DRAM). Security audits reveal the pedestrian detection model is highly vulnerable to physical adversarial patches. You must architect a real-time defense mechanism (like input purification) without breaking the dataflow streaming model.
-question: Which real-time adversarial-patch defense would you deploy on the Hailo-8, and how would you fit it into its host-streamed dataflow?
+scenario: You are designing an autonomous delivery robot's perception system using a streaming NPU. Security audits reveal the pedestrian detection model is highly vulnerable to physical adversarial patches. You must architect a real-time defense mechanism (like input purification) without breaking the dataflow streaming model.
+question: Which real-time adversarial-patch defense would you deploy on the streaming NPU, and how would you fit it into its host-streamed dataflow?
 details:
-  realistic_solution: The best architectural choice is to compile a lightweight input purification network (like a shallow autoencoder) and the primary object detector into a single, fused dataflow graph. This allows the host to stream the image exactly once. The tradeoff is that the combined model must fit within the limited on-chip SRAM, but it guarantees deterministic latency and minimizes host-memory bandwidth consumption.
+  realistic_solution: "Compile the shallow input purification network and the object detector into a singular, fused dataflow execution graph. On host-streamed NPUs, multi-model execution typically demands round-tripping intermediate activation tensors back to host RAM. A fused graph streams the 1080p payload exactly once (186 MB/s at 30 FPS) rather than saturating the PCIe Gen3 link with 558 MB/s of intermediate tensor traffic. The compute overhead (2.1 TOPS) easily fits within the 26 TOPS envelope."
   common_mistake: |
     **The Pitfall:** Proposing multi-step, iterative defenses like test-time optimization or generative purifiers.
     **The Rationale:** Candidates apply cloud-centric defense strategies, ignoring the severe PCIe bandwidth bottlenecks of stream-based edge accelerators.
     **The Consequence:** Continuous round-tripping of large intermediate activation tensors back to the host CPU breaks the dataflow paradigm and destroys frame rates.
   napkin_math: |
-    - 1080p RGB input size: 1920x1080x3 ≈ 6.2MB.
-    - Two-model unfused pipeline transfer: 6.2MB in + 6.2MB out + 6.2MB in = 18.6MB per frame.
-    - Unfused PCIe bandwidth (30 FPS): 18.6MB * 30 = 558 MB/s.
-    - Fused graph transfer: Only initial 6.2MB input = 186 MB/s.
-    - Compute cost: 20 GOPS (purifier) + 50 GOPS (detector) = 70 GOPS.
-    - Fused TOPS needed: 70 GOPS * 30 FPS = 2.1 TOPS.
-    - Utilization: 2.1 / 26 TOPS = **~8% of total compute**, proving bandwidth, not compute, dictates the defense architecture.
+    1. **Assumptions & Constraints:**
+       - Input: 1080p RGB (1920x1080x3) ≈ 6.2MB.
+       - Hardware: Host-streamed NPU (26 TOPS).
+       - FPS target: 30 FPS.
+    2. **Calculations:**
+       - Unfused pipeline transfer = 6.2MB (in) + 6.2MB (out) + 6.2MB (in) = 18.6MB/frame.
+       - Unfused bandwidth = 18.6MB * 30 FPS = 558 MB/s.
+       - Fused graph transfer = 6.2MB (in) * 30 FPS = 186 MB/s.
+       - Compute cost = (20 + 50) GOPS * 30 FPS = 2.1 TOPS.
+    3. **Conclusion & Interpretation:**
+       - **Fused pipeline is essential.** Compute is strictly 8% utilized, but bandwidth severely penalizes unfused execution.
 status: published
 provenance: imported
 requires_explanation: true

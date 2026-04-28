@@ -8,37 +8,30 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The Real-Time Stutter
-scenario: You are developing a real-time video filter that must run at 30 FPS (33ms per frame). On a new
-  device, all 100 layers of your model delegate to the NPU in FP16, meeting the 33ms budget. On an older
-  device, 95 of the layers run on the NPU, but 5 custom layers in a sequential block fall back to the
-  CPU in FP32. You measure the NPU taking 25ms for the 95 layers, and each CPU layer taking 3ms. The OS
-  vendor documentation states each NPU-CPU context switch incurs a 1ms overhead. Diagnose the performance
-  bottleneck by calculating the total frame latency on the older device.
+scenario: "You are developing a real-time video filter that must run at 30 FPS (33ms per frame). On an older device, 95 layers of your 100-layer model run on the NPU (taking 25ms), but 5 custom layers fall back to the CPU (taking 3ms each). OS documentation states each NPU-CPU context switch incurs a 1ms overhead."
 question: "How would you diagnose the performance bottleneck by calculating the total frame latency on the older device?"
 details:
-  realistic_solution: The device is dropping frames because the total latency exceeds the 33ms budget.
-    The total latency is the sum of the NPU compute time, the CPU compute time, and the context-switching
-    overhead. The five layers falling back to the CPU create a significant compute bottleneck, which,
-    when added to the NPU time and overhead, pushes the total latency over the threshold. The fix is to
-    optimize the CPU portion by creating an INT8-quantized implementation for the 5 fallback layers, drastically
-    reducing their 15ms execution time.
-  common_mistake: Engineers often focus on just one part of the latency equation. They might blame the
-    context-switch overhead as the 'killer', or see a 95% delegation ratio and assume it's 'good enough'
-    without doing the math. They fail to calculate the actual time spent on the CPU, which is often the
-    dominant factor in a partial fallback scenario.
-  napkin_math: '1. **Target Latency**: 1000ms / 30 FPS = 33.3ms per frame. 2. **Compute Latency**: 25ms
-    (NPU) + 5 × 3ms (CPU) = 40ms. 3. **Context Switch Overhead**: Assuming the 5 CPU layers are sequential,
-    there is 1 switch from NPU to CPU, and 1 switch back to NPU. 2 switches × 1ms = 2ms. 4. **Total Latency**:
-    40ms + 2ms = 42ms. 42ms > 33.3ms, resulting in dropped frames.'
+  realistic_solution: "Calculate the true system latency by summing NPU compute, CPU fallback execution, and explicit cross-domain context switching penalties. Because the fallback causes a system-wide stall, the 5 unsupported layers become the primary blocker. The pipeline must be optimized by quantizing those remaining 5 layers to INT8 or replacing them with mathematically equivalent ops supported by the NPU delegate."
+  common_mistake: |
+    **The Pitfall:** Focusing only on the 95% NPU delegation ratio and assuming the 1ms context switch is the main issue.
+    **The Rationale:** Candidates fail to calculate the actual CPU execution time and assume partial NPU delegation is mathematically "good enough".
+    **The Consequence:** Neglecting to optimize the CPU fallback operations, leaving the pipeline failing its real-time 33ms deadline.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Target Latency: 33.3 ms (for 30 FPS).
+       - NPU Compute (95 layers) = 25 ms.
+       - CPU Compute (5 layers) = 5 * 3 ms = 15 ms.
+       - Context Switches (NPU->CPU->NPU) = 2 * 1 ms = 2 ms.
+    2. **Calculations:**
+       - Total Compute = 25 ms + 15 ms = 40 ms.
+       - Total Latency = 40 ms + 2 ms = 42 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** The total latency is **42 ms**, significantly exceeding the 33.3 ms budget, driven overwhelmingly by the **15 ms** CPU fallback compute block.
   options:
-  - The NPU is too slow. 25ms for 95 layers is the main bottleneck; the model needs to be pruned to run
-    faster on the NPU.
-  - The 2ms context switch overhead is the primary issue, as it adds nearly 10% to the latency budget.
-    The model must be re-architected to remove all unsupported ops.
-  - The total latency is ~42ms (25ms NPU + 15ms CPU + 2ms overhead), exceeding the 33ms budget. The 15ms
-    spent on the CPU is the main bottleneck.
-  - A 95% delegation ratio is simply not high enough for real-time video; you must achieve at least 99%
-    for the feature to be viable.
+  - The NPU is too slow. 25ms for 95 layers is the main bottleneck; the model needs to be pruned to run faster on the NPU.
+  - The 2ms context switch overhead is the primary issue, as it adds nearly 10% to the latency budget. The model must be re-architected to remove all unsupported ops.
+  - The total latency is ~42ms (25ms NPU + 15ms CPU + 2ms overhead), exceeding the 33ms budget. The 15ms spent on the CPU is the main bottleneck.
+  - A 95% delegation ratio is simply not high enough for real-time video; you must achieve at least 99% for the feature to be viable.
   correct_index: 2
 status: published
 provenance: imported

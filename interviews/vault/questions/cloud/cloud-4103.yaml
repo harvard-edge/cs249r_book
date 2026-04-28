@@ -7,36 +7,22 @@ topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: evaluate
 phase: training
-title: Debugging TP Numerical Divergence
-scenario: After switching from TP=1 to TP=4 on MI300X, your 30B model's training loss diverges after 500 steps. Loss curves match perfectly for the first 200 steps, then gradually separate.
-question: After switching from TP=1 to TP=4, what are the most likely causes of loss divergence after 500 steps, and how would you systematically debug it?
+title: 'Debugging TP Numerical Divergence'
+scenario: 'After switching from TP=1 to TP=4 on MI300X, your 30B model''s training loss diverges after 500 steps. Loss curves match perfectly for the first 200 steps, then gradually separate.'
+question: 'After switching from TP=1 to TP=4, what are the most likely causes of loss divergence after 500 steps, and how would you systematically debug it?'
 details:
-  realistic_solution: 'Root causes (most to least likely): (1) AllReduce non-determinism: ring AllReduce sums elements in different orders than single-GPU reduction. FP32/BF16 addition is not associative — (a+b)+c ≠ a+(b+c) due to rounding. Over hundreds of steps, different reduction trees produce different accumulated errors. Fix: enable deterministic NCCL (NCCL_ALGO=Ring, fixed topology), or use Kahan summation in the optimizer. (2) Dropout seed mismatch: with TP, dropout masks must be identical across TP ranks for replicated regions (LayerNorm input) but independent for partitioned regions. Incorrect seeding causes divergent regularization. Fix: use Megatron''s parallel RNG state management. (3) Gradient scaling interaction: loss scaling for mixed precision interacts differently with TP because gradients are AllReduced at different scales. Fix: ensure loss scaler state is synchronized. Debug approach: (a) Run TP=1 and TP=4 with dropout disabled and deterministic NCCL. (b) Compare activations layer-by-layer at step 1, 100, 200. (c) Identify the first layer where relative error exceeds 1e-5. (d) Check if it correlates with RNG-dependent ops.'
+  realistic_solution: 'Root causes: (1) AllReduce non-determinism: FP32/BF16 addition is not associative. Different reduction trees accumulate different errors. Fix: deterministic NCCL. (2) Dropout seed mismatch: replicated regions need identical seeds, partitioned need independent. (3) Gradient scaler mismatch.'
   common_mistake: |
     **The Pitfall:** Blaming NCCL bugs or hardware errors.
     **The Rationale:** It's a natural inclination to assume a system issue when changing parallelism changes the outcome.
     **The Consequence:** The most common cause, non-deterministic floating-point reduction order in AllReduce which accumulates different rounding errors, is ignored.
   napkin_math: |
-    - BF16 has 7-8 bits mantissa → relative precision ~1/128 ≈ 0.8%.
-    - After 500 AllReduces with 4-way reduction, accumulated error ≈ sqrt(500) × 0.8%.
-    - **Total accumulated error ≈ 17.8% relative** — enough to perturb gradient direction in flat loss regions.
+    1. **Assumptions & Constraints:**
+       - BF16 mantissa: 7 bits (relative precision ~1/128 ≈ 0.8%).
+       - TP=4 reduction over 500 steps.
+    2. **Calculations:**
+       - Random walk accumulated error over N steps = sqrt(N) × base_error.
+       - Error at 500 steps = sqrt(500) × 0.8% = 22.3 × 0.8% = ~17.8%.
+    3. **Conclusion & Interpretation:**
+       - **Result: 17.8% accumulated relative error severely perturbs gradients. System is FP-Non-Associativity-Bound.**
 status: published
-provenance: imported
-requires_explanation: true
-expected_time_minutes: 22
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-opus-4-6
-math_verified: true
-math_status: CORRECTED
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-math_issues:
-- Double divides by 128. Accumulated error should be roughly sqrt(500) * 0.8% ≈ 17.8%,
-  not 0.14%. Formula incorrectly computes 0.8% / 128.
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

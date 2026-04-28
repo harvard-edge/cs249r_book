@@ -8,20 +8,24 @@ competency_area: precision
 bloom_level: apply
 phase: both
 title: Per-Channel INT8 Overhead on AI 100
-scenario: 'You are deploying a vision model on a Qualcomm Cloud AI 100 on-premise accelerator (75W, 32 GB LPDDR4x, 400 TOPS INT8). You observe that switching from per-tensor to per-channel INT8 quantization for the weights restores the model''s accuracy, but the inference latency increases slightly.'
+scenario: 'You are deploying a vision model on a Qualcomm Cloud AI 100 on-premise accelerator. You observe that switching from per-tensor to per-channel INT8 quantization for the weights restores the model''s accuracy, but the inference latency increases slightly.'
 question: 'Why does per-channel INT8 quantization slightly slow the Cloud AI 100, and how much extra metadata is needed for a linear layer with 4096 output channels?'
 details:
-  realistic_solution: 'Per-channel quantization improves accuracy by isolating outlier weights to individual channels, preventing them from skewing the quantization range of the entire tensor. However, instead of loading a single scale and zero-point pair for the whole tensor, the hardware must now load a unique pair for every output channel. This extra metadata fetching from the LPDDR4x memory reduces arithmetic intensity, marginally slowing down the computation and preventing the accelerator from hitting its peak 400 TOPS INT8.'
+  realistic_solution: 'Per-channel quantization improves accuracy by isolating outlier weights to individual channels, preventing them from skewing the quantization range of the entire tensor. However, instead of loading a single scale and zero-point pair for the whole tensor, the hardware must now load a unique pair for every output channel. This extra metadata fetching from memory reduces arithmetic intensity, marginally slowing down the computation and preventing the accelerator from hitting peak TOPS.'
   common_mistake: |
     **The Pitfall:** Attributing the slowdown to the INT8 MAC operations themselves being computationally more complex.
     **The Rationale:** Candidates assume that "more precise" quantization math takes more clock cycles.
     **The Consequence:** They miss the true hardware bottleneck (memory bandwidth pressure from loading granular quantization metadata), failing to optimize the execution.
   napkin_math: |
-    * Layer with 4096 output channels.
-    * Per-tensor metadata: 1 FP32 scale (4 bytes) + 1 INT8 zero-point (1 byte) = 5 bytes.
-    * Per-channel metadata: 4096 scales * 4 bytes + 4096 zero-points * 1 byte = 16,384 + 4,096 = 20,480 bytes (~20.5 KB).
-    * Additional memory payload: 20,480 - 5 = 20,475 bytes per layer.
-    * **Fetching this extra ~20.5 KB metadata per layer from LPDDR4x consumes additional memory bandwidth, slightly slowing down the compute pipeline.**
+    1. **Assumptions & Constraints:**
+       - Layer output channels: 4096.
+       - Per-tensor metadata: 1 FP32 scale (4 bytes) + 1 INT8 zero-point (1 byte) = 5 bytes.
+       - Per-channel metadata: 4 bytes scale + 1 byte zero-point per channel.
+    2. **Calculations:**
+       - Per-channel metadata: 4096 * 5 bytes = 20,480 bytes (~20.5 KB).
+       - Additional payload per layer: 20,480 bytes - 5 bytes = 20,475 bytes.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Penalty**. Fetching granular quantization metadata per channel consumes additional LPDDR4x bandwidth, reducing arithmetic intensity and causing latency increases.
 status: published
 provenance: imported
 requires_explanation: false

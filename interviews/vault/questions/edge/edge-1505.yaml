@@ -8,20 +8,25 @@ competency_area: deployment
 bloom_level: analyze
 phase: both
 title: Canary Rollout CPU Fallback Degradation
-scenario: You are conducting a canary rollout of an updated INT8 object detection model to 5% of a fleet of remote cameras, each equipped with a Google Coral Edge TPU via PCIe. Shortly after the progressive rollout begins, telemetry from the canary group shows that inference latency has increased dramatically and host CPUs are reporting thermal warnings. The model was successfully quantized to INT8, and the previous model version continues to run perfectly on the remaining 95% of the fleet within the 2W power envelope.
+scenario: You are conducting a canary rollout of an updated INT8 object detection model to 5% of a fleet of remote cameras using Google Coral Edge TPUs via PCIe. Telemetry shows inference latency has dramatically increased and host CPUs are reporting thermal warnings. The previous model version runs perfectly within the 2W power envelope.
 question: What is the root cause of this deployment failure?
 details:
-  realistic_solution: The root cause is that the updated model architecture includes an operation (e.g., an unsupported activation function or unfused layer) that is not supported by the Google Coral Edge TPU compiler. Although the model is properly quantized to INT8, unsupported operations cause the Edge TPU to delegate that specific layer and all subsequent operations back to the host CPU via PCIe. This fallback completely eliminates the latency advantage of the TPU's 4 TOPS and significantly increases host power draw, leading to the observed thermal warnings and latency spikes.
+  realistic_solution: 'The updated model topology contains an operator (e.g., an exotic activation function or unfused reshape layer) not supported by the Coral compiler. While quantization to INT8 was successful, the TPU cannot execute the unsupported node. This triggers a disastrous graph partition: the TPU delegates the unsupported layer and all subsequent layers back across the PCIe bus to the host ARM CPU. The CPU is completely unequipped to handle dense matrix math, resulting in skyrocketing latency, 100% core utilization, and thermal throttling.'
   common_mistake: |
-    **The Pitfall:** Blaming network bandwidth during the OTA update or memory leaks in the deployment agent.
-    **The Rationale:** Candidates miss the hardware-specific constraint of the Coral Edge TPU compiler, which delegates unsupported operations to the host CPU even if the model is INT8.
-    **The Consequence:** Deployment teams spend hours debugging infrastructure or network issues instead of fixing the model architecture to remove the unsupported operation.
+    **The Pitfall:** Blaming external infrastructure factors (network bandwidth, OTA agent memory leaks) rather than investigating graph partitioning.
+    **The Rationale:** Candidates assume that if a model compiles to INT8 without hard-failing, it will execute entirely on the NPU, ignoring compiler warnings about CPU delegation.
+    **The Consequence:** Engineering teams waste days debugging the OTA pipeline while remote host CPUs literally melt down trying to process dense neural network layers.
   napkin_math: |
-    1. Calculate optimal Edge TPU latency: 4 GOPS / 2000 GOPS/s (2 TOPS effective) = 2 ms at 2W.
-    2. Estimate CPU fallback throughput: Host ARM CPU INT8 throughput is ~20 GOPS/s (0.02 TOPS).
-    3. Calculate CPU fallback latency: If 2 GOPS fallback to CPU, 2 GOPS / 20 GOPS/s = 100 ms.
-    4. Calculate total spike: 2 ms TPU + 100 ms CPU = 102 ms.
-    **Total latency spikes from 2 ms to 102 ms (a 51x increase) because unsupported operators force compute onto the slow host CPU, triggering thermal warnings.**
+    1. **Assumptions & Constraints:**
+       - Optimal TPU Latency: ~2 ms (at 4 TOPS).
+       - Host CPU INT8 Throughput: ~20 GOPS (0.02 TOPS).
+       - Model Compute Fallback: Assume 2 GOPS delegated to host.
+    2. **Calculations:**
+       - CPU Fallback Compute Time = 2 GOPS / 20 GOPS/sec = 0.100 s (100 ms).
+       - PCI-e transfer overhead = ~5-10 ms.
+       - Total latency spike = 2 ms (TPU partial) + 100 ms (CPU) + PCIe overhead = >100 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 50x+ latency increase. The system is critically Compute-Bound on the Host CPU due to catastrophic graph partitioning and unsupported operators.**
 status: published
 provenance: imported
 requires_explanation: false

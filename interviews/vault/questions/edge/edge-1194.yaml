@@ -8,22 +8,25 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Analyze Prefill vs Decode Cost Split on Jetson Orin
-scenario: A Jetson Orin NX (100 TOPS, 64 GB/s memory bandwidth) runs a 7B parameter language model in INT4 (3.5GB model size). A typical request has 512 prompt tokens (prefill) and generates 128 output tokens (decode).
+scenario: A Jetson Orin NX runs a 7B parameter language model in INT4 (3.5GB model size). A typical request has 512 prompt tokens (prefill) and generates 128 output tokens (decode).
 question: How do prefill and decode times split for a 7B INT4 model on Orin NX with a 512-token prompt and 128-token response, and why?
 details:
-  realistic_solution: 'Prefill (512 tokens in parallel): FLOPs = 2 × 7B × 512 = 7,168 GFLOP. At 100 TOPS effective (INT4): time = 7.168T / 100T = 71.7ms. Memory: streaming 3.5GB weights once: 3.5GB / 64GB/s = 54.7ms. Prefill is compute-bound (71.7ms > 54.7ms). Decode (1 token at a time, 128 iterations): per token FLOPs = 2 × 7B = 14 GFLOP. Memory: load 3.5GB weights each step: 3.5GB / 64GB/s = 54.7ms per token. Decode is memory-bound. Total decode: 128 × 54.7ms = 7,002ms = 7.0s. Total: prefill 71.7ms + decode 7,002ms = 7,074ms. Decode dominates 99%.'
+  realistic_solution: 'Prefill computes all 512 tokens in parallel and is compute-bound. Decode generates 1 token at a time, sequentially loading the 3.5GB weights for every step, making it massively memory-bandwidth bound. Decode dictates 99% of the total latency.'
   common_mistake: |
     **The Pitfall:** Treating prefill and decode as having the same per-token cost.
     **The Rationale:** Candidates fail to realize prefill processes all tokens in parallel while decode is sequential.
-    **The Consequence:** Incorrectly assessing the pipeline bottleneck, missing that decode is severely memory-bandwidth-bound.
+    **The Consequence:** Incorrectly assessing the pipeline bottleneck and failing to apply KV caching or speculative decoding optimizations.
   napkin_math: |
-    * Prefill compute: 2 × 7B × 512 = 7,168 GFLOP
-    * Prefill compute time: 7.168T / 100 TOPS = 71.7ms
-    * Prefill memory time: 3.5GB / 64 GB/s = 54.7ms (compute-bound)
-    * Decode compute per token: 2 × 7B = 14 GFLOP (0.14ms)
-    * Decode memory per token: 3.5GB / 64 GB/s = 54.7ms (memory-bound)
-    * Total decode time: 128 × 54.7ms = 7,002ms
-    * **Decode phase dominates total latency (7,002ms vs 72ms prefill).**
+    1. **Assumptions & Constraints:**
+       - Model: 7B params (INT4 = 3.5GB)
+       - Orin NX: 100 TOPS, 64 GB/s bandwidth
+       - Request: 512 prefill, 128 decode
+    2. **Calculations:**
+       - Prefill compute time: (2 * 7B * 512) / 100 TOPS = 71.7 ms.
+       - Decode memory per token: 3.5GB / 64 GB/s = 54.7 ms.
+       - Total decode time: 128 * 54.7 ms = 7,001.6 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Decode is Memory-Bound.** Decode dominates 99% of latency (~7s vs ~72ms) due to the sequential 3.5GB memory fetch per token.
 status: published
 provenance: imported
 requires_explanation: false

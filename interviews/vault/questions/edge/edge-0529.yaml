@@ -11,18 +11,21 @@ title: The UVC Camera MJPEG CPU Tax
 scenario: You attach a USB webcam to a Raspberry Pi to run a vision model. To save USB bandwidth, you configure the camera via V4L2 to output compressed MJPEG video at 1080p 30FPS instead of raw YUYV. The USB bandwidth drops significantly, which is good. But your ML inference time increases by 40%, and the Pi runs incredibly hot.
 question: Why did saving USB bandwidth destroy your CPU performance and slow down inference?
 details:
-  realistic_solution: 'Saving USB bandwidth shifted the bottleneck to CPU-based MJPEG decoding. Raw YUYV requires a trivial colorspace conversion (~2ms CPU), while MJPEG requires full JPEG decompression — Huffman decoding, inverse DCT, and color conversion — taking ~15ms per frame on the Pi''s ARM CPU. At 30 FPS, that''s 450ms/second of CPU time just for decoding, leaving less for inference. The fix: either use raw YUYV if USB bandwidth permits (1 camera), use hardware-accelerated video decode (V4L2 M2M on Pi, or Jetson''s NVDEC), or switch to H.264 which the Pi''s VideoCore can decode in hardware at near-zero CPU cost.'
+  realistic_solution: Transitioning to MJPEG effectively shifts the bottleneck from the USB interface to CPU-based video decompression. To resolve this, offload decompression via hardware-accelerated V4L2 M2M pipelines or switch to an H.264 stream relying on the VideoCore engine.
   common_mistake: |
     **The Pitfall:** Believing the ML model processes MJPEG directly.
-    **The Rationale:** Engineers assume the compressed format simply passes through to the model, ignoring the heavy software decompression overhead incurred by OpenCV before the inference step.
+    **The Rationale:** Engineers assume the compressed format simply passes through to the model, ignoring the heavy software decompression overhead incurred by OpenCV/GStreamer before the inference step.
     **The Consequence:** Exchanging a benign USB bottleneck for a catastrophic CPU bottleneck that starves the inference engine.
   napkin_math: |
-    1. **Raw YUYV 1080p:** 1920 * 1080 * 2 = 4.14 MB/frame.
-    2. **USB 2.0 Bandwidth Limit:** ~40 MB/s, saturated at ~10 FPS for raw YUYV.
-    3. **MJPEG Compression:** ~400 KB/frame, easily fitting USB 2.0 at 30 FPS.
-    4. **Software Decode Cost:** ~15ms CPU time per frame.
-    5. **Total CPU Decode Overhead:** 30 FPS * 15ms = 450ms per second.
-    **Result: Decoding consumes nearly 50% of the CPU's time, leaving insufficient resources for the ML model and causing extreme thermal load.**
+    1. **Assumptions & Constraints:**
+       - Target Framerate: 30 FPS.
+       - Resolution: 1080p (1920x1080).
+       - MJPEG Software Decode Time (ARM CPU): ~15 ms per frame.
+    2. **Calculations:**
+       - CPU Time per second spent decoding = 30 FPS * 15 ms/frame = 450 ms.
+       - CPU Utilization purely for decode = 450 ms / 1000 ms = 45%.
+    3. **Conclusion & Interpretation:**
+       - **Result: 45% Base Overhead (CPU-Bound Software Decode)**
 status: published
 provenance: imported
 requires_explanation: false

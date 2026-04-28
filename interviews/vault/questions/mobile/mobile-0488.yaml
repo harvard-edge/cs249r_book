@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The On-Device AI Stutter
-scenario: You are optimizing an 'AI Reply' feature that streams generated text into a chat app. The first word appears instantly, but the rest of the sentence emerges in slow, uneven chunks, causing 'stutter'. The model is a 1B parameter model on a phone with an Apple A17 Pro (35 TOPS NPU). Profiling shows latency increases linearly with sequence length.
+scenario: You are optimizing an 'AI Reply' feature that streams generated text into a chat app. The first word appears instantly, but the rest of the sentence emerges in slow, uneven chunks, causing 'stutter'. The model is a 1B parameter model. Profiling shows latency increases linearly with sequence length.
 question: What implementation bug causes generated tokens to slow down over a sequence despite an initially fast first word?
 details:
   realistic_solution: The root cause is a stateless generation loop that recomputes the attention keys and values for the entire token sequence for every new token. This is a classic implementation bug when deploying generative models without an efficient KV cache. With a KV cache, the computation for each new token is constant time because the state of past tokens is preserved and reused. Without it, the computation grows linearly with the sequence length, causing the per-token latency to increase until it violates the UI's 16ms frame budget, resulting in stutter. The data clearly shows latency growing with sequence length.
@@ -17,12 +17,18 @@ details:
     **The Rationale:** Engineers often assume a faster NPU or memory bus is needed, failing to recognize the linear or quadratic cost of naive text generation.
     **The Consequence:** Wasted effort trying to optimize hardware utilization when the fundamental issue is a stateless generation loop.
   napkin_math: |
-    1. **Stateless Compute Cost:** Without a KV cache, generating the L-th token requires processing L tokens. For a 1B model, compute = 2 * L * 1B ops. At L=1000, compute = 2000 GOps.
-    2. **Compute Time:** On a 35 TOPS NPU, 2000 GOps takes ~57 ms. This exceeds the 16 ms/frame UI budget.
-    3. **With KV Cache:** Per-token compute is constant (2 GOps), making it memory-bound but fast enough.
-    4. **Conclusion:** **The generation loop is performing a stateless re-computation of the entire sequence for each token due to a missing KV cache.**
+    1. **Assumptions & Constraints:**
+       - 1B parameter model generating text.
+       - UI frame budget = 16 ms/frame (60 FPS).
+       - Latency scales linearly with sequence length.
+    2. **Calculations:**
+       - Stateless Compute Cost: Generating token L requires processing L tokens. Compute = 2 * L * 1B ops.
+       - At L=1000, Compute = 2000 GOps.
+       - On a typical 35 TOPS NPU, 2000 GOps takes ~57 ms (exceeds 16 ms budget).
+       - With KV Cache: Per-token compute is constant O(1) across L.
+    3. **Conclusion & Interpretation:** **The generation loop is performing a stateless re-computation of the entire sequence for each token due to a missing KV cache.** Algorithmic-complexity-bound bug.
   options:
-  - The A17 Pro's 35 TOPS NPU is insufficient for a 1B parameter model, causing a compute bottleneck.
+  - The NPU is insufficient for a 1B parameter model, causing a compute bottleneck.
   - The LPDDR5 memory bus is saturated from loading model weights for each token, causing a memory bandwidth bottleneck.
   - The generation loop is performing a stateless re-computation of the entire sequence for each token due to a missing or misused KV cache.
   - The mobile OS is thermal throttling the NPU, causing performance to degrade as generation continues.

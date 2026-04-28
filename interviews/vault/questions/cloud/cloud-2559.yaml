@@ -8,38 +8,22 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Cloud Fully Sharded Data Parallel L3 0
-scenario: You are training a 20B parameter model using FSDP on 16 A100 GPUs with NVLink (450 GB/s bisection). Each training step requires an all-gather of full parameters for forward and backward passes.
-question: For a 20B model with FSDP on 16 A100s over 450 GB/s NVLink, what is the per-step communication overhead?
+scenario: You are training a 20B parameter model using FSDP on 16 GPUs with NVLink (450 GB/s bisection). Each training step requires an all-gather of full parameters for forward and backward passes.
+question: For a 20B model with FSDP on 16 GPUs over 450 GB/s NVLink, what is the per-step communication overhead?
 details:
-  realistic_solution: 'Model size in FP16: 20B × 2 bytes = 40 GB. FSDP all-gather: each GPU sends its 40/16 = 2.5 GB shard to all others. Total data moved per all-gather = 40 × (N-1)/N ≈ 40 GB. Two all-gathers per step (forward + backward) + one reduce-scatter for gradients (40 GB). Total communication: ~120 GB. NVLink bisection bandwidth: 450 GB/s. Time: 120 GB / 450 GB/s = 0.27 seconds. If compute per step (matmuls) takes ~2 seconds, communication overhead is 0.27 / (2 + 0.27) = 11.9%. With overlap (prefetching next layer''s all-gather during compute), effective overhead drops to ~3-5%.'
+  realistic_solution: 'Model size in FP16: 20B * 2 bytes = 40 GB. FSDP requires two all-gathers (forward + backward) and one reduce-scatter for gradients. Total data moved per step = 3 * 40 GB = 120 GB. Transfer time = 120 GB / 450 GB/s = 0.27 seconds. If compute is ~2 seconds, communication overhead is ~12% without ZeRO-3 communication overlap.'
   common_mistake: |
     **The Pitfall:** Forgetting that FSDP requires parameter communication for both the forward and backward passes.
     **The Rationale:** Engineers used to DDP are accustomed to communicating only gradients during the backward pass, missing the extra parameter all-gather required before the forward pass in FSDP.
     **The Consequence:** Communication overhead estimates are drastically undercalculated, leading to inaccurate training time projections.
   napkin_math: |
-    - **Model Size:** $20\text{B} \times 2\text{ bytes (FP16)} = 40\text{ GB}$.
-    - **FSDP Communication:** 2x All-Gather (forward + backward) + 1x Reduce-Scatter (gradients).
-    - **Total Data Moved:** $3 \times 40\text{ GB} = 120\text{ GB}$.
-    - **Time on NVLink:** $120\text{ GB} / 450\text{ GB/s} = 0.27\text{ seconds}$.
-    - **Overhead:** If compute is $\sim 2\text{s}$, overhead is $0.27 / 2.27 = 11.9\%$.
-    - **Conclusion:** **0.27s per step (~12% overhead)** without overlap.
-status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 4
-chains:
-- id: cloud-chain-484
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - Model: 20B parameters (FP16 = 2 bytes).
+       - Bandwidth: 450 GB/s.
+       - FSDP Overhead: 2x All-Gather, 1x Reduce-Scatter.
+    2. **Calculations:**
+       - Model size = 20B * 2 = 40 GB.
+       - Total data moved = 3 * 40 GB = 120 GB.
+       - Time on NVLink = 120 GB / 450 GB/s = 0.27s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 0.27s overhead per step.** (Network-Bound)

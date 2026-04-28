@@ -8,17 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Reducing activation memory for on-device fine-tuning on Jetson Orin
-scenario: You need to perform on-device fine-tuning of a MobileNetV3-Large model on Jetson Orin (275 TOPS, 32GB, 60W) using local sensor data. The full fine-tuning run OOMs at batch=8 even though the model is only 5.4M parameters (21MB in FP32). You need to fit within 2GB RAM to leave headroom for the OS and other processes.
-question: What is the FP32 activation memory for a batch=8, 96-channel, 28x28 feature map, and why is 7.2 MB too high?
+scenario: You are fine-tuning a MobileNetV3-Large model on Jetson Orin (275 TOPS, 32GB). The run OOMs at batch=8 despite the model being only 5.4M parameters. You need to fit within 2GB RAM.
+question: What is the FP32 activation memory for a batch=8, 96-channel, 28x28 feature map, and why is 7.2 MB an incorrect estimate?
 details:
-  realistic_solution: |
-    Activation size is calculated by multiplying batch size, channels, spatial dimensions, and data type size. The actual size is 2.4MB, so 7.2MB is incorrect (3x too large).
+  realistic_solution: Activation memory during the forward pass must be saved for backpropagation. The true size is the product of the batch size, channel depth, spatial dimensions, and data type size (4 bytes for FP32). The actual footprint is ~2.4 MB per layer, not 7.2 MB. Gradient checkpointing (activation recomputation) must be applied to discard these intermediate feature maps and recalculate them during the backward pass to survive within the 2GB constraint.
   common_mistake: |
     **The Pitfall:** Assuming fine-tuning memory is dictated solely by model parameters and optimizer states.
-    **The Rationale:** Ignoring activation memory, which for a batch of images and high-resolution feature maps across all layers, sums to hundreds of megabytes.
+    **The Rationale:** Ignoring activation memory, which scales linearly with batch size and spatial resolution across all layers in the computational graph.
     **The Consequence:** Encountering unexpected Out-Of-Memory (OOM) errors on the edge device during fine-tuning.
   napkin_math: |
-    - Batch size = 8, Channels = 96, Spatial = 28x28, FP32 (4 bytes).
-    - Calculation: 8 * 96 * 28 * 28 * 4 bytes = 2,408,448 bytes.
-    - **Result: ~2.4 MB (not 7.2 MB, which is exactly 3x too large).**
+    1. **Assumptions & Constraints:**
+       - Batch size = 8, Channels = 96, Spatial = 28x28, Data type = FP32 (4 bytes).
+    2. **Calculations:**
+       - Footprint: 8 * 96 * 28 * 28 * 4 bytes = 2,408,448 bytes.
+       - Size in MB: 2,408,448 / 1,000,000 = 2.41 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity Bound. The actual activation size is ~2.4 MB (7.2 MB is exactly 3x too large, likely due to a miscalculation of dimensions).**
 status: published

@@ -11,17 +11,23 @@ title: Carbon-Aware Training Job Scheduling
 scenario: 'Your organization has a 48-hour flexible training window for a 200-GPU batch training job. The cloud region publishes a 24-hour carbon intensity forecast that varies between 40 and 320 gCO2e/kWh depending on solar/wind availability. The job requires a continuous 12-hour GPU reservation.'
 question: 'How would you schedule a continuous 12-hour, 200-GPU training job within a 48-hour window to minimize carbon while meeting the deadline?'
 details:
-  realistic_solution: 'Use a sliding window minimum algorithm over the 48-hour carbon intensity forecast: compute the average carbon intensity for every possible 12-hour start time within the [now, now+36h] feasibility window (must start by hour 36 to finish by hour 48). Select the 12-hour window with the minimum average carbon intensity. Implementation: query the WattTime or ElectricityMaps API for 24-hour forecasts, refresh every 4 hours (forecast accuracy degrades beyond 12 hours). Re-optimize the start time at each refresh if a better window appears in the new forecast. Edge case: if forecast uncertainty is high (±50 gCO2e), add a risk-adjusted objective: minimize E[carbon] + 0.5·Var[carbon] to prefer lower-variance windows. SLA constraint: maintain a deadline buffer — do not defer start past hour 36 regardless of forecast.'
+  realistic_solution: 'Use a sliding window minimum algorithm over the carbon intensity forecast: compute the average carbon intensity for every possible 12-hour start time within the feasibility window (must start by hour 36 to finish by hour 48). Select the 12-hour window with the minimum average carbon intensity. Implement a dynamically updating schedule querying the ElectricityMaps API, refreshing as forecast accuracy improves, but strictly enforcing the hour-36 deadline buffer.'
   common_mistake: |
     **The Pitfall:** Greedily starting the job at the first low-carbon window.
     **The Rationale:** Engineers assume that finding a "good enough" dip in the current forecast is sufficient.
     **The Consequence:** They miss the globally optimal window that might appear later in the 48-hour timeframe, leaving substantial carbon reduction opportunities on the table.
   napkin_math: |
-    * **Job power consumption:** 200 GPUs * 700W * 1.2 PUE = 168 kW.
-    * **Energy over 12 hours:** 168 kW * 12 hours = 2,016 kWh.
-    * **Peak carbon (320 gCO2e/kWh):** 645 kgCO2e.
-    * **Valley carbon (40 gCO2e/kWh):** 80.6 kgCO2e.
-    * **Savings by waiting:** 645 - 80.6 = **564 kgCO2e (87% carbon reduction)**.
+    1. **Assumptions & Constraints:**
+       * 200 GPUs at ~700W each. PUE = 1.2.
+       * 12-hour continuous job.
+       * Peak carbon: 320 gCO2e/kWh. Valley carbon: 40 gCO2e/kWh.
+    2. **Calculations:**
+       * Power consumption: 200 * 700W * 1.2 = 168 kW.
+       * Total Energy: 168 kW * 12 hours = 2,016 kWh.
+       * Peak emissions: 2,016 kWh * 320 = 645 kgCO2e.
+       * Valley emissions: 2,016 kWh * 40 = 80.6 kgCO2e.
+    3. **Conclusion & Interpretation:**
+       * **Result: Optimal sliding-window scheduling yields 564 kgCO2e (87%) in raw carbon savings.**
 status: published
 provenance: imported
 requires_explanation: true

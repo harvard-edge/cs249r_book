@@ -14,15 +14,18 @@ details:
   realistic_solution: Use torch._dynamo.explain(model)(inputs) to inspect captured graphs. Use TORCH_LOGS='output_code' to see generated Triton kernels. Identify that torch.topk() followed by scatter creates a graph break or inhibits fusion. Replace with torch._C._VariableFunctions.topk (same) but wrapped in a custom operator registered via torch.library.custom_op to give TorchInductor a fusion hint. Alternatively, use Triton kernels directly for the routing logic.
   common_mistake: |
     **The Pitfall:** Treating torch.compile entirely as a magical black box that cannot be inspected or manually guided.
-    
     **The Rationale:** Engineers generally trust high-level API abstractions implicitly, assuming that if TorchInductor splits a graph, it must be the theoretical optimum, missing the nuance of explicit custom operator hints.
-    
     **The Consequence:** The team tolerates the slower, highly-fragmented execution graphs caused by expert routing loops and eventually abandons native compilation tools to manually rewrite thousands of lines of raw CUDA code instead.
   napkin_math: |
-    - **MoE Routing Cost**: For 1024 tokens, 8 experts, top-2 routing involves topk over 1024×8 = 8192 values, scattering to expert buffers.
-    - **Overhead**: Each kernel launch overhead is ~5μs on H100.
-    - **Fusion Difference**: If 3 separate kernels are launched vs 1 fused: 15μs vs 5μs per step.
-    - **Result**: At 1000 steps/sec, this is a 10ms/sec (1%) raw overhead penalty — which brutally compounds in sequence-parallel setups across large distributed clusters.
+    1. **Assumptions & Constraints:**
+       - 1024 tokens, 8 experts, top-2 routing (8192 values).
+       - Kernel launch overhead on H100: ~5µs.
+    2. **Calculations:**
+       - Fusion Difference: 3 separate kernels (15µs) vs 1 fused kernel (5µs).
+       - Savings per step: 10µs.
+       - Overhead at 1000 steps/sec: 10ms/sec (1% raw overhead penalty).
+    3. **Conclusion & Interpretation:**
+       - **Result: 1% raw penalty that destructively compounds in CPU-Dispatch-Bound sequence-parallel setups.**
 status: published
 provenance: imported
 requires_explanation: false

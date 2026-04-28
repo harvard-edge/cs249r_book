@@ -11,18 +11,22 @@ title: LoRA Rank Sensitivity to Task Complexity
 scenario: A team fine-tunes Llama-3 70B for SQL generation using LoRA. They try rank 4, 16, and 64. Rank 4 underperforms by 8% on evaluation metrics. Rank 64 shows no improvement over rank 16 but uses 4x more memory.
 question: Why does LoRA rank 4 underperform while rank 64 gives no gain over rank 16 for SQL generation, and which rank should you choose?
 details:
-  realistic_solution: 'LoRA approximates the weight update delta_W = B*A where A in R^(r x d) and B in R^(d x r). The optimal rank equals the intrinsic dimensionality of the task-specific weight update. SQL generation is a structured task with grammar constraints - its update space is low-dimensional but not trivially so. Intrinsic dimensionality analysis: compute SVD of full fine-tune delta_W and count singular values above 1% of top SV threshold. For code-like tasks: typically r=16-32 captures >95% of the signal. Diagnosis: rank 4 misses fine-grained syntax patterns; rank 64 overfits or adds noise. Use r=16 as baseline; verify with SV analysis on a rank-64 run: if top 16 SVs capture 95% of variance, r=16 is optimal.'
+  realistic_solution: 'LoRA approximates the weight update delta_W = B*A. The optimal rank equals the intrinsic dimensionality of the task-specific weight update. SQL generation is a structured task with grammar constraints - its update space is low-dimensional but not trivially so. Rank 4 misses fine-grained syntax patterns; rank 64 overfits or wastes memory. Use r=16 as the baseline.'
   common_mistake: |
     **The Pitfall:** Treating rank selection as an arbitrary hyperparameter to maximize.
     **The Rationale:** Teams default to standard ranks or run expensive sweeps without analyzing the intrinsic dimensionality of the task.
     **The Consequence:** Choosing a rank too low misses critical fine-grained patterns, while choosing one too high wastes memory and invites overfitting.
   napkin_math: |
-    - **Calculate Memory per layer:** For Llama-3 70B (dim d=8192, 80 layers), 2 matrices (Q,V) * 2 (A+B) * rank(r) * d * 2B (BF16).
-    - **r=4:** `2 * 2 * 4 * 8192 * 2 = 262 KB/layer`. For 80 layers = **21 MB**.
-    - **r=16:** 262 KB * 4 = 1.05 MB/layer * 80 = **83 MB**.
-    - **r=64:** 1.05 MB * 4 = 4.19 MB/layer * 80 = **335 MB**.
-    - **Full fine-tune delta:** `2 * d * d * 2B = 268 MB/layer`, total **21.5 GB**.
-    - **Conclusion:** Even rank 64 offers a 64x compression ratio compared to full fine-tuning, but r=16 captures >95% of the signal for structured tasks like SQL.
+    1. **Assumptions & Constraints:**
+       - Model: Llama-3 70B (dim d=8192, 80 layers).
+       - LoRA Target: 2 matrices (Q, V) per layer.
+       - Precision: BF16 (2 bytes).
+    2. **Calculations:**
+       - Memory for r=4: 2 (matrices) * 2 (A+B) * 4 * 8192 * 2 bytes = 262 KB/layer. Total = 80 * 262 KB = 21 MB.
+       - Memory for r=16: 262 KB * 4 = 1.05 MB/layer. Total = 80 * 1.05 MB = 83 MB.
+       - Memory for r=64: 1.05 MB * 4 = 4.19 MB/layer. Total = 80 * 4.19 MB = 335 MB.
+       - Full fine-tune memory: 2 * 8192 * 8192 * 2 bytes = 268 MB/layer. Total = 80 * 268 MB = 21.5 GB.
+    3. **Conclusion & Interpretation:** **Rank 16 provides optimal dimensionality for structured SQL tasks while maintaining a tiny memory footprint.**
 status: published
 provenance: imported
 requires_explanation: false

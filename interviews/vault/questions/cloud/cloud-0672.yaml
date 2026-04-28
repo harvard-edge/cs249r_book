@@ -8,20 +8,24 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: The Router Bottleneck in MoE Serving
-scenario: You deploy a Mixtral 8x7B (Mixture of Experts) model on a single 80GB GPU. Because it only uses ~13B active parameters per token, the math should be fast. However, your profiling shows that generating a token takes 2x longer than a standard dense 13B model.
-question: What architectural component of the MoE model is destroying your memory bandwidth?
+scenario: 'You deploy a Mixtral 8x7B model on a single GPU. Because it only uses ~13B active parameters per token, the math should be fast. However, your profiling shows that generating a token takes 2x longer than a standard dense 13B model.'
+question: 'What architectural component of the MoE model is destroying your memory bandwidth?'
 details:
-  realistic_solution: 'The MoE model pays a severe memory access penalty due to sparse, non-sequential weight loading. A dense 13B model reads its weights sequentially from HBM at full 2 TB/s bandwidth. Mixtral''s router dynamically selects 2 of 8 experts per token, meaning the GPU must fetch weights from scattered memory locations. HBM''s random access throughput drops to ~400 GB/s (vs 2 TB/s sequential), making the effective read time 5x slower despite identical FLOPs. The fix: group tokens by expert assignment (expert-parallel batching) to convert random reads into sequential reads, or use expert prefetching to hide the latency.'
+  realistic_solution: 'The MoE router network introduces extreme memory fragmentation. A dense model fetches weights sequentially, maximizing HBM burst bandwidth. MoE dynamically selects experts per token, forcing sparse, random memory accesses. HBM throughput drops precipitously for non-sequential reads, bottlenecking the system on memory fetch rather than FLOPs. Mitigation requires Expert-Parallel Batching to group tokens by expert, transforming random reads back into sequential bursts.'
   common_mistake: |
     **The Pitfall:** Blaming the router network math.
     **The Rationale:** Candidates assume that because MoE introduces a new routing layer, the computational overhead of this routing mechanism must be the bottleneck.
     **The Consequence:** They ignore the memory hierarchy and fail to identify that sparse, random memory access is the true culprit, leading to misguided optimization efforts.
   napkin_math: |
-    1. **HBM Sequential Read Speed:** 2000 GB/s.
-    2. **HBM Random Access Speed:** ~400 GB/s.
-    3. **Sequential Fetch (Dense 13B):** Fetching 26 GB sequentially takes **13 ms**.
-    4. **Sparse Random Fetch (MoE 13B active):** Fetching 26 GB via sparse random accesses takes **65 ms**.
-    5. **Result:** **The MoE model's memory reads are effectively 5x slower despite identical FLOPs.**
+    1. **Assumptions & Constraints:**
+       * HBM sequential read: ~2000 GB/s.
+       * HBM random access: ~400 GB/s.
+       * Active model size (13B FP16) = 26 GB.
+    2. **Calculations:**
+       * Dense 13B (Sequential): 26 GB / 2000 GB/s = 13 ms.
+       * MoE 13B active (Random Access): 26 GB / 400 GB/s = 65 ms.
+    3. **Conclusion & Interpretation:**
+       * **Result: Memory-Bound. The MoE model's random memory reads are 5x slower than sequential, entirely explaining the latency regression.**
 status: published
 provenance: imported
 requires_explanation: true

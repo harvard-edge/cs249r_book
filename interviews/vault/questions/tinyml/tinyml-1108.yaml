@@ -8,20 +8,24 @@ competency_area: reliability
 bloom_level: analyze
 phase: inference
 title: Diagnosing WDT Resets During Peak BLE Transmissions
-scenario: A vibration monitoring device built on the Nordic nRF5340 is deployed in a factory. The device runs a continuous anomaly detection model on the 128 MHz application core, while the 64 MHz network core handles BLE 5.3 communications. Recently, the devices have started experiencing intermittent Watchdog Timer (WDT) resets. Log analysis reveals these resets exclusively correlate with periods of high wireless interference where BLE packet retries spike, even though the vibration model's input data rate and complexity remain constant. The system was designed to be fail-operational but lacks an explicit degradation ladder.
+scenario: A dual-core nRF5340 vibration monitor experiences Watchdog Timer (WDT) resets specifically during periods of high wireless interference. The vibration model's input data rate and complexity remain constant, and there is no degradation ladder designed.
 question: Why do nRF5340 WDT resets correlate with BLE retries, and what degradation ladder should prevent them?
 details:
-  realistic_solution: The root cause is a lack of quality-of-service (QoS) shedding and backpressure handling between the two cores. During high BLE interference, the 64 MHz network core slows down its processing of outbound telemetry. Because the app core lacks a graceful degradation strategy, it continues running the full inference model and pushing results into the inter-core communication (IPC) queues. Once the 256 KB SRAM allocated for IPC queues fills up, the app core's telemetry push function blocks indefinitely, eventually starving the idle thread and triggering the WDT. A proper degradation ladder would monitor IPC queue depth and gracefully fallback to a cheaper thresholding model that logs locally rather than transmitting.
+  realistic_solution: High BLE interference stalls the 64 MHz network core. The 128 MHz app core continues sending inferences until the IPC queue fills, blocking the execution thread completely. Implement QoS shedding to drop inferences based on queue depth.
   common_mistake: |
     **The Pitfall:** Misdiagnosing this as the BLE stack stealing CPU cycles from the inference task.
     **The Rationale:** Candidates forget that the Nordic nRF5340 utilizes physically separate cores, so CPU stealing isn't the issue.
     **The Consequence:** Proposing OS scheduling fixes rather than addressing the core issue: lack of backpressure handling and QoS shedding between the two cores.
   napkin_math: |
-    1. **Inference Payload:** Runs at 10 Hz, generating 250 bytes/cycle (2.5 KB/sec).
-    2. **IPC Queue:** Shared SRAM queue is configured to **2 KB**.
-    3. **Interference Scenario:** If the net core stalls transmission for just 800 ms, the 2 KB queue fills completely (8 inferences * 250 bytes = 2000 bytes).
-    4. **Block Condition:** The 9th inference at t=900ms blocks the app core completely.
-    5. **Conclusion:** If the WDT timeout is 1.5 seconds, the system resets shortly after, confirming the absence of a fallback trigger to drop payloads.
+    1. **Assumptions & Constraints:**
+       - nRF5340: Dual-core. Inference runs at 10 Hz (250 bytes/cycle).
+       - Shared IPC Queue: 2 KB SRAM limit.
+    2. **Calculations:**
+       - Queue capacity: 2000 bytes / 250 bytes = 8 inferences.
+       - Starvation time: 8 inferences * 100 ms = 800 ms.
+       - If BLE retries block the net core for >800 ms, the queue is full.
+    3. **Conclusion & Interpretation:**
+       **Result: Queue fills in 800 ms, blocking the app core.** The architecture lacks backpressure, leading to a **QoS-Bound** watchdog reset.
 status: published
 provenance: imported
 requires_explanation: false

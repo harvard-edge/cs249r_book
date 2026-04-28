@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Tail Latency Impact of Garbage Collection
-scenario: Your Python-based inference service on TPU v5e shows periodic P99 spikes every ~30 seconds, each lasting 50-200ms. The spikes correlate with Python garbage collection cycles.
+scenario: Your Python-based inference service shows periodic P99 spikes every ~30 seconds, each lasting 50-200ms. The spikes correlate with Python garbage collection cycles.
 question: Why does GC disproportionately affect tail latency in ML serving, and what are your mitigation options?
 details:
   realistic_solution: 'Python''s cyclic GC (generation 2) triggers every ~700 allocations by default and runs stop-the-world, pausing all threads including the ones feeding data to the TPU. During a GC pause, the TPU starves for input and the response is delayed by the full GC duration. Mitigations: (1) Disable automatic GC and trigger it manually between request batches: `gc.disable()` then `gc.collect()` during idle periods. (2) Use `gc.set_threshold(50000, 50, 10)` to reduce GC frequency at the cost of higher peak memory. (3) Minimize Python object churn — use numpy/jax arrays (not Python lists) for data staging, pre-allocate buffers. (4) In production, use a sidecar process for GC-heavy preprocessing, keeping the inference process lean. Result: P99 spikes eliminated, steady-state memory increases 10-15%.'
@@ -17,25 +17,16 @@ details:
     **The Rationale:** Engineers see GC causing latency spikes and assume turning it off is the simplest fix.
     **The Consequence:** This causes memory leaks that eventually Out-Of-Memory (OOM) the inference process, trading a latency issue for a total reliability failure.
   napkin_math: |
-    1. **GC Impact:** Default GC gen2 runs every ~30s, taking 50-200ms depending on object count.
-    2. **Request Delay:** At 1000 req/s, each GC pause delays 50-200 requests.
-    3. **Latency Shift:** P99 without GC spikes is 25ms. P99 with spikes is 150ms.
-    4. **Mitigation Impact:** After manual GC scheduling between batches, P99 drops to 28ms (3ms overhead from deferred collection).
-    5. **Conclusion:** **Manual GC scheduling eliminates P99 spikes** at the cost of a 10-15% higher baseline memory footprint.
+    1. **Assumptions & Constraints:**
+       - Default GC runs every ~30s, pausing for 50-200ms.
+       - Inference runs at 1000 req/s.
+    2. **Calculations:**
+       - Request Delay: Each GC pause delays 50-200 requests.
+       - Latency Shift: Baseline P99 is 25ms. With spikes, P99 is 150ms.
+       - Mitigation: Manual GC scheduling drops P99 to 28ms (3ms overhead).
+    3. **Conclusion & Interpretation:**
+       - **Result: Manual GC scheduling eliminates P99 spikes at the cost of a 10-15% memory increase. Runtime-Bound**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 5
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-opus-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

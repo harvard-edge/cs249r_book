@@ -8,19 +8,23 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The CMSIS-DSP Buffer Overrun
-scenario: You are using ARM's CMSIS-DSP library to compute an FFT (Fast Fourier Transform) on raw audio before feeding it to a TinyML model. You allocate an array `float audio_buffer[1024]` for the FFT. You call `arm_cfft_f32()`. The function returns, but your program immediately crashes with a Hard Fault on the next line of code.
+scenario: You are using ARM's CMSIS-DSP library to compute an FFT on raw audio before feeding it to a TinyML model. You allocate an array `float audio_buffer[1024]`. You call `arm_cfft_f32()`. The function returns, but your program immediately crashes with a Hard Fault on the next line of code.
 question: Why does `arm_cfft_f32()` HardFault after running on a `float[1024]` audio buffer?
 details:
-  realistic_solution: 'CMSIS-DSP''s arm_cfft_f32 operates on complex numbers — each sample needs real + imaginary parts. For 1024 points: 1024 * 2 (complex) * 4 bytes (float) = 8,192 bytes required. You allocated float[1024] = 4,096 bytes. The FFT writes 4KB beyond your buffer, corrupting adjacent stack or heap memory. The function itself completes successfully because it has no bounds checking. The corruption manifests on the next line when the program accesses the destroyed memory. Fix: allocate float fft_buffer[2048] (or 1024 complex pairs). Always read the CMSIS-DSP documentation — complex FFTs require 2N-element buffers.'
+  realistic_solution: Ensure the buffer accounts for the real and imaginary parts. Allocate `float fft_buffer[2048]` (or 1024 complex pairs). Complex FFTs require 2N-element buffers in C libraries lacking implicit bounds checking.
   common_mistake: |
     **The Pitfall:** Assuming the array is too big for the stack.
     **The Rationale:** Candidates guess that a 4KB array blew the stack size limit, ignoring that this would crash *during* allocation, not after the function returns.
     **The Consequence:** Hunting for stack overflow issues instead of reading the CMSIS-DSP documentation, which states complex FFTs require 2N-element buffers.
   napkin_math: |
-    1. **Complex Requirement:** Each sample needs real + imaginary parts.
-    2. **Required Buffer:** 1024 points * 2 (complex) * 4 bytes (float) = **8,192 bytes**.
-    3. **Allocated Buffer:** `float[1024]` = **4,096 bytes**.
-    4. **Conclusion:** The FFT silently writes 4 KB beyond your buffer, corrupting adjacent stack/heap memory and causing a HardFault on the next access.
+    1. **Assumptions & Constraints:**
+       - Audio Buffer: 1024 points (allocated as float[1024] = 4096 bytes).
+       - CMSIS-DSP arm_cfft_f32() requires complex arrays (real + imaginary).
+    2. **Calculations:**
+       - Required Buffer: 1024 points * 2 (complex) * 4 bytes (float) = 8,192 bytes.
+       - Deficit: 8,192 bytes - 4,096 bytes = 4,096 bytes of buffer overrun.
+    3. **Conclusion & Interpretation:**
+       **Result: Silent 4 KB memory corruption.** The crash is **Memory-Safety-Bound** caused by missing bounds checking in the C DSP library.
 status: published
 provenance: imported
 requires_explanation: false

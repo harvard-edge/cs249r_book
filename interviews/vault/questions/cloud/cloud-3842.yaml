@@ -8,20 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Analyzing Memory Bounds in Unfused Operations
-scenario: You are profiling a sequence of three element-wise operations (GeLU, Dropout, Scale) on a tensor of 50 million FP16 elements (100 MB total size) running on an A100 GPU. The A100 provides 2.0 TB/s memory bandwidth, 312 TFLOPS FP16, and has a ridge point of ~156 FLOPs/Byte. When implemented as three separate standard framework calls, the operations are heavily bottlenecked and GPU compute utilization is near zero. Each operation performs only ~2 FLOPs per element.
+scenario: You are profiling a sequence of three element-wise operations (GeLU, Dropout, Scale) on a tensor of 50 million FP16 elements (100 MB total size) on a GPU with 2.0 TB/s memory bandwidth. The GPU compute utilization is near zero.
 question: Why are separate GeLU, Dropout, and Scale kernels memory-bound, and how does fusing them change HBM traffic?
 details:
-  realistic_solution: Because the operations have an arithmetic intensity (~1 FLOP/Byte) far below the A100's ridge point of 156 FLOPs/Byte, they are severely memory-bound. With separate kernels, the GPU must write the 100 MB intermediate tensor to HBM and read it back for the next operation, multiplying the memory traffic. Operator fusion solves this by loading the data from HBM once into fast on-chip registers, sequentially applying all three operations, and writing the final result back to HBM once.
+  realistic_solution: 'Operations with arithmetic intensity below the GPU ridge point are severely memory-bound. With separate kernels, the GPU writes intermediate results to HBM and reads them back. Fusing loads data into on-chip registers once.'
   common_mistake: |
     **The Pitfall:** Attributing the slowness purely to kernel launch overhead.
-    **The Rationale:** Engineers overlook that writing intermediate results to High Bandwidth Memory (HBM) and reading them back is the primary cost for operations with low arithmetic intensity.
-    **The Consequence:** Missing the massive performance gains achievable by reducing memory traffic through fusion.
+    **The Rationale:** Engineers overlook that writing intermediate results to HBM is the primary cost for operations with low arithmetic intensity.
+    **The Consequence:** Missing massive performance gains from reducing memory traffic through fusion.
   napkin_math: |
-    1. Unfused traffic: 3 kernels * (100 MB read + 100 MB write) = 600 MB total HBM traffic.
-    2. Unfused memory time = 600 MB / (2.0 TB/s) = 300 microseconds (plus launch overhead).
-    3. Fused traffic: 1 kernel * (100 MB read + 100 MB write) = 200 MB total HBM traffic.
-    4. Fused memory time = 200 MB / (2.0 TB/s) = 100 microseconds.
-    **Final Result: Fusion yields a 3x speedup purely from HBM traffic reduction.**
+    1. **Assumptions & Constraints:**
+       - Tensor = 100 MB. Bandwidth = 2.0 TB/s.
+    2. **Calculations:**
+       - Unfused traffic = 3 kernels * (100 MB read + 100 MB write) = 600 MB.
+       - Unfused time = 600 MB / 2.0 TB/s = 300 µs.
+       - Fused traffic = 1 kernel * (100 MB read + 100 MB write) = 200 MB.
+       - Fused time = 200 MB / 2.0 TB/s = 100 µs.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Fusion yields 3x speedup by reducing HBM traffic).**
 status: published
 provenance: imported
 requires_explanation: false

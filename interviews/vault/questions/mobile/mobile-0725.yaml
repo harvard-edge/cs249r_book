@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: The NPU Compiler Black Box
-scenario: You export the same ONNX model to three mobile NPU compilers: Apple's CoreML compiler, Qualcomm's QNN compiler, and MediaTek's NeuroPilot compiler. The model has 45 layers. CoreML maps 44 layers to the NPU, QNN maps 38 layers, and NeuroPilot maps 41 layers. The unmapped layers fall back to the CPU.
+scenario: 'You export the same ONNX model to three mobile NPU compilers: Apple''s CoreML compiler, Qualcomm''s QNN compiler, and MediaTek''s NeuroPilot compiler. The model has 45 layers. CoreML maps 44 layers to the NPU, QNN maps 38 layers, and NeuroPilot maps 41 layers. The unmapped layers fall back to the CPU.'
 question: Why do three compilers targeting three NPUs produce different partitioning decisions from the same ONNX graph, and how do you debug this?
 details:
   realistic_solution: 'NPU compilers differ in three ways: (1) Operator support — each NPU has a different op compatibility list (e.g., grouped conv natively vs decomposition). (2) Fusion strategy — some compilers aggressively fuse Conv+BN+ReLU into single ops, while others are more conservative. (3) Cost modeling — compilers decide whether running an op on NPU vs CPU is worth the DMA transfer cost differently. Debug: export per-layer delegation logs from each compiler, identify the specific unsupported ops, and replace them with universally-supported alternatives.'
@@ -17,10 +17,16 @@ details:
     **The Rationale:** Engineers overlook that compilers have vastly different cost models for cross-device data transfers and fusion strategies.
     **The Consequence:** Developers waste time blindly swapping operators instead of optimizing the graph boundaries to minimize DMA transfer costs.
   napkin_math: |
-    - **CoreML:** 44 on NPU + 1 on CPU. 1 data transfer boundary costs ~0.3ms. Total fallback latency: 4.2ms.
-    - **QNN:** 38 on NPU + 7 on CPU. 3 data transfer boundaries cost ~2.1ms. Total fallback latency: 7.8ms.
-    - **NeuroPilot:** 41 on NPU + 4 on CPU. 2 data transfer boundaries cost ~1.2ms. Total fallback latency: 5.9ms.
-    - **Result:** **Data transfers (2.1ms for 3 boundaries) often cost more than the CPU computation itself (1.5ms for 7 layers), dictating compiler partitioning.**
+    1. **Assumptions & Constraints:**
+       - 45 layer ONNX model.
+       - CoreML: 44 NPU, 1 CPU (1 boundary). QNN: 38 NPU, 7 CPU (3 boundaries). NeuroPilot: 41 NPU, 4 CPU (2 boundaries).
+       - CPU layer latency = 0.5ms/layer. DMA transfer boundary = 0.7ms/boundary.
+    2. **Calculations:**
+       - CoreML fallback cost: (1 layer * 0.5ms) + (1 boundary * 0.7ms) = 1.2ms.
+       - QNN fallback cost: (7 layers * 0.5ms) + (3 boundaries * 0.7ms) = 5.6ms.
+       - NeuroPilot fallback cost: (4 layers * 0.5ms) + (2 boundaries * 0.7ms) = 3.4ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound (DMA).** Data transfers (e.g., 2.1ms for 3 boundaries) often cost nearly as much as or more than the CPU computation itself, forcing compilers to carefully optimize partitioning boundaries.
 status: published
 provenance: imported
 requires_explanation: false

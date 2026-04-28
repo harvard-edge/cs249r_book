@@ -11,18 +11,24 @@ title: 'Specification: define latency-accuracy SLA for efficient CNN cloud API'
 scenario: You are writing the technical specification for a cloud vision API that must serve 50K QPS. The SLA requires p50 < 10ms, p99 < 50ms, accuracy > 80% top-1 on ImageNet.
 question: What hardware, model, batching, and failure-mode spec would you choose to serve 50K QPS under the p50, p99, and >80% ImageNet SLA?
 details:
-  realistic_solution: 'Hardware: 4× H100 SXM5 nodes (32 GPUs). Model: EfficientNet-B2 (9.1M params, 1.0 GFLOPs, 80.1% top-1) or MobileNetV3-Large with TRT INT8. Batching: dynamic batching with 5ms window, max batch=128. SLA spec: (1) p50 < 10ms = batching_wait(5ms) + inference(3ms) + overhead(2ms); (2) p99 < 50ms = max batching_wait(20ms) + inference(3ms) + 2× overhead; (3) accuracy: shadow eval on 1K held-out images hourly, alert if top-1 < 79%; (4) failure modes: model OOM → fallback to smaller model, preprocessing timeout → return error 504.'
+  realistic_solution: 'Hardware: 2× H100 nodes (16 GPUs). Model: EfficientNet-B2 (9.1M params, 1.0 GFLOPs, 80.1% top-1) or MobileNetV3-Large with TRT INT8. Batching: dynamic batching with 5ms window, max batch=128. SLA spec: (1) p50 < 10ms = batching_wait(5ms) + inference(3ms) + overhead(2ms); (2) p99 < 50ms = max batching_wait(20ms) + inference(3ms) + 2× overhead; (3) accuracy: shadow eval on 1K held-out images hourly, alert if top-1 < 79%; (4) failure modes: model OOM → fallback to smaller model, preprocessing timeout → return error 504.'
   common_mistake: |
     **The Pitfall:** Specifying only average latency targets without defining accuracy failures or accounting for head-of-line blocking.
     **The Rationale:** Engineers often focus on raw compute throughput and ignore the statistical realities of queuing and data drift.
     **The Consequence:** The system hits 50K QPS but fails SLA during burst traffic or silently serves degraded predictions due to distribution shifts.
   napkin_math: |
-    - **Hardware Distribution:** 50K QPS across 32 H100 GPUs = 1,563 QPS/GPU.
-    - **Dynamic Batching:** 5ms window × 1,563 QPS = 7.8 images/window → Batch size 8.
-    - **Compute Requirement:** EfficientNet-B2 (80.1% top-1, 1.0 GFLOPs). At batch 8 = 8 GFLOPs.
-    - **Latency Check:** 8 GFLOPs / 494 TFLOPS (50% util on H100) = 0.016 ms compute. Total latency = 5ms wait + 0.016ms compute + ~2ms overhead ≈ 7ms (Under 10ms p50).
-    - **Resource Over-provisioning:** 1,563 QPS × 1.0 GFLOPs = 1.56 TFLOPS needed per GPU.
-    - **Conclusion:** H100 effective compute is 494 TFLOPS, yielding 0.3% utilization. **The design is massively over-provisioned and should be reduced to 2 H100 nodes.**
+    1. **Assumptions & Constraints:**
+       - SLA: p50 < 10ms, p99 < 50ms, 50K QPS.
+       - H100 effective compute: 494 TFLOPS (50% util).
+       - EfficientNet-B2: 1.0 GFLOPs per image.
+    2. **Calculations:**
+       - Hardware Distribution: 50K QPS across 16 H100 GPUs = 3,125 QPS/GPU.
+       - Dynamic Batching: 5ms window × 3,125 QPS = 15.6 images/window → Batch size 16.
+       - Compute Requirement: 16 images × 1.0 GFLOPs = 16 GFLOPs.
+       - Latency Check: 16 GFLOPs / 494 TFLOPS = 0.032 ms compute. Total latency = 5ms wait + 0.032ms compute + ~2ms overhead ≈ 7ms (Under 10ms p50).
+       - Resource Over-provisioning: 3,125 QPS × 1.0 GFLOPs = 3.125 TFLOPS needed per GPU.
+    3. **Conclusion & Interpretation:**
+       - **Result: Over-provisioned. The original 32 GPU design had 0.3% utilization. Even 16 GPUs (2 nodes) is highly over-provisioned, easily meeting the SLA.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,19 +8,23 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: Context Parallelism vs Sequence Parallelism
-scenario: Megatron's 'sequence parallelism' and 'context parallelism' (also called Ring Attention) both split the sequence dimension, but they solve different problems.
+scenario: Megatron's 'sequence parallelism' and 'context parallelism' (Ring Attention) both split the sequence dimension, but they solve different architectural problems.
 question: What is the difference between sequence parallelism and context parallelism, and when would you use each?
 details:
-  realistic_solution: 'Sequence Parallelism (SP): Splits the sequence dimension ONLY for non-TP operations (LayerNorm, Dropout, residual connections). Each TP rank processes seq_len/TP tokens for these ops. The GEMM operations still use standard TP. SP is always used WITH TP and requires no additional GPUs — it reuses the TP group. Purpose: reduce activation memory from replicated LayerNorm/Dropout activations. Context Parallelism (CP) / Ring Attention: Splits the actual attention computation across GPUs along the sequence dimension. Each GPU holds seq_len/CP tokens and computes attention by ring-passing KV blocks. Requires dedicated GPUs beyond the TP group. Purpose: enable training with sequence lengths that exceed single-GPU memory (e.g., 128K+ tokens). When to use: SP is essentially free (no extra GPUs, minimal extra comms) — always use with TP. CP is needed when sequence length × hidden_dim × num_layers × bytes_per_element > available_GPU_memory for activations, typically at seq_len > 32K with large models.'
+  realistic_solution: 'Sequence Parallelism (SP) splits the sequence dimension ONLY for non-TP operations (LayerNorm, Dropout) to save activation memory, reusing the existing TP group. Context Parallelism (CP) splits the actual attention computation across dedicated GPUs by ring-passing KV blocks, allowing infinite context scaling.'
   common_mistake: |
-    **The Pitfall:** Using the terms interchangeably.
-    **The Rationale:** Engineers think anything splitting the sequence dimension is identical.
-    **The Consequence:** Misconfiguring parallelism strategies, resulting in OOM errors or wasted GPUs.
+    **The Pitfall:** Using the terms SP and CP interchangeably.
+    **The Rationale:** Engineers see both splitting the sequence dimension and assume identical logic.
+    **The Consequence:** Misconfiguring parallelism strategies, resulting in OOM errors or wasted GPU interconnects.
   napkin_math: |
-    1. KV cache elements (128K context): 2 * 131072 * 80 * 8 * 128 = 21,474,836,480 elements.
-    2. Size in BF16 (2 bytes): 21,474,836,480 * 2 = 42,949,672,960 bytes (~40 GiB).
-    3. Memory with Context Parallelism (CP=4): ~40 GiB / 4 = ~10 GiB per GPU.
-    **Final Result: CP reduces KV memory per GPU from ~40 GiB to ~10 GiB.**
+    1. **Assumptions & Constraints:**
+       - Context = 128K tokens.
+       - KV elements = 21.47 billion.
+    2. **Calculations:**
+       - BF16 size = 21.47B * 2 bytes = ~40 GiB.
+       - With CP=4: 40 GiB / 4 = ~10 GiB per GPU.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity Bound (CP reduces single-GPU KV requirement to 10 GiB).**
 status: published
 provenance: imported
 requires_explanation: false

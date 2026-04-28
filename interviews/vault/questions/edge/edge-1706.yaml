@@ -8,33 +8,18 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: TensorRT DLA to GPU Fallback Optimization
-scenario: We are deploying a real-time object detection model converted from ONNX
-  to TensorRT on an NVIDIA Jetson Orin (32 GB LPDDR5, 60W TDP). The goal is to run
-  inference entirely on the DLA accelerator to save the Ampere GPU for concurrent
-  tracking algorithms. However, profiling shows unexpected latency spikes, and it
-  appears certain layers are falling back to the GPU. How do you diagnose the operator
-  coverage gap causing this fallback and quantify the performance cost?
-question: How do you diagnose the operator coverage gap causing this fallback and
-  quantify the performance cost?
+scenario: 'We are deploying a real-time object detection model converted from ONNX to TensorRT on an NVIDIA Jetson Orin. The goal is to run inference entirely on the DLA accelerator to save the Ampere GPU for concurrent tracking algorithms. However, profiling shows unexpected latency spikes, and it appears certain layers are falling back to the GPU.'
+question: How do you diagnose the operator coverage gap causing this fallback and quantify the performance cost?
 details:
-  realistic_solution: Use the TensorRT 'trtexec' tool with detailed profiling to identify
-    the specific ONNX operators unsupported by the DLA (e.g., specific padding types
-    or non-standard activations). Once identified, modify the original model architecture
-    to substitute these with DLA-supported equivalents before re-exporting to ONNX.
-    This ensures the entire graph is compiled for the DLA, eliminating the fallback
-    overhead and freeing the Ampere GPU.
-  common_mistake: Candidates often suggest simply applying INT8 quantization to increase
-    TOPS without diagnosing the actual bottleneck. They may also fail to realize that
-    falling back from DLA to GPU introduces significant memory transfer and context-switching
-    overhead, treating the platform's 275 TOPS INT8 as a single uniform compute pool.
-  napkin_math: The Jetson Orin has 32 GB LPDDR5 providing roughly 205 GB/s of memory
-    bandwidth. If an unsupported operator forces a fallback, intermediate feature
-    maps (e.g., 128 channels at 256x256, approx 8.4MB) must be synchronized between
-    DLA and GPU contexts. Moving 8.4MB at 205 GB/s takes about 0.04ms, but GPU kernel
-    launch and context switch latency add ~0.5ms per transfer. A single fallback requires
-    two transfers (DLA->GPU->DLA), adding >1ms overhead. On a 10ms latency budget
-    (100 FPS), this single unsupported operator consumes over 10% of the inference
-    time, proving that modifying the model to stay entirely on the DLA is mandatory.
+  realistic_solution: 'Use the TensorRT `trtexec` tool with detailed profiling to identify the specific ONNX operators unsupported by the DLA (e.g., specific padding types or non-standard activations). Once identified, modify the original model architecture to substitute these with DLA-supported equivalents before re-exporting to ONNX. This ensures the entire graph is compiled for the DLA, eliminating the fallback overhead and freeing the Ampere GPU.'
+  common_mistake: |
+    **The Pitfall:** Treating the platform's TOPS as a single uniform compute pool.
+    **The Rationale:** Candidates often suggest simply applying INT8 quantization without diagnosing the actual bottleneck.
+    **The Consequence:** They fail to realize that falling back from DLA to GPU introduces massive memory transfer and context-switching overhead, stalling the pipeline.
+  napkin_math: |
+    1. **Assumptions & Constraints:** LPDDR5 bandwidth is ~205 GB/s. Intermediate feature map is 128 channels at 256x256 (approx 8.4MB). GPU context switch adds ~0.5ms.
+    2. **Calculations:** Transfer time = 8.4 MB / 205 GB/s = ~0.04ms. Two transfers (DLA->GPU->DLA) + 2 context switches = 2*(0.04) + 2*(0.5) = 1.08ms overhead. Latency budget = 10ms (100 FPS).
+    3. **Conclusion & Interpretation:** **A single unsupported operator consumes over 10% of the 10ms latency budget. Result: Host-Fallback-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

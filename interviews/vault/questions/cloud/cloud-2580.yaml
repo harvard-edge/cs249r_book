@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Cloud Megatron Parallelism L3 0
-scenario: "You are training an 80-layer model (hidden dim 8192) with Megatron TP=8 on 8 GPUs. The micro-batch size is 4, sequence length is 2048, and NVLink bandwidth is 450 GB/s."
-question: "What is the all-reduce communication volume and NVLink transfer time added by TP=8 per training step?"
+scenario: 'You are training an 80-layer model (hidden dim 8192) with Megatron TP=8 on 8 GPUs. The micro-batch size is 4, sequence length is 2048, and NVLink bandwidth is 450 GB/s.'
+question: 'What is the all-reduce communication volume and NVLink transfer time added by TP=8 per training step?'
 details:
   realistic_solution: 'Per Transformer block: 2 all-reduces (1 FFN + 1 attention) in forward, 2 in backward = 4 all-reduces total. Each all-reduce transfers an activation tensor: batch × seq_len × hidden_dim × 2 bytes. Volume per all-reduce: 4 × 2048 × 8192 × 2 = 134.2 MB. A ring all-reduce across 8 GPUs sends 2×(N-1)/N × data = 1.75 × 134.2 MB = 234.9 MB per all-reduce. Per block: 4 × 234.9 MB = 939.6 MB. 80 layers: 80 × 939.6 MB ≈ 75.2 GB. NVLink time: 75.2 GB / 450 GB/s = 0.167 seconds (167 ms). With overlap of compute and communication, effective overhead is much smaller.'
   common_mistake: |
@@ -17,13 +17,16 @@ details:
     **The Rationale:** Candidates often only trace the forward pass data flow.
     **The Consequence:** The estimated communication volume is off by exactly a factor of 2, leading to incorrect latency projections.
   napkin_math: |
-    1. **Data per tensor:** 4 (batch) × 2048 (seq) × 8192 (dim) × 2 bytes (FP16) = 134.2 MB.
-    2. **Ring All-Reduce overhead:** 2 × (7/8) × 134.2 MB = 234.9 MB per all-reduce.
-    3. **All-reduces per layer:** 2 in forward (Attention, FFN) + 2 in backward = 4 ARs/layer.
-    4. **Total ARs:** 4 × 80 layers = 320 all-reduces.
-    5. **Total Volume:** 320 × 234.9 MB ≈ 75.2 GB.
-    6. **Transfer Time:** 75.2 GB / 450 GB/s ≈ 0.167 seconds (167 ms).
-    - **Conclusion:** **TP=8 adds ~75 GB of communication volume taking ~167 ms per step.**
+    1. **Assumptions & Constraints:**
+       - TP=8 across 8 GPUs. Layers: 80.
+       - Tensor size: 4 (batch) * 2048 (seq) * 8192 (dim) * 2 bytes (FP16) = 134.2 MB.
+       - NVLink bandwidth: 450 GB/s.
+    2. **Calculations:**
+       - Ring All-Reduce payload = 2 * (7/8) * 134.2 MB = 234.9 MB.
+       - All-Reduces per block = 2 forward (Attn, FFN) + 2 backward = 4.
+       - Total volume per step = 4 * 80 * 234.9 MB = ~75.2 GB.
+       - Transfer time = 75.2 GB / 450 GB/s = ~0.167 seconds (167 ms).
+    3. **Conclusion & Interpretation:** **Result: Network-Bound (Intra-node)**. TP=8 adds ~75 GB of communication volume per step, taking ~167 ms over NVLink, which must be hidden via compute overlap.
 status: published
 provenance: imported
 requires_explanation: false

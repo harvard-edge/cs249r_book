@@ -11,19 +11,24 @@ title: INT8 Clipping in Edge Quality Gates
 scenario: A data quality gate is deployed on a Google Coral Edge TPU (4 TOPS, 2W) to filter corrupt camera frames before processing. The gate uses an INT8-quantized anomaly detection model. During peak sunlight, the camera's auto-exposure shifts the input pixel distribution ranges significantly higher. Engineers observe that the gate suddenly starts flagging 40% of perfectly valid bright frames as anomalous.
 question: Why does the Coral INT8 anomaly gate flag 40% of valid bright frames as anomalous during peak sunlight?
 details:
-  realistic_solution: The issue happens because the INT8 quantization parameters (scale and zero-point) were calibrated on standard lighting data. When sunlight shifts the input range, the fixed INT8 representation cannot encode the higher values, causing severe clipping at 127. This clipping destroys the input features, leading to massive reconstruction error in the anomaly detector, which flags the distorted tensor. The solution is to re-calibrate the fixed scale (S) to accommodate the broader dynamic range.
+  realistic_solution: Correctly diagnose severe mathematical clipping enforced by fixed-point representations. Calibrate the quantization pipeline limits to enforce a broader dynamic scaling factor (S), permitting accurate ingestion of overexposed frames without truncation faults.
   common_mistake: |
     **The Pitfall:** Assuming it's merely a distribution shift requiring standard retraining.
     **The Rationale:** Candidates suggest retraining the model on brighter images, ignoring that the Coral TPU's strict INT8 requirement causes fixed-point mathematical clipping prior to any learned operations.
     **The Consequence:** Retraining fails to fix the issue because the data is mathematically destroyed by clipping before the network even sees it.
   napkin_math: |
-    1. **INT8 Params:** Scale (S) = 1.0 / 255 ≈ 0.00392, Zero-point (Z) = -128.
-    2. **Input Value:** Sunlit pixel reaches 1.8.
-    3. **Quantization:** q = round(1.8 / 0.00392) - 128 = 459 - 128 = 331.
-    4. **Hardware Clipping:** 331 is clamped to the maximum INT8 value of 127.
-    5. **Effective Value:** Processed value is (127 - (-128)) * 0.00392 = 1.0.
-    6. **Error:** |1.8 - 1.0| = 0.8 per bright pixel.
-    **Result: Severe mathematical clipping destroys feature fidelity, artificially inflating reconstruction loss.**
+    1. **Assumptions & Constraints:**
+       - Normal Pixel Range Calibration: max mapped to 1.0.
+       - Quantization Params: Scale (S) = 1.0 / 255 ≈ 0.00392, Zero-point (Z) = -128.
+       - Sunlight Input Shift: Peak bright pixel reaches 1.8.
+       - INT8 Hardware Bounds: [-128, 127].
+    2. **Calculations:**
+       - Raw Quantization = round(1.8 / 0.00392) - 128 = 459 - 128 = 331.
+       - Hardware Clipping = min(max(331, -128), 127) = 127.
+       - Dequantized Effective Value = (127 - (-128)) * 0.00392 = 255 * 0.00392 = 1.0.
+       - Absolute Error per saturated pixel = |1.8 - 1.0| = 0.8.
+    3. **Conclusion & Interpretation:**
+       - **Result: Mathematical Clipping (Precision-Bound)** - Fixed INT8 representation destroys data fidelity via clipping before inference even occurs.
 status: published
 provenance: imported
 requires_explanation: false

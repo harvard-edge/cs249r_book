@@ -8,30 +8,27 @@ competency_area: memory
 bloom_level: understand
 phase: both
 title: The Real-Time Sensor Fusion Dilemma
-scenario: You're designing an ECU for sensor fusion in a self-driving car. The system has 1 MB of fast
-  on-chip SRAM and 32 MB of slower LPDDR5 DRAM. Your fusion model's weights are 2 MB (INT8 quantized).
-  For safety, inference latency must be minimized. Explain where you must store the model weights and
-  what specific hardware mechanism is essential for efficiently moving data from the camera peripheral
-  into memory for processing without bottlenecking the CPU.
-question: "Where should the 2 MB INT8 weights be stored given 1 MB SRAM, and what hardware should move camera data without CPU bottlenecks?"
+scenario: You are designing an ECU for sensor fusion in a self-driving car. The system has 1 MB of fast on-chip SRAM and 32 MB of slower LPDDR5 DRAM. Your fusion model's weights are 2 MB. For safety, inference latency must be minimized.
+question: Where should the 2 MB INT8 weights be stored given 1 MB SRAM, and what hardware should move camera data without CPU bottlenecks?
 details:
-  realistic_solution: The 2 MB of model weights are too large for the 1 MB SRAM, so they *must* be stored
-    in the LPDDR5 DRAM. The essential hardware mechanism is a **DMA (Direct Memory Access) controller**.
-    The DMA is configured to transfer the incoming camera frame directly from the camera peripheral's
-    buffer into a designated region of DRAM. This happens in the background, without any CPU intervention.
-    Once the data is in DRAM, the CPU can orchestrate the inference, using the DMA again to transfer small,
-    necessary chunks of the weights and input data from DRAM into the fast SRAM just in time for the compute
-    engine to use them. This hierarchical memory management is key to minimizing latency.
-  common_mistake: A common misconception is that the CPU must be involved in all data movement. In this
-    scenario, having the CPU manually copy the incoming high-bandwidth camera stream into memory would
-    consume critical cycles, introduce latency, and create a system bottleneck, preventing the CPU from
-    performing other tasks like scheduling or executing the model's control logic.
-  napkin_math: 1. **Weight Storage:** Model weights (2 MB) > On-chip SRAM (1 MB) → Weights must reside
-    in LPDDR5 DRAM.
+  realistic_solution: The model weights must be pinned in the LPDDR5 DRAM since they exceed the SRAM capacity. To prevent the primary CPU from becoming an I/O bottleneck, a dedicated DMA (Direct Memory Access) controller must be configured to continuously stream the camera peripheral buffer into DRAM asynchronously, freeing the CPU to purely orchestrate compute dispatch.
+  common_mistake: |
+    **The Pitfall:** Relying on the host CPU to perform memory copy operations for sensor ingestion.
+    **The Rationale:** Candidates default to standard software paradigms (`memcpy`) without considering the rigid cycle budgets of real-time embedded systems.
+    **The Consequence:** The CPU is entirely consumed by I/O thrashing, starving the inference engine and violating safety-critical latency deadlines.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - SRAM limit: 1 MB
+       - Model weights: 2 MB
+       - DRAM available: 32 MB
+    2. **Calculations:**
+       - Weight Footprint (2 MB) > SRAM Capacity (1 MB)
+       - Weights must reside in DRAM
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity Bound. The DMA controller is strictly required to orchestrate movement into SRAM without locking the CPU.**
   options:
   - Store weights in DRAM and have the CPU perform a `memcpy` to move camera data.
-  - Store weights in DRAM; use a DMA controller to move data from camera to DRAM and from DRAM to SRAM
-    for processing.
+  - Store weights in DRAM; use a DMA controller to move data from camera to DRAM and from DRAM to SRAM for processing.
   - The model won't fit because the 2 MB of weights are larger than the 1 MB of SRAM.
   - Store weights in DRAM and have the compute engine access them directly from DRAM for every calculation.
   correct_index: 1
@@ -47,8 +44,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

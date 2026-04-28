@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Continuous vs Dynamic Batching Trade-offs
-scenario: You are evaluating the architecture of an LLM inference server for an 8B parameter model deployed on GPUs. The service has a strict Service Level Objective (SLO): Time-to-First-Token (TTFT) < 200ms and Time-Between-Tokens (TBT) < 50ms at a concurrency of 100 requests/sec. The current implementation uses traditional dynamic batching (request-level scheduling) but experiences severe TTFT degradation (up to 3 seconds) during peak traffic due to highly variable input and output sequence lengths.
+scenario: 'You are evaluating the architecture of an LLM inference server for an 8B parameter model deployed on GPUs. The service has a strict Service Level Objective (SLO): Time-to-First-Token (TTFT) < 200ms and Time-Between-Tokens (TBT) < 50ms at a concurrency of 100 requests/sec. The current implementation uses traditional dynamic batching (request-level scheduling) but experiences severe TTFT degradation (up to 3 seconds) during peak traffic due to highly variable input and output sequence lengths.'
 question: "Should this LLM server use request-level dynamic batching or iteration-level continuous batching to meet TTFT and TBT SLOs?"
 details:
   realistic_solution: Implement Iteration-Level Scheduling (Continuous Batching). This allows the inference server to evict finished requests and schedule new requests at each token generation step, rather than waiting for all requests in a batch to complete. This resolves head-of-line blocking, decoupling the TTFT of new requests from the maximum generation length of currently executing requests.
@@ -17,10 +17,17 @@ details:
     **The Rationale:** Candidates apply standard web-server tuning logic (reduce queue depth) instead of fundamentally changing the scheduling paradigm.
     **The Consequence:** Hardware utilization is destroyed, leading to cascading queue buildup at high concurrency and worsening overall latency.
   napkin_math: |
-    - **Dynamic batching penalty:** If a new request arrives right after a batch starts, and the longest sequence is 100 tokens, it waits: 100 tokens * 40ms/token = 4,000ms.
-    - **SLO Violation:** 4,000ms massively violates the 200ms TTFT SLO.
-    - **Continuous batching fix:** The scheduler admits the new request at the very next token boundary.
-    - **Result: Queue wait time drops to just 1 token step (40ms) + prefill execution time, safely meeting the SLO.**
+    1. **Assumptions & Constraints:**
+       - SLO: TTFT < 200 ms, TBT < 50 ms.
+       - Generation step: ~40 ms/token.
+       - Longest sequence: 100 tokens.
+    2. **Calculations:**
+       - Dynamic Batching: New requests wait for the longest active generation.
+       - Wait time: 100 tokens * 40 ms/token = 4,000 ms penalty (violates 200 ms SLO).
+       - Continuous Batching (Iteration-level): New requests enter at the next token boundary.
+       - Wait time: 1 token generation = 40 ms penalty.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound. Dynamic batching causes 4-second head-of-line blocking. Continuous batching strictly solves this by admitting requests per-token.**
 status: published
 provenance: imported
 requires_explanation: true

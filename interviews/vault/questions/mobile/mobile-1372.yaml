@@ -8,21 +8,28 @@ competency_area: compute
 bloom_level: create
 phase: inference
 title: On-Device LLM Sizing for Google Tensor G3
-scenario: You are architecting an on-device text summarization feature using a 1.8B parameter model (like Gemini Nano) running locally on a Google Tensor G3 device. The product requirement dictates processing an 800-token article and generating a 200-token summary in under 2 seconds to ensure a seamless user experience. The Tensor G3 features 12 GB of LPDDR5X memory and an on-device TPU rated at 7.5 TOPS.
-question: How should Gemini Nano be sized and optimized across prefill, decode, and memory limits to meet the 2-second target?
+scenario: You are architecting an on-device text summarization feature using a 1.8B parameter model. The product requirement dictates processing an 800-token article and generating a 200-token summary in under 2 seconds.
+question: How should the model be sized and optimized across prefill, decode, and memory limits to meet the 2-second target?
 details:
-  realistic_solution: A senior engineer will recognize that LLM inference is split into a compute-bound prefill phase and a memory-bandwidth-bound decode phase. They will architect a solution that aggressively quantizes the model weights to 4-bit (INT4) to minimize both the memory footprint and the sheer volume of data transferred from LPDDR5X. They will calculate the required memory bandwidth to meet the latency target and realize that standard autoregressive decoding will likely exceed the physical capabilities of mobile LPDDR5X, prompting them to propose architectural mitigations like speculative decoding or cascading to a cloud endpoint for larger generation tasks.
+  realistic_solution: |
+    LLM inference is split into a compute-bound prefill phase and a memory-bandwidth-bound decode phase. Aggressively quantize weights to INT4 to minimize the memory footprint and data transfer from unified memory. Since standard autoregressive decoding exceeds mobile memory bandwidth limits, implement speculative decoding or Medusa-style draft models to generate multiple tokens per forward pass, maximizing NPU utilization.
   common_mistake: |
     **The Pitfall:** Assuming token generation (decode) is a compute-bound problem rather than a memory-bandwidth-bound problem.
     **The Rationale:** Candidates often see high TOPS numbers and assume generation will be fast, ignoring the memory bandwidth required to stream weights.
     **The Consequence:** The designed system completely fails to meet latency targets during autoregressive generation.
   napkin_math: |
-    1. Model Footprint: A 1.8B parameter model at 4-bit requires ~0.9 GB for weights.
-    2. Prefill Phase (Compute-Bound): 800 tokens * 1.8B params * 2 ops = 2.88 TOPS. At 3 TOPS effective, prefill takes ~0.96s.
-    3. Decode Phase (Memory-Bound): Generating 200 tokens requires reading 0.9 GB weights 200 times = 180 GB data movement.
-    4. Latency Target Check: With 2.0s budget and 0.96s used, 1.04s remains.
-    5. Bandwidth Requirement: 180 GB / 1.04s = ~173 GB/s.
-    6. **Reality Check:** Mobile LPDDR5X provides ~50 GB/s. Decode takes 180 / 50 = 3.6s. **Total latency = 4.56s (fails 2s target, requiring speculative decoding).**
+    1. **Assumptions & Constraints:**
+       - Model: 1.8B parameters at INT4 (0.9 GB weights)
+       - Target: 2.0s for 800 prefill + 200 decode
+       - Effective NPU TOPS: 3 TOPS
+       - Unified Bandwidth: 50 GB/s
+    2. **Calculations:**
+       - Prefill Compute: 800 * 1.8B * 2 ops = ~2.88 TOPS. Time = 2.88 / 3 = 0.96s.
+       - Remaining Budget: 2.0s - 0.96s = 1.04s.
+       - Decode Bandwidth Needed: 0.9 GB * 200 tokens = 180 GB transfer.
+       - Decode Time: 180 GB / 50 GB/s = 3.6s.
+       - Total Time: 0.96s + 3.6s = 4.56s.
+    3. **Conclusion & Interpretation:** **Standard decoding takes 4.56s, missing the 2s target. Result: Memory Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

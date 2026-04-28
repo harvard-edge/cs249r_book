@@ -11,17 +11,23 @@ title: The INT8 Calibration Drift
 scenario: Your team deployed an INT8-quantized pedestrian detection model on a TI TDA4VM in an autonomous shuttle. Calibration was performed in July using 2000 images from a sunlit suburban route. Come December, field reports show an 8% mAP drop — pedestrians in heavy coats and low-angle winter sun are being missed. The FP32 model shows no accuracy change on the same winter scenes.
 question: What went wrong with the quantization, and how do you fix it without retraining?
 details:
-  realistic_solution: 'Post-training quantization computes per-tensor or per-channel scale factors from the calibration dataset''s activation distributions. Summer calibration images have bright, high-contrast scenes — pedestrians in T-shirts against sunlit backgrounds produce large, well-separated activations. Winter scenes are fundamentally different: low-contrast, compressed dynamic range, and different spatial frequency distributions. The summer-calibrated quantization ranges are too wide for winter activations, wasting precision on magnitude ranges that winter data never uses. Recalibrate on winter data.'
+  realistic_solution: Post-training quantization computes scale factors based on calibration dataset activation distributions. The high-contrast summer data resulted in wide quantization ranges, wasting precision for the low-contrast winter activations which fall into a tightly bounded range. This causes the INT8 model to effectively operate at ~4-bit precision for winter scenes. The fix is to run Post-Training Quantization (PTQ) recalibration using representative winter data to recalculate the activation scale factors.
   common_mistake: |
     **The Pitfall:** Assuming INT8 inherently lacks precision for winter scenes.
     **The Rationale:** Engineers see the FP32 model succeed and wrongly assume an irreversible limit of 8-bit precision.
     **The Consequence:** Unnecessarily doubling compute cost by switching to FP16, or worse, launching a massive retraining campaign.
   napkin_math: |
-    1. **Summer Calibration:** max activation = 12.0. Step size = 12.0 / 127 = 0.094.
-    2. **Winter Range:** Activations fall tightly in [0.5, 2.0]. Range is 1.5. Usable bins = 1.5 / 0.094 = ~16 bins.
-    3. **Winter Recalibration:** Channel max = 3.0. Step = 3.0 / 127 = 0.0236.
-    4. **Improvement:** Usable bins = 1.5 / 0.0236 = ~63 bins (**4x precision improvement**).
-    5. **OTA Fix Cost:** 500 images x 1 MB = 500 MB upload + 5 min on-device TensorRT rebuild.
+    1. **Assumptions & Constraints:**
+       - INT8 representation: 127 positive bins.
+       - Summer max activation: 12.0.
+       - Winter activation range: [0.5, 2.0] (range = 1.5).
+    2. **Calculations:**
+       - Summer step size: 12.0 / 127 = 0.094.
+       - Usable bins for winter data with summer calibration: 1.5 / 0.094 ≈ 16 bins.
+       - Winter recalibration (channel max = 3.0): step size = 3.0 / 127 = 0.0236.
+       - Recalibrated usable bins: 1.5 / 0.0236 ≈ 63 bins.
+    3. **Conclusion & Interpretation:**
+       - **Result: 4x precision improvement (~63 bins vs 16 bins).** The model suffered from quantization drift due to shifted activation distributions, severely compressing dynamic range.
 status: published
 provenance: imported
 requires_explanation: false

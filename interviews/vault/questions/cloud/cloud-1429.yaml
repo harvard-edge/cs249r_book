@@ -8,28 +8,26 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: Mitigating P99 Jitter with Interrupt Shielding
-scenario: You are serving a real-time fraud detection model on a multi-core server with 8x A100 GPUs and
-  a 200Gbps NIC. At peak load (50,000 requests/sec), your median latency is a stable 2ms, but the P99
-  latency unpredictably spikes to 8-12ms. System profiles show that the CPU threads responsible for submitting
-  CUDA kernels to the GPUs are experiencing frequent context switches and preemption, correlating directly
-  with the arrival of high-throughput network traffic. Calculate the theoretical impact of NIC interrupts
-  on kernel submission latency and determine the specific configuration changes needed to shield the inference
-  cores.
+scenario: You are serving a real-time fraud detection model on a multi-core server with 8x GPUs and a high-speed NIC. At peak load, median latency is 2ms, but P99 spikes to 8-12ms. CPU threads submitting CUDA kernels experience frequent context switches correlating with network traffic.
 question: "How do NIC interrupts affect CUDA kernel submission latency at 50,000 RPS, and what CPU/IRQ configuration shields inference cores?"
 details:
-  realistic_solution: Disable the `irqbalance` daemon and manually configure `/proc/irq/default_smp_affinity`
-    to route all NIC RX/TX hardware interrupts to a dedicated subset of CPU cores. Simultaneously, use
-    `numactl` or `taskset` to pin the inference worker threads (handling GPU kernel submission) to a strictly
-    disjoint set of cores on the same NUMA node, completely shielding them from interrupt handling.
-  common_mistake: Assuming the P99 spikes are caused by GPU saturation or Python GIL contention, leading
-    to misguided efforts to increase batch sizes or aggressively quantize the model, which only worsens
-    median latency without addressing the OS-level preemption.
-  napkin_math: At 50K RPS, the NIC generates at least 50K interrupts/sec (assuming minimal coalescing).
-    If handling an interrupt and its associated context switch takes 50µs, the OS spends 2.5 CPU-seconds
-    per second just on IRQs. If an IRQ preempts a thread about to launch a CUDA kernel, the thread suffers
-    the 50µs handler delay plus CPU cache eviction/repopulation costs. With a queue depth of 10 requests
-    waiting on that kernel, a single 100µs CPU-side delay translates to a 1ms+ queueing delay for downstream
-    requests, compounding into the observed 8-12ms P99 spikes.
+  realistic_solution: |
+    Disable the `irqbalance` daemon. Manually configure `/proc/irq/default_smp_affinity` to route NIC RX/TX interrupts to a dedicated subset of cores. Use `numactl` or `taskset` to pin inference worker threads to a strictly disjoint set of cores on the same NUMA node, shielding them from interrupt handling.
+  common_mistake: |
+    **The Pitfall:** Assuming P99 spikes are caused by GPU saturation or Python GIL contention.
+    **The Rationale:** Candidates immediately jump to model-level optimizations (quantization, batching) without profiling the OS-level preemption.
+    **The Consequence:** Wasted effort degrading model quality while the underlying OS context-switch jitter remains completely unfixed.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Load: 50,000 RPS.
+       - Context switch/IRQ handler time: 50μs.
+       - Queue depth waiting on kernel: 10 requests.
+    2. **Calculations:**
+       - NIC generates at least 50K interrupts/sec.
+       - OS CPU time on IRQs = 50,000 * 50μs = 2.5 CPU-seconds per second.
+       - A single 100μs CPU-side delay (IRQ + cache eviction) with a queue depth of 10 yields a 1ms+ queueing delay downstream.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU-Bound (Interrupts).** OS-level preemption from NIC interrupts compounds into massive P99 queueing delays.
 status: published
 provenance: imported
 requires_explanation: false

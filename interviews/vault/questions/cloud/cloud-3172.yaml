@@ -8,33 +8,28 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Speculative Decoding with Continuous Batching
-scenario: You run vLLM on 4x H100 with continuous batching and want to add speculative decoding. The challenge: different requests in the batch have different draft token counts (some K=5, some K=3 after early rejection).
-question: How should continuous batching verify requests with variable speculation lengths in a single target forward pass?
+scenario: 'You run vLLM on 4x H100 with continuous batching and want to add speculative decoding. The challenge: different requests in the batch have different draft token counts (some K=5, some K=3 after early rejection).'
+question: 'How should continuous batching verify requests with variable speculation lengths in a single target forward pass?'
 details:
-  realistic_solution: 'Challenge: verification needs one forward pass with different numbers of draft tokens per request. Solutions: (1) Padding with masking: pad all to K_max, use attention mask to ignore pad tokens. Compute waste: (K_max - K_avg)/K_max. If K_max=5, K_avg=3.5: 30% waste. Simple but inefficient. (2) Bucketing: group requests by K value (K=3, K=4, K=5) and run separate verification passes. 3 passes at smaller batch sizes. Trade-off: less waste but more kernel launches. (3) Variable-length sequence packing (like Sarathi): pack all draft tokens into a single sequence dimension with position IDs. Batch of 100 requests with total 350 draft tokens: run as if batch=100 with variable seq_lens. FlashAttention-2 supports variable sequence lengths via cu_seqlens parameter. This achieves ~95% efficiency. Implementation: sort by K, pack with cu_seqlens = cumsum([K1+1, K2+1, ...]), run single forward pass.'
+  realistic_solution: 'Variable-length sequence packing packs all draft tokens into a single sequence dimension with position IDs. FlashAttention-2 supports variable sequence lengths via cu_seqlens parameter. Implementation: sort by K, pack with cu_seqlens, and run single forward pass.'
   common_mistake: |
     **The Pitfall:** Padding all requests in the batch to the maximum K value before verification.
     **The Rationale:** Candidates default to standard static tensor padding for batched operations, ignoring the massive compute waste when K values vary wildly due to early rejection.
     **The Consequence:** The verification forward pass wastes massive amounts of arithmetic intensity on empty pad tokens, entirely defeating the speedup gained by speculative decoding.
   napkin_math: |
-    - **Scenario:** 100 requests. Avg K = 3.5. Max K = 5.
-    - **Padding Approach:** 100 × 6 (K+1) = 600 tokens processed. Waste = (5 - 3.5)/5 = **30% waste**.
-    - **Packing Approach (cu_seqlens):** 100 × 4.5 = 450 tokens processed. **0% waste**.
-    - **Compute Savings:** 150 saved tokens × 140 GFLOPs/token = 21 TFLOPs. At 3.96 PFLOPS compute, this saves **~5.3ms per decoding round**.
+    1. **Assumptions & Constraints:**
+       - 100 requests in batch.
+       - Max K = 5. Avg K = 3.5.
+    2. **Calculations:**
+       - Padding Approach: 100 * 6 (K+1) = 600 tokens processed. Waste = (5 - 3.5) / 5 = 30%.
+       - Packing Approach (cu_seqlens): 100 * 4.5 = 450 tokens. 0% waste.
+       - Compute Savings = 150 saved tokens * 140 GFLOPs/token = 21 TFLOPs.
+       - Time Savings at 3.96 PFLOPS = ~5.3ms per decoding round.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound. Variable-length sequence packing completely eliminates the 30% compute waste from padding, restoring the intended speedup of speculative decoding.**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 16
 validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: claude-opus-4-6
 math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

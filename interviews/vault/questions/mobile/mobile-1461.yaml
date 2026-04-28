@@ -8,19 +8,24 @@ competency_area: reliability
 bloom_level: evaluate
 phase: inference
 title: Deterministic Driver Monitoring on Exynos 2400
-scenario: You are deploying a vision-based Driver Monitoring System (DMS) running continuously on a smartphone powered by the Samsung Exynos 2400. The DMS must process 30 FPS video to detect driver fatigue and issue real-time alerts. Because this is a safety-critical application acting as an aftermarket ADAS, it requires deterministic execution. You need to design the memory allocation, compute partitioning, and safety mechanisms on the 34.7 TOPS dual-core NPU. This NPU shares 12 GB of LPDDR5X RAM with the CPU, GPU, and ISP.
-question: How would you make Exynos 2400 driver monitoring deterministic with watchdogs and pinned NPU resources so it never misses a deadline?
+scenario: You are deploying a vision-based Driver Monitoring System (DMS) running continuously on a smartphone. The DMS must process 30 FPS video to detect driver fatigue and issue real-time alerts. Because this is a safety-critical application acting as an aftermarket ADAS, it requires deterministic execution.
+question: How would you make the driver monitoring deterministic with watchdogs and pinned NPU resources so it never misses a deadline?
 details:
-  realistic_solution: The architecture must pin the model to one specific NPU core and pre-allocate its memory footprint within the shared 12 GB LPDDR5X to prevent runtime page faults. To ensure high reliability, a watchdog timer must monitor the strict 33.3ms per-frame deadline. Additionally, a lightweight self-test routine (passing a known-good dummy frame) must execute periodically on the NPU to verify hardware integrity and ensure the NPU hasn't silently degraded due to thermal throttling from the adjacent GPU.
+  realistic_solution: The architecture must pin the model to one specific NPU core and statically pre-allocate its entire memory footprint within the shared LPDDR5X to prevent runtime page faults and LMKD evictions. A hardware watchdog timer must assert the strict 33.3ms per-frame deadline. A lightweight self-test routine (passing a known-good dummy frame) must execute periodically on the NPU to verify hardware integrity and detect silent degradation from GPU thermal throttling.
   common_mistake: |
     **The Pitfall:** Assuming high TOPS guarantees real-time safety.
-    **The Rationale:** Candidates focus on the 34.7 TOPS capacity and assume the tiny model will easily hit 30 FPS deadlines.
-    **The Consequence:** They fail to pin the 18.2 MB working set in the shared LPDDR5X pool, leading to non-deterministic page faults and missed safety deadlines when the GPU saturates memory bandwidth.
+    **The Rationale:** Candidates focus on the massive NPU capacity and assume the tiny model will easily hit 30 FPS deadlines.
+    **The Consequence:** They fail to pin the working set in the shared LPDDR5X pool, leading to non-deterministic page faults and missed safety deadlines when the GPU saturates memory bandwidth.
   napkin_math: |
-    - Compute: 2.5 GOPS/frame * 30 FPS = 75 GOPS (0.075 TOPS).
-    - Utilization: 0.075 TOPS / 34.7 TOPS = **0.2%** of Exynos 2400 NPU.
-    - Working Set: 8 MB (INT8 weights) + 6.2 MB (1080p input) + 4 MB (activations) = 18.2 MB.
-    - Required Bandwidth: 18.2 MB * 30 FPS = **546 MB/s**.
+    1. **Assumptions & Constraints:**
+       - Compute per frame: 2.5 GOPS.
+       - Target Framerate: 30 FPS.
+       - Working Set: 8 MB (weights) + 6.2 MB (input) + 4 MB (activations) = 18.2 MB.
+    2. **Calculations:**
+       - Compute: 2.5 GOPS * 30 FPS = 75 GOPS (0.075 TOPS).
+       - Required Bandwidth: 18.2 MB * 30 FPS = 546 MB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 546 MB/s / 0.075 TOPS.** The workload is highly deterministic and neither compute nor memory bound, but is **Latency-Bound** by OS page faults if memory is not statically pinned.
 status: published
 provenance: imported
 requires_explanation: false

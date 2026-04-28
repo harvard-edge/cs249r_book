@@ -8,33 +8,23 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: TP + DP Hybrid Parallelism Layout
-scenario: 'You have 32 H100 GPUs across 4 nodes (8 GPUs per node). You want to train a 70B model with TP=8 and DP=4.'
+scenario: 'You are training a 70B model with TP=8 and DP=4 across 4 nodes.'
 question: 'How should TP and DP process groups be laid out, and where does each type of communication occur?'
 details:
-  realistic_solution: 'Layout: Node 0: GPUs [0-7] = TP group 0 (data-parallel rank 0). Node 1: GPUs [8-15] = TP group 1 (DP rank 1). Node 2: GPUs [16-23] = TP group 2 (DP rank 2). Node 3: GPUs [24-31] = TP group 3 (DP rank 3). TP communication (AllReduce per layer): happens within each node over NVLink (900 GB/s per GPU). DP communication (gradient AllReduce): GPU 0 communicates with GPUs 8, 16, 24; GPU 1 with GPUs 9, 17, 25; etc. This crosses nodes over InfiniBand (400 Gbps per node). DP gradient AllReduce happens once per training step, sending each GPU''s local gradient shard.'
+  realistic_solution: 'Layout: Node 0: GPUs [0-7] = TP group 0 (DP rank 0). Node 1: GPUs [8-15] = TP group 1 (DP rank 1). Node 2: GPUs [16-23] = TP group 2 (DP rank 2). Node 3: GPUs [24-31] = TP group 3 (DP rank 3). TP communication (AllReduce per layer) happens intra-node over NVLink. DP communication (gradient AllReduce) happens inter-node over InfiniBand.'
   common_mistake: |
     **The Pitfall:** Placing TP groups across nodes instead of intra-node.
     **The Rationale:** Candidates fail to realize that TP requires frequent synchronization (every layer), whereas DP requires infrequent synchronization (once per step).
     **The Consequence:** Communication bottleneck over slower inter-node interconnects, drastically reducing training throughput.
   napkin_math: |
-    - **TP Groups:** 4 groups of 8 GPUs (intra-node).
-    - **DP Groups:** 8 groups of 4 GPUs (inter-node).
-    - **Message Size:** Total parameters / 8 × 2 bytes = 70B / 8 × 2 = 17.5 GB.
-    - **AllReduce Time:** 17.5 GB × 2 × 0.75 / 50 GB/s = **525 ms (overlapped with backward pass)**.
-status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 13
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-opus-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - 32 GPUs total across 4 nodes (8 GPUs per node).
+       - 70B parameters, FP16/BF16 weights.
+    2. **Calculations:**
+       - TP Groups: 4 groups of 8 GPUs (intra-node).
+       - DP Groups: 8 groups of 4 GPUs (inter-node).
+       - Message Size: 70B / 8 * 2 bytes = 17.5 GB.
+       - AllReduce Time: 17.5 GB * 2 * 0.75 / 50 GB/s = 525 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 525 ms AllReduce time per step.**
+       - **Conclusion: Interconnect-Bound; TP must stay intra-node.**

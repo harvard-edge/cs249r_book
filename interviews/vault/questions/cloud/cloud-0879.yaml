@@ -8,20 +8,24 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Evaluating Async Prefetching for H100 Starvation
-scenario: 'You are training a large vision model on an 8x H100 node. Profiling shows that a forward/backward pass takes 45ms per batch. However, fetching and augmenting a batch of 1024 high-resolution images from network storage takes 110ms on the CPU. The current sequential pipeline yields ~29% GPU utilization.'
-question: 'Evaluate the trade-offs between CPU workers, offline preprocessing, and async GPU decoding (DALI) to stop H100 starvation.'
+scenario: You are training a large vision model on an 8x H100 node. Profiling shows that a forward/backward pass takes 45ms per batch. However, fetching and augmenting a batch of 1024 high-resolution images from network storage takes 110ms on the CPU. The current sequential pipeline yields ~29% GPU utilization.
+question: Evaluate the trade-offs between CPU workers, offline preprocessing, and async GPU decoding (DALI) to stop H100 starvation.
 details:
-  realistic_solution: 'Evaluate based on bottleneck location. Simple async prefetching overlaps I/O but is bounded by `max(T_data, T_compute)`. Since 110ms > 45ms, standard CPU prefetching only improves utilization to 41%. Offline augmentation requires massive storage overhead and limits training flexibility. The optimal solution is to combine async prefetching with DALI to shift the decode/augmentation compute to the GPU, dropping CPU pipeline time below 45ms and achieving near 100% compute saturation.'
+  realistic_solution: Simple async prefetching overlaps I/O but is bounded by `max(T_data, T_compute)`. Since 110ms > 45ms, standard CPU prefetching only improves utilization to 41%. Offline augmentation requires massive storage overhead and limits training flexibility. The optimal solution is to combine async prefetching with DALI to shift the decode/augmentation compute to the GPU, dropping CPU pipeline time below 45ms and achieving near 100% compute saturation.
   common_mistake: |
-    **The Pitfall:** Assuming infinite scaling with `prefetch_factor` and more CPU workers.
-    **The Rationale:** Believing that adding more CPU threads will always linearly reduce I/O time.
-    **The Consequence:** Hitting CPU thread contention and memory bandwidth limits, leaving the H100 severely starved because CPU processing time still exceeds GPU compute time.
+    **The Pitfall:** Assuming infinite scaling with more CPU workers and `prefetch_factor`.
+    **The Rationale:** Believing adding CPU threads will linearly eliminate I/O limits.
+    **The Consequence:** Hitting hard CPU thread contention and memory bandwidth limits, leaving the H100 GPUs severely starved because CPU processing time still strictly exceeds GPU compute time.
   napkin_math: |
-    - **Sequential Baseline:** 110ms (CPU fetch) + 45ms (GPU compute) = 155ms per step. GPU Util = 45/155 = 29%.
-    - **Async CPU Prefetch:** Hides compute. Step time = max(110, 45) = 110ms. GPU Util = 45/110 = 41%.
-    - **DALI (GPU Offload):** Shifts decode to GPU. CPU time drops to 30ms, GPU compute slightly increases to 50ms.
-    - **Optimized Step Time:** max(30, 50) = 50ms.
-    - **Optimized Util:** 45ms baseline / 50ms total = 90% utilization (or 100% of the new 50ms compute time).
+    1. **Assumptions & Constraints:**
+       - GPU Compute Time: 45ms.
+       - CPU Fetch/Augment Time: 110ms.
+    2. **Calculations:**
+       - Sequential Baseline: 110ms + 45ms = 155ms. GPU Util = 45 / 155 = 29%.
+       - Async CPU Prefetch: Step Time = max(110, 45) = 110ms. GPU Util = 45 / 110 = 41%.
+       - GPU Offload (DALI): CPU drops to 30ms, GPU compute slightly increases to 50ms. Step Time = max(30, 50) = 50ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: DALI Achieves ~90% Utilization.** By shifting decoding and augmentation strictly to the GPU, the pipeline bottleneck flips from CPU to GPU, maximizing throughput.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,18 +8,23 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: TP for Cross-Attention in Encoder-Decoder Models
-scenario: 'You are applying Tensor Parallelism (TP) to a T5-style encoder-decoder model where the decoder''s cross-attention keys and values come from the encoder output. With TP=4, the encoder output is already partitioned across 4 GPUs.'
+scenario: 'You are applying Tensor Parallelism (TP) to a T5-style encoder-decoder model where the decoder cross-attention keys and values come from the encoder output. With TP=4, the encoder output is already partitioned across 4 GPUs.'
 question: 'With TP=4 and partitioned encoder outputs, how should cross-attention KV projections be handled without adding extra communication?'
 details:
-  realistic_solution: 'With Megatron-style TP, the encoder output is column-parallel partitioned: each GPU holds encoder_output_i of shape [enc_seq, hidden/4]. The cross-attention KV projections (W_K and W_V) can be applied as row-parallel operations: W_K is split along the input dimension (rows), matching the encoder output partition. Each GPU computes K_i = encoder_output_i @ W_K_i, producing partial keys of shape [enc_seq, head_dim × num_heads/4]. This is exactly the same pattern as self-attention: each GPU owns num_heads/4 heads and computes complete attention for those heads using its local KV partition. No extra communication is needed beyond the standard row-parallel AllReduce after the output projection. The encoder and decoder TP groups must be identical (same GPUs in the same order) for this to work — a constraint that Megatron enforces by construction.'
+  realistic_solution: 'The encoder output is column-parallel partitioned. Cross-attention KV projections (W_K and W_V) should be applied as row-parallel operations directly on the partitioned state. W_K is split along the input dimension (rows). Each GPU computes partial keys, perfectly mirroring self-attention logic where each GPU computes complete attention for its local heads. The encoder and decoder TP groups must strictly align to avoid cross-device AllGather communication.'
   common_mistake: |
     **The Pitfall:** Inserting an AllGather to reconstruct the full encoder output before cross-attention KV projection.
-    **The Rationale:** Candidates think the decoder needs the full encoder output to process it, missing that row-parallel operations can be applied directly to the partitioned state.
-    **The Consequence:** Injecting unnecessary network communication into the critical path, slowing down training and wasting bandwidth.
+    **The Rationale:** Candidates assume the decoder requires the complete encoder output to process it, missing that row-parallel operations seamlessly handle partitioned states.
+    **The Consequence:** Injecting unnecessary network communication into the critical path, substantially reducing training throughput.
   napkin_math: |
-    * Extra AllGather cost if done incorrectly: `enc_seq × hidden × 2 bytes × (P-1)/P`.
-    * For enc_seq=2048, hidden=4096, TP=4: 2048 × 4096 × 2 × 0.75 = 12.58 MB per layer.
-    * **Using row-parallel KV projection avoids this 12.6 MB per layer communication entirely.**
+    1. **Assumptions & Constraints:**
+       - TP=4, enc_seq=2048, hidden=4096.
+       - FP16 precision (2 bytes).
+    2. **Calculations:**
+       - Extra AllGather cost if done incorrectly: enc_seq * hidden * 2 bytes * (P-1)/P.
+       - 2048 * 4096 * 2 * 0.75 = 12.58 MB per layer.
+    3. **Conclusion & Interpretation:**
+       - **Result: Row-parallel KV projection avoids 12.6 MB per layer of communication entirely (Communication-Bound).**
 status: published
 provenance: imported
 requires_explanation: true

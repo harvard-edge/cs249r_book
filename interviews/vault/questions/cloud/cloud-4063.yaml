@@ -8,26 +8,24 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: GPUDirect RDMA Memory Registration Overhead
-scenario: Your NCCL-based training job on 128 MI300X GPUs shows 500ms of startup delay
-  before the first AllReduce. Profiling reveals that NCCL is registering GPU memory
-  regions with the RDMA subsystem. Each GPU registers 64 buffers of 32MB each for
-  ring AllReduce double-buffering. Diagnose why memory registration is expensive and
-  propose a mitigation.
-question: Why is NCCL memory registration causing the 500ms startup delay, and what
-  are the correct MTT and QP setup costs?
+scenario: Your NCCL-based training job on 128 GPUs shows 500ms of startup delay before the first AllReduce. Profiling reveals that NCCL is registering GPU memory regions with the RDMA subsystem. Each GPU registers 64 buffers of 32MB each for ring AllReduce double-buffering.
+question: "Why is NCCL memory registration causing the 500ms startup delay, and what are the correct MTT and QP setup costs?"
 details:
-  realistic_solution: '524,288 MTT entries × 100ns = 52.4ms per GPU (not 6.7ms). Total
-    startup: 52.4ms (MR) + 305ms (QP) ≈ 357ms amortized to ~500ms observed.'
-  common_mistake: 'Treating memory registration as a simple pointer pass. RDMA memory
-    registration involves: (1) pinning pages in physical memory (no swapping), (2)
-    programming the HCA''s translation table (virtual → physical address mapping),
-    and (3) for GPUDirect RDMA, establishing PCIe BAR mappings between GPU VRAM and
-    HCA. Each step involves kernel calls and PCIe configuration space writes.'
-  napkin_math: '64 buffers × 32MB × 8,192 pages each = 524,288 page table entries
-    per GPU. 128 GPUs = 67M total entries. At 100ns per MTT entry: 524,288 × 100ns
-    = 52.4ms per GPU for MTT programming alone (not 6.7ms — 6.7ms would be 67,000
-    entries × 100ns or 52.4ms/7.8). QP setup: 1,016 QPs × 300μs = 305ms dominates.
-    Total startup: ~500ms.'
+  realistic_solution: 'RDMA requires 524,288 MTT entries. Total startup amortized to ~500ms observed.'
+  common_mistake: |
+    **The Pitfall:** Treating memory registration as a simple pointer pass.
+    **The Rationale:** Candidates forget that RDMA memory registration involves pinning pages, programming translation tables, and establishing PCIe BAR mappings, which are expensive kernel operations.
+    **The Consequence:** Unexplained massive startup delays that cripple the first AllReduce step in a distributed training job.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 128 GPUs. 64 buffers of 32MB per GPU.
+    2. **Calculations:**
+       - 64 buffers * 32MB * 8,192 pages = 524,288 page table entries per GPU.
+       - MTT programming time = 524,288 * 100ns = 52.4ms per GPU.
+       - QP setup time = 1,016 QPs * 300μs = 305ms.
+       - Total startup = 52.4ms + 305ms = 357ms ≈ 500ms observed.
+    3. **Conclusion & Interpretation:**
+       - **Result: Overhead-Bound**. Memory registration and QP setup dominate the startup delay.
 status: published
 provenance: imported
 requires_explanation: false
@@ -40,9 +38,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Calculation 524,288 entries * 100ns = 52.4ms per GPU, not 6.7ms
-- 67M total entries * 100ns = 6.7s total, not 6.7ms per GPU
 human_reviewed:
   status: not-reviewed
   by: null

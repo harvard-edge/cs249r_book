@@ -8,21 +8,25 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The Delegate Dilemma
-scenario: Your team implemented a custom 'token-shuffling' operator in TensorFlow. When deployed to a Google Pixel via TFLite NPU delegate, it is 5x slower. The graph is partitioned into 20 segments alternating between NPU and CPU.
-question: How do 20 NPU-CPU graph partitions cause a 5x slowdown for a single custom token-shuffling operator?
+scenario: Your team implemented a custom token-shuffling operator in TensorFlow. When deployed to a Google Pixel via the TFLite NPU delegate, it runs 5x slower than on CPU alone. The graph compiler segmented the execution into 20 partitions alternating between the NPU and CPU.
+question: How do 20 NPU-CPU graph partitions cause a 5x slowdown for a single custom operator?
 details:
-  realistic_solution: 'The TFLite NPU delegate can only accelerate supported operators. When it encounters an unsupported custom op, it partitions the graph. The output tensor is transferred from the NPU to DRAM, the CPU reads it, executes the op, and writes back to DRAM. Then the NPU reads it back. This CPU-NPU round trip overhead dominates execution time.'
+  realistic_solution: 'The NPU delegate executes supported ops natively but falls back to CPU for unsupported custom ops. The output tensor must be flushed from NPU SRAM to DRAM, read by the CPU, processed, and written back to DRAM for the NPU. This CPU-NPU memory round-trip and synchronization overhead vastly outweighs the compute time.'
   common_mistake: |
-    **The Pitfall:** Assuming the slowdown is purely because the custom op runs on the slower CPU.
-    **The Rationale:** Ignoring the colossal cost of moving data between memory spaces.
-    **The Consequence:** Attempting to optimize the CPU operator's C++ code instead of rewriting the op to be NPU-compatible or keeping the whole graph on one processor.
+    **The Pitfall:** Assuming the slowdown is purely due to the custom operator''s raw CPU execution speed.
+    **The Rationale:** Ignoring the colossal latency of moving data across memory spaces and synchronizing hardware queues.
+    **The Consequence:** Blindly rewriting the CPU C++ operator logic instead of writing an NPU-compatible custom kernel to avoid graph fragmentation.
   napkin_math: |
-    - 4MB intermediate tensor. Mobile LPDDR5x bandwidth: 77 GB/s.
-    - Transfer time (4MB / 77 GB/s) = ~0.05 ms.
-    - 20 partitions = 40 transfers (NPU->CPU, CPU->NPU).
-    - Theoretical memory time: 40 * 0.05 ms = 2.0 ms.
-    - Actual latency (with driver overhead and sync): 10-20 ms penalty.
-    - **Data transfer overhead dominates, not the CPU computation itself.**
+    1. **Assumptions & Constraints:**
+       - Tensor size: 4MB.
+       - Mobile LPDDR5x bandwidth: ~77 GB/s.
+       - Partitions: 20 (40 memory transfers: NPU->CPU, CPU->NPU).
+    2. **Calculations:**
+       - Theoretical transfer time: 4MB / 77 GB/s = ~0.052 ms per transfer.
+       - Total theoretical transfer time: 40 * 0.052 ms = ~2.1 ms.
+       - Driver/Sync overhead: ~0.5 ms per transfer = 40 * 0.5 ms = 20 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: Latency-Bound (I/O & Synchronization). CPU-NPU data transfers and driver synchronization overheads (22+ ms) completely dominate, eclipsing the actual algorithmic compute latency.**
 status: published
 provenance: imported
 requires_explanation: false

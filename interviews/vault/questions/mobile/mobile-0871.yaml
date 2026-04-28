@@ -8,20 +8,25 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Designing an On-Device RAG Architecture for A17 Pro with 8GB Memory
-scenario: Design an on-device RAG system for an A17 Pro (8GB RAM, 35 TOPS) that enables a personal knowledge assistant to search 10,000 personal documents and generate responses. Total memory budget is 3.5GB. The design must support documents up to 5000 tokens, 256-dim embeddings, and sub-2-second end-to-end response time.
-question: How should an on-device RAG system fit document search and LLM generation within A17 Pro memory and response-time constraints?
+scenario: Design an on-device RAG system that enables a personal knowledge assistant to search 10,000 personal documents and generate responses. Total memory budget is 3.5GB. The design must support documents up to 5000 tokens, 256-dim embeddings, and a sub-2-second end-to-end response time.
+question: How should an on-device RAG system fit document search and LLM generation within memory and response-time constraints?
 details:
-  realistic_solution: 'Component allocation within 3.5GB: (1) Embedding model: MobileBERT-based 256-dim encoder, INT8 quantized = 22MB. (2) FAISS HNSW index: 10K docs * 256 * 4 bytes = 10MB. (3) LLM: 1B parameter model INT4 = 500MB. (4) Document store: 10K docs * 5000 tokens avg * 3 bytes = 150MB compressed. (5) KV cache: 1024-token context * 2*22layers*64dim*2bytes = 5.5MB. Total: 22+10+500+150+5.5 = 687.5MB — well within budget. Response pipeline: embed query (15ms) + HNSW search (3ms) + LLM at 20 tok/s (A17 Pro ANE): 100 token response = 5s — too slow. Must pre-fill context and stream first token in < 500ms.'
+  realistic_solution: 'Component allocation within 3.5GB: (1) Embedding model: MobileBERT-based 256-dim encoder, INT8 quantized = 22MB. (2) FAISS HNSW index: 10K docs * 256 * 4 bytes = 10MB. (3) LLM: 1B parameter model INT4 = 500MB. (4) Document store: 10K docs * 5000 tokens avg * 3 bytes = 150MB compressed. (5) KV cache: 1024-token context * 2*22layers*64dim*2bytes = 5.5MB. Total: 22+10+500+150+5.5 = 687.5MB — well within budget. Response pipeline: embed query (15ms) + HNSW search (3ms) + LLM at 20 tok/s: 100 token response = 5s — too slow. Must pre-fill context and stream first token in < 500ms.'
   common_mistake: |
     **The Pitfall:** Using cloud-scale models for mobile constraints.
     **The Rationale:** Candidates often propose massive 1536-dim embeddings or full FP16 models, consuming 10x the memory budget.
     **The Consequence:** Out-of-memory crashes or severe performance degradation on mobile devices.
   napkin_math: |
-    1. **Memory Budget:** Embedding model (22 MB) + FAISS (10 MB) + LLM 1B INT4 (500 MB) + doc store (150 MB) + KV cache/buffers (50 MB) = 732 MB total. Fits easily in 3.5 GB budget.
-    2. **Compute Time:** A17 Pro ANE (35 TOPS) for INT4 1B model yields ~20 tok/s.
-    3. **Time-to-First-Token:** Prefill 512-token context = 512 * 2 * 1B / 35e12 ≈ 29 ms.
-    4. **Response Time:** Generate 38 tokens at 20 tok/s = 1.9 seconds. Total time = 29 ms + 1.9s = 1.929 seconds.
-    5. **Conclusion:** **The system can meet the 2-second SLA by restricting the generated response to ~38 tokens.**
+    1. **Assumptions & Constraints:**
+       - 1B LLM (INT4) = 500 MB. FAISS HNSW + Docs + Cache = ~232 MB.
+       - Total Memory Budget = 3.5 GB.
+       - SLA = 2.0 seconds end-to-end. NPU text generation = 20 tok/s.
+    2. **Calculations:**
+       - System memory = 500 MB + 232 MB = 732 MB (fits 3.5 GB budget).
+       - Prefill Time (512 tokens) = (512 * 2 * 1B ops) / 35 TOPS ≈ 29 ms.
+       - Remaining Time = 2.0s - 0.029s - 0.018s (retrieval) = 1.953 seconds.
+       - Max Tokens Generated = 1.953s * 20 tok/s = ~39 tokens.
+    3. **Conclusion & Interpretation:** **The system fits in RAM and meets the 2-second SLA, provided the generated response is restricted to ~39 tokens.** Compute-bound generation SLA.
 status: published
 provenance: imported
 requires_explanation: true

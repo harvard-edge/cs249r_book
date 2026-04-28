@@ -8,20 +8,25 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: Optimizing LLM Checkpoint Intervals at Scale
-scenario: You are training a 175B parameter LLM on a cluster of 1,024 A100 GPUs organized into 128 nodes. The cluster experiences hardware or network failures with a Mean Time Between Failures (MTBF) of 12 hours. A full checkpoint (FP16 weights, FP32 master weights, Adam states) totals ~2.45 TB. Writing synchronously to a shared Lustre file system blocks the training loop for exactly 120 seconds.
-question: With a 12h MTBF and 120s Lustre writes, what checkpoint interval is optimal, and is async node-local NVMe worth implementing?
+scenario: 'You are training a 175B parameter LLM on a cluster of 1,024 GPUs organized into 128 nodes. The cluster experiences hardware or network failures with a Mean Time Between Failures (MTBF) of 12 hours. A full checkpoint totals ~2.45 TB. Writing synchronously to a shared Lustre file system blocks the training loop for exactly 120 seconds.'
+question: 'With a 12h MTBF and 120s Lustre writes, what checkpoint interval is optimal, and is async node-local NVMe worth implementing?'
 details:
-  realistic_solution: Use Daly's formula (T_opt = sqrt(2 * t_c * MTBF)) to balance overhead and failure cost. For synchronous Lustre writes, T_opt is ~53 minutes. Transitioning to an asynchronous local checkpointing architecture allows nodes to write their 19.1GB shard directly to local NVMe SSDs in ~4.78 seconds, unblocking the training loop immediately while a background thread uploads to Lustre. This reduces the critical-path t_c to 4.78s, shifting T_opt to ~10.7 minutes and drastically cutting both blocking overhead and wasted recompute time.
+  realistic_solution: 'Use Daly''s formula (T_opt = sqrt(2 * t_c * MTBF)). Transitioning to an asynchronous local checkpointing architecture drops the critical-path blocking time to 4.78s, shifting T_opt and saving 5.9% of total cluster compute time.'
   common_mistake: |
     **The Pitfall:** Proposing arbitrary checkpoint intervals (e.g., 'every 2 hours') without statistically balancing overhead against risk.
     **The Rationale:** Developers rely on gut feeling rather than mathematical modeling for systems reliability.
     **The Consequence:** Wasting massive amounts of compute either by blocking the cluster too often (sync overhead) or losing days of progress to a crash (recompute overhead).
   napkin_math: |
-    1. **Daly's Formula:** T_{opt} = sqrt(2 * t_c * MTBF).
-    2. **Sync Lustre:** t_c = 120s, MTBF = 43,200s. T_{opt} = sqrt(2 * 120 * 43200) ≈ 3,219s (**~53.6 mins**). Total waste is ~7.4%.
-    3. **Local NVMe Shard:** 2.45TB / 128 nodes = 19.1GB/node. NVMe write at 4GB/s = 4.78s.
-    4. **Async NVMe:** t_c = 4.78s. T_{opt} = sqrt(2 * 4.78 * 43200) ≈ 643s (**~10.7 mins**).
-    5. **Result:** New total waste is ~1.5%. Implementing NVMe saves **5.9% of cluster time**, saving millions of dollars.
+    1. **Assumptions & Constraints:**
+       - MTBF: 12 hours (43,200s).
+       - t_c (Sync Lustre): 120s.
+       - Node-local NVMe speed: 4 GB/s.
+    2. **Calculations:**
+       - Sync Lustre: T_opt = sqrt(2 * 120 * 43200) ≈ 3,219s (~53.6 mins).
+       - Async NVMe Shard: 2.45TB / 128 nodes = 19.1 GB/node. NVMe write at 4 GB/s = 4.78s.
+       - Async NVMe: t_c = 4.78s. T_opt = sqrt(2 * 4.78 * 43200) ≈ 642s (~10.7 mins).
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound. Implementing NVMe pipelining shifts the optimal checkpoint interval to ~10.7 mins, saving ~5.9% of total cluster time.**
 status: published
 provenance: imported
 requires_explanation: false

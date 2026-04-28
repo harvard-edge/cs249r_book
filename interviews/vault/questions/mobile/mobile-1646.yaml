@@ -8,29 +8,27 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: 'Diagnosing NPU Latency on Samsung Exynos 2400: Operator Scheduling Challenges'
-scenario: You are tasked with optimizing the inference latency of an LLM deployed on a Samsung Exynos 2400 NPU (34.7 TOPS, 12 GB LPDDR5X). Profiling reveals sub-optimal resource utilization due to issues with memory reuse, parallel operator execution, and layer fusion.
+scenario: You are optimizing LLM inference latency on an edge NPU. Profiling reveals sub-optimal resource utilization due to issues with memory reuse, parallel operator execution, and layer fusion.
 question: How would you diagnose the specific root causes of this performance bottleneck using NPU profiling tools?
 details:
   realistic_solution: |
-    The diagnostic process should begin with a detailed analysis of the model's computational graph and data dependencies. Utilize NPU-specific profiling tools (if available from Samsung or a partner SDK) to trace operator execution times, memory access patterns (reads/writes to LPDDR5X vs. on-chip buffers), and NPU core utilization.
-
-    1. **Memory Reuse:** Analyze the operator sequence to identify opportunities for in-place operations or shared memory buffers, minimizing redundant data movement. Look for operators whose outputs are consumed immediately by subsequent operators, making them candidates for memory reuse.
-
-    2. **Parallel Execution:** Identify independent subgraphs or operators that can execute concurrently. Map these to available NPU cores, ensuring that data dependencies are respected and that the overhead of launching parallel tasks doesn't outweigh the benefits. Profile the execution of these parallel sections to verify actual concurrency and identify any synchronization bottlenecks.
-
-    3. **Layer Fusion:** Examine adjacent operators that can be fused into a single, more efficient NPU operation. For example, a convolution followed by a ReLU activation can often be fused. This reduces memory accesses and kernel launch overhead. Investigate the Exynos 2400's specific fusion capabilities.
-
-    The diagnosis should produce a clear map of memory traffic, NPU core idle times, and a detailed breakdown of execution latency per operator, highlighting where the actual bottlenecks (memory, computation, or transfer) lie.
+    The diagnostic process strictly demands separating computation limits from memory limits by defining the theoretical roofline lower bounds. First, calculate the theoretical pure compute time for the graph's MACs, and the pure memory transfer time for its tensor bytes. Whichever is larger represents the theoretical lower bound of the execution under perfect overlap. If your observed execution time significantly exceeds this bound, the delta precisely quantifies the latency wasted on kernel launch overhead, poor SRAM tiling (thrashing), or missed fusion passes. NPU profilers (e.g., nsys or vendor SDKs) are then used exclusively to trace these specific scheduling gaps and ensure operators form a tight, continuous execution stream without falling back to host CPU syncs.
   common_mistake: |
-    **The Pitfall:** Applying general GPU/CPU optimization heuristics without NPU context.
-    **The Rationale:** Candidates prioritize parallel execution of all operators, causing LPDDR5X memory spills that negate parallelization benefits.
-    **The Consequence:** Increased memory transfer overhead and degraded performance instead of latency improvements.
+    **The Pitfall:** Applying general multi-threading CPU/GPU heuristics to fixed-path NPUs without modeling memory transfers.
+    **The Rationale:** Candidates instinctively attempt to maximize parallelism across NPU cores, causing intermediate activations to spill back to LPDDR5X and thrashing the memory bus.
+    **The Consequence:** A "parallelized" schedule that ironically runs significantly slower because LPDDR memory traffic penalties strictly dominate NPU execution delays.
   napkin_math: |
-    - **Compute Time Ideal:** M MACs * 2 / 34.7 TOPS.
-    - **Memory Transfer Time Minimum:** D bytes / 60 GB/s LPDDR5X bandwidth.
-    - **Theoretical Latency:** Compute Time + Transfer Time.
-    - **Analysis:** If observed latency T_obs >> Theoretical Latency, the gap quantifies overhead from poor scheduling, cache misses, or kernel launch delays.
-    - **Result:** **This gap isolates the exact duration of scheduling inefficiencies that must be eliminated.**
+    1. **Assumptions & Constraints:**
+       - NPU Peak Compute ($C_{peak}$): e.g., 34.7 TOPS.
+       - LPDDR Bandwidth ($BW_{peak}$): e.g., 60 GB/s.
+       - Workload: $M$ MACs compute, $D$ bytes memory transferred.
+    2. **Calculations:**
+       - Minimum Compute Time: $(M \times 2) / C_{peak}$.
+       - Minimum Transfer Time: $D / BW_{peak}$.
+       - Theoretical Latency Bound: $\max(\text{Compute Time}, \text{Transfer Time})$.
+       - Diagnostic Gap: Observed Latency - Theoretical Latency Bound.
+    3. **Conclusion & Interpretation:**
+       **Result: The Diagnostic Gap quantifies scheduling overhead (Scheduler-Bound).** Any latency mathematically exceeding the memory/compute bound directly isolates kernel launch delays and cache thrashing.
 status: published
 provenance: imported
 requires_explanation: false

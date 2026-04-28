@@ -8,20 +8,27 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: On-Device LLM Memory Architecture for Snapdragon 8 Gen 3
-scenario: You need to architect an on-device text generation system using a 7-billion parameter language model for a flagship smartphone featuring the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). The device has 16 GB of shared LPDDR5X memory, but the OS and background apps strictly reserve 8 GB.
+scenario: You need to architect an on-device text generation system using a 7-billion parameter language model. The OS and background apps strictly reserve 8 GB.
 question: How would you design the memory allocation, quantization strategy, and execution pipeline to safely deploy this model while maximizing the 45 TOPS INT8 compute available on the NPU?
 details:
-  realistic_solution: The optimal architecture mandates quantizing the 7B model to 4-bit weights to fit within the strict 8 GB available RAM budget, including the KV cache. The design must offload the heavy matrix multiplication workloads to the Hexagon NPU to utilize its 45 TOPS INT8 engine using dynamic quantization or W4A8 execution, while orchestrating the CPU to handle non-quantizable operations.
+  realistic_solution: Optimal mobile architecture strictly mandates 4-bit weight quantization (INT4). While INT8 halves the FP16 payload, it still starves the system of critical RAM needed for the KV cache and dynamic OS buffers, causing OOM kills. The design must leverage W4A8 execution (4-bit weights, 8-bit activations), mapping dense matrix math squarely to the Hexagon NPU's INT8 pipelines, while safely offloading structurally sensitive operations to the CPU.
   common_mistake: |
-    **The Pitfall:** Overlooking the shared nature of the 16 GB LPDDR5X memory and assuming it is dedicated VRAM.
-    **The Rationale:** Architects familiar with discrete GPUs apply the same mental model to mobile SoCs.
-    **The Consequence:** Designs cause OS out-of-memory application kills, and fail to align quantization with the Hexagon NPU's specific INT8 acceleration.
+    **The Pitfall:** Willfully overlooking the shared nature of the mobile DRAM and treating the system like a discrete server GPU.
+    **The Rationale:** Architects familiar with cloud AI entirely fail to account for the unevictable memory overhead of the mobile OS and background daemon structure.
+    **The Consequence:** Deployment architectures cause immediate and catastrophic Out-Of-Memory (OOM) OS interventions, and utterly fail to exploit the specific INT8 acceleration pathways of the edge NPU.
   napkin_math: |
-    - **FP16 Baseline:** 7B × 2 bytes = 14 GB (Exceeds 8 GB budget).
-    - **INT4 Quantized Weights:** 7B × 0.5 bytes = **3.5 GB**.
-    - **KV Cache Size:** Assuming 1024 context at FP16 = **~0.5 GB**.
-    - **Total Memory Footprint:** 3.5 GB + 0.5 GB = **4.0 GB**.
-    - **Conclusion:** Fits safely within the 8 GB available budget.
+    1. **Assumptions & Constraints:**
+       - Strict RAM App Ceiling: 8.0 GB.
+       - Model size: 7B parameters.
+       - KV Cache target: 1024 context window.
+    2. **Calculations:**
+       - FP16 Weight footprint: 7B * 2 bytes = 14.0 GB (Fails immediately).
+       - INT8 Weight footprint: 7B * 1 byte = 7.0 GB (Fails, leaves unsafe 1GB for KV and buffers).
+       - INT4 Weight footprint: 7B * 0.5 bytes = 3.5 GB (Passes securely).
+       - KV Cache (FP16): ~0.5 GB.
+       - Total Footprint: 3.5 GB + 0.5 GB = 4.0 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** INT4 quantization is absolutely non-negotiable. It halves memory bandwidth pressure and fits the entire operational footprint safely within the 8GB envelope.
 status: published
 provenance: imported
 requires_explanation: true

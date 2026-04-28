@@ -8,19 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Estimating activation memory for backward pass on H100 with large batch
-scenario: You are training a 7B parameter transformer on an H100 (80GB HBM) with batch size 32 and sequence length 2048. The model uses mixed precision (BF16) and has 32 layers, 32 heads, and a 4096 hidden dimension. Activation checkpointing is not enabled.
-question: Do the batch-32, seq-2048 activations for a 7B BF16 transformer fit in 80 GB H100 HBM without checkpointing?
+scenario: You are training a 7B parameter transformer on an 80GB GPU with batch size 32 and sequence length 2048. The model uses mixed precision (BF16) and has 32 layers, 32 heads, and a 4096 hidden dimension. Activation checkpointing is not enabled.
+question: Do the batch-32, seq-2048 activations for a 7B BF16 transformer fit in 80 GB HBM without checkpointing?
 details:
-  realistic_solution: 'Estimate per-layer activation cost: for each transformer block, store Q/K/V projections, attention scores, MLP intermediates ≈ 12 × seq_len × d_model × batch × 2 bytes. For 7B model: 32 layers × 12 × 2048 × 4096 × 32 × 2 ≈ 206GB just for residual stream. Add attention matrices: 32 layers × 32 heads × 2048² × 32 × 2 bytes ≈ 275GB. Total exceeds 80GB. Enable activation checkpointing to trade recompute for memory.'
+  realistic_solution: 'Estimate per-layer activation cost: for each transformer block, store Q/K/V projections, attention scores, MLP intermediates. For 7B model: residual stream is ~206GB. Add attention matrices: ~275GB. Total exceeds 80GB. Enable activation checkpointing to trade recompute for memory.'
   common_mistake: |
     **The Pitfall:** Counting only parameter memory.
-    **The Rationale:** Candidates check if 7B × 2 bytes = 14GB fits into 80GB and immediately say yes, forgetting that the forward pass stores all intermediate activations for autograd.
+    **The Rationale:** Candidates check if 7B x 2 bytes = 14GB fits into 80GB and immediately say yes, forgetting that the forward pass stores all intermediate activations for autograd.
     **The Consequence:** The training job OOMs instantly on the first forward pass.
   napkin_math: |
-    *   **Residual stream:** 32 layers × 12 (Q/K/V, up/down projs) × 2048 seq × 4096 dim × 32 batch × 2 bytes ≈ 206 GB.
-    *   **Attention matrices:** 32 layers × 32 heads × 2048^2 × 32 batch × 2 bytes ≈ 275 GB.
-    *   **Total Activation Memory:** 206 GB + 275 GB ≈ 481 GB.
-    *   **Result:** 481 GB severely exceeds the 80 GB HBM limit. Activation checkpointing is strictly required.
+    1. **Assumptions & Constraints:**
+       - 32 layers, 32 heads, seq=2048, batch=32, dim=4096.
+       - Element size: 2 bytes (BF16).
+    2. **Calculations:**
+       - Residual stream: 32 x 12 x 2048 x 4096 x 32 x 2 = ~206 GB.
+       - Attention matrices: 32 x 32 x (2048^2) x 32 x 2 = ~275 GB.
+       - Total Activation Memory: 206 + 275 = 481 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity-Bound. 481 GB severely exceeds the 80 GB HBM limit. Activation checkpointing is strictly required.**
 status: published
 provenance: imported
 requires_explanation: false

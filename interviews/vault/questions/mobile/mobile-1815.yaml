@@ -8,27 +8,28 @@ competency_area: cross-cutting
 bloom_level: apply
 phase: both
 title: 'Portable Feature Extraction Pipeline: Camera Input to Model Input'
-scenario: A cross-platform camera app preprocesses images (resize, normalize, convert to RGB). iOS outputs BGRA, Android outputs YUV_420_888. Both must produce a [1,3,224,224] float tensor.
+scenario: A cross-platform camera app preprocesses images. iOS outputs BGRA, Android outputs YUV_420_888. Both must produce a [1,3,224,224] float tensor.
 question: How would one preprocessing interface convert iOS BGRA and Android YUV_420_888 frames into a float tensor efficiently?
 details:
-  realistic_solution: 'Use platform-specific GPU-accelerated preprocessing bridged
-    by a common interface: (1) iOS: use vImage (Accelerate framework) for BGRA->RGB
-    conversion and resize on CPU, or Metal compute shader for GPU-side conversion
-    directly from CVPixelBuffer. Total preprocessing: ~0.3ms. (2) Android: use RenderScript
-    or Vulkan compute for YUV->RGB + resize. Total: ~0.5ms. (3) Common interface:
-    define a PreprocessResult struct {float* data, int width, int height, int channels}.
-    Each platform implements the conversion to this common format. Key: do color space
-    conversion on GPU to avoid a GPU->CPU->GPU round-trip that adds 1-3ms.'
+  realistic_solution: 'Use platform-specific GPU-accelerated preprocessing bridged by a common interface: (1) iOS: use vImage (Accelerate framework) for BGRA->RGB conversion and resize on CPU, or Metal compute shader for GPU-side conversion directly from CVPixelBuffer. Total preprocessing: ~0.3ms. (2) Android: use RenderScript or Vulkan compute for YUV->RGB + resize. Total: ~0.5ms. (3) Common interface: define a PreprocessResult struct {float* data, int width, int height, int channels}. Each platform implements the conversion to this common format. Key: do color space conversion on GPU to avoid a GPU->CPU->GPU round-trip that adds 1-3ms.'
   common_mistake: |
     **The Pitfall:** Writing preprocessing inside the ML framework (PyTorch/TFLite) for portability.
     **The Rationale:** Attempting to reuse generic Python/C++ code instead of utilizing platform-native hardware acceleration APIs.
     **The Consequence:** Slow, inefficient memory copies between the camera buffer and the ML runtime, adding crucial milliseconds to the pipeline.
   napkin_math: |
-    - **Tensor Size:** 224x224x3 floats = 602 KB.
-    - **Raw Frame Size:** 1080p BGRA = 8.3 MB.
-    - **GPU Preprocessing:** Convert + resize takes ~0.3 ms.
-    - **CPU Preprocessing:** Memcpy (8.3 MB at 25 GB/s) = 0.3 ms + 1-2 ms conversion = ~2.3 ms.
-    - **Result:** GPU-accelerated preprocessing is **5-7x faster** than CPU execution.
+    1. **Assumptions & Constraints:**
+       - Output Tensor Size: 224x224x3 floats.
+       - Raw Frame Size: 1080p BGRA.
+       - CPU Memory Bandwidth: ~25 GB/s.
+    2. **Calculations:**
+       - Output Size: 224 * 224 * 3 * 4 bytes = 602 KB.
+       - Input Size: 1920 * 1080 * 4 bytes = 8.3 MB.
+       - GPU Preprocessing: Convert + resize = ~0.3 ms.
+       - CPU Preprocessing Memcpy: 8.3 MB / 25 GB/s = 0.33 ms.
+       - CPU Preprocessing Execution: ~1.5 to 2.0 ms.
+       - Total CPU Time: ~2.3 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** GPU-accelerated preprocessing is 5-7x faster than CPU execution.
 status: published
 provenance: imported
 requires_explanation: false

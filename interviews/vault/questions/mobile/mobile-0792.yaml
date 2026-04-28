@@ -8,20 +8,19 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: The INT8 KV Cache Penalty
-scenario: 'To fit a 4B model in 4GB of mobile RAM, you quantize the KV cache from FP16 to INT8, successfully saving ~600MB. However, you observe that decode latency increases from 35ms per token to 55ms per token, and overall NPU utilization drops from 80% to 50%.'
-question: 'Why does quantizing the KV cache to INT8 save memory but increase decode latency and lower NPU utilization?'
+scenario: To fit a 4B parameter model in 4GB of mobile RAM, you quantize the KV cache from FP16 to INT8, saving ~600MB. However, you observe decode latency increases from 35ms to 55ms per token, and overall NPU utilization drops significantly.
+question: Why does quantizing the KV cache to INT8 save memory but increase decode latency and lower hardware utilization?
 details:
-  realistic_solution: 'The latency increase is caused by the lack of native INT8-to-FP16 mixed-precision attention support on the mobile NPU. To perform attention, the engine inserts an explicit dequantization kernel that reads INT8, casts to FP16, and writes to an intermediate SRAM/DRAM buffer before attention can run. This extra kernel launch and memory round-trip stalls the NPU.'
+  realistic_solution: |
+    The latency regression stems from missing native silicon support for INT8-to-FP16 mixed-precision attention. The NPU framework must inject an explicit dequantization kernel that reads INT8, casts to FP16, and writes to an intermediate SRAM/DRAM buffer before attention executes, massively stalling the pipeline.
   common_mistake: |
-    **The Pitfall:** Assuming INT8 memory fetches are inherently slower than FP16 fetches.
-    **The Rationale:** Candidates notice the latency increase and falsely deduce it takes the hardware longer to process INT8 data paths.
-    **The Consequence:** Misdiagnosing the root cause, leading to wasted time investigating hardware bus speeds rather than fixing the software kernel pipeline.
+    **The Pitfall:** Assuming fetching 1 byte (INT8) is inherently faster than 2 bytes (FP16) without analyzing kernel execution graphs.
+    **The Rationale:** Calculating theoretical memory bandwidth improvements while completely ignoring ALU casting overhead and intermediate buffer thrashing.
+    **The Consequence:** Misdiagnosing the latency spike as a hardware bus issue instead of fixing the software kernel's dequantization pipeline.
   napkin_math: |
-    1. **INT8 Savings:** 4B model, 36 layers, 8 KV heads, dim 128, 8192 context. INT8 KV cache = 2 × 8 × 128 × 8192 × 36 × 1 byte ≈ 604 MB (saving ~600 MB vs FP16).
-    2. **Dequant Overhead:** At 1000-token decode step, INT8 read = 2 MB per layer. Write back intermediate FP16 = 4 MB. Total 6 MB traffic per layer.
-    3. **Bandwidth Time:** 6 MB / 30 GB/s = 0.2 ms per layer. Across 36 layers = 7.2 ms.
-    4. **Kernel Launch:** Overhead ~0.2 ms per extra dequant kernel × 36 layers = 7.2 ms.
-    5. **Total Penalty:** 7.2 ms + 7.2 ms = **14.4 ms penalty per token**, explaining the jump from 35ms to 55ms.
+    1. **Assumptions & Constraints:** 36 layers. INT8 saves 600 MB. Bandwidth = 30 GB/s. Extra traffic per layer = 2 MB read + 4 MB write = 6 MB.
+    2. **Calculations:** Bandwidth delay = 6 MB / 30 GB/s = 0.2 ms per layer. Kernel overhead = 0.2 ms per layer. Total penalty = (0.2 + 0.2) * 36 = 14.4 ms.
+    3. **Conclusion & Interpretation:** **Result: Compute/I-O-Bound**. The dequantization kernel overhead completely eclipses the memory footprint savings, adding ~15ms to the TPOT.
 status: published
 provenance: imported
 requires_explanation: false

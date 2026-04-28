@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Implement EfficientNet-B0 for Snapdragon 8 Gen 3 Hexagon NPU via QNN SDK
-scenario: You are deploying EfficientNet-B0 (5.3M params, 0.39 GFLOPs) to a Samsung Galaxy S24 (Snapdragon 8 Gen 3 Hexagon NPU) using the QNN SDK for offline deployment. The model has Swish (SiLU) activations and SE blocks.
+scenario: You are deploying EfficientNet-B0 to a Samsung Galaxy S24 using the QNN SDK for offline deployment. The model has Swish (SiLU) activations and SE blocks.
 question: How should EfficientNet-B0 be converted and optimized for Snapdragon 8 Gen 3 Hexagon deployment with the QNN SDK?
 details:
   realistic_solution: 'QNN conversion: (1) Export PyTorch → ONNX with static shapes (batch=1, input=1×3×224×224, opset=13); (2) Replace SiLU with approximation: hardswish or x × hardtanh(x+3,0,6)/6 (QNN-supported); (3) qnn-onnx-converter --input_network model.onnx --output_path model.cpp; (4) qnn-net-run with --backend libQnnHtp.so; (5) SE blocks: Hexagon HTP supports GlobalAveragePool as a native op. Verify latency < 3ms with qnn-net-run --duration 1000. If SE blocks cause issues, use qnn-model-lib-generator to inspect per-layer dispatch.'
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Candidates overlook that Hexagon HTP graph compilation requires static shapes for SE blocks with dynamic Global Average Pooling (GAP).
     **The Consequence:** This prevents native execution on the NPU, forcing a costly fallback to the CPU.
   napkin_math: |
-    1. **Theoretical Latency:** EfficientNet-B0 INT8 on Hexagon HTP: 0.39G GOPS / 45 TOPS = 8.7μs.
-    2. **Realistic Benchmark:** Published QNN benchmark: ~1.5ms batch=1. Overhead factor: 172×.
-    3. **Memory Footprint:** Model weights INT8: 5.3M × 1B = 5.3MB. Hexagon HTP SRAM: ~8MB -> entire model fits on-chip.
-    4. **SE Block Overhead:** SE block FC layers: 16 × C²/4 FLOPs = 16 × (varying C² terms) ≈ 5M FLOPs total. SE as % of total: 5M/390M = 1.3% FLOPs.
-    5. **Dispatch Penalty:** HTP dispatch overhead for 16 SE blocks: 16 × 2 FC layers × 0.1ms overhead = 3.2ms if not fused.
-    **Result:** It is critical to ensure SE GAP + FC1 + FC2 + sigmoid + multiply are fused in QNN context to avoid the **3.2ms overhead**.
+    1. **Assumptions & Constraints:**
+       - Model: EfficientNet-B0 (5.3M params, INT8).
+       - Theoretical NPU capability: 45 TOPS.
+       - SE Block operations: 16 blocks, totaling ~5M FLOPs.
+    2. **Calculations:**
+       - Theoretical Latency: 0.39 GOPs / 45,000 GOPs/sec = 8.7\u03bcs.
+       - Dispatch Penalty: Hexagon HTP CPU-to-DSP dispatch is ~0.1ms per non-fused op.
+       - Overhead calculation: 16 SE blocks * 2 non-fused FC layers * 0.1ms = 3.2ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU-Dispatch Bottleneck**. If the SE blocks (GlobalAveragePool + FC) are not statically shaped and fused, the 3.2ms dispatch overhead completely dominates the 8.7\u03bcs theoretical compute time.
 status: published
 provenance: imported
 requires_explanation: true

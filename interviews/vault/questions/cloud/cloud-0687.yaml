@@ -8,23 +8,29 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: The Optimizer Explosion
-scenario: You are training a 30B parameter model on a single 80 GB H100. The FP16 weights occupy 60 GB,
-  which fits comfortably. Optimizer is Adam with mixed-precision FP16 weights and an FP32 master copy.
-  The system OOMs on the very first optimizer step. Identify the hidden memory tax and propose a software
-  fix that does not change the model architecture.
-question: "Why does Adam mixed-precision training of a 30B model OOM on an 80 GB H100, and which sharding strategy fixes it?"
+scenario: You are training a 30B parameter model on a single GPU. The FP16 weights occupy 60 GB. Optimizer is Adam with mixed-precision FP16 weights and an FP32 master copy. The system OOMs on the very first optimizer step.
+question: "Why does Adam mixed-precision training of a 30B model OOM, and which sharding strategy fixes it?"
 details:
-  realistic_solution: The system OOMs because of the **Optimizer State**. Adam stores two additional tensors
-    per parameter (first and second moments), plus master weights, all in FP32. ZeRO (Zero Redundancy
-    Optimizer) or FSDP is the fix. Instead of replicating the full optimizer state on every GPU, shard
-    it across all workers. ZeRO Stage 3 shards weights, gradients, and optimizer states, reducing per-GPU
-    memory from 480 GB to ~120 GB across 4 GPUs.
-  common_mistake: '"60 GB fits in 80 GB, so the batch size must be too large." Batch size matters, but
-    even with batch size 1, this system OOMs — the hidden cost is the optimizer, not the data.'
-  napkin_math: 'A 30B parameter model''s FP16 weights require 30B * 2 bytes = 60GB, seemingly fitting
-    an 80GB H100. However, training requires gradients (FP16, 60GB) and Adam optimizer states: FP32 master
-    weights (120GB), FP32 momentum (120GB), and FP32 variance (120GB). Total memory needed = 60 + 60 +
-    120 + 120 + 120 = 480GB per GPU! The hidden Adam memory tax causes an instant OOM.'
+  realistic_solution: |
+    The system OOMs because of the Optimizer State. Adam stores two additional tensors per parameter (first and second moments), plus master weights, all in FP32. ZeRO (Zero Redundancy Optimizer) or FSDP is the fix. ZeRO Stage 3 shards weights, gradients, and optimizer states across all workers.
+  common_mistake: |
+    **The Pitfall:** Blaming the batch size and attempting to lower it.
+    **The Rationale:** Candidates see that 60GB fits in 80GB and assume activations are the culprit, ignoring the massive memory footprint of the optimizer state.
+    **The Consequence:** Endless tuning of batch sizes and gradient accumulation without resolving the fundamental OOM.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 30B parameter model.
+       - FP16 Weights: 2 bytes/param.
+       - Adam Optimizer: FP32 master weights, momentum, variance (4 bytes/param each).
+    2. **Calculations:**
+       - FP16 Weights: 30B * 2B = 60GB.
+       - FP16 Gradients: 30B * 2B = 60GB.
+       - FP32 Master Weights: 30B * 4B = 120GB.
+       - FP32 Momentum: 30B * 4B = 120GB.
+       - FP32 Variance: 30B * 4B = 120GB.
+       - Total Memory: 60 + 60 + 120 + 120 + 120 = 480GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Optimizer).** The 480GB footprint instantly causes an OOM on an 80GB GPU. ZeRO/FSDP sharding is mandatory.
 status: published
 provenance: imported
 requires_explanation: false

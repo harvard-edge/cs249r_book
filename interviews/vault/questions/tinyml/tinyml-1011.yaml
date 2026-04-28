@@ -11,16 +11,24 @@ title: Diagnosing SRAM Overflow During Concurrent Bluetooth Operations
 scenario: You are deploying an audio classification model on a Nordic nRF5340, utilizing its 128 MHz app core for inference while the 64 MHz net core manages BLE 5.3 communications. The system has 1 MB of flash and 256 KB of SRAM, with static analysis indicating the model requires 160 KB of peak memory. However, the system experiences sporadic Out-Of-Memory (OOM) crashes during inference exclusively when the BLE stack is actively transmitting at ~5mA. The crashes always occur during a specific sequence of operations involving residual connections.
 question: Why does the nRF5340 audio model OOM during residual blocks only while BLE 5.3 is transmitting?
 details:
-  realistic_solution: The root cause is an inefficient operator schedule that extends the lifetime of residual connection buffers during concurrent execution. When the BLE stack is active, it dynamically allocates SRAM, reducing the available memory pool for the ML application. The default scheduler processes the residual network branches in an order that keeps the large initial input tensor alive in memory while subsequent depthwise and pointwise convolutions simultaneously allocate their own intermediate buffers. By reordering the execution schedule to consume the residual branch earlier, or by implementing layer fusion, the overlapping tensor lifetimes are eliminated and peak memory drops safely below the threshold.
+  realistic_solution: 'The root cause is an inefficient operator schedule that extends the lifetime of residual connection buffers during concurrent execution. When the BLE stack is active, it dynamically allocates SRAM, reducing the available memory pool for the ML application. The default scheduler processes the residual network branches in an order that keeps the large initial input tensor alive in memory while subsequent depthwise and pointwise convolutions simultaneously allocate their own intermediate buffers. By reordering the execution schedule to consume the residual branch earlier, or by implementing layer fusion, the overlapping tensor lifetimes are eliminated and peak memory drops safely below the threshold.'
   common_mistake: |
     **The Pitfall:** Misdiagnosing the crash as purely a networking issue and ignoring ML operator lifespans.
     **The Rationale:** Candidates focus solely on disabling BLE during inference to free SRAM, ignoring how the default ML execution graph artificially bloats memory.
     **The Consequence:** The system loses real-time networking capabilities, crippling the product, because the actual buffer overlap issue was never fixed.
   napkin_math: |
-    - **Step 1:** Total SRAM = 256 KB. BLE stack + RTOS baseline = 60 KB, leaving 196 KB usable.
-    - **Step 2:** Calculate overlapping memory in residual block: 50 KB (input) + 70 KB (depthwise) + 70 KB (pointwise) = 190 KB active simultaneously.
-    - **Step 3:** Total system memory used: 190 KB (ML) + 60 KB (OS) = 250 KB. Headroom is 6 KB.
-    - **Result:** **An active BLE interrupt easily allocates > 6 KB dynamically, triggering an immediate OOM crash during the residual block.**
+    1. **Assumptions & Constraints:**
+       - Total SRAM: 256 KB.
+       - BLE stack + RTOS baseline: 60 KB.
+       - Residual block input: 50 KB.
+       - Depthwise activation: 70 KB.
+       - Pointwise activation: 70 KB.
+    2. **Calculations:**
+       - Usable SRAM: 256 KB - 60 KB = 196 KB.
+       - Peak overlapping memory: 50 KB + 70 KB + 70 KB = 190 KB.
+       - Headroom: 196 KB - 190 KB = 6 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound.** An active BLE interrupt easily allocates > 6 KB dynamically, triggering an immediate OOM crash due to the inefficient ML operator schedule keeping buffers alive.
 status: published
 provenance: imported
 requires_explanation: false

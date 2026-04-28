@@ -11,17 +11,23 @@ title: Diagnose Decode Latency Regression from KV Cache Format on Hailo-8
 scenario: A 3B transformer on Hailo-8 shows 8ms/token during the first 32 decode steps, then degrades to 22ms/token for steps 33-128. The KV cache is stored in row-major format [seq][layer][head][dim]. The Hailo-8 DMA controller accesses the KV cache sequentially by layer during attention computation.
 question: Why does the Hailo-8 transformer slow from 8ms/token to 22ms/token after step 32, and what KV layout fixes it?
 details:
-  realistic_solution: '[seq][layer][head][dim] layout: at step 33, KV cache contains 33 entries. DMA reads layer 0, head 0 across all 33 seq positions: stride = layer×head×dim = 32×8×64×2B = 32,768B apart. For seq>32: the 33rd entry falls on a new LPDDR5 row (8KB row boundary at 32×256B=8192B for this dim). LPDDR5 row activation adds 10ns per miss × 8 layers × 8 heads = 640ns overhead per attention step. Cumulative: 32+ tokens triggers row crossing in tight inner loop. Fix: transpose to [layer][head][seq][dim] so sequential reads are contiguous in memory. DMA reads 33 seq positions sequentially = contiguous → single LPDDR5 row activation per read, not 33.'
+  realistic_solution: |
+    In a `[seq][layer][head][dim]` layout, accessing the KV cache by layer causes the DMA controller to stride across sequence positions. At step 33, the stride crosses an 8KB LPDDR5 row boundary, causing cache line aliasing and massive row activation penalties. The O(N) memory access pattern becomes heavily fragmented. The solution is to transpose the layout to `[layer][head][seq][dim]`. This ensures that the DMA controller reads sequence tokens contiguously, resulting in a single LPDDR5 row activation per attention head and eliminating the memory bandwidth bottleneck during autoregressive decoding.
   common_mistake: |
     **The Pitfall:** Attributing the latency degradation to the O(n²) scaling of attention compute.
     **The Rationale:** Candidates know attention compute scales quadratically, but fail to realize the compute difference between N=32 and N=33 is negligible.
     **The Consequence:** Proposing compute-bound solutions (like sparse attention) instead of addressing the actual memory access pattern and cache line aliasing bottleneck.
   napkin_math: |
-    * **KV Memory per Head**: 32 tokens × 64 dim × 2 bytes = 4 KB. This fits exactly in half a standard LPDDR5 row (8 KB).
-    * **At Step 33**: 33 tokens × 64 dim × 2 bytes = 4.2 KB. The 33rd token forces the DMA controller to cross a row boundary.
-    * **Row Activation Penalty**: 10 ns overhead per miss.
-    * **Total Overhead**: 10 ns × 8 layers × 8 heads = 640 ns per attention step. While seemingly small, the DMA setup overhead for staggered non-contiguous row access accumulates heavily.
-    * **Solution**: Transpose to `[layer][head][seq][dim]` to guarantee **contiguous memory reads** for all sequence tokens.
+    1. **Assumptions & Constraints:**
+       - Layout: `[seq][layer][head][dim]` with 64 dim, 2 bytes (FP16).
+       - LPDDR5 Row Size: 8 KB.
+       - Row Activation Penalty: 10 ns per miss.
+    2. **Calculations:**
+       - KV Size per Head (32 tokens): 32 * 64 * 2B = 4,096 B (4 KB), fitting within one 8 KB row.
+       - At Step 33: 33rd token stride = 32 * 8 * 64 * 2B = 32,768 B apart, forcing a new row activation.
+       - Total Overhead: 10 ns * 8 layers * 8 heads = 640 ns per attention step (accumulates per token).
+    3. **Conclusion & Interpretation:**
+       - **Result: 640 ns overhead per step causing 14ms latency regression. Bottleneck: Memory Bandwidth-Bound (Row Activation Thrashing).**
 status: published
 provenance: imported
 requires_explanation: false

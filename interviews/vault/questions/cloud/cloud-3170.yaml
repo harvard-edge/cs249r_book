@@ -8,18 +8,25 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: 'Diagnosing Speculation Latency Regression at High Temperature'
-scenario: 'Your speculative decoding system (70B target, 7B draft, K=5) shows alpha=0.82 at temperature=0.1 but drops to alpha=0.55 at temperature=1.0, causing a net slowdown at high temperature.'
-question: 'Why does alpha fall from 0.82 at temperature 0.1 to 0.55 at temperature 1.0, and how would you fix the slowdown?'
+scenario: Your speculative decoding system (70B target, 7B draft, K=5) shows alpha=0.82 at temperature=0.1 but drops to alpha=0.55 at temperature=1.0, causing a net slowdown at high temperature.
+question: "Why does alpha fall from 0.82 at temperature 0.1 to 0.55 at temperature 1.0, and how would you fix the slowdown?"
 details:
   realistic_solution: 'At temperature=0.1: both distributions are very peaked. The target assigns >90% probability to top-1 token, the draft assigns >80%. They agree on the top token ~90% of the time. TV distance is small. At temperature=1.0: target distribution is more diffuse (entropy ~4 bits), draft is also diffuse but has different probability mass allocation over the tail. The total variation distance increases significantly. By the acceptance rate formula alpha = 1 - TV, alpha drops from 0.82 to 0.55. Compounding over K=5 makes it worse. Fix 1: Temperature-aware adaptive K: reduce K from 5 to 2 when temperature > 0.7. Fix 2: Truncate the vocabulary before temperature scaling — apply top-p or top-k filtering to the logits before applying the high temperature. This forces both models to allocate probability mass only to the most likely tokens, reducing the tail divergence. Fix 3: Train a specialized draft model matching the target''s high-temperature distribution.'
   common_mistake: |
     **The Pitfall:** Blaming the draft model's baseline quality at high temperatures.
     **The Rationale:** Candidates assume the draft model degrades internally, ignoring that higher temperatures mathematically flatten both distributions differently.
-    **The Consequence:** Proposing unnecessary retraining of the draft model instead of recognizing and addressing the total variation distance divergence.
+    **The Consequence:** Proposing unnecessary retraining of the draft model instead of addressing the total variation distance divergence.
   napkin_math: |
-    - **Temp=0.1**: TV~0.18, alpha=0.82, E[tok]=3.86. Speedup = **2.75x**.
-    - **Temp=1.0**: TV~0.45, alpha=0.55, E[tok]=2.16. With draft cost: 2.16 / (5×2+25)ms = 61.7 tok/s vs 40 baseline = **1.54x speedup**.
-    - **At temp=0.7**: alpha~0.72. Breakeven **K=3**.
+    1. **Assumptions & Constraints:**
+       - Target: 70B, Draft: 7B, K=5.
+       - Alpha (Temp 0.1): 0.82. Alpha (Temp 1.0): 0.55.
+    2. **Calculations:**
+       - Expected Tokens (Temp 0.1) = 1 / (1 - 0.82) ≈ 3.86. Speedup = 2.75x.
+       - Expected Tokens (Temp 1.0) = 1 / (1 - 0.55) ≈ 2.16.
+       - Speedup (Temp 1.0) = 2.16 / Draft Overhead ≈ 1.54x speedup (slower than optimal).
+       - Breakeven (Temp 0.7) = Alpha ~0.72 -> K=3.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1.54x Speedup (Acceptance-Rate-Bound).** The divergence in total variation distance at high temperatures destroys the speculative decoding advantage unless K is dynamically adjusted.
 status: published
 provenance: imported
 requires_explanation: false

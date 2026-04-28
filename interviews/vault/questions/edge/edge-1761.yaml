@@ -11,18 +11,23 @@ title: Edge TPU Activation and Weight Budgeting
 scenario: You are deploying a real-time object detection model for a battery-powered security camera using the Google Coral Edge TPU in a USB form factor. The platform provides 4 TOPS for INT8 operations and operates on a strict 2W power budget, meaning all compute must happen on-chip to avoid catastrophic power and latency penalties from USB data transfers.
 question: How would you size the CNN weights, activations, and intermediate tensors so the Coral Edge TPU keeps the detector in one INT8 subgraph?
 details:
-  realistic_solution: An L5 candidate will evaluate both parameter size and peak activation memory, specifically identifying the early high-resolution layers as the primary memory bottleneck. They will mandate strictly supported INT8 operators to match the hardware's 4 TOPS INT8 engine and prevent the compiler from splitting the graph. By enforcing aggressive early spatial downsampling and calculating exact byte requirements for feature maps, they guarantee the execution graph remains entirely on the Edge TPU, respecting the 2W power envelope.
+  realistic_solution: Commandeer peak activation memory explicitly, noting that early, high-resolution convolutional blocks form the overriding SRAM bottleneck. Enforce aggressive Stride 2 downsampling natively at the ingestion layer to mathematically halve output dimensions, forcing the entire INT8 activation tensor down into the TPU's constrained onboard cache without triggering expensive graph splintering over the host USB bridge.
   common_mistake: |
-    **The Pitfall:** Calculating memory only for weights and ignoring intermediate activations.
-    **The Rationale:** Candidates often overlook the peak memory required during the forward pass, or suggest unsupported operators.
-    **The Consequence:** The graph is partitioned, causing constant memory swapping over the slow USB interface and violating power/latency budgets.
+    **The Pitfall:** Sizing the model footprint explicitly by weight parameters while completely discarding forward-pass activation geometries.
+    **The Rationale:** Candidates rely on standard file-size benchmarks rather than analyzing runtime structural tensor volumes.
+    **The Consequence:** The compiler is forced to split the execution subgraph, generating immense USB I/O delays that instantly shatter the strict 2W operational envelope.
   napkin_math: |
-    - **Input:** 256x256x3 RGB.
-    - **First Layer (Stride 1):** 3x3 conv, 32 filters. Weights = 3×3×3×32 = **864 bytes**.
-    - **Activation Memory (Stride 1):** 256×256×32 = 2,097,152 bytes = **~2.1 MB** (INT8).
-    - **Total Constraint:** Input + Weights + Output > 2.3 MB, exceeding on-chip SRAM.
-    - **Optimization (Stride 2):** Output becomes 128×128×32 = **~0.5 MB**.
-    - **Savings:** **1.6 MB** saved, keeping the execution entirely on-chip.
+    1. **Assumptions & Constraints:**
+       - Input Tensor: 256x256x3 RGB.
+       - Coral SRAM Boundary: ~2.3 MB total budget.
+       - Early Feature Map: 3x3 Conv, 32 Filters (INT8).
+    2. **Calculations:**
+       - Base Stride 1 Activation = 256 * 256 * 32 = 2.097 MB.
+       - Base Storage Total: Input + Weights + 2.097 MB > 2.3 MB (OOM crash).
+       - Optimized Stride 2 Activation = 128 * 128 * 32 = 0.524 MB.
+       - Savings: 2.097 MB - 0.524 MB = 1.573 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Maintained Subgraph**. Stride 2 rescues ~1.6 MB, locking the execution fully into the device cache.
 status: published
 provenance: imported
 requires_explanation: false

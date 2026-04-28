@@ -8,37 +8,20 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The P99 Latency Spike
-scenario: You are the on-call engineer for a new LLM-based chatbot service deployed on H100s. The service uses a simple static batching strategy with a batch size of 32 and a fixed 100ms timeout to collect requests. During a load test, you observe that while average Time to First Token (TTFT) is acceptable at ~120ms, the P99 TTFT spikes to over 500ms, violating your SLO. `nvidia-smi` shows the GPU is consistently busy.
+scenario: You are the on-call engineer for a new LLM-based chatbot service. The service uses a simple static batching strategy with a batch size of 32 and a fixed 100ms timeout to collect requests. During a load test, you observe that while average Time to First Token (TTFT) is acceptable at ~120ms, the P99 TTFT spikes to over 500ms. `nvidia-smi` shows the GPU is consistently busy.
 question: What is the most likely cause of the P99 TTFT spikes above 500ms despite a busy GPU?
 details:
-  realistic_solution: The most likely cause is head-of-line blocking exacerbated by the static batching policy. A user request that arrives just after a batch has been dispatched to the GPU must wait for the *entire* 100ms timeout window to elapse, and *then* wait for the next full batch to be processed. Under load, most requests experience some queueing, but the unlucky 'tail' requests that just miss the window experience the maximum possible delay. This creates a bimodal latency distribution, where some users get fast responses and others get very slow ones, dragging up the P99. The solution is to implement continuous batching, which processes requests as they arrive and adds new requests to the running batch dynamically, eliminating the fixed timeout and drastically reducing queue times.
+  realistic_solution: 'The most likely cause is head-of-line blocking exacerbated by the static batching policy. A request arriving just after a batch is dispatched must wait for the 100ms timeout, plus the full batch processing time. Implement continuous batching (iteration-level scheduling) to dynamically add requests.'
   common_mistake: |
     **The Pitfall:** Blaming the hardware and scaling up compute.
     **The Rationale:** High tail latency under load is frequently misattributed to a lack of raw compute power or memory bandwidth.
     **The Consequence:** Unnecessary spending on more powerful GPUs without resolving the underlying scheduling and head-of-line blocking problem.
   napkin_math: |
-    1. **Static Batching Constraint:** New requests cannot join an actively processing batch.
-    2. **Active Processing Time:** Assume a batch generates tokens for 700ms.
-    3. **Worst-case Queue Wait:** A request arriving just after a batch starts must wait 700ms (processing) + 100ms (timeout for next batch).
-    4. **Result:** Worst-case wait = 700ms + 100ms = 800ms.
-    5. **Conclusion:** **This head-of-line blocking perfectly explains the massive P99 TTFT spikes.**
+    1. **Assumptions & Constraints:**
+       - Static Batching Constraint: New requests cannot join an actively processing batch.
+       - Active Processing Time: Assume a batch generates tokens for 700ms.
+    2. **Calculations:**
+       - Worst-case Queue Wait: 700ms (processing) + 100ms (timeout) = 800ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduling-Bound.** Head-of-line blocking perfectly explains the massive P99 TTFT spikes.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 6
-chains:
-- id: cloud-chain-430
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -8,8 +8,8 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Evaluating Online Softmax for Long-Context Kernels
-scenario: You are optimizing a custom attention kernel for an A100 GPU (192KB SRAM per SM, 2 TB/s HBM bandwidth) to support 65,536 sequence lengths. A standard softmax materializes the N x N logits matrix in HBM.
-question: Why is block-based online softmax strictly required for 65,536-token attention on an A100 to avoid the memory wall compared to HBM-materialized or naive 1-pass softmax?
+scenario: You are optimizing a custom attention kernel to support 65,536 sequence lengths. A standard softmax materializes the N x N logits matrix in HBM.
+question: Why is block-based online softmax strictly required for 65,536-token attention to avoid the memory wall compared to HBM-materialized or naive 1-pass softmax?
 details:
   realistic_solution: Online softmax maintains running maximums and normalization sums incrementally in SRAM. When a new block introduces a larger maximum, previous block sums are rescaled by exp(old_max - new_max). This exact formulation allows fusing the entire attention pass, bypassing intermediate N x N HBM materialization entirely.
   common_mistake: |
@@ -17,12 +17,15 @@ details:
     **The Rationale:** Candidates may not realize the mathematical exactness of online softmax or forget that unshifted sums overflow FP16/BF16 dynamic ranges.
     **The Consequence:** The resulting implementation either overflows numerically or fails to leverage the massive bandwidth savings of FlashAttention.
   napkin_math: |
-    - Sequence length N: 65,536.
-    - Standard softmax materializes an N x N attention matrix in HBM.
-    - Memory per head: 65,536^2 * 2 bytes (FP16) = 8.59 GB.
-    - Standard 3-pass softmax (max, sum, div) reads/writes this matrix, consuming >25 GB HBM bandwidth per head.
-    - Online softmax streams only Q,K,V blocks (e.g., ~16.7MB for dim=128), avoiding N^2 materialization.
-    - **Bandwidth savings: ~1500x reduction, avoiding the 25 GB bandwidth cost per head.**
+    1. **Assumptions & Constraints:**
+       - Sequence length N: 65,536.
+       - FP16 precision (2 bytes).
+       - Standard softmax requires N x N HBM materialization.
+    2. **Calculations:**
+       - Memory per head: 65,536^2 * 2 bytes = 8.59 GB.
+       - Standard 3-pass softmax (max, sum, div) reads/writes this matrix, consuming >25 GB HBM bandwidth per head.
+       - Online softmax streams only Q,K,V blocks (e.g., ~16.7MB for dim=128), avoiding N^2 materialization.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bandwidth Bound.** A >1500x bandwidth reduction is achieved by skipping the 25 GB/head read-write penalty of standard softmax.
 status: published
 provenance: imported
 requires_explanation: false

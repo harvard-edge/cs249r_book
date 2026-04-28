@@ -7,20 +7,26 @@ topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: Diagnosing Tensor Parallelism Bottlenecks on NVIDIA H100 for LLMs
+title: Diagnosing Tensor Parallelism Bottlenecks on NVIDIA GPUs for LLMs
 scenario: 'You are managing the training of a 175B parameter LLM using 8-way tensor parallelism across a cluster of GPUs. GPU utilization is high, but training throughput is below expectations. Profiler reports show periods of low compute utilization interleaved with bursts of high memory bandwidth usage, and significant inter-GPU communication.'
-question: "How would you diagnose tensor-parallel underperformance characterized by low compute utilization and heavy inter-GPU communication across 8 GPUs?"
+question: 'How would you diagnose tensor-parallel underperformance characterized by low compute utilization and heavy inter-GPU communication across 8 GPUs?'
 details:
-  realistic_solution: 'The diagnosis should start with profiling the kernel execution and communication patterns. Use `nvprof` or NVIDIA NSight Compute/Systems to get a detailed timeline. Look for: 1. **Communication hotspots**: Identify which collective operations are taking the longest. Are they balanced? 2. **Compute-Communication Overlap**: Verify if communication is truly overlapping with computation. If not, analyze the tensor parallelism library (e.g., Megatron-LM, FSDP) to ensure asynchronous communication calls are correctly implemented and placed. 3. **Memory Access Patterns**: Ensure data is accessed optimally from HBM to maximize bandwidth without causing stalls. 4. **Micro-benchmarking**: Isolate and benchmark the collective operations on your specific cluster to understand baseline performance. 5. **Topology**: Verify the NVLink/PCIe topology and ensure the 8 GPUs involved in tensor parallelism are optimally connected to minimize latency.'
+  realistic_solution: 'Diagnosis must start with profiling the kernel execution using nsys to identify communication hotspots and analyze computation-to-communication overlap. Micro-benchmark the collective operations (e.g., all-reduce, reduce-scatter) to isolate topology or NVLink bottlenecks.'
   common_mistake: |
     **The Pitfall:** Assuming communication overhead is uniform and failing to isolate specific collective primitives.
-    **The Rationale:** Developers often treat "communication" as a black box, ignoring the difference between `all-reduce`, `all-gather`, and `reduce-scatter`, and their interaction with the specific tensor chunk sizes.
+    **The Rationale:** Developers often treat "communication" as a black box, ignoring the difference between all-reduce, all-gather, and reduce-scatter, and their interaction with the specific tensor chunk sizes.
     **The Consequence:** Ineffectively tuning the wrong layer dimensions or network topology, failing to resolve the poor computation-to-communication ratio.
   napkin_math: |
-    1. **All-Reduce Data Volume:** For a 1GB tensor across N=8 GPUs, an `all-reduce` sends and receives `2 * (N-1)/N * TensorSize`.
-    2. **Data Communicated:** 2 * (7/8) * 1GB = 1.75GB per GPU.
-    3. **Ideal Time:** Over 600 GB/s NVLink, this takes 1.75 GB / 600 GB/s ≈ **2.9 milliseconds**.
-    4. **Diagnostic Check:** If profiler shows communication phases lasting 10ms-50ms, effective bandwidth is crippled, indicating network saturation, topology bottlenecks, or non-optimal collective implementations.
+    1. **Assumptions & Constraints:**
+       - 8-way tensor parallelism.
+       - 1GB tensor size.
+       - NVLink bandwidth: 600 GB/s.
+    2. **Calculations:**
+       - All-Reduce Data Volume: For a tensor across N GPUs, an all-reduce sends and receives 2 * (N-1)/N * TensorSize.
+       - Data Communicated: 2 * (7/8) * 1GB = 1.75GB per GPU.
+       - Ideal Time: 1.75 GB / 600 GB/s ≈ 2.9 milliseconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Communication-Bound. If profiler shows communication phases lasting 10ms-50ms, effective bandwidth is crippled, indicating network saturation.**
 status: published
 provenance: imported
 requires_explanation: false

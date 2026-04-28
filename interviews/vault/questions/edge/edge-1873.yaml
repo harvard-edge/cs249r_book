@@ -7,32 +7,19 @@ topic: dma-data-movement
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'Jetson Orin: Real-time 4K Video Object Detection Data Movement Strategy'
-scenario: You are tasked with designing an embedded ML inference pipeline for real-time object detection on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W). The system needs to process a 4K video stream (3840x2160) at 30 FPS. Each frame undergoes CPU pre-processing, followed by INT8 inference on the GPU, and finally, CPU post-processing and display.
+title: Real-time 4K Video Object Detection Data Movement Strategy
+scenario: Designing an embedded ML pipeline for real-time 4K30 object detection with CPU pre/post-processing and INT8 GPU inference.
 question: What data movement strategy would you use on Jetson Orin to process 4K30 with CPU pre/postprocessing and INT8 GPU inference within 60W?
 details:
-  realistic_solution: 'The optimal solution involves a multi-pronged approach:
-
-    1.  **Pinned Memory:** Allocate all host-side buffers (for input frames and output results) as pinned memory (`cudaHostAlloc`). This guarantees direct memory access (DMA) transfers and prevents page faults, improving transfer efficiency.
-
-    2.  **Asynchronous Transfers & Streams:** Utilize CUDA streams to perform asynchronous DMA transfers (`cudaMemcpyAsync`). This allows the CPU to continue pre-processing one frame while the GPU performs inference on a previous frame and/or transfers data for the next. Two or more streams can be used to overlap computation and communication.
-
-    3.  **Zero-Copy (if applicable):** For smaller data portions or if memory permits, explore CUDA Unified Memory with `cudaManaged` to enable potential zero-copy access where the GPU can directly access host memory. On Jetson, physical memory is unified, making explicit zero-copy techniques (like `cudaHostRegister` for larger buffers) highly effective for avoiding explicit data duplication between CPU and GPU memory spaces.
-
-    4.  **Batching:** If possible, batch multiple frames for GPU inference to amortize the kernel launch and data transfer overheads. This would require buffering several frames on the CPU side.
-
-    5.  **Optimized Pre/Post-processing:** Ensure CPU pre-processing (e.g., scaling, normalization) and post-processing (e.g., NMS, drawing bounding boxes) are highly optimized to minimize their contribution to overall latency.'
+  realistic_solution: Allocate all host-side buffers as pinned memory. Utilize CUDA streams to perform asynchronous DMA transfers, allowing the CPU to pre-process one frame while the GPU performs inference on a previous frame. Use Unified Memory where zero-copy is viable.
   common_mistake: |
     **The Pitfall:** Relying on standard synchronous CPU-GPU memory copies (`cudaMemcpy`) and unpinned memory.
-    **The Rationale:** Developers accustomed to discrete GPUs in servers often default to standard memory copy APIs, overlooking the unified memory architecture and severe penalty of page-swapping on edge devices.
-    **The Consequence:** This leads to significant pipeline stalls, reduced throughput, and increased latency as computation and data transfers fail to overlap.
+    **The Rationale:** Developers accustomed to discrete GPUs default to standard APIs, overlooking the unified memory architecture and severe penalty of page-swapping on edge devices.
+    **The Consequence:** Significant pipeline stalls and increased latency as computation and data transfers fail to overlap.
   napkin_math: |
-    1. **Input Data Size per Frame:** 3840 * 2160 pixels * 3 channels * 1 byte/pixel = 24,883,200 bytes (~23.73 MiB).
-    2. **Input Data Transfer Rate:** 23.73 MiB/frame * 30 FPS = ~711.9 MiB/s.
-    3. **Output Data Transfer Rate:** Assuming complex results/metadata of 1 MiB/frame * 30 FPS = 30 MiB/s.
-    4. **Total Required Bandwidth:** 711.9 MiB/s + 30 MiB/s = ~741.9 MiB/s.
-    5. **Bandwidth Capacity:** 741.9 MiB/s is well within the effective LPDDR5 bandwidth limits (up to 204.8 GB/s).
-    6. **Result:** Utilizing zero-copy and asynchronous DMA can effectively hide the explicit transfer latency, reducing overhead to **near zero**.
+    1. **Assumptions & Constraints:** 4K RGB frames at 30 FPS. LPDDR5 limit = ~204 GB/s.
+    2. **Calculations:** Input = 3840 * 2160 * 3 = 24.8 MB/frame. Input rate = 24.8 MB * 30 = 744 MB/s. Output = ~30 MB/s. Total = ~774 MB/s.
+    3. **Conclusion & Interpretation:** **Result: 774 MB/s DMA required.** Using pinned, zero-copy memory completely hides explicit transfer latency, overlapping it with compute. **System Status: Data-Movement-Bound (Alleviated).**
 status: published
 provenance: imported
 requires_explanation: true

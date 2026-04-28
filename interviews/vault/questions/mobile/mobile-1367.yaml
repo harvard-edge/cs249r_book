@@ -8,21 +8,25 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: On-Device Shadow Rollout for A17 Pro Video Segmentation
-scenario: You are rolling out a video background segmentation model to iOS users on the Apple A17 Pro Neural Engine (35 TOPS, ~5W envelope, 8 GB memory). You must design an on-device shadow deployment architecture that compares live and shadow outputs without causing frame drops.
+scenario: You are rolling out a video background segmentation model to iOS users on the Apple A17 Pro Neural Engine. You must design an on-device shadow deployment architecture that compares live and shadow model outputs without causing camera frame drops.
 question: How would you design an A17 Pro shadow rollout for video segmentation without frame drops or thermal throttling?
 details:
-  realistic_solution: The optimal architecture decouples the shadow model into a background, lower-priority queue. The legacy model remains in the synchronous critical path to guarantee the 33ms frame budget at 30 FPS. The shadow model processes frames asynchronously only when thermal states are nominal and memory pressure is low.
+  realistic_solution: The optimal architecture strictly decouples the shadow model into an asynchronous, low-priority NSOperationQueue. The legacy model remains in the synchronous critical path to guarantee the 33.3ms frame budget. The shadow model processes heavily downsampled frames asynchronously only when thermal states (`NSProcessInfoThermalState`) are nominal.
   common_mistake: |
-    **The Pitfall:** Running the shadow model synchronously in the critical camera pipeline.
-    **The Rationale:** Treating mobile inference like cloud microservices without respecting frame deadlines or unified memory bandwidth.
-    **The Consequence:** Guaranteed latency spikes, frame drops, and severe thermal throttling.
+    **The Pitfall:** Executing the shadow model synchronously alongside the live model within the critical camera pipeline.
+    **The Rationale:** Treating mobile real-time inference like a scalable cloud microservice without respecting hard physical frame deadlines.
+    **The Consequence:** Immediate frame drops, severe thermal throttling, and OS intervention shutting down the camera pipeline.
   napkin_math: |
-    - A17 Pro efficiency: 35 TOPS @ 5W = ~7 TOPS/W.
-    - Live model (0.8 TOPS) + Shadow (1.2 TOPS) = 2.0 TOPS total.
-    - Power draw: 2.0 TOPS / 7 TOPS/W = ~0.286W (adds ~5.7% to thermal envelope).
-    - Compute budget (30 FPS): 33 ms/frame. 35 TOPS peak = 1.16 T-Ops per 33ms window.
-    - Load: 2.0 TOPS = 0.066 T-Ops per 33ms window.
-    - **Compute fits comfortably (0.066 < 1.16), provided shadow model runs asynchronously to avoid blocking the 33ms critical path.**
+    1. **Assumptions & Constraints:**
+       - A17 Pro ANE peak: 35 TOPS @ ~5W (~7 TOPS/W).
+       - Live model: 0.8 TOPS. Shadow model: 1.2 TOPS.
+       - Real-time frame budget (30 FPS): 33.3 ms.
+    2. **Calculations:**
+       - Compute capacity per 33.3ms frame: 35 TOPS * 0.0333s = 1.16 Tera-Ops.
+       - Combined load per frame: 2.0 TOPS * 0.0333s = 0.066 Tera-Ops.
+       - Power draw increase: 2.0 TOPS / 7 TOPS/W = ~0.286W.
+    3. **Conclusion & Interpretation:**
+       **Result: Scheduling-Bound. While the hardware has immense compute margin (0.066 < 1.16 Tera-Ops), running the shadow model synchronously artificially blocks the 33.3ms deadline; asynchronous offloading is structurally mandatory.**
 status: published
 provenance: imported
 requires_explanation: true

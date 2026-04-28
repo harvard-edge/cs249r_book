@@ -8,20 +8,25 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: SRAM Tiling Strategy for Large Conv Layer on Cortex-M7+Ethos-U55
-scenario: An Ethos-U55 has 512KB on-chip SRAM. A colleague claims that a standard convolutional layer processing a 28x28x96 activation map (INT8 = 75.3KB) with 96 filters of 3x3 (weights = 82.9KB) requires a tiling strategy because the combined memory exceeds 512KB.
-question: "Is your colleague correct that the 28x28x96 Ethos-U55 CNN layer needs tiling within 512 KB SRAM, and how would you tile a larger 56x56x96 input?"
+scenario: An Ethos-U55 NPU has 512 KiB on-chip SRAM. A colleague claims a layer processing a 28x28x96 activation map (INT8) with 96 filters of 3x3 requires spatial tiling to avoid Out-Of-Memory.
+question: "Is your colleague correct that the 28x28x96 Ethos-U55 CNN layer needs tiling within 512 KiB SRAM, and how would you tile a larger 56x56x96 input?"
 details:
-  realistic_solution: 'Total memory need: input 75.3KB + weights 82.9KB + output 75.3KB = 233.5KB — fits in 512KB. Single-buffer is fine. More challenging scenario: 56x56x96 input = 301KB. Then 301+82.9+301 = 685KB > 512KB. Tiling strategy: keep weights (82.9KB) resident. Tile input/output spatially: split 56x56 into 4x28x28 tiles. Per tile: 28x28x96 = 75.3KB input + 82.9KB weights + 75.3KB output = 233.5KB < 512KB.'
+  realistic_solution: Execute a direct static tensor arena calculation. The combined buffer allocations for weights, input activations, and output activations fit natively. Tiling is unneeded unless input resolution scales up (e.g., 56x56), wherein spatial feature map tiling is necessary while anchoring invariant weights in SRAM.
   common_mistake: |
-    **The Pitfall:** Tiling only the output without keeping weights resident in SRAM.
-    **The Rationale:** Candidates fail to realize that re-loading weights for each tile from slower memory is excessively expensive.
-    **The Consequence:** The resulting bandwidth bottleneck ruins inference latency.
+    **The Pitfall:** Tiling only the output feature map without keeping dense weights resident in fast SRAM.
+    **The Rationale:** Candidates fail to realize that re-streaming weight vectors from slower external Flash for every spatial tile is I/O catastrophic.
+    **The Consequence:** The resultant bandwidth bottleneck totally destroys inference latency due to massive redundant memory access.
   napkin_math: |
-    1. Calculate 28x28x96 memory need: 75.3KB (input) + 82.9KB (weights) + 75.3KB (output) = 233.5KB.
-    2. Verify fit: 233.5KB < 512KB. No tiling is required.
-    3. Calculate larger 56x56x96 need: 301KB (input) + 82.9KB (weights) + 301KB (output) = 685KB. Exceeds 512KB.
-    4. Calculate spatial 4-tile strategy (4x 28x28x96): 75.3KB (tile input) + 82.9KB (resident weights) + 75.3KB (tile output) = 233.5KB per pass.
-    5. **Final Result: The 28x28x96 layer fits comfortably in 233.5KB; tiling is only needed for larger resolutions like 56x56.**
+    1. **Assumptions & Constraints:**
+       - Memory: 512 KiB shared SRAM.
+       - 28x28x96 INT8 input/output = 75,264 bytes (~73.5 KiB).
+       - Weights (3x3x96x96) = 82,944 bytes (~81.0 KiB).
+    2. **Calculations:**
+       - Total 28x28 need: 73.5 KiB (input) + 81.0 KiB (weights) + 73.5 KiB (output) = 228 KiB. (Fits natively).
+       - Total 56x56x96 need: 294 KiB (input) + 81.0 KiB (weights) + 294 KiB (output) = 669 KiB. (>512 KiB).
+       - 56x56 Spatial 4-tile setup (4x 28x28 tiles): 73.5 KiB (tile-in) + 81.0 KiB (resident weights) + 73.5 KiB (tile-out) = 228 KiB memory span.
+    3. **Conclusion & Interpretation:**
+       - **Result: 28x28x96 natively fits (228 KiB). Only the 56x56 configuration mandates spatial tiling (Memory-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

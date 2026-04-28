@@ -8,37 +8,20 @@ competency_area: data
 bloom_level: analyze
 phase: inference
 title: DMA Buffer Overrun with BLE on ESP32-S3
-scenario: An ESP32-S3 (240 MHz dual-core, 512 KB SRAM, WiFi/BLE) is ingesting a continuous
-  16 kHz, 16-bit audio stream via I2S using DMA. The DMA is configured with a ping-pong
-  buffer, where each of the two buffers holds 1000 samples. The DSP task runs on Core
-  0, using the vector extensions to compute INT8 features in 15 ms per buffer. You
-  observe that whenever the BLE stack (also pinned to Core 0) executes its advertising
-  event, the system throws DMA buffer overflow errors. Explain why this happens based
-  on the system's temporal constraints, and calculate the maximum time the BLE stack
-  can block the core before causing an overflow.
-question: Why this happens based on the system's temporal constraints, and calculate
-  the maximum time the BLE stack can block the core before causing an overflow?
+scenario: 'An ESP32-S3 (240 MHz dual-core, 512 KB SRAM, WiFi/BLE) is ingesting a continuous 16 kHz, 16-bit audio stream via I2S using DMA. The DMA is configured with a ping-pong buffer, where each of the two buffers holds 1000 samples. The DSP task runs on Core 0, using the vector extensions to compute INT8 features in 15 ms per buffer. You observe that whenever the BLE stack (also pinned to Core 0) executes its advertising event, the system throws DMA buffer overflow errors.'
+question: 'Why does this happen based on the system''s temporal constraints, and what is the maximum time the BLE stack can block the core before causing an overflow?'
 details:
-  realistic_solution: The overflow happens because the BLE stack preempts the DSP
-    task for longer than the available timing headroom. In a real-time ping-pong DMA
-    setup, the CPU must finish processing the current buffer before the DMA finishes
-    filling the alternate buffer. The solution is to leverage the ESP32-S3's dual-core
-    architecture by pinning the DSP task to Core 1, isolating it from the BLE stack
-    on Core 0.
-  common_mistake: Candidates often suggest increasing the buffer size indefinitely
-    without realizing the ESP32-S3's 512 KB SRAM limit, or they fail to calculate
-    the exact timing headroom, assuming the 240 MHz clock speed is fast enough to
-    just 'catch up' later.
-  napkin_math: '1. Time to fill one DMA buffer = 1000 samples / 16,000 samples/sec
-    = 0.0625 seconds (62.5 ms).
-
-    2. CPU processing time per buffer = 15 ms.
-
-    3. Available idle time (headroom) before the next DMA interrupt = 62.5 ms - 15
-    ms = 47.5 ms.
-
-    If the BLE advertising event blocks Core 0 for more than 47.5 ms, the CPU cannot
-    finish processing in time, and the DMA will overwrite unread data.'
+  realistic_solution: 'The overflow happens because the BLE stack preempts the DSP task for longer than the available timing headroom. In a real-time ping-pong DMA setup, the CPU must finish processing the current buffer before the DMA finishes filling the alternate buffer. The solution is to leverage the ESP32-S3''s dual-core architecture by pinning the DSP task to Core 1, isolating it from the BLE stack on Core 0.'
+  common_mistake: |
+    **The Pitfall:** Increasing the buffer size indefinitely instead of calculating temporal headroom.
+    **The Rationale:** Candidates fail to calculate the exact timing headroom, assuming the 240 MHz clock speed is fast enough to just ''catch up'' later.
+    **The Consequence:** Memory exhaustion from oversized buffers, and eventual buffer overruns because the BLE blocking time still periodically exceeds the available compute window.
+  napkin_math: |
+    1. **Assumptions & Constraints:** 16 kHz audio. 1000 samples per buffer. DSP processing takes 15 ms.
+    2. **Calculations:**
+       - Time to fill one DMA buffer = 1000 samples / 16,000 samples/sec = 0.0625 seconds = 62.5 ms.
+       - Available idle time (headroom) before next DMA interrupt = 62.5 ms - 15 ms = 47.5 ms.
+    3. **Conclusion & Interpretation:** **If the BLE advertising event blocks Core 0 for >47.5 ms, the DMA overwrites unread data.** Result: Compute-Bound (Preemption).
 status: published
 provenance: imported
 requires_explanation: false

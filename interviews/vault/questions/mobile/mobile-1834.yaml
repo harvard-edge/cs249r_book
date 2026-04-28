@@ -8,19 +8,25 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Minimizing computational graph size for on-device fine-tuning on Snapdragon 8 Gen 3
-scenario: You are implementing LoRA (Low-Rank Adaptation) fine-tuning on Snapdragon 8 Gen 3 (8GB) for a 1B parameter LLM. Standard LoRA with rank=4 adds 2×rank trainable matrices per attention layer. The backward pass for 32 transformer layers with LoRA adapters takes 800ms, far too slow for interactive use.
-question: How would you shrink the autograd graph for LoRA fine-tuning a 1B LLM on Snapdragon 8 Gen 3?
+scenario: You are implementing LoRA fine-tuning on a device with 8GB RAM for a 1B parameter LLM. Standard LoRA with rank=4 adds 2xrank trainable matrices per attention layer. The backward pass for 32 transformer layers with LoRA adapters takes 800ms, far too slow for interactive use.
+question: How would you shrink the autograd graph for LoRA fine-tuning a 1B LLM?
 details:
-  realistic_solution: 'Wrap the frozen base model forward pass with torch.no_grad(). Compute frozen layer activations as detached tensors. Only the LoRA adapter computation (very small) needs the computational graph. This reduces backward graph size from 32 full attention layers to 32 LoRA adapters (each rank=4 matrix multiplication). Memory and time reduction: ~95%.'
+  realistic_solution: 'Wrap the frozen base model forward pass with torch.no_grad(). Compute frozen layer activations as detached tensors. Only the LoRA adapter computation (very small) needs the computational graph. This reduces backward graph size from 32 full attention layers to 32 LoRA adapters. Memory and time reduction: ~95%.'
   common_mistake: |
     **The Pitfall:** Keeping `requires_grad=True` on frozen base model parameters while fine-tuning with LoRA.
     **The Rationale:** Engineers think that correctly setting the optimizer to only update LoRA parameters is enough, but PyTorch still builds the computational graph for any operation where ANY tensor has `requires_grad=True`.
     **The Consequence:** This needlessly stores massive activation tensors for the full forward pass, wasting memory and dramatically slowing down the backward pass.
   napkin_math: |
-    - **Full attention backward:** 32 layers * (Q,K,V,O projections: 4 * 2048^2 * 2 bytes) = 32 * 32MB = 1GB activation storage.
-    - **LoRA adapters (rank=4):** 32 layers * 4 adapters * (2048*4 + 4*2048) * 2 bytes = 32 * 4 * 32KB = 4MB.
-    - **Backward time reduction:** 800ms * (4MB / 1GB) = ~3ms.
-    - **Conclusion:** Achieving a **267x speedup** by eliminating unnecessary graph construction.
+    1. **Assumptions & Constraints:**
+       - LLM Layers: 32.
+       - Base model dimensions: 2048^2.
+       - LoRA Rank: 4.
+    2. **Calculations:**
+       - Full attention backward: 32 layers x (4 projections x 2048^2 x 2 bytes) = 32 x 32MB = 1GB activation storage.
+       - LoRA adapters: 32 layers x 4 adapters x (2048x4 + 4x2048) x 2 bytes = 32 x 4 x 32KB = 4MB.
+       - Backward time reduction: 800ms x (4MB / 1GB) = ~3ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 267x Speedup** (Memory-Bandwidth-Bound).
 status: published
 provenance: imported
 requires_explanation: false

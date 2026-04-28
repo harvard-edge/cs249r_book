@@ -14,13 +14,12 @@ details:
   realistic_solution: Implement a cache eviction and prefetching architecture using a virtual memory manager. Map GPU HBM3 as L1 and host RAM as L2. Group KV blocks by token sequence. For a 70B model with 64 layers, 8 GQA KV heads, and 128 head dimension, the KV cache per token is 64 × 8 × 128 × 2 bytes × 2 (K+V) = 262,144 bytes (0.25 MB/token). At 100k tokens, one full context occupies 26.2 GB. Anticipate generation length and proactively offload inactive sequences to L2 via PCIe Gen4. When a sequence is scheduled, prefetch its KV blocks from L2 to L1 async. Use a dedicated CUDA stream for PCIe transfers to overlap with the H100's heavy compute during continuous batching.
   common_mistake: |
     **The Pitfall:** Synchronous swapping of KV blocks on a cache miss.
-    **The Rationale:** This stalls the decoding loop while waiting for PCIe transfers.
-    **The Consequence:** This drops utilization of the massive HBM3 bandwidth and drastically increases latency.
+    **The Rationale:** Treating GPU VRAM swapping exactly like standard OS CPU paging without accounting for continuous batching loop dynamics.
+    **The Consequence:** This stalls the decoding loop while waiting for PCIe transfers, dropping utilization of massive HBM3 bandwidth and drastically increasing latency.
   napkin_math: |
-    - 1. **Model Weights:** 70B params = 140GB FP16.
-    - 2. **Memory Available:** 8x H100 = 640GB HBM3. Available HBM = ~500GB.
-    - 3. **KV Cache Size:** 100k context, 64 layers, 8 GQA KV heads, 128 head_dim, FP16: 100k × 64 × 8 × 128 × 2 bytes × 2 (K+V) = 26.2 GB per sequence.
-    - 4. **PCIe Transfer:** With 8 GPUs swapping in parallel, PCIe Gen4 (32GB/s per GPU) can swap one 100k context in **~0.10s**.
+    1. **Assumptions & Constraints:** 70B parameters, 8x H100 (PCIe Gen4 at 32 GB/s per GPU). 100k context, 64 layers, 8 GQA heads, 128 head_dim, FP16 format.
+    2. **Calculations:** KV Cache per sequence = 100,000 × 64 × 8 × 128 × 2 bytes × 2 (K+V) = 26.2 GB. Distributing evenly, each GPU holds ~3.27 GB. PCIe transfer time = 3.27 GB / 32 GB/s = ~0.10s.
+    3. **Conclusion & Interpretation:** **Result: PCIe Gen4 swapping takes ~0.10s per sequence. PCIe-Bandwidth-Bound if not overlapped via async prefetching.**
 status: published
 provenance: imported
 requires_explanation: true

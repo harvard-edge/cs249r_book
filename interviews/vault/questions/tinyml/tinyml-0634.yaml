@@ -8,23 +8,30 @@ competency_area: reliability
 bloom_level: evaluate
 phase: inference
 title: The Deaf Automobile Watchdog
-scenario: You are the tech lead for a keyword-spotting model that runs on a Cortex-M4 in a fleet of 10,000 vehicles. After 6 months in the field, you get reports of the system 'going deaf' (stops responding until power-cycled). An engineer proposes enabling the hardware watchdog timer (WDT) to force a reboot if the main loop hangs for 2 seconds.
+scenario: >
+  You are the tech lead for a keyword-spotting model that runs on a Cortex-M4 in a fleet of 10,000 vehicles. After 6 months in the field, you get reports of the system 'going deaf' (stops responding until power-cycled). An engineer proposes enabling the hardware watchdog timer (WDT) to force a reboot if the main loop hangs for 2 seconds.
 question: Why is simply enabling a watchdog timer an insufficient fix for the vehicle voice assistant going deaf?
 details:
-  realistic_solution: 'The watchdog is a dangerous patch that masks a deeper issue: **unmonitored data drift**. The system isn''t hanging randomly; it''s almost certainly encountering input data that it cannot handle, a direct result of operating in the wild for months. The microphone''s characteristics can drift due to thermal cycles and aging, or the background noise profile can change with seasons (e.g., winter tire noise). This drift feeds pathological values into the feature extraction pipeline (e.g., MFCCs), which eventually generates NaNs or Infs. These values propagate through the model, corrupting its state until it hangs or crashes.'
+  realistic_solution: >
+    The watchdog is a dangerous patch that masks unmonitored data drift. The system isn't hanging randomly; it's encountering out-of-distribution (OOD) data due to microphone aging or seasonal noise changes. This drift feeds pathological values into the MFCC pipeline, generating NaNs or Infs which propagate through the model, corrupting its state until it hangs. A robust solution requires input validation, a boot counter to discard corrupted audio buffers, and OOD detection.
   common_mistake: |
     **The Pitfall:** Treating the symptom (a device hang) with a standard embedded watchdog patch.
     **The Rationale:** Engineers assume standard software lockups, ignoring that ML systems are highly susceptible to stateful failures from input data drift.
-    **The Consequence:** The watchdog triggers a reboot, but the drifted input (e.g., a bad microphone signal) is immediately reprocessed, causing an infinite reboot loop and keeping the device permanently deaf.
+    **The Consequence:** The watchdog triggers a reboot, but the drifted input is immediately reprocessed, causing an infinite reboot loop and keeping the device permanently deaf.
   napkin_math: |
-    - **Normal Boot & Execution:** Boot (500ms) + Inference (<200ms) < 2s WDT.
-    - **Pathological State:** Drifted input causes NaNs/Infs, crashing the model inference into an infinite loop.
-    - **Watchdog Intervention:** After 2s, WDT forces reboot.
-    - **Infinite Loop:** Device reboots (500ms), re-reads the same bad audio, hangs, and WDT reboots again after 2s.
-    - **Conclusion:** **The watchdog creates an infinite 2.5-second reboot cycle; a boot counter is required to discard the corrupted audio buffer.**
+    1. **Assumptions & Constraints:**
+       - Normal Execution: Boot (500ms) + Inference (<200ms) < 2s WDT.
+       - Pathological State: Drifted input causes NaNs/Infs, hanging the model.
+       - Watchdog Timeout: 2s.
+    2. **Calculations:**
+       - Normal cycle: 500ms + 200ms = 700ms < 2s WDT.
+       - Hang cycle: Device reboots (500ms), re-reads bad audio, hangs. WDT reboots after 2s.
+       - Total infinite loop cycle: 2s (hang) + 500ms (boot) = 2.5s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Infinite 2.5-second reboot cycle.** The watchdog creates a death spiral. **Bottleneck: Stateful Data Drift.**
   options:
   - A watchdog timer requires a dedicated RTOS to function correctly, which is missing from this bare-metal system.
-  - The system is experiencing unmonitored data drift. Bad inputs (e.g. from an aging microphone) cause NaN/Inf propagation that hangs the model. A watchdog just creates an infinite reboot loop, keeping the device deaf.
+  - The system is experiencing unmonitored data drift. Bad inputs cause NaN/Inf propagation that hangs the model. A watchdog just creates an infinite reboot loop.
   - A 2-second watchdog is too short for an automotive environment and will frequently trigger during normal operations like a cold engine start.
   - The watchdog resets the entire vehicle's CAN bus, which violates automotive safety integrity level (ASIL) standards.
   correct_index: 1

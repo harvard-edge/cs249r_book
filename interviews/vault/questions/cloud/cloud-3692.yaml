@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: Stage Imbalance in Heterogeneous Pipeline
-scenario: You deploy a 48-layer transformer in a 4-stage pipeline on 4x A100. Stages 1-3 hold 12 layers each but Stage 4 holds the 12 final transformer layers PLUS the language model head (unembedding, 50K vocab × 4096 = 800M parameters in BF16 = 1.6 GB extra). Stage 4 takes 35% longer than Stages 1-3.
-question: How much throughput is lost because Stage 4 is 35% slower, and how would you rebalance the 4-stage pipeline?
+scenario: "You deploy a 48-layer transformer in a 4-stage pipeline on 4x A100. Stages 1-3 hold 12 layers each but Stage 4 holds the 12 final transformer layers PLUS the language model head. Stage 4 takes 35% longer than Stages 1-3."
+question: "How much throughput is lost because Stage 4 is 35% slower, and how would you rebalance the 4-stage pipeline?"
 details:
   realistic_solution: "Move 2 transformer layers from Stage 4 to Stage 3 to compensate for the LM head overhead. New split: Stage 1: 13 layers, Stage 2: 13 layers, Stage 3: 14 layers, Stage 4: 8 layers + LM head. Profile Stage 4 time before and after to confirm balance. Alternatively, use pipeline schedule load balancing tools (e.g., Megatron-LM's automatic stage profiler)."
   common_mistake: |
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Engineers cleanly divide the N transformer layers by the number of pipeline stages, forgetting the massive computational cost of the LM head.
     **The Consequence:** A severely unbalanced pipeline where most GPUs idle while waiting for the final GPU to compute the massive softmax over the vocabulary.
   napkin_math: |
-    *   **Stage Times:** Let Stages 1-3 take 1.0 units of time; Stage 4 takes 1.35 units.
-    *   **Throughput Bottleneck:** Pipeline speed is dictated by the slowest stage (1.35).
-    *   **Loss Relative to Fastest Stage:** (1.35 - 1.0) / 1.35 = 0.259 (25.9%).
-    *   **Wasted Cost:** 26% of a 4x A100 node ($40/hr) is ~$10.40/hr.
-    *   **Result:** **~26% throughput loss and $10.40/hr wasted.**
+    1. **Assumptions & Constraints:**
+       - 4-stage pipeline. Stages 1-3 have 12 layers. Stage 4 has 12 layers + LM head.
+       - LM head: 200K vocab x 4096 hidden.
+    2. **Calculations:**
+       - LM head params: 200,000 * 4096 = 819M parameters.
+       - Memory in BF16: 819M * 2 bytes = 1.6 GB.
+       - Stage Times: Stages 1-3 take 1.0 units; Stage 4 takes 1.35 units.
+       - Throughput Loss Relative to Fastest Stage: (1.35 - 1.0) / 1.35 = 25.9%.
+       - Wasted Cost: 26% of 4x A100 node (~$40/hr) = $10.40/hr.
+    3. **Conclusion & Interpretation:**
+       **~26% throughput loss and $10.40/hr wasted. Result: Pipeline-Bound due to structural imbalance.**
 status: published
 provenance: imported
 requires_explanation: false

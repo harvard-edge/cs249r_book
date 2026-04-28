@@ -8,20 +8,24 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Memory-Optimal Operator Execution Order
-scenario: Your model on Cortex-M7 (512 KB SRAM) is a DAG: operator C consumes outputs of both A and B. Operator D consumes only B's output. Execution order 1 is A → B → C → D. Execution order 2 is A → B → D → C. Tensor sizes are A output = 40 KB, B output = 60 KB, C output = 30 KB, D output = 20 KB.
+scenario: 'A DAG model executes Operator C (consuming A and B) and Operator D (consuming B). Tensors sized: A=40 KB, B=60 KB, C=30 KB, D=20 KB. Two candidate routes exist.'
 question: "Which execution order (A→B→C→D or A→B→D→C) has lower peak arena usage on a 512 KB Cortex-M7, and what is the general principle?"
 details:
-  realistic_solution: 'Analyze each order: Order 1 (A→B→C→D): After A: A_out alive (40 KB). Peak so far: 40. After B: A_out + B_out alive (40 + 60 = 100 KB). Peak: 100. During C: A_out + B_out + C_out needed (40 + 60 + 30 = 130 KB). C consumes A_out and B_out. After C: B_out + C_out alive (60 + 30 = 90 KB). A_out freed because C was its last consumer. Wait — does D need B_out? Yes. So after C: B_out (60) + C_out (30) = 90 KB. During D: B_out + C_out + D_out = 60 + 30 + 20 = 110 KB. Peak: 130 KB. Order 2 (A→B→D→C): After A: 40 KB. After B: 100 KB. During D: A_out + B_out + D_out = 40 + 60 + 20 = 120 KB. After D: B_out freed (D was its last consumer if C doesn''t need B). Wait — does C need B_out? C consumes A and B. So B_out stays alive. After D: A_out + B_out + D_out = 120 KB. During C: A_out + B_out + D_out + C_out = 40 + 60 + 20 + 30 = 150 KB. Peak: 150 KB. Order 1 wins (130 vs 150 KB). Principle: schedule operators that free the most memory as early as possible. Execute operators that consume large tensors first to free them sooner.'
+  realistic_solution: Apply greedy topological scheduling. The fundamental spatial heuristic demands operations executing against large matrix prerequisites fire first to proactively force intermediate garbage collection phases.
   common_mistake: |
-    **The Pitfall:** Assuming the execution order doesn't matter because the same tensors are ultimately produced and consumed.
-    **The Rationale:** Candidates treat memory allocation like a static pool rather than a dynamic timeline of overlapping lifetimes.
-    **The Consequence:** The order drastically changes which tensors are alive simultaneously, directly affecting peak memory and causing OOM errors.
+    **The Pitfall:** Assuming execution routes maintain entirely mathematically neutral memory outcomes.
+    **The Rationale:** Candidates model spatial memory footprints identically to statically compiled blocks rather than cascading temporal overlaps.
+    **The Consequence:** Reversing specific routes structurally aggregates massive dead tensors inside live limits, immediately triggering deep OOM faults.
   napkin_math: |
-    * Order 1 peak: max(40, 100, 130, 110) = **130 KB**.
-    * Order 2 peak: max(40, 100, 120, 150) = **150 KB**.
-    * Difference: 20 KB (15% reduction).
-    * On a 512 KB MCU, 20 KB can be the difference between fitting and not fitting.
-    * For complex DAGs, optimal scheduling is NP-hard; heuristics like topological sort with 'largest-freed-first' achieve near-optimal results.
+    1. **Assumptions & Constraints:**
+       - Execution route Option 1: A -> B -> C -> D.
+       - Execution route Option 2: A -> B -> D -> C.
+       - Spatial limits: A(40 KB), B(60 KB), C(30 KB), D(20 KB).
+    2. **Calculations:**
+       - Option 1 spatial progression: Max of (40 KB after A), (100 KB after B), (130 KB during C execution), (110 KB during D execution). Peak trace = 130 KB.
+       - Option 2 spatial progression: Max of (40 KB after A), (100 KB after B), (120 KB during D execution), (150 KB during C execution). Peak trace = 150 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Route A->B->C->D yields a superior 130 KB peak by releasing temporal inputs systematically (Scheduling-Bound Optimization).**
 status: published
 provenance: imported
 requires_explanation: false

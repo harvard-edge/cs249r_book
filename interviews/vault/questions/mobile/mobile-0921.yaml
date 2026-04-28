@@ -8,21 +8,26 @@ competency_area: reliability
 bloom_level: apply
 phase: training
 title: 'Fault Tolerance: Realize Checkpoint Architecture for Continuous Mobile Personalization'
-scenario: Realize the complete checkpoint architecture for an on-device personalization system on A17 Pro (35 TOPS, 8GB RAM) that trains nightly for 10 minutes and serves inference 24/7.
+scenario: Realize the complete checkpoint architecture for an on-device personalization system that trains nightly for 10 minutes and serves inferences asynchronously 24/7.
 question: How would you specify storage layout, checkpoint schedule, retention policy, and recovery paths for an on-device training system?
 details:
-  realistic_solution: 'Two separate state objects: (1) Inference state: LoRA weights (fp32, 4MB). (2) Training state: full checkpoint (weights + optimizer, 24MB). Different retention policies and update frequency.'
+  realistic_solution: 'Decouple the architecture into two explicitly separate state objects: (1) Inference State: Lightweight LoRA weights (fp32, 4MB) loaded instantly for serving. (2) Training State: The full heavy checkpoint (weights + Adam optimizer moments, 24MB). Apply distinct retention policies: keep only the latest serving weights, but hold a rolling window of 3 training checkpoints to prevent catastrophic corruption.'
   common_mistake: |
-    **The Pitfall:** Not separating inference model state from training state.
-    **The Rationale:** Using standard PyTorch checkpointing paradigms on a constrained mobile storage system.
-    **The Consequence:** App restarts during the day load massive 24MB optimizer states into RAM unnecessarily, wasting I/O and memory.
+    **The Pitfall:** Refusing to structurally separate the inference model state from the heavy training optimizer state.
+    **The Rationale:** Using standard server-side PyTorch checkpointing paradigms on a constrained mobile NAND flash system.
+    **The Consequence:** App restarts load massive 24MB optimizer states into RAM completely unnecessarily, wasting IO operations and risking background app eviction.
   napkin_math: |
-    - Storage: Base model (500 MB) + Inference LoRA (4 MB) + Training Ckpt (24 MB * 3 = 72 MB). Total = 576 MB.
-    - Write speed: 24 MB at 3 GB/s flash = ~8 ms.
-    - Checkpoints: Every 3 mins (3 total per 10-min window).
-    - Recovery (Inference): Load 4 MB (4 ms).
-    - Recovery (Training): Load 24 MB (8 ms).
-    - **Separating the 4 MB inference state from the 24 MB training state prevents massive I/O overheads on app launch.**
+    1. **Assumptions & Constraints:**
+       - Base Model: 500 MB. Inference LoRA: 4 MB (FP32).
+       - Optimizer State (Adam): 24 MB.
+       - Checkpoint Frequency: Every 3 minutes (3 checkpoints per 10-min window).
+       - Device Flash Write Speed: ~3 GB/s.
+    2. **Calculations:**
+       - Single Training Checkpoint Size: 4 MB (LoRA) + 24 MB (Optimizer) = 28 MB.
+       - Write latency to Flash: 28 MB / 3000 MB/s = ~9.3 ms.
+       - Storage footprint for rolling recovery (3 ckpts): 28 MB * 3 = 84 MB.
+    3. **Conclusion & Interpretation:**
+       **Result: I/O-Bound (Optimized). Decoupling the 4 MB serving weights from the 24 MB training state prevents severe I/O read penalties during 24/7 app launches.**
 status: published
 provenance: imported
 requires_explanation: false

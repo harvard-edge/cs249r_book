@@ -8,8 +8,8 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: The RoPE Recomputation Paradox
-scenario: You optimize a Transformer for a 128k context window. The original code reads pre-computed RoPE sin/cos matrices from HBM. You rewrite the kernel to dynamically recompute the trig functions on the fly for every token. FLOPs increase by 400%, but the kernel executes 4× faster.
-question: Why does recomputing RoPE sin/cos on the fly make the kernel 4× faster despite 400% more FLOPs?
+scenario: You optimize a Transformer for a 128k context window. By rewriting the RoPE kernel to dynamically recompute sin/cos on the fly instead of reading a pre-computed HBM table, FLOPs increase by 400% but the kernel executes 4x faster.
+question: Why does recomputing RoPE sin/cos on the fly make the kernel 4x faster despite 400% more FLOPs?
 details:
   realistic_solution: 'The original RoPE was deeply memory-bandwidth bound. The pre-computed sin/cos table for 128K context (65.5 MB) causes TLB thrashing and cache-line waste on scattered lookups, reducing effective HBM bandwidth to ~1 TB/s. By recomputing sin/cos on the fly, you: (1) eliminate the table reads entirely (halving HBM traffic), and (2) convert scattered memory access into sequential Q/K reads at full 2.0 TB/s bandwidth. The extra trig FLOPs (~688 MFLOPs) execute in 2.2 μs while memory takes 32.8 μs — completely hidden. Net result: 4× speedup from 131 μs → 32.8 μs. This is a textbook roofline shift: trading cheap compute for expensive memory access.'
   common_mistake: |
@@ -17,11 +17,16 @@ details:
     **The Rationale:** Over-applying CPU-era caching intuition without understanding the extreme compute-to-memory-bandwidth ratio of modern GPUs.
     **The Consequence:** Leaving substantial performance on the table by writing heavily memory-bound, cache-thrashing kernels.
   napkin_math: |
-    - **Pre-computed RoPE:** The sin/cos table for 128K context is ~65.5 MB. Lookups are scattered, thrashing the cache and dropping effective bandwidth to ~1.0 TB/s. Time to read 131 MB $\approx 131\text{ }\mu\text{s}$.
-    - **Recomputed RoPE:** Eliminates sin/cos table reads. Only Q and K are read sequentially. Total HBM traffic drops by half to 65.5 MB.
-    - Sequential reads hit full 2.0 TB/s bandwidth. Time $\approx 32.8\text{ }\mu\text{s}$.
-    - The extra compute (688 MFLOPs) takes ~2.2 $\mu$s on a 312 TFLOPS GPU.
-    - **Because compute time (2.2 $\mu$s) is hidden under memory time (32.8 $\mu$s), halving memory traffic speeds the kernel up 4× (131/32.8).**
+    1. **Assumptions & Constraints:**
+       - Pre-computed table: ~65.5 MB (scattered reads, effective ~1.0 TB/s).
+       - Recomputed: Sequentially reads Q and K (effective 2.0 TB/s).
+       - Hardware: 312 TFLOPS GPU.
+    2. **Calculations:**
+       - Pre-computed read time: 131 MB / 1.0 TB/s = ~131 \mu s.
+       - Recomputed read time: 65.5 MB / 2.0 TB/s = ~32.8 \mu s.
+       - Recomputation compute time: 688 MFLOPs / 312 TFLOPS = ~2.2 \mu s.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bandwidth Bound.** Because the 2.2 \mu s compute overhead is entirely hidden under the 32.8 \mu s memory time, eliminating scattered table reads speeds the kernel up 4x.
 status: published
 provenance: imported
 requires_explanation: false
@@ -30,20 +35,7 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The napkin math for the recomputation time is off by a factor of 1000; 327 MFLOPs on a 312 TFLOPS GPU
-  takes ~1 microsecond, not ~0.001 microseconds.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-tags:
-- transformers
-- triton
-- kernel-optimization

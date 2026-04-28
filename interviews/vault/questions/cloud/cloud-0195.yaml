@@ -11,18 +11,22 @@ title: The Underutilized Accelerator
 scenario: You are optimizing an LLM inference service running on A100 GPUs. You have already implemented dynamic batching, where requests are grouped together until the GPU queue is full or a timeout is reached. However, under bursty traffic with highly variable input sequence lengths, you still observe significant GPU underutilization and high tail latencies.
 question: What is the fundamental limitation of standard dynamic batching in this scenario, and what advanced technique maximizes GPU throughput and reduces tail latency?
 details:
-  realistic_solution: 'The fundamental limitation of standard dynamic batching is that it processes requests sequentially within a batch and waits for *all* sequences in a batch to complete before moving to the next. For LLMs, sequences have variable lengths and generate tokens one by one. If one sequence in a batch finishes early, its allocated GPU memory and compute resources remain idle while other, longer sequences in the same batch continue decoding. This leads to memory fragmentation and GPU underutilization for the entire batch. Continuous batching (iteration-level scheduling) solves this.'
+  realistic_solution: The fundamental limitation of standard dynamic batching is that it processes requests sequentially within a batch and waits for *all* sequences to complete before moving to the next. For variable length LLM responses, early-finishing sequences strand allocated GPU memory and compute resources, leading to massive memory fragmentation. Continuous batching (iteration-level scheduling, e.g., ORCA) solves this by injecting new requests at the token-generation level rather than the sequence level.
   common_mistake: |
     **The Pitfall:** Recommending larger batch sizes.
     **The Rationale:** Larger batches increase throughput for homogeneous requests, so engineers reflexively apply it to variable lengths.
-    **The Consequence:** Standard dynamic batching still struggles with variable lengths; the system waits for full batches, leading to idle GPU cycles and increased tail latency.
+    **The Consequence:** Standard dynamic batching still struggles with variable lengths; the system waits for full batches to finish, leading to massive memory fragmentation and idle GPU cycles.
   napkin_math: |
-    1. **Batch Sequence Lengths:** [100, 200, 300, 400] tokens.
-    2. **Total Tokens to Decode:** 100 + 200 + 300 + 400 = 1,000 tokens.
-    3. **Standard Batching Time:** Governed by the longest sequence (400 tokens).
-    4. **Allocated GPU Slots:** 4 requests × 400 steps = 1,600 token execution slots.
-    5. **Wasted Cycles:** 1,600 - 1,000 = 600 slots are idle (waiting for the 400-token sequence to finish).
-    6. **Result: GPU Utilization is 1,000 / 1,600 = 62.5%, leading to high fragmentation.**
+    1. **Assumptions & Constraints:**
+       - Batch of 4 requests.
+       - Sequence lengths: 100, 200, 300, 400 tokens.
+    2. **Calculations:**
+       - Total Tokens to Decode: 100 + 200 + 300 + 400 = 1,000 tokens.
+       - Standard Batching Execution Time: Governed by the 400-token sequence.
+       - Allocated GPU Slots: 4 requests * 400 steps = 1,600 execution slots.
+       - Wasted Cycles: 1,600 - 1,000 = 600 slots.
+    3. **Conclusion & Interpretation:**
+       - **Result: Fragmentation-Bound.** GPU utilization drops to 62.5% (1,000 / 1,600) due to idle waiting. Continuous batching (iteration-level scheduling) is required to reclaim these cycles.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,8 +8,8 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: RDMA Connection Scaling for 10K GPU Clusters
-scenario: You are architecting the RDMA transport for a 16,384-MI300X GPU cluster. Traditional RDMA requires O(N²) QP connections for all-to-all communication.
-question: What are the QP state memory and setup-time costs for naive RDMA at 16,384 MI300X GPUs, and what sub-quadratic design would you use?
+scenario: You are architecting the RDMA transport for a 16,384 GPU cluster. Traditional RDMA requires O(N²) QP connections for all-to-all communication.
+question: What are the QP state memory and setup-time costs for naive RDMA at 16,384 GPUs, and what sub-quadratic design would you use?
 details:
   realistic_solution: 'Naive O(N²): 16,384 GPUs × 16,383 peers × 8 rails = 2.15 billion QPs. Per QP: ~1KB state on HCA. Per GPU: 16,383 × 8 = 131K QPs × 1KB = 128MB — exceeds ConnectX-7''s 256MB HCA memory (QPs share with MRs, CQs, etc.). Connection setup: 131K QPs × 0.3ms/QP = 39.3 seconds — too slow for elastic scaling. Scalable architecture: (1) Shared Receive Queue (SRQ): all QPs on a port share one receive queue. Reduces receive buffer memory from O(N) to O(1) per port. (2) Dynamic Connected (DC) transport (Mellanox extension): single QP handles connections to all peers by swapping connection context on each message. Per GPU: 8 DC QPs (one per rail) instead of 131K. Memory: 8 × 1KB = 8KB vs 128MB. 16,000× reduction. (3) Connection caching: DC maintains an LRU cache of recently-used peer contexts. Cache hit = 0 overhead. Cache miss = ~5μs to fetch context from host memory. For ring AllReduce (each GPU talks to 2 neighbors): cache hit rate > 99%. (4) Hybrid: use DC for AllReduce (N peers, infrequent connection changes) and RC for pipeline-parallel (fixed peers, latency-critical). Estimate 16 RC QPs (pipeline) + 8 DC QPs (AllReduce) = 24 QPs per GPU × 1KB = 24KB. (5) Connection setup: 24 QPs × 0.3ms = 7.2ms (vs 39 seconds). 5,400× faster.'
   common_mistake: |
@@ -17,12 +17,19 @@ details:
     **The Rationale:** Forgetting that RDMA connection states reside on the heavily constrained NIC HCA hardware memory, not system RAM.
     **The Consequence:** The cluster simply fails to initialize, or elasticity becomes impossible due to agonizing 40-second connection negotiation stalls.
   napkin_math: |
-    - **Naive O(N²)**: 16,383 peers × 8 rails = 131K QPs per GPU.
-    - **HCA Memory Cost**: 131K QPs × 1KB = **128MB**. Exceeds a ConnectX-7's safe limits.
-    - **Connection Setup**: 131K QPs × 0.3ms = **~39 seconds** setup time per node.
-    - **DC Transport Alternative**: 8 Dynamic Connected QPs (1 per rail) per GPU. Memory drops to **8KB** (16,000× reduction).
-    - **Setup Impact**: 24 QPs (Hybrid RC/DC) × 0.3ms = **7.2ms** (5,400× faster).
-    - **Result**: Shared Receive Queues (SRQ) and Dynamic Connected (DC) transport solve the O(N²) memory and latency wall.
+    1. **Assumptions & Constraints:**
+       - Cluster size: 16,384 GPUs.
+       - 8 rails (NICs) per GPU. QP state size: ~1KB.
+       - ConnectX-7 HCA memory limit: ~256MB.
+       - QP setup time: ~0.3ms per QP.
+    2. **Calculations:**
+       - Naive O(N²) QPs per GPU: 16,383 peers × 8 rails = 131,064 QPs.
+       - Naive HCA Memory: 131,064 × 1KB = ~131MB (approaching limits with MRs/CQs).
+       - Naive Setup Time: 131,064 × 0.3ms = 39.3 seconds per node.
+       - Dynamic Connected (DC) QPs: 8 QPs (1 per rail).
+       - DC Memory: 8 × 1KB = 8KB (16,000× reduction).
+       - Hybrid RC/DC Setup (24 QPs): 24 × 0.3ms = 7.2ms.
+    3. **Conclusion & Interpretation:** **Naive O(N²) RDMA exhausts HCA memory and causes 39s setup stalls; Shared Receive Queues (SRQ) and DC transport reduce state by 16,000×. Result: HCA-Memory-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

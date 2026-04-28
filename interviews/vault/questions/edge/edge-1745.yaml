@@ -8,20 +8,24 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Distilling a Hybrid Object Detector for Jetson Orin
-scenario: You are deploying a real-time object detection model for an autonomous delivery robot on an NVIDIA Jetson Orin. The baseline teacher model is a heavy vision transformer that is highly accurate but runs at only 5 FPS and saturates the 60W TDP. You plan to use knowledge distillation to train a smaller, hybrid CNN-Transformer student model.
+scenario: A heavy vision transformer running at 5 FPS is distilled into a hybrid CNN-Transformer student model to achieve 30 FPS on a Jetson Orin (60W TDP).
 question: How would you design feature distillation and size the student CNN-Transformer to hit 30 FPS while using the Orin's Ampere GPU and DLA efficiently?
 details:
-  realistic_solution: The optimal strategy uses intermediate feature distillation, aligning the teacher's attention maps with the student's CNN and transformer stages. To utilize the Jetson Orin efficiently, the student model should be designed with heavy convolutional blocks early in the network to run on the DLA, followed by lightweight transformer blocks mapped to the Ampere GPU. The distillation loss must explicitly force the DLA-bound CNN features to mimic the rich semantic representations of the teacher's early layers, ensuring no accuracy drop when the workload transitions between the two accelerators.
+  realistic_solution: Implement intermediate feature distillation to align the heavy teacher's attention maps with the student's stages. Architecturally, the student must be heavily front-loaded with convolutional blocks designed specifically to compile down to the Orin's Deep Learning Accelerator (DLA). The subsequent lightweight transformer blocks map to the Ampere GPU. The distillation loss forces the DLA-bound CNN features to mimic the rich semantic representations of the teacher, ensuring maximum heterogeneous hardware utilization without accuracy loss.
   common_mistake: |
-    **The Pitfall:** Proposing standard logit-only distillation and uniform student sizing.
-    **The Rationale:** Candidates fail to transfer the complex spatial reasoning of the heavy teacher and ignore the heterogeneous hardware capabilities of the Orin.
-    **The Consequence:** The resulting model fails to partition cleanly between the Ampere GPU (better for custom ops) and the DLA (dense convolutions), leading to poor hardware utilization.
+    **The Pitfall:** Proposing uniform student sizing and logit-only distillation.
+    **The Rationale:** Treating the hardware as a monolithic compute pool rather than recognizing the severe limitations of the DLA regarding attention operations.
+    **The Consequence:** The model fails to partition cleanly; convolutions spill over onto the GPU, causing resource contention and missing the 30 FPS target.
   napkin_math: |
-    - **Target frame time:** 1000ms / 30 FPS = 33.3ms.
-    - **Theoretical compute per frame:** 275 TOPS / 30 FPS = 9.16 Tera-Operations (TOPs).
-    - **Practical compute budget:** Assuming realistic 35% utilization (due to 32 GB LPDDR5 bandwidth limits) = **~3.2 TOPs (~1.6 TMACs) per frame**.
-    - **Sizing target:** Size student at 1.0-1.2 TMACs.
-    - **Mapping:** ~800 GMACs of convolutions to DLA, ~300 GMACs of attention/routing to Ampere GPU.
+    1. **Assumptions & Constraints:**
+       - Target: 30 FPS. Frame time: 33.3 ms.
+       - Orin Compute: 275 TOPS. Realistic Utilization (due to memory): ~35%.
+    2. **Calculations:**
+       - Theoretical Compute/Frame: 275 TOPS / 30 FPS = 9.16 TOPs.
+       - Practical Budget: 9.16 TOPs * 0.35 = ~3.2 TOPs (~1.6 TMACs).
+       - Proposed Mapping: ~800 GMACs to DLA (CNN), ~300 GMACs to Ampere (Transformer).
+    3. **Conclusion & Interpretation:**
+       - **Result: Hardware-Mapping Bound. Sizing the student at ~1.1 TMACs and splitting workloads ensures 30 FPS within the thermal limit.**
 status: published
 provenance: imported
 requires_explanation: false

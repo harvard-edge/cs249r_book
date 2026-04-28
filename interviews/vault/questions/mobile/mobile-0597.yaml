@@ -8,22 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The Fusion Illusion
-scenario: A junior engineer on your team has applied 50% unstructured weight pruning to a MobileNetV2 model, reducing its theoretical FLOPs by half. However, when they deploy it to an iPhone with an A17 Pro chip using CoreML, the end-to-end latency only improves by 10%. They are confused, as they expected a speedup closer to 2x.
+scenario: "A junior engineer on your team has applied 50% unstructured weight pruning to a MobileNetV2 model, reducing its theoretical FLOPs by half. However, when they deploy it to an iPhone with an A17 Pro chip using CoreML, the end-to-end latency only improves by 10%. They are confused, as they expected a speedup closer to 2x."
 question: "How would you analyze the interaction between the CoreML runtime, the A17 Pro's hardware, and the pruned model to explain this disappointing result?"
 details:
   realistic_solution: |
-    The root cause is the trade-off between computation and memory access overhead, a classic roofline problem. Unstructured pruning, while reducing FLOPs, breaks the dense, regular structure of convolutions that CoreML's compiler is heavily optimized to fuse. The original, dense model allowed CoreML to fuse multiple layers (e.g., Conv-BN-ReLU) into a single, highly efficient kernel. This minimizes memory roundtrips to the much slower LPDDR5 RAM. The pruned model, with its sparse weight matrices, forces CoreML to use generic, unfused operators. This results in many more individual kernel launches and significantly more data movement between the ANE's SRAM and the device's main memory, making the model memory-bound. The small latency improvement comes from the reduced compute time, but it's almost entirely negated by the massive increase in memory access overhead.
+    Unstructured pruning degrades dense matrix representations into sparse, irregular structures. This completely shatters the CoreML compiler's ability to fuse adjacent operators (e.g., Conv-BN-ReLU). Instead of a single highly-optimized ANE kernel, the graph fragments into disjointed operators, triggering massive read/write traffic to LPDDR5X. The theoretical FLOP reduction is entirely eclipsed by the newly introduced memory-access overhead.
   common_mistake: |
     **The Pitfall:** Believing that FLOPs are the primary driver of latency on mobile NPUs.
-    **The Rationale:** Engineers often ignore the fact that unstructured pruning creates sparse, irregular memory access patterns.
-    **The Consequence:** They pursue unstructured pruning strategies that are hostile to the hardware's architecture and the compiler's optimizations, resulting in poor real-world speedups.
+    **The Rationale:** Engineers often ignore the fact that unstructured pruning creates sparse, irregular memory access patterns that break compiler fusion.
+    **The Consequence:** Pursuing unstructured pruning strategies that are hostile to the hardware, resulting in negligible real-world speedups.
   napkin_math: |
-    - **A17 Pro ridge point:** ~683 Ops/Byte (Arithmetic Intensity required to be compute-bound).
-    - **Dense MobileNetV2 AI:** ~15-20 Ops/Byte (heavily memory-bound).
-    - **50% unstructured pruning:** Halves FLOPs, keeps memory footprint roughly the same (sparse indices + dense memory access patterns).
-    - **Pruned model AI:** Drops to ~7.5-10 Ops/Byte.
-    - Both are far below 683 Ops/Byte, so latency is dominated by memory bandwidth, not compute.
-    - **Result:** **Halving compute (FLOPs) provides very little end-to-end speedup.**
+    1. **Assumptions & Constraints:**
+       - Hardware: A17 Pro. Ridge point: ~683 Ops/Byte.
+       - Dense MobileNetV2 AI (Arithmetic Intensity): ~15-20 Ops/Byte.
+       - Pruning: 50% unstructured (halves FLOPs, keeps memory footprint ~same due to sparse indices).
+    2. **Calculations:**
+       - Pruned AI: Drops to ~7.5-10 Ops/Byte.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency is memory-bound.** Both dense and sparse models operate far below the ridge point. Halving compute yields minimal latency gains because the system is restricted by a **memory-bandwidth bottleneck**.
 status: published
 provenance: imported
 requires_explanation: false

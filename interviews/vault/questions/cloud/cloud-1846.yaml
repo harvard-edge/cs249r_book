@@ -8,19 +8,24 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Evaluating RNN Optimization Strategies on A100s
-scenario: Your team is training a sequence model on a cluster of NVIDIA A100 GPUs for sequences of length 2048. Profiling reveals the legacy LSTM model achieves only ~15% GPU compute utilization, whereas a baseline Transformer reaches ~60%. A performance engineer proposes investing in CUDA graphs and custom fused kernels for the LSTM to achieve Transformer-level GPU utilization.
+scenario: Your team is training a sequence model on a cluster of GPUs for sequences of length 2048. Profiling reveals the legacy LSTM model achieves only ~15% GPU compute utilization, whereas a baseline Transformer reaches ~60%. A performance engineer proposes investing in CUDA graphs and custom fused kernels for the LSTM to achieve Transformer-level GPU utilization.
 question: Can CUDA graphs and custom fused kernels make the 2048-step LSTM reach Transformer-level GPU utilization, or is the bottleneck algorithmic?
 details:
-  realistic_solution: Reject the proposal. While kernel fusion reduces CPU-bound kernel launch overhead, it cannot resolve the inherent O(N) algorithmic sequential dependency of recurrent networks. Time step 't' strictly waits on the hidden state of 't-1'. Consequently, the massive parallel execution units (SMs) of the A100 will remain fundamentally underutilized because the computation cannot be parallelized across the sequence length dimension.
+  realistic_solution: Reject the proposal. While kernel fusion reduces CPU-bound kernel launch overhead, it cannot resolve the inherent O(N) algorithmic sequential dependency of recurrent networks. Time step 't' strictly waits on the hidden state of 't-1'. Consequently, the massive parallel execution units (SMs) of the GPU will remain fundamentally underutilized because the computation cannot be parallelized across the sequence length dimension.
   common_mistake: |
     **The Pitfall:** Believing software-level execution overheads are the primary cause of low GPU utilization.
     **The Rationale:** Candidates think that fusing kernels will eliminate enough latency to saturate the GPU, ignoring the inherent algorithmic sequential dependencies of RNNs.
     **The Consequence:** Wasting months of engineering effort on low-level CUDA optimizations that yield negligible throughput gains.
   napkin_math: |
-    - **LSTM Step Compute:** A hidden size of 1024 requires a matrix multiply of [1, 2048] x [2048, 4096], yielding ~16M FLOPs.
-    - **GPU Capacity:** An A100 delivers 312 TFLOPs (FP16), or ~300M FLOPs per microsecond.
-    - **Algorithmic Bottleneck:** The GPU completes this small matrix multiply almost instantly, leaving SMs idle while waiting for step t+1 to begin.
-    - **Conclusion:** **The limitation is O(N) sequential dependency, not kernel launch overhead. Fusing kernels won't fix this.**
+    1. **Assumptions & Constraints:**
+       - Sequence length: 2048.
+       - Hidden size: 1024.
+       - GPU Capacity: 312 TFLOPS (FP16), or ~300M FLOPs per microsecond.
+    2. **Calculations:**
+       - LSTM Step Compute: Matrix multiply of [1, 2048] x [2048, 4096] yields ~16M FLOPs.
+       - GPU Saturation check: 16M FLOPs is negligible compared to 300M FLOPs/μs capacity.
+       - Algorithmic Bottleneck: The GPU completes this small matrix multiply almost instantly, leaving SMs idle while waiting for step t+1 to begin.
+    3. **Conclusion & Interpretation:** **The limitation is the O(N) sequential dependency, not kernel launch overhead. Fusing kernels won't fix this. Result: Algorithm-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

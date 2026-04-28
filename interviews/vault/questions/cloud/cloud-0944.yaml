@@ -8,21 +8,24 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Canary Traffic Batching Timeouts
-scenario: You route 5% of 1,000 global QPS to a new canary model via dynamic batching. Global P99 latency instantly spikes from 100ms to 455ms, despite the canary GPU execution time being only 55ms and utilization remaining low.
-question: What is the root cause of the P99 latency spike, and how do you resolve it?
+scenario: 'You route 5% of 1,000 global QPS to a new canary model via dynamic batching. Global P99 latency instantly spikes from 100ms to 455ms, despite the canary GPU execution time being only 55ms and utilization remaining low.'
+question: 'What is the root cause of the P99 latency spike, and how do you resolve it?'
 details:
-  realistic_solution: The reduced canary traffic is insufficient to quickly fill the dynamic batching window, causing requests to hit the maximum delay timeout. Verify by checking model server queue times. Resolve by using shadow traffic (100% duplication) instead of a split, or by tuning max_batch_delay specifically for the canary.
+  realistic_solution: 'The reduced canary traffic is insufficient to quickly fill the dynamic batching window, causing requests to hit the maximum delay timeout. Verify by checking model server queue times. Resolve by using shadow traffic (100% duplication) instead of a split, or by tuning max_batch_delay specifically for the canary.'
   common_mistake: |
     **The Pitfall:** Blaming model architecture, cold starts, or network routing overhead.
     **The Rationale:** Candidates fail to realize that splitting traffic mathematically alters the accumulation rate of dynamic batching windows.
     **The Consequence:** Wasting time profiling the model code when the issue is purely an artifact of the batching configuration interacting with low QPS.
   napkin_math: |
-    1. **Global QPS:** 1000.
-    2. **Canary QPS (5%):** 50 QPS.
-    3. **Batch Fill Time:** If target batch size is 32, time to fill = 32 / 50 QPS = 640ms.
-    4. **Timeout:** If `max_batch_delay` is 400ms, every canary request waits the full 400ms before execution.
-    5. **Impact:** Canary traffic (5%) exceeds the P99 threshold (1%). P99 Latency = 400ms (queue) + 55ms (compute) = 455ms.
-    **Conclusion:** The small fractional traffic starves the batching window, triggering the max delay timeout.
+    1. **Assumptions & Constraints:**
+       - Target batch size: 32. Max batch delay: 400 ms.
+       - Global traffic: 1000 QPS. Canary traffic (5%): 50 QPS.
+       - GPU compute time: 55 ms.
+    2. **Calculations:**
+       - Canary time to fill batch naturally = 32 requests / 50 QPS = 640 ms.
+       - Since 640 ms > 400 ms timeout, every canary request hits the `max_batch_delay`.
+       - P99 Latency = 400 ms (queue) + 55 ms (compute) = 455 ms.
+    3. **Conclusion & Interpretation:** **Result: Latency-Bound**. The mathematically low canary QPS inherently starves the dynamic batching window, forcing the system into max timeout states regardless of GPU speed.
 status: published
 provenance: imported
 requires_explanation: false

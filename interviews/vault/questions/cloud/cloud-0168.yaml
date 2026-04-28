@@ -7,8 +7,8 @@ topic: batching-strategies
 competency_area: latency
 bloom_level: evaluate
 phase: inference
-title: The Continuous Batching Paradox: Batching Strategies
-scenario: Your team is serving a 70B parameter summarization model on H100s. To improve GPU utilization, you replace static batching with a continuous batching strategy. Average throughput triples, and utilization is stable at 80%. However, you receive an alert that P99 Time-To-First-Token (TTFT) has increased by 500ms, violating your 250ms SLA for interactive (short prompt) users.
+title: 'The Continuous Batching Paradox: Batching Strategies'
+scenario: Your team is serving a 70B parameter summarization model. To improve GPU utilization, you replace static batching with a continuous batching strategy. Average throughput triples, and utilization is stable at 80%. However, you receive an alert that P99 Time-To-First-Token has increased by 500ms, violating your 250ms SLA for interactive users.
 question: Why would a continuous batching strategy catastrophically degrade P99 TTFT for your most sensitive users?
 details:
   realistic_solution: 'This is a classic Head-of-Line Blocking problem introduced by a naive FIFO continuous batcher. Continuous batching combines requests that arrive close together into a single dynamic batch. If a short, fast interactive query arrives right after a long, slow summarization query, the batcher groups them. The GPU processes the entire batch in parallel, but the short query is stuck waiting for the long query to finish its prefill. The fix is not to remove continuous batching, but to implement priority queuing where high-priority requests can bypass the queue of long-running jobs.'
@@ -17,10 +17,15 @@ details:
     **The Rationale:** Candidates misattribute the latency to microsecond-scale overheads or reactively revert the optimization instead of fixing the scheduling logic.
     **The Consequence:** Throwing away massive throughput gains or failing to solve the actual Head-of-Line blocking issue.
   napkin_math: |
-    1. **Long Query Compute:** 70B model, 20,000 token prefill. Compute = 2 * 70B * 20,000 = 2.8 PFLOPs.
-    2. **Prefill Time:** On a 989 TFLOPS GPU, time = 2800 TFLOPs / 989 TFLOPS = 2.83 seconds.
-    3. **Queue Delay:** In a naive FIFO continuous batcher, a short request arriving 1ms later must wait 2.83s.
-    4. **Conclusion:** **The short request is blocked by the long prefill, resulting in a >2.5s TTFT.**
+    1. **Assumptions & Constraints:**
+       - Model: 70B parameters. GPU: 989 TFLOPS.
+       - Long Query: 20,000 token prefill.
+       - Naive FIFO continuous batcher groups short and long queries.
+    2. **Calculations:**
+       - Prefill Compute: 2 × 70 Billion params × 20,000 tokens = 2.8 PFLOPs.
+       - Prefill Time: 2800 TFLOPS / 989 TFLOPS = 2.83 seconds.
+       - Queue Delay: A short query arriving 1ms later waits for the 2.83s prefill to complete.
+    3. **Conclusion & Interpretation:** **Head-of-Line blocking forces short queries to wait >2.5s for massive prefill phases to complete, destroying TTFT SLAs. Result: Compute-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

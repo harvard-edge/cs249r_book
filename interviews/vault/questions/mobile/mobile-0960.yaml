@@ -8,20 +8,25 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: 'KV-Cache: Specification — KV Cache Requirements for Production Mobile LLM App'
-scenario: Write the KV cache specification for a production mobile LLM chat app on A17 Pro (35 TOPS, 8GB) serving 10M users. The app supports 3B LLM, 4096-token context.
+scenario: Write the KV cache specification for a production mobile LLM chat app serving 10M users. The app supports a 3B parameter model and 4096-token contexts.
 question: What KV cache memory, quantization, eviction, and recovery requirements should a production A17 Pro chat app specify?
 details:
-  realistic_solution: 'Each conversation has isolated KV storage. Quantization: INT8 for quality, INT4 for long context. Eviction: background conversations'' KV offloaded to flash. Recovery: KV not persisted (recomputed on resume).'
+  realistic_solution: 'Implement PagedAttention with isolated KV storage per conversation. Quantization: INT8 Grouped-Query Attention (GQA) for baseline, INT4 for max context. Eviction: Background conversations'' KV offloaded to flash memory. Recovery: KV is dropped under heavy memory pressure and asynchronously recomputed (prefilled) upon app resume.'
   common_mistake: |
-    **The Pitfall:** Not specifying per-conversation KV isolation or quantization formats.
-    **The Rationale:** Treating mobile LLM memory like cloud endpoints without strict per-user boundaries.
-    **The Consequence:** Context leakage between chats and severe memory ballooning that crashes the app.
+    **The Pitfall:** Not specifying per-conversation KV isolation or leveraging GQA quantization.
+    **The Rationale:** Treating mobile LLM memory like cloud endpoints without strict per-user hardware boundaries.
+    **The Consequence:** Context leakage between chats and severe memory ballooning that results in the OS killing the application process.
   napkin_math: |
-    - 3B INT4 model: 1.5 GB. OS: 2 GB. Framework: 0.5 GB. Remaining RAM: 4.0 GB.
-    - Per-conversation KV (INT8): 32 layers * 2 (K/V) * 8 heads * 128 dim * 1 byte * 4096 tokens = 268 MB.
-    - Eviction threshold: Background KV to flash when RAM < 1 GB.
-    - Recompute cost: (4096 tokens * 3B * 2 FLOPs) / 35 TOPS = ~0.7 seconds.
-    - **SLA: Max 268 MB KV per active conversation (INT8), offload to flash in background.**
+    1. **Assumptions & Constraints:**
+       - Model: 3B parameters INT4.
+       - Context: 4096 tokens, 32 layers, 8 heads, 128 hidden dim.
+       - Hardware: A17 Pro (35 TOPS).
+    2. **Calculations:**
+       - KV cache size (INT8): 32 layers * 2 (K/V) * 8 heads * 128 dim * 1 byte * 4096 tokens = 268,435,456 bytes (~268 MB).
+       - Recompute cost: 4096 tokens * 3B params * 2 FLOPs = ~24.5 TeraFLOPs.
+       - Time at 35 TOPS = 24.5 / 35 = 0.7 seconds.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bound. Each active conversation rigidly consumes ~268 MB (INT8 KV), necessitating flash offload or a 0.7s recompute penalty to prevent OOM errors.**
 status: published
 provenance: imported
 requires_explanation: true

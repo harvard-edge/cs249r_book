@@ -11,21 +11,23 @@ title: Design Strict Memory Bound LoRA Fine-Tuning
 scenario: You must implement on-device LoRA fine-tuning for a 2B parameter model (4GB weights). The app's peak mutable RAM footprint must not exceed 100MB.
 question: What memory flow architecture permits gradient calculation for LoRA adapters without loading 4GB base weights into mutable app memory?
 details:
-  realistic_solution: The 4GB frozen base weights must be completely memory-mapped
-    (mmap) as read-only, allowing the OS to stream them from storage to the Neural
-    Engine via page cache without counting against app RAM limits. Forward pass activations
-    are discarded immediately, except for the input tensors specifically feeding the
-    low-rank adapters (rank=8). Gradients are explicitly computed only for these <10MB
-    LoRA weights, fitting safely in 100MB.
+  realistic_solution: 'The 4GB frozen base weights must be completely memory-mapped (mmap) as read-only, allowing the OS to stream them from storage to the Neural Engine via page cache without counting against app RAM limits. Forward pass activations are discarded immediately, except for the input tensors specifically feeding the low-rank adapters (rank=8). Gradients are explicitly computed only for these <10MB LoRA weights, fitting safely in 100MB.'
   common_mistake: |
     **The Pitfall:** Allocating standard RAM for base weights or full activation trees.
     **The Rationale:** Porting cloud PyTorch code directly to mobile without realizing autograd defaults to saving all activations for backprop.
     **The Consequence:** Instant Out-Of-Memory (OOM) crashes on mobile devices due to blowing past the strict 100MB mutable memory budget.
   napkin_math: |
-    - **Base Weights:** 4 GB, memory-mapped (mmap) as read-only (0 MB mutable RAM).
-    - **LoRA Adapter Weights (rank=8):** < 10 MB.
-    - **Forward Activations:** Discarded immediately except for adapter inputs.
-    - **Result:** Peak mutable memory is **< 10 MB**, fitting well within the 100 MB budget.
+    1. **Assumptions & Constraints:**
+       - Base Weights: 2B parameters (4 GB), memory-mapped (mmap) as read-only.
+       - LoRA Adapter Weights (rank=8): < 10 MB.
+       - RAM Limit: 100 MB mutable peak.
+    2. **Calculations:**
+       - Base model mutable RAM: 0 MB (read-only mmap).
+       - LoRA weights RAM: ~10 MB.
+       - Forward Activations RAM: Discarded immediately except adapter inputs (~20 MB).
+       - Peak mutable memory: 0 MB + 10 MB + 20 MB = ~30 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound. Peak mutable memory remains < 100 MB by utilizing mmap for base weights and selective autograd.**
 status: published
 provenance: llm-draft
 expected_time_minutes: 15

@@ -8,12 +8,26 @@ competency_area: compute
 bloom_level: apply
 phase: inference
 title: The AV Perception Latency Puzzle
-scenario: You are an ML Systems Engineer on an autonomous vehicle team, tasked with deploying a new LiDAR perception model to a Jetson AGX Orin. The real-time requirement is 30 FPS (a 33ms deadline). Your model runs, but only achieves 20 FPS. Profiling shows the model performs 500 G-Ops (INT8) and moves 10 GB of data (weights, activations, inputs) per inference. `tegrastats` shows the Orin is only drawing 30W of power, well below its 60W configurable maximum. Using the GPU roofline model, diagnose the primary bottleneck preventing you from hitting the 30 FPS target.
-question: "Using the roofline model, what bottleneck prevents the 500 G-Ops, 10 GB LiDAR model from reaching 30 FPS on the Orin?"
+scenario: You are an ML Systems Engineer on an autonomous vehicle team, tasked with deploying a new LiDAR perception model to a Jetson AGX Orin. The real-time requirement is 30 FPS (a 33ms deadline). Your model runs, but only achieves 20 FPS. Profiling shows the model performs 500 G-Ops (INT8) and moves 10 GB of data (weights, activations, inputs) per inference. `tegrastats` shows the Orin is only drawing 30W of power, well below its 60W configurable maximum.
+question: "Using the GPU roofline model, what primary bottleneck prevents the 500 G-Ops, 10 GB LiDAR model from reaching 30 FPS on the Orin?"
 details:
-  realistic_solution: "The core issue is that the model is memory-bound. Its Arithmetic Intensity (the ratio of compute to memory access) is too low to saturate the Orin's powerful compute units. The Tensor Cores finish their work quickly and then sit idle, waiting for data to arrive from memory. This is why the performance is low and the power draw isn't reaching its peak — the compute units aren't being fully utilized."
-  common_mistake: "Engineers often guess at bottlenecks without calculation. They might blame thermal throttling because the power isn't maxed out, or assume the model is simply 'too big' without analyzing *why* it's slow. The roofline model forces a quantitative diagnosis by comparing the model's needs to the hardware's capabilities."
-  napkin_math: "1. Calculate Arithmetic Intensity (AI): AI = FLOPs / bytes = 500 GOps / 10 GB = 500e9 / 10e9 = 50 Ops/Byte. 2. Find Jetson Orin Ridge Point: 275 TOPS INT8 / 204.8 GB/s = ~1343 Ops/Byte. 3. Diagnosis: AI (50) < Ridge Point (1343) -> memory-bound. 4. Max achievable throughput: 204.8 GB/s * 50 Ops/Byte = 10.24 TOPS effective. 5. Latency: 500 GOps / 10.24 TOPS = 48.8 ms. This perfectly matches the observed ~20 FPS (50ms/frame) performance. The bottleneck is strictly memory bandwidth."
+  realistic_solution: "The core issue is that the model is memory-bound. Its Arithmetic Intensity (the ratio of compute to memory access) is too low to saturate the Orin's powerful compute units. The Tensor Cores finish their work quickly and then sit idle, waiting for data to arrive from memory. This is why the performance is low and the power draw isn't reaching its peak \u2014 the compute units aren't being fully utilized."
+  common_mistake: |
+    **The Pitfall:** Blaming thermal throttling or pure compute complexity without calculating arithmetic intensity.
+    **The Rationale:** Engineers guess bottlenecks based on power draw or FLOPs, ignoring the roofline model and the reality of the memory wall.
+    **The Consequence:** Wasting time trying to prune or quantize a model that is already fundamentally starved for memory bandwidth.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 500 G-Ops, 10 GB per inference
+       - Target: 30 FPS (33ms deadline)
+       - Orin peak: 275 TOPS, 204.8 GB/s bandwidth
+    2. **Calculations:**
+       - Arithmetic Intensity (AI) = 500 GOps / 10 GB = 50 Ops/Byte
+       - Orin Ridge Point = 275 TOPS / 204.8 GB/s = ~1343 Ops/Byte
+       - Max effective throughput = 204.8 GB/s * 50 Ops/Byte = 10.24 TOPS
+       - Inference Latency = 500 GOps / 10.24 TOPS = 48.8 ms (~20 FPS)
+    3. **Conclusion & Interpretation:**
+       **Result: 48.8 ms per inference (Memory-Bound)**
   options:
   - "The system is thermal throttling. The 30W power draw indicates it can't access its full 60W performance budget."
   - "The model is too computationally complex (500 G-Ops) for the Jetson AGX Orin to execute within the 33ms time budget."

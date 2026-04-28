@@ -8,19 +8,24 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: A100 KV Cache L2 Thrashing
-scenario: A custom transformer inference kernel on an NVIDIA A100 experiences a severe throughput collapse when scaling from batch size 1 to 16. Nsight Compute profiling reveals DRAM read bandwidth is saturated, but compute utilization is under 15%. The kernel processes sequences of 4096 tokens with a hidden dimension of 1024 in FP16.
-question: What memory hierarchy bottleneck causes the batch-16 throughput collapse, and how would you fix the kernel?
+scenario: 'A custom transformer inference kernel experiences a severe throughput collapse when scaling from batch size 1 to 16. Nsight Compute profiling reveals DRAM read bandwidth is saturated, but compute utilization is under 15%. The kernel processes sequences of 4096 tokens with a hidden dimension of 1024 in FP16.'
+question: 'What memory hierarchy bottleneck causes the batch-16 throughput collapse, and how would you fix the kernel?'
 details:
-  realistic_solution: Diagnose that the 256MB KV cache working set for batch 16 completely evicts the 40MB L2 cache. The fix requires implementing an SRAM-aware tiling strategy (like FlashAttention) to load Q, K, V blocks directly into the 192KB L1/Shared Memory, fusing the operations to prevent intermediate HBM roundtrips.
+  realistic_solution: 'Diagnose that the 256MB KV cache working set for batch 16 completely evicts the 40MB L2 cache. The fix requires implementing an SRAM-aware tiling strategy (like FlashAttention) to load Q, K, V blocks directly into the 192KB L1/Shared Memory, fusing the operations to prevent intermediate HBM roundtrips.'
   common_mistake: |
     **The Pitfall:** Assuming the performance drop is due to total HBM capacity limits or insufficient compute parallelism.
     **The Rationale:** Candidates often focus on the larger HBM capacity or FLOPs rather than the specific sizes and roles of intermediate caches like L2.
     **The Consequence:** Missing that the working set now far exceeds the L2 cache, causing catastrophic thrashing and memory bandwidth saturation.
   napkin_math: |
-    1. KV cache per batch element per layer: 4096 (seq) * 1024 (dim) * 2 (FP16 bytes) * 2 (K+V) = 16 MB.
-    2. Total KV cache for batch 16: 16 MB * 16 = 256 MB.
-    3. The 256 MB working set far exceeds the A100's 40 MB L2 cache.
-    4. **Each generation step forces a full 256MB read from slow HBM instead of the fast L2 cache, collapsing throughput.**
+    1. **Assumptions & Constraints:**
+       - GPU L2 cache is typically ~40 MB.
+       - KV cache per batch element per layer: 4096 (seq) * 1024 (dim) * 2 (FP16 bytes) * 2 (K+V).
+       - Batch size 16.
+    2. **Calculations:**
+       - Per element memory: 4096 * 1024 * 4 = 16 MB.
+       - Total KV cache for batch 16: 16 MB * 16 = 256 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound** (256 MB working set evicts 40 MB L2 cache, causing HBM thrashing).
 status: published
 provenance: imported
 requires_explanation: false

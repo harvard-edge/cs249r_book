@@ -8,20 +8,23 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Diagnosing TPU Pipeline Stalls in Large Language Models
-scenario: Your team is deploying a large language model (LLM) for inference on a Google TPU v5e pod (16 GB HBM, 197 TFLOPS BF16, 1.6 TB/s memory bandwidth per core). The model has been split into 8 stages for pipeline parallelism across 8 TPU cores. Initially, the throughput was satisfactory. However, after increasing the batch size and model complexity, you observe significant and unpredictable stalls, leading to much lower-than-expected throughput. The TPU utilization metrics show intermittent drops to near zero on various cores, followed by bursts of activity, indicating a 'bubble' effect. You suspect an issue with the pipeline scheduling.
+scenario: Your team is deploying a large language model (LLM) for inference on a Google TPU v5e pod. The model has been split into 8 stages for pipeline parallelism across 8 TPU cores. Initially, the throughput was satisfactory. However, after increasing the batch size and model complexity, you observe significant and unpredictable stalls, leading to much lower-than-expected throughput. The TPU utilization metrics show intermittent drops to near zero on various cores, followed by bursts of activity, indicating a 'bubble' effect. You suspect an issue with the pipeline scheduling.
 question: How would you diagnose the root cause of these unexpected stalls and massive pipeline bubbles?
 details:
   realistic_solution: "1. **Profile Communication & Computation:** Use TPU profiling tools (e.g., TensorBoard's HBM usage, computation graphs, and device trace viewers) to visualize the execution timeline of each pipeline stage. Identify which stages are critical path bottlenecks and where data transfers (inter-core communication) are occurring. \n2. **Analyze Bubble Overhead:** Quantify the idle time (bubbles) between stages. Determine if the bubbles are due to load imbalance (some stages taking significantly longer than others), communication overhead, or inefficient micro-batch scheduling.\n3. **Inspect Micro-batching Strategy:** Evaluate the current micro-batch size and the interleaved schedule. A very small micro-batch might increase communication frequency, while a very large one could lead to long bubbles if stages are imbalanced. Consider if the number of in-flight micro-batches is optimal. The goal is to keep all cores busy by overlapping computation with communication and hiding bubbles.\n4. **Data Dependency Analysis:** Confirm there are no unexpected data dependencies that force stages to wait unnecessarily, beyond the inherent pipeline dependencies."
   common_mistake: |
     **The Pitfall:** Blindly re-partitioning the model layers or randomly tuning hyperparameters without quantifying the true source of the pipeline idle time.
-    
     **The Rationale:** Engineers frequently treat pipeline parallel "bubbles" as a generic symptom to be brute-forced, disregarding whether the bubble emerges from communication starvation, physical stage imbalances, or micro-batch inefficiencies.
-    
     **The Consequence:** The team spends weeks tweaking arbitrary parallelism partitions only to accidentally exacerbate inter-core transfer waits, further degrading throughput and driving TPU utilization even lower.
   napkin_math: |
-    - **Ideal Latency**: `S * T_microbatch_forward + (N - 1) * T_microbatch_longest_stage`.
-    - **Total Wait Approximation**: If total observed pipeline processing time (`T_total`) wildly deviates from the ideal latency, then `T_total - Ideal_Latency` directly quantifies the raw duration of pipeline bubbles and stall impacts.
-    - **Result**: Tracking this exact numerical divergence isolates whether stages are natively imbalanced or if pure interconnect transfers are blocking execution.
+    1. **Assumptions & Constraints:**
+       - Pipeline parallelism across 8 TPU cores.
+       - Increased batch size and complexity led to bubbles.
+    2. **Calculations:**
+       - Ideal Latency: S * T_microbatch_forward + (N - 1) * T_microbatch_longest_stage.
+       - Total Wait Approximation: T_total_observed - Ideal_Latency = Total bubble duration.
+    3. **Conclusion & Interpretation:**
+       - **Result: Tracking numerical divergence isolates whether the system is Stage-Imbalance-Bound or Interconnect-Transfer-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

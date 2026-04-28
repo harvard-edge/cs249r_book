@@ -7,31 +7,26 @@ topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: create
 phase: training
-title: Implementing gradient-based input attribution for on-device explainability
-  on A17 Pro
-scenario: 'You need to implement Integrated Gradients for explainability in a medical
-  imaging app on A17 Pro. The model classifies skin lesion images (224×224×3). IG
-  requires computing gradients of the output with respect to the input pixel values,
-  averaged over 50 interpolation steps between a baseline and the input image. Total
-  compute: 50 forward+backward passes.'
-question: How would you implement Integrated Gradients for on-device explainability
-  on A17 Pro without 50 sequential passes?
+title: Implementing gradient-based input attribution for on-device explainability on A17 Pro
+scenario: 'You need to implement Integrated Gradients for explainability in a medical imaging app on an A17 Pro. IG requires computing gradients of the output with respect to the input pixel values, averaged over 50 interpolation steps between a baseline and the input image.'
+question: 'How would you implement Integrated Gradients for on-device explainability on A17 Pro without 50 sequential passes?'
 details:
-  realistic_solution: 'Vectorize across interpolation steps using vmap: create a batched
-    input of 50 interpolated images (50×3×224×224) and run a single batched forward-backward
-    pass. Enable gradient tracking only for the input tensor (input.requires_grad_(True)),
-    not model parameters. Use torch.func.grad(model_fn)(batched_input) with vmap.
-    Memory: 50 images × 3×224×224×4 bytes = 30MB — acceptable. Speedup: ~40× over
-    sequential.'
-  common_mistake: Running 50 separate forward-backward passes sequentially, each materializing
-    the full computational graph for a 224×224 image through a MobileNet-scale model.
-    This takes ~50 × 20ms = 1 second per explanation — too slow for an interactive
-    UI.
-  napkin_math: 'Sequential IG: 50 passes × 20ms = 1000ms. vmap batched: 50 images
-    at batch=50 on A17 Pro ANE. MobileNetV2 at batch=1: 20ms. At batch=50 (not typically
-    supported on ANE): ~200ms on GPU. But gradient computation (not ANE) on A17 CPU:
-    ~50ms for full batched backward. Total vmap approach: ~250ms vs 1000ms sequential
-    = 4× speedup (not 40× due to CPU compute limit).'
+  realistic_solution: 'Vectorize across interpolation steps using vmap: create a batched input of 50 interpolated images and run a single batched forward-backward pass. Enable gradient tracking only for the input tensor, not model parameters. Use torch.func.grad(model_fn)(batched_input) with vmap. This provides a dramatic speedup over sequential looping.'
+  common_mistake: |
+    **The Pitfall:** Running 50 separate forward-backward passes sequentially.
+    **The Rationale:** Engineers default to basic loop constructs without utilizing `vmap` to vectorize across interpolation steps.
+    **The Consequence:** Explanation takes ~1 second per image, which is too slow for an interactive UI.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - MobileNet-scale model (224x224x3).
+       - 50 interpolation steps.
+       - Single pass: 20 ms.
+    2. **Calculations:**
+       - Sequential IG: 50 * 20 ms = 1000 ms.
+       - vmap batched (batch=50): compute parallelizes, but CPU gradient tracking adds ~50 ms.
+       - Total batched approach: ~250 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 4x speedup (Vectorized Graph Computation).**
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,23 +9,27 @@ bloom_level: apply
 phase: inference
 title: The Secure Doorbell A/B Test
 scenario: >
-  You are the tech lead for a smart doorbell product using a Cortex-M7 MCU with 1MB of Flash and 256KB of SRAM. The current system uses a 32KB bootloader, a 64KB RTOS, and a 200KB person-detection model. You need to A/B test a new, promising 450KB model. For security, OTA updates must be atomic, preventing bricked devices. For privacy, raw images cannot be sent to the cloud.
-question: >
-  What A/B testing strategy fits both the 200 KB and 450 KB models while preserving privacy and rollback safety?
+  A smart doorbell uses a Cortex-M7 with 1MB Flash and 256KB SRAM, currently running a 32KB bootloader, 64KB RTOS, and a 200KB model.
+  You need to A/B test a new 450KB model with atomic OTA updates, preventing bricked devices without cloud offloading.
+question: What A/B testing strategy fits both the 200 KB and 450 KB models while preserving privacy and rollback safety?
 details:
-  realistic_solution: >
+  realistic_solution: |
     Store both models in the application partition and use a config flag to select which loads into SRAM. Flash: 1 MB - 32 KB bootloader - 64 KB RTOS = 928 KB available. Model A (200 KB) + Model B (450 KB) = 650 KB. Remaining: 278 KB for app code. SRAM at runtime: only one model's activations active. Model A arena: ~40 KB peak. Model B: ~80 KB. 256 KB SRAM: 80 KB arena + 16 KB stack + 32 KB RTOS + 20 KB app = 148 KB used, 108 KB free. Switching: read config flag (1 byte), reallocate tensor arena, reinitialize TFLM interpreter. Time: ~50 ms (flash read + arena setup). No A/B partition needed. Rollback: flip config byte (1 flash page write = 10 ms). Both models always present in flash.
   common_mistake: |
-    **The Pitfall:** Suggesting a dual-partition OTA scheme without calculating if two full copies of the application would fit into the 1MB of flash.
-    **The Rationale:** Many engineers are used to cloud or mobile environments where storage is plentiful and ignore the physical flash memory constraints.
-    **The Consequence:** A dual-partition scheme would exceed the 928KB budget, making the solution impossible to deploy.
+    **The Pitfall:** Suggesting a dual-partition OTA scheme without calculating if two full copies of the application fit in 1MB of flash.
+    **The Rationale:** Engineers used to cloud/mobile environments ignore physical flash memory constraints.
+    **The Consequence:** A standard dual-partition scheme exceeds the flash budget, rendering the architecture impossible.
   napkin_math: |
-    - **Total Flash:** 1024 KB
-    - **System Reserved:** 32 KB (Bootloader) + 64 KB (RTOS) = 96 KB
-    - **Available Flash for Application & Models:** 1024 KB - 96 KB = 928 KB
-    - **Required Space for both models:** 200 KB (Model A) + 450 KB (Model B) = 650 KB
-    - **Remaining Flash:** 928 KB - 650 KB = **278 KB** for the core application logic.
-    - **Conclusion:** This leaves a feasible budget, making the "store both" strategy viable. A dual-partition scheme would require at least `2 * (App Logic + 450KB)`, which would exceed the 928KB budget.
+    1. **Assumptions & Constraints:**
+       - Total Flash: 1024 KB.
+       - System Reserved: 32 KB Bootloader + 64 KB RTOS = 96 KB.
+       - Model A: 200 KB. Model B: 450 KB.
+    2. **Calculations:**
+       - Available Flash: 1024 KB - 96 KB = 928 KB.
+       - Storing both models: 200 KB + 450 KB = 650 KB.
+       - Remaining for app logic: 928 KB - 650 KB = 278 KB (Feasible).
+       - Dual-partition requirement: 2 * (App + 450KB) > 900 KB (Infeasible).
+    3. **Conclusion & Interpretation:** Store both models in a single partition and toggle via config flag. **Result: Storage-Bound (278KB Remainder)**.
   options:
   - Stream images to the cloud to run the new model server-side, allowing for rapid iteration without touching the device.
   - Use a dual-partition OTA scheme, writing the new model to an inactive partition and swapping on boot for maximum safety.

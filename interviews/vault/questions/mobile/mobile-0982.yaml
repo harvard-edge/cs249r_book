@@ -8,33 +8,23 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: 'Model Format Conversion: Optimize TFLite Model Conversion for Snapdragon DSP'
-scenario: A TFLite model (EfficientNet-Lite0, 4.7M params, 390M MACs) converts to Snapdragon 8 Gen 3 via QNN SDK. Initial deployment shows 45ms latency vs. 8ms target. Profile shows 60% of ops run on DSP (HTP) and 40% on CPU due to unsupported ops.
-question: Why does an EfficientNet-Lite0 TFLite model converted through QNN show 45 ms latency instead of the 8 ms target?
+scenario: A TFLite model (EfficientNet-Lite0, 4.7M params, 390M MACs) converts to a mobile NPU. Initial deployment shows 45ms latency vs. 8ms target. Profile shows 60% of ops run on the NPU and 40% on CPU due to unsupported ops.
+question: Why does an EfficientNet-Lite0 TFLite model converted through the SDK show 45 ms latency instead of the 8 ms target?
 details:
-  realistic_solution: 'The 45ms latency is driven by the 40% of ops falling back to the CPU. 40% of 390M MACs = 156M MACs. A mobile CPU core at 10 GOPS (gigaops, not teraops) computing 156M MACs (312M ops) takes 312M / 10G = 31.2ms. Adding DSP execution time and memory transfer overhead easily reaches ~45ms. If the CPU were capable of 10 TOPS, it would take 0.03ms, which is unrealistic.'
+  realistic_solution: "The extreme latency inflation is caused by graph fragmentation and CPU execution bottlenecking. Because 40% of the network's operations (e.g., unsupported activations like Swish) are rejected by the NPU compiler, the framework defaults to the CPU. Mobile CPUs possess vastly lower theoretical throughput (GOPS) compared to NPUs (TOPS). Executing 40% of the 390M MACs on a thermal-constrained mobile CPU takes over 30ms. Furthermore, the cross-domain transfers of activation tensors between the NPU SRAM and CPU DRAM incur a heavy NoC synchronization tax, ensuring the 8ms target is irrevocably missed."
   common_mistake: |
     **The Pitfall:** Adding more DSP acceleration without identifying specific unsupported ops.
     **The Rationale:** Candidates assume performance can be fixed by throwing more hardware at it rather than looking at CPU fallback caused by operations like Swish.
     **The Consequence:** Time is wasted on DSP tuning when the bottleneck is structurally bound to CPU execution.
   napkin_math: |
-    * Fallback MACs: 40% of 390M = 156M MACs.
-    * Inference at 10 GOPS CPU: 156M MACs × 2 ops = 312M ops per inference.
-    * Time taken: 312M / 10G = 31.2ms.
-    * **The 31.2ms CPU fallback time directly explains why latency is ~45ms instead of the 8ms target.**
+    1. **Assumptions & Constraints:**
+       - Total model MACs: 390M.
+       - CPU fallback: 40% of operations.
+       - Mobile CPU throughput: ~10 GOPS.
+    2. **Calculations:**
+       - Fallback MACs: 390M * 0.40 = 156M MACs.
+       - Total fallback operations: 156M MACs * 2 (multiply-accumulate) = 312M Ops.
+       - Time taken on CPU: 312,000,000 Ops / 10,000,000,000 Ops/s = 0.0312 seconds (31.2ms).
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU Throughput-Bound.** The 31.2ms pure computation time on the CPU directly explains the ~45ms total latency, making the 8ms target mathematically impossible without full NPU fusion.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: claude-sonnet-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

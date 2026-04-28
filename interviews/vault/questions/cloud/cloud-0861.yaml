@@ -11,16 +11,23 @@ title: Diagnosing Clickbait Degradation in DLRM
 scenario: You are managing a large-scale video recommendation pipeline deployed on 32 NVIDIA A100s handling 40k QPS. Your team recently deployed a heavy parameter-server-based DLRM that improved offline AUC by 0.05 and increased online Click-Through Rate (CTR) by 14%. The P99 latency strictly maintained its 50ms SLA. However, after a two-week A/B test, overall daily active user (DAU) retention dropped by 8% and total daily platform watch-time plummeted by 48%.
 question: What caused the retention and watch-time drop, and how should the ranking model be realigned?
 details:
-  realistic_solution: Identify this as an Alignment Gap. The system optimized for CTR (the proxy metric), which inadvertently surfaced 'clickbait' content, harming user satisfaction (the business metric). The solution is to transition the architecture to a Multi-Gate Mixture-of-Experts (MMoE) to jointly predict clicks and expected watch-time, ranking items by P(Click) * Expected_Watch_Time.
+  realistic_solution: |
+    Identify this as an Alignment Gap. The system optimized purely for CTR (the proxy metric), which inadvertently surfaced 'clickbait' content, harming user satisfaction (the business metric). The architectural solution is to transition to a Multi-Gate Mixture-of-Experts (MMoE) to jointly predict clicks and expected watch-time, ranking items by `P(Click) * Expected_Watch_Time`.
   common_mistake: |
     **The Pitfall:** Assuming a severe infrastructure failure or latency regression.
-    **The Rationale:** Candidates debug feature staleness or embedding cache misses, failing to recognize that a model perfectly optimizing a proxy metric (CTR) can destroy the true business metric.
-    **The Consequence:** Engineering teams waste weeks profiling GPU clusters when the system architecture mathematically demands a Multi-Gate Mixture-of-Experts (MMoE) to correct the alignment gap.
+    **The Rationale:** Candidates debug feature staleness or embedding cache misses, failing to recognize that a model perfectly optimizing a proxy metric (CTR) can easily destroy the true business metric.
+    **The Consequence:** Engineering teams waste weeks profiling GPU clusters when the system architecture mathematically demands an MMoE to correct the alignment gap.
   napkin_math: |
-    - **Old Model Baseline:** 5% CTR × 120s avg watch time per click = **6.0s expected watch time** per impression.
-    - **New Model Impact (Clickbait):** CTR rises to 5.7% (14% relative increase), but average watch time per click drops to 55s.
-    - **New Model Expected Value:** 5.7% × 55s = **3.135s expected watch time** per impression.
-    - **Result:** 3.135s / 6.0s = 52.25%. This represents a **~48% catastrophic drop** in total platform watch-time.
+    1. **Assumptions & Constraints:**
+       - Baseline: 5% CTR, 120s average watch time per click.
+       - New Model (Clickbait): CTR increases by 14% (relative), but average watch time per click drops to 55s.
+    2. **Calculations:**
+       - Old Expected Value: 0.05 (CTR) * 120s = 6.0s expected watch time per impression.
+       - New CTR: 0.05 * 1.14 = 0.057 (5.7%).
+       - New Expected Value: 0.057 (CTR) * 55s = 3.135s expected watch time per impression.
+       - Platform Drop: 3.135s / 6.0s = 0.5225 (52.25% of original, a ~48% drop).
+    3. **Conclusion & Interpretation:**
+       - **Result: Alignment-Bound.** The model perfectly optimized the proxy metric at the catastrophic expense of the true business metric. Joint optimization via MMoE is structurally required.
 status: published
 provenance: imported
 requires_explanation: false

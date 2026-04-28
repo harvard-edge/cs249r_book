@@ -11,18 +11,28 @@ title: On-Device Data Pruning for Continual Learning
 scenario: You are architecting an on-device continual learning pipeline for a personalized keyboard model running on the Apple A17 Pro Neural Engine. You must avoid impacting foreground tasks and adhere to the ~5W power budget.
 question: How would you build an on-device data pruning pipeline for continual learning without exceeding mobile resource budgets?
 details:
-  realistic_solution: Design a streaming data pipeline where a lightweight, heavily quantized INT8 proxy model calculates the ICR (e.g., via approximate gradient norms) for each interaction as it occurs. High-ICR samples are saved to a fixed-size ring buffer, while redundant data is immediately discarded. The 16-core Neural Engine then performs scheduled, batched fine-tuning exclusively on this highly informative subset, drastically reducing total compute and memory footprint.
+  realistic_solution: Design a streaming data pipeline where a lightweight, heavily quantized INT8 proxy model calculates the ICR (e.g., via approximate gradient norms) for each interaction as it occurs. High-ICR samples are saved to a fixed-size ring buffer via Top-K Sparsification, while redundant data is immediately discarded. The 16-core Neural Engine then performs scheduled, batched fine-tuning exclusively on this highly informative subset, drastically reducing total compute and memory footprint.
   common_mistake: |
     **The Pitfall:** Proposing complex coreset selection algorithms that cache the entire history.
     **The Rationale:** Candidates ignore the compute overhead of the selection mechanism and the 8 GB unified memory limit.
     **The Consequence:** This leads to memory pressure, OS-level app evictions, and proxy models that consume more power than fine-tuning saves.
   napkin_math: |
-    - **Scoring Cost:** 10 GOPS per sample. For 5,000 interactions, 50,000 GOPS total.
-    - **Scoring Time:** 50,000 GOPS / 35,000 GOPS/sec = ~1.4 seconds.
-    - **Pruning:** 90% pruned, leaving 500 samples.
-    - **Fine-Tuning Cost:** 1,000 GOPS per sample * 500 samples = 500,000 GOPS.
-    - **Fine-Tuning Time:** 500,000 GOPS / 35,000 GOPS/sec = ~14.3 seconds.
-    - **Energy Consumed:** 15.7s total time * 5W = **78.5 Joules per day (requires background scheduling).**
+    1. **Assumptions & Constraints:**
+       - Proxy Scoring Cost: 10 GOPS per sample.
+       - Target: 5,000 interactions.
+       - A17 Pro NPU: ~35 TOPS (35,000 GOPS/sec).
+       - Power Budget: ~5W.
+       - Pruning Rate: 90% (leaves 500 samples).
+       - Fine-Tuning Cost: 1,000 GOPS per sample.
+    2. **Calculations:**
+       - Scoring Total: 5,000 samples * 10 GOPS = 50,000 GOPS.
+       - Scoring Time: 50,000 GOPS / 35,000 GOPS/sec = ~1.43 seconds.
+       - Fine-Tuning Total: 500 samples * 1,000 GOPS = 500,000 GOPS.
+       - Fine-Tuning Time: 500,000 GOPS / 35,000 GOPS/sec = ~14.29 seconds.
+       - Total Compute Time: 1.43s + 14.29s = 15.72s.
+       - Energy Consumed: 15.72s * 5W = 78.6 Joules.
+    3. **Conclusion & Interpretation:**
+       - **Result: Energy-Bound.** The 78.6 Joules per day requires background scheduling to adhere to the 5W thermal envelope and avoid foreground interference.
 status: published
 provenance: imported
 requires_explanation: true
@@ -35,8 +45,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Unit error: 50,000 GOPS / 35,000 GOPS/sec = 1.428 seconds, not 1.4ms (off by a factor of 1000).'
 human_reviewed:
   status: not-reviewed
   by: null

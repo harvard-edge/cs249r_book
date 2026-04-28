@@ -13,14 +13,19 @@ question: Should the 70B chat service use stateless routing or stateful sticky K
 details:
   realistic_solution: Adopt a fundamentally stateless routing layer coupled with a prefix-caching KV backend (e.g., RadixAttention). This ensures requests can be routed anywhere for high availability and fault tolerance, while the compute penalty of full reprefills is mitigated opportunistically.
   common_mistake: |
-    **The Pitfall:** Instinctively choosing stateful serving to save compute.
-    **The Rationale:** Optimizing for the happy-path inference cost without modeling the distributed failure modes.
-    **The Consequence:** When a stateful node fails, thousands of dropped sessions simultaneously hit remaining nodes, causing a devastating prefill storm that takes down the entire service.
+    **The Pitfall:** Instinctively choosing stateful routing (sticky sessions) to save compute.
+    **The Rationale:** Optimizing solely for the "happy-path" inference cost without modeling catastrophic distributed failure modes.
+    **The Consequence:** When a stateful node fails, thousands of dropped sessions simultaneously slam the remaining nodes, triggering a massive synchronized prefill storm that completely cascades and takes down the entire service.
   napkin_math: |
-    - **Stateless Penalty:** Prefilling 8K tokens on 70B params is ~1.12 PFLOPs (2 * 70e9 * 8K), taking ~100ms on 8xH100.
-    - **Stateful Memory Cost:** 80 layers * 8 KV heads * 128 dim * 4 bytes (FP16 K+V) * 8K tokens = ~2.62 GB per session.
-    - **Failure Impact:** A stateful node storing 100 sessions loses 262 GB of state upon failure.
-    - **Result:** **Rebuilding 100 sessions forces a synchronized 112 PFLOP computation across the remaining fleet, causing massive tail latency spikes.**
+    1. **Assumptions & Constraints:**
+       - Model: Llama-3-70B. Context: 8,000 tokens.
+       - Stateful Memory Cost: ~2.62 GB KV cache per session.
+       - Stateless Prefill Penalty: ~100ms per 8K token context.
+    2. **Calculations:**
+       - Single Node Failure Drop: 100 sessions lost (262 GB of state vaporized).
+       - Rebuild Compute Cost: 100 sessions * 1.12 PFLOPs = 112 PFLOPs.
+    3. **Conclusion & Interpretation:**
+       - **Result: Stateless Prefix-Caching.** The fleet must use stateless routing with RadixAttention prefix caching. The 112 PFLOP recovery storm makes stateful sticky routing far too fragile for HA production.
 status: published
 provenance: imported
 requires_explanation: true

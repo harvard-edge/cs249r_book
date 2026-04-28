@@ -8,20 +8,22 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Optimizing KV-Cache on Google TPU v5e for Long Context LLMs
-scenario: You are designing an inference serving system for a large language model
-  with a maximum context length of 128k tokens, running on a Google TPU v5e with 16
-  GB HBM and 1.6 TB/s memory bandwidth. The model uses 7B parameters (FP16) and a
-  KV-cache with 16 attention heads, each with a hidden dimension of 128. You observe
-  high memory pressure and frequent evictions due to long contexts. Describe how you
-  would analyze the memory footprint of the KV-cache, propose a paging strategy, and
-  evaluate different cache eviction policies to maximize throughput and minimize latency,
-  given the specific hardware constraints of the TPU v5e.
-question: How would you size, page, and evict the KV-cache for 128k-context 7B inference
-  on a 16 GB TPU v5e to reduce pressure and latency?
+scenario: You are designing an inference serving system for a 7B model with a 128k context length. The model uses 16 attention heads (dim 128).
+question: How would you size, page, and evict the KV-cache for 128k-context 7B inference on a 16 GB TPU v5e to reduce pressure and latency?
 details:
-  realistic_solution: 'A realistic solution calculates the precise memory footprint of a single KV-cache entry per token: `num_layers * num_heads * head_dim * 2 (K+V) * sizeof(float16)`. For a 128k context, this significantly exceeds the TPU v5e''s 16 GB HBM. To manage this: 1. Implement Ring Attention or FlashAttention to tile the computation. 2. Implement PagedAttention for dynamic memory allocation. 3. Use KV-cache quantization to INT8 (reducing KV size by half to ~16.7 GB), though this alone is insufficient since weights + KV still exceed 16 GB. 4. Use an eviction policy like StreamingLLM (keeping attention sinks and a sliding window) or H2O (Heavy Hitter Oracle) to discard unimportant tokens, and distribute the sequence across multiple TPUs via Tensor Parallelism to maintain a strict KV-cache memory budget.'
-  common_mistake: 'A common mistake is to ignore the `num_layers` multiplier in the KV-cache sizing, leading to massive underestimation. Another mistake is ignoring the specific 16 GB HBM capacity limit of the TPU v5e, proposing naive batching without realizing a single 128k sequence already OOMs the device.'
-  napkin_math: 'For a 7B model: 32 layers, 16 KV heads (assuming GQA/MQA), 128 hidden dimension. KV-cache per token = 2 (K+V) × 32 layers × 16 heads × 128 dim × 2 bytes/FP16 = 262,144 bytes/token (~262 KB). For a 128k context length: 128,000 tokens × 262,144 bytes = ~33.5 GB. The model weights alone are 14 GB (7B × 2 bytes). Total memory required for just weights + 1 sequence = 47.5 GB, which grossly exceeds the TPU v5e''s 16 GB HBM. Even with KV-cache quantization (INT8 cuts it to 16.7 GB), the ~30.7 GB total still exceeds 16 GB. You MUST distribute the sequence across multiple TPUs via Tensor Parallelism or Ring Attention, and/or heavily evict tokens (e.g., keep only recent 4k + sinks).'
+  realistic_solution: Implement PagedAttention and heavy token eviction (e.g. StreamingLLM or H2O). A single 128k context vastly exceeds 16GB HBM, so Tensor Parallelism across multiple TPUs is mandatory.
+  common_mistake: |
+    **The Pitfall:** Ignoring the layer multiplier or strict hardware limits.
+    **The Rationale:** Calculating KV size for one layer instead of all layers, missing the exponential memory footprint of long contexts.
+    **The Consequence:** Designing a deployment topology that immediately fails with OOM before completing a single request.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 7B model (32 layers), 128k tokens, 16 KV heads, 128 dim.
+    2. **Calculations:**
+       - Per token = 2 (K+V) * 32 * 16 * 128 * 2 bytes = 262 KB.
+       - 128k context = 33.5 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 33.5 GB grossly exceeds 16 GB TPU capacity; eviction and multi-chip distribution are strictly required.**
 status: published
 provenance: imported
 requires_explanation: false

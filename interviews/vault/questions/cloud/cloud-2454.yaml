@@ -8,21 +8,26 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Chunked Prefill for Latency Jitter
-scenario: Your continuous batching server runs a 7B model. The target TPOT is 30ms. When a new 4000-token prompt arrives, the prefill phase takes 400ms, blocking the GPU. Existing decode requests in the batch are forced to wait, causing severe P99 TPOT degradation (latency spikes up to 430ms). You are evaluating Chunked Prefill to mitigate this.
-question: How does chunked prefill reduce P99 TPOT spikes from the 4000-token prompt, and what tradeoff does it introduce?
+scenario: 'Your continuous batching server runs a 7B model. The target TPOT is 30ms. When a new 4000-token prompt arrives, the prefill phase takes 400ms, blocking the GPU. Existing decode requests in the batch are forced to wait, causing severe P99 TPOT degradation. You are evaluating Chunked Prefill to mitigate this.'
+question: 'How does chunked prefill reduce P99 TPOT spikes from the 4000-token prompt, and what tradeoff does it introduce?'
 details:
-  realistic_solution: Chunked prefill requires analyzing the tradeoff between compute efficiency (TTFT) and latency jitter (TPOT). Standard prefill processes all tokens in one massive matrix multiplication, which maximizes GPU Tensor Core utilization. Chunking the prefill (e.g., into 512-token blocks) allows interleaving the prefill chunks with the decode steps of other requests. This preserves the 30ms TPOT for existing requests (eliminating the 430ms spike). However, smaller chunks lower the arithmetic intensity of the GEMM operations, slightly increasing the total time required to process the 4000 tokens, thereby degrading the TTFT of the new request. It trades TTFT performance for strict TPOT SLA adherence.
+  realistic_solution: 'Chunked prefill actively interleaves the massive initial prompt evaluation with ongoing decode steps. By chunking the 4000-token prefill into smaller blocks (e.g., 512 tokens), the engine allows existing decode requests to process between prefill chunks, eliminating massive 400ms jitter spikes and preserving the 30ms TPOT SLA. The fundamental tradeoff is that smaller chunks lower the arithmetic intensity of the GEMM operation, decreasing overall Tensor Core utilization and slightly degrading the Time-To-First-Token (TTFT) for the new request.'
   common_mistake: |
     **The Pitfall:** Assuming chunked prefill will improve both Time-To-First-Token (TTFT) and Time-Per-Output-Token (TPOT) simultaneously.
     **The Rationale:** Candidates forget that chunking lowers the arithmetic intensity of the GEMM operations compared to a single large monolithic prefill.
     **The Consequence:** They fail to articulate the fundamental tradeoff: chunked prefill degrades TTFT performance to ensure strict TPOT SLA adherence for concurrent requests.
   napkin_math: |
-    1. **Unchunked:** 4000-token prefill takes 400ms. Decode requests wait 400ms + 30ms = 430ms TPOT spike.
-    2. **Chunked (512 tokens):** 4000 / 512 ≈ 8 chunks.
-    3. **Chunk Duration:** Each 512-token chunk takes ~60ms (slower than 400/8 due to lower GPU utilization).
-    4. **Interleaved Step:** 60ms (prefill chunk) + 30ms (decode) = 90ms.
-    5. **New Max TPOT:** The max TPOT jitter is now **90ms** (down from 430ms).
-    6. **New TTFT:** TTFT for the new request = 8 chunks × 90ms = **720ms** (up from 400ms).
+    1. **Assumptions & Constraints:**
+       * Unchunked prefill: 400ms.
+       * Chunk size: 512 tokens (8 chunks total).
+       * Decode TPOT SLA: 30ms.
+    2. **Calculations:**
+       * Max Unchunked Jitter: 400ms + 30ms = 430ms TPOT spike.
+       * Chunk Duration: 512 tokens ≈ 60ms (slower due to lower arithmetic intensity).
+       * Interleaved Step: 60ms (prefill chunk) + 30ms (decode) = 90ms.
+       * New TTFT = 8 chunks * 90ms = 720ms.
+    3. **Conclusion & Interpretation:**
+       * **Result: Chunked prefill trades 80% slower TTFT (720ms vs 400ms) for a massive reduction in TPOT jitter (90ms vs 430ms).**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,34 +8,25 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Distillation Projection Layer Bottlenecks
-scenario: We deployed a student vision model, distilled from a heavy teacher using feature-level distillation, onto the Samsung Exynos 2400 NPU. To align intermediate representations, the student architecture includes 10 additional 1x1 projection convolutions. Profiling shows the dual-core NPU (capable of 34.7 TOPS) is severely stalling, yielding only 20 FPS instead of the target 60 FPS.
-question: Why are distillation projection layers a bottleneck on the Exynos 2400, and what student design avoids them?
+scenario: We deployed a student vision model, distilled from a heavy teacher using feature-level distillation, onto an NPU. To align intermediate representations, the student architecture includes 10 additional 1x1 projection convolutions. Profiling shows the dual-core NPU is severely stalling, yielding only 20 FPS instead of the target 60 FPS.
+question: Why are distillation projection layers a bottleneck on the NPU, and what student design avoids them?
 details:
-  realistic_solution: The optimal solution is to redesign the student model without the 1x1 projection layers and train it using only soft-target logit matching at the output layer. Since the Samsung Exynos 2400 shares LPDDR5X memory across the system, memory bandwidth is heavily contested by the ISP and GPU. The 1x1 projection layers are completely memory-bound; removing them drastically reduces memory traffic and allows the NPU to leverage its 34.7 TOPS on the core model operations without stalling on data fetches.
+  realistic_solution: "The 1x1 projection layers are severely memory-bound operations with extremely low arithmetic intensity. Because mobile NPUs share the memory bus with the ISP and GPU, these layers saturate the memory bandwidth, starving the NPU cores of data and causing severe stalling. The optimal architecture eliminates these 1x1 projection layers entirely. Instead of feature-level distillation that mandates these projections for dimensionality alignment, the student model should be trained using pure soft-target logit matching (response-based distillation) at the final output layer."
   common_mistake: |
     **The Pitfall:** Attempting to optimize the 1x1 projection convolutions through pruning or quantization.
     **The Rationale:** Engineers assume the bottleneck is computational and apply standard compression techniques, missing the fact that 1x1 convolutions on high-resolution feature maps have extremely low arithmetic intensity.
-    **The Consequence:** Wasting optimization effort while the shared LPDDR5X memory bus remains completely saturated, leaving the NPU stalled.
+    **The Consequence:** Wasting optimization effort while the shared memory bus remains completely saturated, leaving the NPU stalled.
   napkin_math: |
-    - **Memory Traffic per Layer:** Input (8.38 MB) + Output (8.38 MB) + Weights (~0.13 MB) ≈ 16.9 MB.
-    - **Total Memory Traffic:** 10 layers = 169 MB per frame.
-    - **Bandwidth Demand:** At 60 FPS, this demands **10.14 GB/s** of bandwidth from the heavily contested LPDDR5X memory.
-    - **Compute Utilization:** Compute per layer is ~2.14 MACs. For 10 layers at 60 FPS, this requires ~1.28 TOPS. The NPU utilization is a mere **3.7%** (1.28 / 34.7 TOPS).
-    - **Conclusion:** Switching to pure logit matching drops the projection layers, saving 10.14 GB/s of bandwidth and instantly eliminating the stall.
+    1. **Assumptions & Constraints:**
+       - 10 additional 1x1 projection layers.
+       - Memory per layer: Input (8.38 MB) + Output (8.38 MB) + Weights (~0.13 MB) = 16.9 MB.
+       - Target framerate: 60 FPS.
+       - NPU throughput: 34.7 TOPS.
+    2. **Calculations:**
+       - Total memory traffic per frame: 10 layers * 16.9 MB = 169 MB.
+       - Bandwidth demand: 169 MB * 60 FPS = 10.14 GB/s.
+       - Compute utilization: ~2.14 MMACs per layer. 10 layers * 60 FPS = 1.28 GOPS.
+       - NPU utilization: 1.28 GOPS / 34.7 TOPS = 0.0037%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bandwidth-Bound.** Switching to pure logit matching drops the projection layers, saving 10.14 GB/s of contested bandwidth and instantly eliminating the stall.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

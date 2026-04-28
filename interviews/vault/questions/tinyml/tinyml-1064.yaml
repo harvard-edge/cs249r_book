@@ -8,21 +8,25 @@ competency_area: architecture
 bloom_level: analyze
 phase: training
 title: Hardware-Aware NAS SRAM Bottleneck on nRF5340
-scenario: You are deploying a keyword spotting model on a Nordic nRF5340 using a hardware-aware Neural Architecture Search (NAS). The nRF5340 features a 128 MHz app core, 64 MHz net core, 256 KB SRAM, 1 MB flash, and BLE 5.3. Your NAS framework consistently rejects high-accuracy candidate architectures during the search phase, citing memory violations, even though the models' total parameter sizes are only around 150 KB.
+scenario: >
+  You are deploying a keyword spotting model on a Nordic nRF5340 using a hardware-aware Neural Architecture Search (NAS). Your NAS framework consistently rejects high-accuracy candidate architectures during the search phase, citing memory violations, even though the models' total parameter sizes are only around 150 KB.
 question: Why does the hardware-aware NAS reject high-accuracy candidate architectures despite their small 150 KB parameter size?
 details:
-  realistic_solution: The NAS framework rejects these architectures because their peak memory footprint during inference exceeds the available SRAM. While the weights are stored in the 1 MB flash, the 256 KB SRAM must accommodate the RTOS, the BLE 5.3 network stack, input tensors, and the largest intermediate activation tensors. If a candidate architecture includes a layer with a massive expansion factor or large spatial dimensions, the resulting activation tensor will exceed the remaining SRAM, causing an out-of-memory error.
+  realistic_solution: >
+    The NAS framework correctly rejects these architectures because their peak transient memory footprint during inference exceeds the available SRAM. While the static weights fit easily in Flash, the SRAM must accommodate the RTOS, the BLE 5.3 stack, and the largest intermediate activation tensors. A layer with a massive expansion factor (e.g., in an inverted residual block) generates activation buffers that blow past the SRAM limits, causing a runtime OOM.
   common_mistake: |
     **The Pitfall:** Assuming that if model weights fit within the flash, the model is easily deployable.
     **The Rationale:** Candidates focus purely on static storage and fail to account for the transient working memory required by activation buffers.
     **The Consequence:** The model crashes at runtime with an out-of-memory error when intermediate tensors are allocated.
   napkin_math: |
-    - Total SRAM = 256 KB.
-    - Assume RTOS and BLE 5.3 stack consume ~64 KB, leaving ~192 KB for the ML workload.
-    - NAS candidate proposes an inverted residual block with an input of 49x20x32 (31,360 bytes, ~31 KB) and an expansion factor of 6.
-    - Intermediate activation requires 49x20x192 = 188,160 bytes (~188 KB) using int8 precision.
-    - Sum of input and intermediate activation (31 KB + 188 KB = 219 KB).
-    - **Final Result:** 219 KB exceeds the 192 KB available SRAM, correctly triggering the hardware constraint rejection.
+    1. **Assumptions & Constraints:**
+       - Total SRAM: 256 KB. System (RTOS + BLE): ~64 KB. App SRAM: ~192 KB.
+       - Layer: Inverted residual block, input 49x20x32 INT8 (~31 KB), expansion factor 6.
+    2. **Calculations:**
+       - Intermediate Activation: 49x20x192 INT8 = 188,160 bytes (~188 KB).
+       - Peak Memory (Input + Activation): 31 KB + 188 KB = 219 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 219 KB > 192 KB.** The transient memory requirement exceeds the available SRAM, triggering hardware constraint rejection. **Bottleneck: Peak Activation Memory.**
 status: published
 provenance: imported
 requires_explanation: false

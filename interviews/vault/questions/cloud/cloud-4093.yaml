@@ -2,26 +2,31 @@ schema_version: '1.0'
 id: cloud-4093
 track: cloud
 level: L5
-zone: optimization
+zone: evaluation
 topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: evaluate
 phase: training
-title: TP Bubble: Synchronization Overhead in Practice
-scenario: 'Your TP=8 training job on H100 nodes shows 72% MFU (Model FLOP Utilization). Profiling reveals that AllReduce operations account for 15% of step time.'
-question: 'What two concrete strategies would you use to reduce the 15% TP AllReduce overhead without changing TP=8?'
+title: 'TP Bubble: Synchronization Overhead in Practice'
+scenario: Your TP=8 training job on H100 nodes shows 72% MFU (Model FLOP Utilization). Profiling reveals that AllReduce operations account for 15% of step time.
+question: What two concrete strategies would you use to reduce the 15% TP AllReduce overhead without changing TP=8?
 details:
-  realistic_solution: 'Strategy 1: Overlap communication with computation using CUDA streams. While AllReduce runs for one sub-layer, the independent Dropout/LayerNorm of the next sub-layer can execute concurrently (Megatron-LM async TP). Strategy 2: Use FP8 for TP communication (available on H100 Transformer Engine). AllReduce message size drops by 2× vs BF16, halving communication time. The slight precision loss in the collective is acceptable because LayerNorm immediately follows. Combined effect pushes MFU from 72% to ~78-80%.'
+  realistic_solution: 'Strategy 1: Overlap communication with computation using CUDA streams. While AllReduce runs for one sub-layer, the independent Dropout/LayerNorm of the next sub-layer can execute concurrently (Megatron-LM async TP). Strategy 2: Use FP8 for TP communication (available on H100 Transformer Engine). AllReduce message size drops by 2x vs BF16, halving communication time. The combined effect pushes MFU from 72% to ~78-80%.'
   common_mistake: |
-    **The Pitfall:** Suggesting to simply reduce the TP degree or blindly apply async AllReduce.
-    **The Rationale:** Assuming TP degree is arbitrary, or failing to understand that TP AllReduces are on the critical path.
-    **The Consequence:** OOMs from reduced TP degree, or logical errors/no speedup from poorly implemented async attempts.
+    **The Pitfall:** Blindly reducing the Tensor Parallel (TP) degree to minimize AllReduce overhead.
+    **The Rationale:** Assuming TP degree is completely flexible and the simplest way to reduce communication.
+    **The Consequence:** Immediate Out-Of-Memory (OOM) errors during training because reducing TP drastically increases the per-GPU memory burden for activations and weights.
   napkin_math: |
-    - **Current Comm Time:** 15% of step time.
-    - **Strategy 2 (FP8 Comms):** Halving message size (FP16 -> FP8) drops comm time to ~7.5%.
-    - **Strategy 1 (Overlap):** Async CUDA streams recover ~3% by overlapping with independent operations.
-    - **Net Communication Overhead:** ~4.5% to 6%.
-    - **MFU Improvement:** 72% × (1 + 0.09) ≈ 78.5% MFU.
+    1. **Assumptions & Constraints:**
+       - Current MFU: 72%.
+       - AllReduce Overhead: 15% of step time.
+    2. **Calculations:**
+       - FP8 Comms Strategy: Halving message size (FP16 -> FP8) drops comm time to ~7.5%.
+       - CUDA Stream Overlap Strategy: Recovers ~3% by overlapping independent ops.
+       - Net Communication Overhead: ~4.5% to 6%.
+       - MFU Improvement: 72% * (1 + 0.09) ≈ 78.5% MFU.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~78.5% MFU Achieved.** Using FP8 communication and asynchronous overlap recovers the majority of the AllReduce penalty without altering the TP=8 requirement.
 status: published
 provenance: imported
 requires_explanation: false

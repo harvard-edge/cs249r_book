@@ -8,21 +8,28 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: TP Degree Selection for Inference
-scenario: You are deploying a 70B parameter model (BF16) for inference. You have access to MI300X GPUs (192 GB HBM3 each). The model weights alone are 140 GB.
-question: Should you use TP=1 with a single MI300X or TP=2 across two MI300X GPUs?
+scenario: You are deploying a 70B parameter model (BF16) for inference. The model weights alone are 140 GB. You must choose between running on a single 192GB GPU or distributed across two identical GPUs.
+question: "Should you use TP=1 with a single GPU or TP=2 across two GPUs?"
 details:
-  realistic_solution: 'Single MI300X (TP=1): 140 GB weights leave 52 GB for KV cache and activations. With long context (32K tokens, 80 layers, 64 KV heads, head_dim=128), KV cache = 2 × 32768 × 80 × 64 × 128 × 2B = 84 GB — exceeds remaining memory. So TP=1 fails for long context. TP=2 on MI300X: 384 GB total, 140 GB weights split = 70 GB per GPU, leaving 122 GB per GPU for KV cache. KV cache is also split across TP ranks, so each GPU holds 42 GB. Memory bandwidth doubles from 5.3 to 10.6 TB/s, nearly doubling decode throughput since decode is memory-bandwidth bound. The cost: each transformer block now needs 2 AllReduces over the inter-GPU link. On MI300X with Infinity Fabric at ~400 GB/s between GPUs, this adds ~0.1 ms per block × 80 blocks = 8 ms — modest vs the ~25 ms decode latency at TP=1.'
+  realistic_solution: 'Single GPU (TP=1): 140 GB weights leave 52 GB for KV cache and activations. With long context (32K tokens, 80 layers, 64 KV heads, head_dim=128), KV cache = 2 × 32768 × 80 × 64 × 128 × 2B = 84 GB — exceeds remaining memory. So TP=1 fails for long context. TP=2: 384 GB total, 140 GB weights split = 70 GB per GPU, leaving 122 GB per GPU for KV cache. KV cache is also split across TP ranks, so each GPU holds 42 GB. Memory bandwidth doubles from 5.3 to 10.6 TB/s, nearly doubling decode throughput since decode is memory-bandwidth bound. The cost: each transformer block now needs 2 AllReduces over the inter-GPU link. This adds ~0.1 ms per block × 80 blocks = 8 ms — modest vs the ~25 ms decode latency at TP=1.'
   common_mistake: |
     **The Pitfall:** Selecting Tensor Parallelism degree based strictly on whether weights fit on a single GPU.
     **The Rationale:** Ignoring the massive dynamic memory footprint of the KV cache and the performance benefits of doubling aggregate memory bandwidth.
     **The Consequence:** OOM errors during long-context generation and significantly slower decoding throughput due to memory bandwidth starvation.
   napkin_math: |
-    * **TP=1 Memory:** 192 GB total - 140 GB weights = 52 GB available.
-    * **KV Cache (32K tokens):** 2 * 32768 * 80 * 64 * 128 * 2B ≈ 85 GB (OOM!).
-    * **TP=2 Memory:** 384 GB total. 70 GB weights/GPU leaves 122 GB/GPU. Split KV cache takes 42 GB/GPU (Fits).
-    * **TP=1 Throughput:** 140 GB / 5.3 TB/s = ~26 ms/token.
-    * **TP=2 Throughput:** 70 GB / 5.3 TB/s = ~13 ms/token + ~8 ms comms = ~21 ms/token.
-    * **Conclusion:** **TP=2 avoids OOM on long contexts and speeds up decoding by ~20% by doubling aggregate bandwidth.**
+    1. **Assumptions & Constraints:**
+       - Model: 70B parameters, BF16 (140 GB weights).
+       - Memory: 192 GB total per GPU.
+       - Context: 32K tokens, 80 layers, 64 KV heads, head_dim 128.
+       - Memory Bandwidth: 5.3 TB/s per GPU.
+    2. **Calculations:**
+       - KV Cache Size = 2 * 32768 * 80 * 64 * 128 * 2 bytes = ~85 GB.
+       - TP=1 Memory Req = 140 GB + 85 GB = 225 GB (Exceeds 192 GB: OOM).
+       - TP=2 Memory Req per GPU = 70 GB + 42.5 GB = 112.5 GB (Fits 192 GB).
+       - TP=1 Throughput = 140 GB / 5.3 TB/s = ~26 ms/token.
+       - TP=2 Throughput = 70 GB / 5.3 TB/s = ~13 ms/token + ~8 ms comms = ~21 ms/token.
+    3. **Conclusion & Interpretation:**
+       - **Result: TP=2 Required (Memory-Capacity-Bound).** TP=2 avoids OOM on long contexts and speeds up decoding by ~20% by doubling aggregate bandwidth.
 status: published
 provenance: imported
 requires_explanation: false

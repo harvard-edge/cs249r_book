@@ -8,27 +8,26 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: High-Throughput DP-SGD Training
-scenario: 'Training a cloud-based recommendation embedding model on 500 million user interaction records.
-  Privacy regulations dictate achieving a strict epsilon ≤ 1.5 using DP-SGD. Standard DP-SGD causes OOM
-  errors on 80GB A100s due to per-sample gradient materialization and slows throughput by 10x. Target:
-  Complete training in <24 hours.'
-question: "How would you train the 500M-record embedding model with epsilon ≤ 1.5 in under 24 hours without OOMing A100s?"
+scenario: 'Training a cloud-based recommendation embedding model on 500 million user interaction records. Privacy regulations dictate achieving a strict epsilon ≤ 1.5 using DP-SGD. Standard DP-SGD causes OOM errors on 80GB A100s due to per-sample gradient materialization and slows throughput by 10x. Target: Complete training in <24 hours.'
+question: How would you train the 500M-record embedding model with epsilon ≤ 1.5 in under 24 hours without OOMing A100s?
 details:
-  realistic_solution: 'Adopt Ghost Clipping and large-scale gradient accumulation. Standard DP-SGD requires
-    instantiating gradients per sample (`batch_size * model_size`), blowing up memory. Ghost clipping
-    calculates the clipping norm using a memory-efficient Taylor expansion trick without materializing
-    the full per-sample gradients, reducing memory complexity to match standard SGD. To achieve epsilon
-    ≤ 1.5, we must use a massive logical batch size (e.g., 16,384) to maximize privacy amplification.
-    The tradeoff is compute efficiency vs. memory: we accumulate gradients across multiple forward/backward
-    passes on smaller physical batches to simulate the large logical batch without OOMing.'
-  common_mistake: Reducing the logical batch size to fit in memory, which destroys the 'privacy amplification
-    by subsampling' property and forces the noise multiplier so high the model fails to converge.
-  napkin_math: 'Dataset: 500M records. 24h SLA = 86,400s. Required throughput: 500M / 86400 = 5,787 samples/sec.
-    Logical batch size: 16,384. Using 8x A100 GPUs, physical batch size per GPU = 256. Gradient accumulation
-    steps = 16,384 / (8 * 256) = 8 steps. With Ghost Clipping, memory per GPU is ~40GB (safely fits in
-    80GB). Forward/backward pass for BS=256 takes ~300ms. 8 steps = 2.4s per logical batch. Throughput
-    = 16,384 / 2.4s = 6,826 samples/sec. 6,826 > 5,787, so we meet the 24h SLA while satisfying the strict
-    privacy bound.'
+  realistic_solution: 'Adopt Ghost Clipping and large-scale gradient accumulation. Standard DP-SGD requires instantiating gradients per sample (`batch_size * model_size`), blowing up memory. Ghost clipping calculates the clipping norm using a memory-efficient Taylor expansion trick without materializing the full per-sample gradients, reducing memory complexity to match standard SGD. To achieve epsilon ≤ 1.5, we must use a massive logical batch size (e.g., 16,384) to maximize privacy amplification. The tradeoff is compute efficiency vs. memory: we accumulate gradients across multiple forward/backward passes on smaller physical batches to simulate the large logical batch without OOMing.'
+  common_mistake: |
+    **The Pitfall:** Reducing the logical batch size to fit gradients into VRAM.
+    **The Rationale:** Engineers solve the immediate OOM by dropping batch sizes, ignoring the mathematics of Differential Privacy.
+    **The Consequence:** Shrinking the logical batch destroys the "privacy amplification by subsampling" property, forcing the noise multiplier so high that the model completely fails to converge.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 500M records. 24h SLA (86,400s). Target throughput: >5,787 samples/sec.
+       - Logical batch size: 16,384. 8x A100s.
+       - Physical batch size per GPU = 256. Gradient accumulation steps = 8.
+    2. **Calculations:**
+       - With Ghost Clipping, memory per GPU is ~40GB (fits in 80GB).
+       - Forward/backward pass for BS=256 takes ~300ms.
+       - 8 steps = 2.4s per logical batch.
+       - Throughput: 16,384 / 2.4s = 6,826 samples/sec.
+    3. **Conclusion & Interpretation:**
+       - **Result: Ghost clipping plus 8x gradient accumulation achieves 6,826 samples/sec, successfully meeting the 24h SLA while preventing OOM. System is Compute-Bound rather than Memory-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

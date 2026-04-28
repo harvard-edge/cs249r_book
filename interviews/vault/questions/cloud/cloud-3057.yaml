@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: create
 phase: training
 title: 'Pipeline Parallelism Mastery: End-to-End Training System Design'
-scenario: You are designing a 3D parallel training system (data + tensor + pipeline) for a 530B parameter model (GPT-3 scale) using 512 H100 GPUs.
-question: How would you choose TP, PP, and DP degrees for a 530B model on 512 H100s, and what are the resulting bubble overhead and memory per device?
+scenario: 'You are designing a 3D parallel training system (data + tensor + pipeline) for a 530B parameter model (GPT-3 scale) using 512 H100 GPUs.'
+question: 'How would you choose TP, PP, and DP degrees for a 530B model on 512 H100s, and what are the resulting bubble overhead and memory per device?'
 details:
   realistic_solution: '530B params at BF16 = 1060GB total. With Adam optimizer: 12 bytes/param = 6360GB optimizer states. Recommended: TP=8 (within NVLink node), PP=8 stages (inter-node), DP=8 (gradient all-reduce). Total GPUs = 8*8*8 = 512. Per device: 530B/(8*8) = 8.28B params = 16.6GB weights. Optimizer states: 6360GB/512 = 12.4GB. Activations (recomputed): ~8GB. Total: ~37GB — fits in 80GB. Bubble with m=64: (8-1)/(64+7) = 9.9%. Target MFU: 45-55% for large models.'
   common_mistake: |
@@ -17,12 +17,15 @@ details:
     **The Rationale:** Candidates often focus purely on compute distribution and forget the massive memory footprint of optimizer states or the latency penalties of cross-node tensor parallelism.
     **The Consequence:** The proposed design either OOMs immediately or suffers from catastrophic inter-node communication bottlenecks.
   napkin_math: |
-    1. **Model Memory:** 530B × 2 bytes = 1060 GB.
-    2. **Optimizer Memory (Adam FP32):** 530B × 12 bytes = 6360 GB. Total = 7420 GB.
-    3. **Per-GPU Memory (across 512 GPUs):** 7420 GB / 512 = ~14.5 GB base memory.
-    4. **Parallelism Degrees:** TP=8 (node size, uses NVLink), PP=8, DP=8 (Total = 8×8×8 = 512).
-    5. **Bubble Overhead:** With PP=8 stages and m=64 micro-batches, bubble = (8-1)/(64+8-1) = 7/71 ≈ 9.9%.
-    **Conclusion:** The configuration fits comfortably within 80GB HBM and keeps TP bounded to high-bandwidth intra-node NVLink.
+    1. **Assumptions & Constraints:**
+       - Model: 530B parameters. BF16 (2 bytes/param). Adam optimizer in FP32 (12 bytes/param).
+       - Cluster: 512 H100 GPUs (80 GB each).
+    2. **Calculations:**
+       - Total Model Memory = 530e9 * 2B = 1.06 TB. Total Optimizer Memory = 530e9 * 12B = 6.36 TB. Total = 7.42 TB.
+       - Per-GPU Memory (across 512 GPUs) = 7.42 TB / 512 = ~14.5 GB base memory.
+       - Parallelism Degrees: TP=8 (node size), PP=8, DP=8 (Total = 8 * 8 * 8 = 512).
+       - Bubble Overhead (PP=8, m=64 micro-batches) = (8-1)/(64+8-1) = 7/71 = ~9.9%.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bound (Capacity)**. The configuration fits comfortably within 80GB HBM while restricting high-bandwidth tensor parallel communication to intra-node NVLink.
 status: published
 provenance: imported
 requires_explanation: true

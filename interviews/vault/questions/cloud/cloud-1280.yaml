@@ -8,7 +8,7 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Diagnosing Limp-Ware Fault Models in Synchronous Training
-scenario: A 1024-GPU A100 cluster is training a 70B parameter model using strictly synchronous 3D parallelism. The cluster orchestrator relies on a classic fail-stop fault model, restarting nodes only when daemon heartbeats fail. However, overall training throughput intermittently drops by >40% for hours at a time, despite all nodes reporting as healthy. Log analysis reveals a degraded PCIe Gen4 link on a single node causing it to operate at 8 GB/s instead of 32 GB/s, creating a severe straggler.
+scenario: A 1024-GPU A100 cluster is training a 70B parameter model using strictly synchronous 3D parallelism. The cluster orchestrator relies on a classic fail-stop fault model, restarting nodes only when daemon heartbeats fail. However, overall training throughput intermittently drops by >40% for hours at a time, despite all nodes reporting as healthy. Log analysis reveals a degraded PCIe Gen4 link on a single node causing it to operate at 8 GB/s instead of 32 GB/s.
 question: What fault model explains the >40% throughput drops, and how can you turn the degraded PCIe link into an orchestrator-handled failure?
 details:
   realistic_solution: Adopt a 'fail-slow' performance fault model where faults manifest as continuous, node-level bandwidth degradation rather than binary crashes. Implement inline NCCL performance monitors; if an operation's latency exceeds 2x the median for a sustained duration (e.g., 10 consecutive steps), intentionally panic the node. This active detection converts the unmanageable fail-slow fault into a standard fail-stop fault, allowing the orchestrator to automatically replace it and resume from the last checkpoint.
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Standard orchestration ignores "fail-slow" performance anomalies that don't trigger a daemon crash but bottleneck synchronous collectives.
     **The Consequence:** The cluster suffers massive, prolonged throughput degradation while the orchestrator assumes the system is fully healthy.
   napkin_math: |
-    * **Normal Step Time:** 150ms compute + 50ms communication = 200ms.
-    * **Degraded Communication:** PCIe bandwidth drops from 32 GB/s to 8 GB/s (4× slower), increasing communication to 50ms × 4 = 200ms.
-    * **Straggler Step Time:** 150ms compute + 200ms communication = 350ms.
-    * **Global Impact:** Synchronous barriers force the cluster to wait for the straggler, making the global step time 350ms.
-    * **Conclusion:** Throughput drops to 200/350 = **~57% of baseline (a 43% drop)**.
+    1. **Assumptions & Constraints:**
+       - Normal Step Time: 150ms compute + 50ms communication = 200ms.
+       - Degraded Communication: PCIe bandwidth drops from 32 GB/s to 8 GB/s (4x slower).
+    2. **Calculations:**
+       - Straggler Communication Time: 50ms * 4 = 200ms.
+       - Straggler Step Time: 150ms compute + 200ms communication = 350ms.
+       - Global Impact: Synchronous barriers force the entire cluster to wait for the straggler (350ms step time).
+       - New Throughput = 200 / 350 ≈ 57% of baseline.
+    3. **Conclusion & Interpretation:**
+       - A single degraded link drops overall cluster throughput by ~43%.
+       - **Result: Fail-Slow Straggler Bottleneck**
 status: published
 provenance: imported
 requires_explanation: false

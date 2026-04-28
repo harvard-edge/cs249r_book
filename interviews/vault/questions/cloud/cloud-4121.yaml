@@ -11,16 +11,23 @@ title: Elastic Training with Dynamic GPU Scaling
 scenario: Your scheduler supports elastic training, allowing jobs to shrink or grow their GPU allocation dynamically. A 64-GPU training job is running when a higher-priority job needs 16 GPUs.
 question: How would you safely shrink the 64-GPU training job to 48 GPUs without restarting from scratch?
 details:
-  realistic_solution: 'Elastic training mechanics (TorchElastic/etcd-based): (1) Scheduler sends SIGTERM to 16 selected workers (preferring workers on the same node to maintain topology efficiency). (2) Surviving 48 workers detect membership change via the rendezvous backend (etcd or C10d store). (3) All 48 workers: save checkpoint, destroy current NCCL communicators, re-rendezvous with new world_size=48, re-initialize NCCL with new rank assignments, reload checkpoint, adjust learning rate (linear scaling rule: LR × 48/64 = 0.75× original LR), adjust batch size or gradient accumulation steps to maintain global batch size. (4) Training resumes. Total downtime: ~2-5 minutes (dominated by checkpoint I/O and NCCL re-initialization). Critical challenges: (a) TP groups must remain intact — you can only remove complete TP groups (e.g., 8 GPUs at a time if TP=8). (b) PP stages need rebalancing if a pipeline stage is removed. (c) DP degree changes require adjusting the learning rate schedule. TorchElastic handles DP-only elasticity well. TP/PP elasticity requires custom resharding logic.'
+  realistic_solution: |
+    Leverage TorchElastic / C10d. 1) Scheduler sends SIGTERM to 16 selected workers (preferring whole node eviction to maintain topology). 2) Surviving 48 workers detect membership change via rendezvous backend (etcd). 3) Workers flush checkpoints, destroy old NCCL communicators, re-rendezvous with world_size=48, and initialize a new NCCL ring. 4) Reload checkpoints, scale the learning rate linearly (LR * 48/64), adjust DP boundaries, and resume. Pipeline/Tensor Parallelism groups must remain strictly intact during eviction.
   common_mistake: |
-    **The Pitfall:** Assuming the scheduler can simply kill 16 worker processes and let the others continue.
-    **The Rationale:** Candidates forget that distributed training relies on collective communication groups (like NCCL) that rigidly require all initialized ranks to participate.
+    **The Pitfall:** Assuming the scheduler can simply kill 16 worker processes and let the others continue processing normally.
+    **The Rationale:** Candidates forget that distributed training relies on strict collective communication groups (like NCCL) that rigidly require all initialized ranks to participate in barriers.
     **The Consequence:** Killing a subset of workers causes the remaining nodes to hang indefinitely waiting for collective barriers, eventually crashing the entire job.
   napkin_math: |
-    - **Shrink Operation:** 64 → 48 GPUs (Removing 2 nodes / 16 GPUs).
-    - **Latency Breakdown:** Checkpoint state = 20s. Re-rendezvous surviving nodes = 30s. NCCL re-initialization = 60s.
-    - **Total Elastic Downtime:** **~2 minutes**.
-    - **Alternative (Full Restart):** Requires 10+ minutes of queuing, allocation, and cold-start loading.
+    1. **Assumptions & Constraints:**
+       - Scale down: 64 GPUs to 48 GPUs (removing 16 GPUs / 2 nodes).
+       - Distributed backend: NCCL over TorchElastic.
+    2. **Calculations:**
+       - Checkpoint state flush: ~20 seconds.
+       - Surviving nodes re-rendezvous (etcd/C10d): ~30 seconds.
+       - NCCL topology re-initialization: ~60 seconds.
+       - Total Elastic Downtime: 20s + 30s + 60s = 110 seconds (~2 minutes).
+    3. **Conclusion & Interpretation:**
+       - **Result: Collective-Bound I/O.** The dynamic shrink operation takes ~2 minutes of downtime, which is overwhelmingly faster than the 10+ minutes required for a full job requeue, cluster allocation, and cold-start state loading.
 status: published
 provenance: imported
 requires_explanation: true

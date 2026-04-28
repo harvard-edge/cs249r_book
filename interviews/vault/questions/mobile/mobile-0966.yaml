@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: 'Latency Decomposition: Full Mobile ML App Latency Audit with User-Perceived Delay'
-scenario: A mobile photo editing app uses on-device style transfer (15M param CNN, INT8) on an A17 Pro (35 TOPS, 8GB). The user-perceived latency from tap to preview includes touch event latency (16ms at 60Hz), image decode from disk (HEIC 12MP), pre-processing, inference, post-processing, and display render.
+scenario: A mobile photo editing app uses on-device style transfer (15M param CNN, INT8) on an A17 Pro. The user-perceived latency from tap to preview includes touch event latency (16ms at 60Hz), image decode from disk (HEIC 12MP), pre-processing, inference, post-processing, and display render.
 question: What is the tap-to-preview latency breakdown for the style transfer app, and which component should be optimized first?
 details:
   realistic_solution: 'Touch event: 16ms. HEIC decode (12MP): CPU ~60ms. Resize to 512×512: 2ms. CNN inference (15M params at INT8, ~3 GOPs): 3G/35T ≈ 0.086ms, realistic 5ms. Post-process: 2ms. Texture upload to GPU: 512×512×4=1MB, ~1ms. Display pipeline: 16ms (next vsync). Total: 16+60+2+5+2+1+16 = 102ms. Optimize HEIC decode with VideoToolbox HW decoder → 8ms. New total: 50ms. Remaining: optimize resize with Metal → 0.5ms.'
@@ -17,11 +17,16 @@ details:
     **The Rationale:** Candidates instinctively target the ML model because it's their domain, ignoring the surrounding systems-level pipeline.
     **The Consequence:** Optimization efforts yield diminishing returns, as the CPU-bound HEIC decode and display pipeline delays continue to dominate the user-perceived latency.
   napkin_math: |
-    1. **Baseline Breakdown:** Touch (16ms) + CPU HEIC Decode (~60ms) + Resize (2ms) + CNN (5ms) + Post (2ms) + GPU Upload (1ms) + Display vsync (16ms) = 102ms total.
-    2. **CNN Theoretical vs Actual:** 3 GOPs / 35 TOPS = 0.086ms. Actual is 5ms due to memory bandwidth (15MB weights / 68 GB/s = 0.22ms + activation memory overhead).
-    3. **HEIC Optimization:** Switch to Hardware VideoToolbox Decoder -> drops decode from 60ms to 8ms.
-    4. **Resize Optimization:** Switch to Metal -> drops resize from 2ms to 0.5ms.
-    **Result:** Optimizing the data pipeline reduces total latency from 102ms to **~50ms**, dropping it below the critical 100ms human perceptual threshold.
+    1. **Assumptions & Constraints:**
+       - Target Threshold: <100ms user-perceived delay.
+       - Hardware: A17 Pro (35 TOPS, 68 GB/s).
+    2. **Calculations:**
+       - Base Latency: Touch (16ms) + CPU Decode (~60ms) + Resize (2ms) + NPU (5ms) + Post (2ms) + GPU (1ms) + Vsync (16ms) = 102ms.
+       - Hardware VideoToolbox Decoder: Drops decode from 60ms to 8ms.
+       - Metal GPU Resize: Drops resize from 2ms to 0.5ms.
+       - Optimized Total: 16 + 8 + 0.5 + 5 + 2 + 1 + 16 = 48.5ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 48.5ms Tap-to-Preview**. By moving the bottlenecked CPU data ingestion to hardware accelerators, the latency is halved, achieving real-time interaction limits.
 status: published
 provenance: imported
 requires_explanation: true

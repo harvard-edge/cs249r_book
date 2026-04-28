@@ -7,23 +7,24 @@ topic: mixture-of-experts
 competency_area: compute
 bloom_level: analyze
 phase: both
-title: MoE Expert Routing Overhead on H100
-scenario: You are running a 64-expert Mixtral-style MoE model on 8x H100 (80GB HBM3,
-  3.35 TB/s). Each token activates top-2 experts. Your gating network adds a softmax
-  over 64 logits per token, and you observe that the router overhead is eating 12%
-  of your step time on a 4096-token batch. You need to reduce this without changing
-  the number of experts.
-question: How would you reduce the 64-expert MoE router overhead from 12% on a 4096-token
-  batch without reducing the expert count?
+title: MoE Expert Routing Overhead
+scenario: You are running a 64-expert Mixtral-style MoE model. Each token activates top-2 experts. Your gating network adds a softmax over 64 logits per token, and you observe that the router overhead is eating 12% of your step time on a 4096-token batch. You need to reduce this without changing the number of experts.
+question: "How would you reduce the 64-expert MoE router overhead from 12% on a 4096-token batch without reducing the expert count?"
 details:
-  realistic_solution: Switch to token-choice routing with a hard top-k argmax after
-    a single linear projection, fusing the router into a single kernel. Replace full
-    softmax with a top-k-only implementation (compute partial softmax over only k=2
-    candidates after cheap linear scoring). This avoids writing out the full 64-way distribution per token.
-  common_mistake: Teams profile the expert FFNs and ignore the gating softmax, assuming
-    it is free. At scale, an unfused full 64-way softmax over a 4096-token batch forces
-    costly HBM round-trips, severely bottlenecking the operation on memory bandwidth rather than compute.
-  napkin_math: 'Naive router: gating linear projection is fused, but unfused softmax over 64 logits writes 4096×64 entries to HBM, taking ~12% overhead due to memory latency. Softmax compute is 4096×64×3 ≈ 0.78 MFLOPs. With fused top-2 hard routing: 4096×2 operations, keeping logits in registers. Router overhead drops from 12% to ~6% by avoiding HBM round-trips for the full 64-way softmax.'
+  realistic_solution: Switch to token-choice routing with a hard top-k argmax after a single linear projection, fusing the router into a single kernel. Replace full softmax with a top-k-only implementation (compute partial softmax over only k=2 candidates after cheap linear scoring). This avoids writing out the full 64-way distribution per token.
+  common_mistake: |
+    **The Pitfall:** Profiling the expert FFNs while ignoring the gating softmax overhead.
+    **The Rationale:** Assuming an operation with negligible compute (0.78 MFLOPs) is "free".
+    **The Consequence:** The unfused softmax silently starves the memory bus, dragging down overall training step time by 12%.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Batch: 4096 tokens. Experts: 64.
+       - Action: Unfused Softmax over 64 logits.
+    2. **Calculations:**
+       - Unfused HBM Traffic = 4096 * 64 writes + 4096 * 64 reads = 524,288 elements.
+       - Fused Top-2 Traffic = Keep 64 logits in registers, only write out 4096 * 2 routing indices.
+    3. **Conclusion & Interpretation:**
+       - **Result: Overhead Halved to 6% (Memory-Bandwidth-Bound).** Replacing the full softmax with a fused top-k hard routing kernel eliminates the massive HBM round-trips, slashing router latency.
 status: published
 provenance: imported
 requires_explanation: false

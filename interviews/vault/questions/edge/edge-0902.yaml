@@ -11,17 +11,21 @@ title: NPU Underutilization in Depthwise Convolutions
 scenario: You deploy a MobileNetV2-based object detector on a custom NPU with a 16x16 systolic array (peak 512 MACs/cycle). Standard 1x1 convolutions achieve 85% array utilization, but 3x3 depthwise convolutions drop to roughly 6% utilization.
 question: Why do MobileNetV2 depthwise convolutions use only about 6% of the 16x16 systolic array, and how would you redesign around it?
 details:
-  realistic_solution: 'The root cause is a mismatch between the model''s arithmetic intensity and the systolic array''s spatial architecture. Depthwise convolutions process each input channel independently, meaning there is zero data reuse across channels. Only 1 out of 16 rows/columns is active, wasting the rest of the array. You must modify the model to use grouped convolutions (e.g., group size 16) or rewrite the compiler''s dataflow to map spatial dimensions to the grid instead of channels.'
+  realistic_solution: "The 6.25% utilization is a textbook spatial mapping failure. Systolic arrays (like the 16x16 grid) are highly optimized for dense matrix multiplications with heavy channel reuse. Depthwise convolutions compute channels entirely independently, activating only a single vector lane while idling the remaining 240 ALUs. Mitigation requires grouping convolutions or completely re-engineering the compiler's dataflow scheduler."
   common_mistake: |
     **The Pitfall:** Assuming memory bandwidth is the bottleneck and attempting to quantize the depthwise weights.
     **The Rationale:** Candidates fail to understand the spatial mapping constraints of a 2D systolic array during channel-independent operations.
     **The Consequence:** The compute array remains starved, and quantization degrades accuracy without fixing the latency.
   napkin_math: |
-    - Systolic array capacity: 16x16 = 256 MAC units.
-    - Standard 1x1 conv mapping (Input x Output channels): Fills the 16x16 grid (100% utilization).
-    - Depthwise conv mapping: Processes 1 channel at a time.
-    - Active MACs per cycle (channel mapped): 1x16 out of 256.
-    - Utilization rate: 16 / 256 = **6.25%**.
+    1. **Assumptions & Constraints:**
+       - Hardware: 16x16 systolic array (256 MAC units).
+       - Depthwise operation: Channel-independent execution.
+    2. **Calculations:**
+       - Standard 1x1 conv maps cleanly to the 2D grid.
+       - Depthwise maps to 1 channel at a time, activating 1x16 MACs.
+       - Utilization = 16 / 256 = 6.25%.
+    3. **Conclusion & Interpretation:**
+       - **6.25% Utilization.** 2D systolic arrays drastically penalize spatial-only, channel-independent operations.
 status: published
 provenance: imported
 requires_explanation: false

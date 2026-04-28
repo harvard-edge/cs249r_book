@@ -8,19 +8,23 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: The Memory Illusion
-scenario: 'We are deploying a 200B parameter model on an NVIDIA GH200 Grace Hopper Superchip. It has 72 GB of HBM3 and 480 GB of LPDDR5X CPU RAM, sharing a unified memory space. The weights are 400 GB in FP16. Your colleague says we can serve this on a single chip without tensor parallelism since it fits in memory.'
-question: "What is the throughput reality of this design?"
+scenario: 'We are deploying a 200B parameter model on a superchip with 72 GB of HBM3 and 480 GB of LPDDR5X CPU RAM sharing a unified memory space. The weights are 400 GB in FP16. Your colleague says we can serve this on a single chip without tensor parallelism since it fits in memory.'
+question: 'What is the throughput reality of this unified-memory design?'
 details:
-  realistic_solution: 'You will hit the **C2C Bandwidth Wall**. While the model fits, the GPU must fetch weights from the CPU''s LPDDR5X memory over the 900 GB/s C2C link for every token during the decode phase. This is ~4.4x slower than fetching from local HBM3 (4,000 GB/s). Your token-per-second throughput will be limited by the C2C link, not the GPU''s compute. For high-throughput serving, you still need Tensor Parallelism to keep weights in HBM.'
+  realistic_solution: 'The design will hit the C2C (Chip-to-Chip) Bandwidth Wall. While unified memory allows shared addressing, physical bandwidth limits are absolute. The GPU must stream weights from LPDDR5X over the ~900 GB/s C2C link during the autoregressive decode phase, rather than reading from the 4,000 GB/s local HBM3. This results in severe memory bandwidth starvation. High-throughput serving mandates Tensor Parallelism to keep all active weights in HBM.'
   common_mistake: |
-    **The Pitfall:** Assuming unified memory means the GPU can read all 480 GB at HBM speeds.
-    **The Rationale:** Misunderstanding that unified memory means shared addressing, but physical bandwidth limits still apply.
-    **The Consequence:** Severely overestimating token generation throughput, leading to massive latency SLA violations.
+    **The Pitfall:** Assuming unified memory means the GPU can read all 480 GB at native HBM speeds.
+    **The Rationale:** Candidates misunderstand that unified memory abstracts addressing, but does not bypass physical link limitations.
+    **The Consequence:** Severely overestimating token generation throughput, leading to catastrophic latency SLA violations in production.
   napkin_math: |
-    1. In Decode, latency is roughly `Weights / Bandwidth`.
-    2. HBM3 bandwidth (4 TB/s) -> ~0.1s per token.
-    3. C2C link bandwidth (0.9 TB/s) -> ~0.44s per token.
-    4. **Result:** Your "fits on one chip" design is **~4.4x slower** than a standard multi-GPU HBM design.
+    1. **Assumptions & Constraints:**
+       - HBM3 Bandwidth: 4 TB/s. C2C Bandwidth: 0.9 TB/s.
+       - Weights: 400 GB.
+    2. **Calculations:**
+       - HBM3 Decode latency: 400 GB / 4 TB/s = 0.1s per token.
+       - C2C Decode latency: 400 GB / 0.9 TB/s = 0.44s per token.
+    3. **Conclusion & Interpretation:**
+       - **Result: The "fits on one chip" design is 4.4x slower than a standard HBM configuration (Bandwidth-Bound).**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,36 +8,21 @@ competency_area: compute
 bloom_level: apply
 phase: inference
 title: The Delegation Lottery
-scenario: Your team ships an image classification model on Android using TFLite. On a Snapdragon 8 Gen 3 device, inference takes 4ms. A colleague adds a single custom post-processing op written as a TFLite Flex delegate.
-question: Why does adding a single TFLite Flex post-processing op raise Snapdragon inference latency from 4ms to 38ms?
+scenario: Your team ships an image classification model on Android using TFLite. On a high-end NPU, inference takes 4ms. A colleague adds a single custom post-processing op written as a TFLite Flex delegate.
+question: Why does adding a single TFLite Flex post-processing op raise the inference latency from 4ms to 38ms?
 details:
-  realistic_solution: NPU delegation is all-or-nothing *per subgraph*. When TFLite encounters an op the NPU (Hexagon/QNN) delegate doesn't support, it partitions the graph. The supported prefix runs on the NPU, then the intermediate tensor is copied back to CPU RAM for the unsupported op, and any remaining ops may not return to the NPU. The cost isn't the op — it's the round-trip data transfer across the on-chip NoC and the loss of NPU graph fusion. One incompatible op can shatter an otherwise fully-accelerated graph into three segments with two expensive hand-offs.
+  realistic_solution: "The latency spike is caused by execution domain context switching and the breakdown of graph fusion, not the mathematical complexity of the op itself. NPU delegation is typically all-or-nothing per subgraph. When TFLite encounters an unsupported Flex op, it fractures the graph. The supported prefix executes on the NPU, forcing a costly memory transfer of the intermediate activation tensor across the Network-on-Chip (NoC) back to the CPU. The CPU executes the unsupported op, and any subsequent ops often remain trapped on the slower CPU domain."
   common_mistake: |
     **The Pitfall:** Assuming the latency spike is caused by the computational complexity of the custom operation.
     **The Rationale:** Developers incorrectly believe that an accelerator executes operations sequentially and seamlessly hands them back to the CPU, ignoring the brutal cost of graph partitioning.
     **The Consequence:** Wasting time trying to optimize the math of the custom operation instead of fixing the graph to prevent execution domain context switching.
   napkin_math: |
-    - **NPU Inference Time:** ~4ms.
-    - **CPU Fallback Time:** ~35ms.
-    - **Partitioning Overhead:** The unsupported Flex op forces a subgraph partition (NPU -> CPU context switch).
-    - **Conclusion:** The latency explodes because you pay the memory transfer penalty across the system NoC plus the slower CPU execution speed for the un-fused tail of the graph.
+    1. **Assumptions & Constraints:**
+       - NPU continuous inference time: ~4ms.
+       - Graph partitioned CPU fallback time: ~35ms.
+    2. **Calculations:**
+       - Partitioning overhead: Synchronizing the NPU to CPU and transferring the intermediate tensor across the NoC accounts for massive latency.
+       - CPU execution: The un-fused tail of the graph runs at an order of magnitude lower FLOPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Transfer & CPU Fallback-Bound.** The latency explodes due to the memory transfer penalty across the system NoC and the slower CPU execution speed for the fractured subgraph.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 4
-chains:
-- id: mobile-chain-007
-  position: 0
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

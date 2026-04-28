@@ -8,19 +8,24 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: LoRA Memory Footprint Calculation
-scenario: You are fine-tuning a 7B parameter Transformer model (d_model=4096, 32 layers) on a 64GB unified memory edge device for 3 distinct user-specific tasks. Full fine-tuning using the Adam optimizer immediately throws an Out-Of-Memory (OOM) error. You switch to LoRA, adapting only the query (W_q) and value (W_v) projection matrices with rank r=8. Assume the base model is in FP16 and Adam optimizer states are kept in FP32.
+scenario: You are fine-tuning a 7B parameter Transformer model on a 64GB unified memory edge device for 3 distinct user-specific tasks. Full fine-tuning using the Adam optimizer immediately throws an Out-Of-Memory error. You switch to LoRA, adapting only the query and value projection matrices with rank r=8. Assume the base model is in FP16 and Adam optimizer states are kept in FP32.
 question: How much memory is needed for the FP16 7B base, LoRA adapters, and FP32 Adam states for all 3 tasks when adapting W_q and W_v with r=8?
 details:
-  realistic_solution: 'Load a single frozen FP16 base model which consumes ~14GB. For each task, calculate the LoRA parameters: 2 matrices (W_q, W_v) * 32 layers * 2 projection matrices (A and B) * (4096 * 8) = 4,194,304 parameters. The trainable state per task requires ~67MB, easily fitting into the 64GB limit.'
+  realistic_solution: Load a single frozen FP16 base model. The LoRA parameters consume 16 bytes per parameter (Adam states + weights + gradients in mixed precision). The drastically reduced trainable parameter footprint enables training inside the 64GB limit.
   common_mistake: |
     **The Pitfall:** Failing to account for FP32 Adam optimizer states or miscalculating LoRA parameters.
     **The Rationale:** Candidates forget that Adam requires 8 bytes per parameter (moments) + 4 bytes master + 2 bytes grad + 2 bytes weight = 16 bytes per trainable parameter, or they incorrectly compute LoRA dims as `d_model * d_model`.
     **The Consequence:** Underestimating the fine-tuning memory footprint and triggering OOMs even when using PEFT methods.
   napkin_math: |
-    - **Base model (FP16):** 7e9 parameters * 2 bytes = 14 GB.
-    - **LoRA params per task:** 2 (Q,V) * 32 layers * (4096*8 + 8*4096) = 4,194,304 params.
-    - **Trainable memory per task:** 4.19M params * 16 bytes (mixed precision: 2B weights + 2B grads + 4B master + 8B Adam state) = ~67.1 MB.
-    - **Total memory for 3 tasks:** 14 GB (base) + (3 * 67.1 MB) = **~14.2 GB**.
+    1. **Assumptions & Constraints:**
+       - Base model (FP16): 7B params
+       - LoRA Params per task: 4,194,304
+    2. **Calculations:**
+       - Base: 7e9 * 2 bytes = 14 GB
+       - Trainable state/task: 4.19M * 16 bytes = ~67.1 MB
+       - Total: 14 GB + (3 * 67.1 MB) = 14.2 GB
+    3. **Conclusion & Interpretation:**
+       - **Result: 14.2 GB Max.** Easily fits within the 64GB unified memory boundary.
 status: published
 provenance: imported
 requires_explanation: false

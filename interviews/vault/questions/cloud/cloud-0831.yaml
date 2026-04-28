@@ -8,7 +8,7 @@ competency_area: reliability
 bloom_level: understand
 phase: training
 title: The Async Checkpoint Overhead
-scenario: You are training a 50B model and need to checkpoint frequently given your cluster's ~10-hour MTBF. A full checkpoint (FP16 weights, FP32 master weights, and FP32 Adam states) is 700 GB. Your NVMe drives write at 3 GB/s.
+scenario: You are training a 50B model and need to checkpoint frequently given your cluster's ~10-hour MTBF. A full checkpoint is 700 GB.
 question: "A synchronous checkpoint would stall training for how long, and how does async checkpointing fix this?"
 details:
   realistic_solution: 'Synchronous write: 700 GB / 3 GB/s = 233 seconds (~4 minutes) of stalled training per checkpoint. With a 30-second training step, this is catastrophic. Async checkpointing first copies to CPU RAM at ~50 GB/s (14 seconds of GPU pause), then writes to NVMe in the background while training continues. This reduces overhead from 233s to 14s per checkpoint.'
@@ -17,13 +17,18 @@ details:
     **The Rationale:** Candidates overlook that even async checkpointing requires a fast synchronous memory copy to CPU RAM before the background disk write can occur.
     **The Consequence:** Underestimating the necessary GPU pause time and failing to optimize the initial host-device memory transfer.
   napkin_math: |
-    - Checkpoint size = 50B * (2 + 4 + 4 + 4) bytes = 700 GB.
-    - Sync NVMe write = 700 GB / 3 GB/s = 233s stall per checkpoint.
-    - Async copy to CPU RAM at ~50 GB/s = 14s GPU pause.
-    - Training step ≈ 30s. Checkpoint every ~10h (1,200 steps).
-    - Sync overhead = 233s / (1200 * 30s) = **0.65%**.
-    - Async overhead = 14s / (1200 * 30s) = **0.04%**.
-    - **Async stalls training for 14s (less than 1 step) compared to 233s (~8 steps) for sync.**
+    1. **Assumptions & Constraints:**
+       - Checkpoint size = 700 GB.
+       - NVMe write speed = 3 GB/s.
+       - CPU RAM copy speed = ~50 GB/s.
+       - Training step ≈ 30s. Checkpoint every ~10h (1,200 steps).
+    2. **Calculations:**
+       - Sync NVMe write = 700 GB / 3 GB/s = 233s stall per checkpoint.
+       - Async copy to CPU RAM = 700 GB / 50 GB/s = 14s GPU pause.
+       - Sync overhead = 233s / (1200 * 30s) = 0.65%.
+       - Async overhead = 14s / (1200 * 30s) = 0.04%.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound mitigation**. Async stalls training for 14s (less than 1 step) compared to 233s (~8 steps) for sync.
   options:
   - A) ~2 seconds — NVMe is fast enough
   - B) ~23 seconds — manageable with less frequent checkpoints

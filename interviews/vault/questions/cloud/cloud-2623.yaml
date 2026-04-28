@@ -8,18 +8,26 @@ competency_area: latency
 bloom_level: understand
 phase: both
 title: Why Micro-Benchmarks Mislead at System Level
-scenario: A team measures GEMM throughput at 280 TFLOPS on H100 (98% of peak) but end-to-end training throughput is only 45% MFU.
-question: Why can a GEMM micro-benchmark hit 280 TFLOPS on an H100 while end-to-end training only achieves 45% MFU?
+scenario: A team measures GEMM throughput at 280 TFLOPS on a flagship GPU (98% of peak) but end-to-end training throughput is only 45% MFU.
+question: Why can a GEMM micro-benchmark hit near-peak TFLOPS while end-to-end training only achieves 45% MFU?
 details:
-  realistic_solution: "Micro-benchmarks isolate a single operation under ideal conditions: data pre-loaded in cache, no kernel launch overhead, steady-state execution. Real training involves: (1) Kernel launch latency — thousands of small kernels with GPU idle time between them. (2) Memory-bound operations — LayerNorm, softmax, and element-wise ops are bandwidth-limited, not compute-limited. (3) Data loading — CPU-to-GPU transfer pipeline stalls. (4) Communication — gradient synchronization across GPUs (AllReduce). (5) Python/framework overhead — graph tracing, memory allocation. The 280 TFLOPS GEMM only applies during large matmuls; the rest of the model execution hits different bottlenecks. MFU measures actual useful FLOPs across the entire step including all overheads."
+  realistic_solution: "Micro-benchmarks isolate a single operation under ideal conditions: data pre-loaded in cache, no kernel launch overhead, steady-state execution. Real training involves: (1) Kernel launch latency \u2014 thousands of small kernels with GPU idle time between them. (2) Memory-bound operations \u2014 LayerNorm, softmax, and element-wise ops are bandwidth-limited, not compute-limited. (3) Data loading \u2014 CPU-to-GPU transfer pipeline stalls. (4) Communication \u2014 gradient synchronization across GPUs (AllReduce). (5) Python/framework overhead \u2014 graph tracing, memory allocation. The 280 TFLOPS GEMM only applies during large matmuls; the rest of the model execution hits different bottlenecks. MFU measures actual useful FLOPs across the entire step including all overheads."
   common_mistake: |
     **The Pitfall:** Using peak GEMM TFLOPS to directly estimate end-to-end training time.
     **The Rationale:** Assuming that because matrix multiplications dominate the FLOP count, they also cleanly dominate the wall-clock time.
     **The Consequence:** Drastically underestimating training time and budget, leading to blown project deadlines.
   napkin_math: |
-    *   **Workload Breakdown:** A typical training step is ~60% matmul (high FLOPS), ~20% memory-bound ops (LayerNorm, softmax), ~10% communication, ~10% framework overhead.
-    *   **Blended Utilization:** $0.6 \times 98\%$ (GEMM) + $0.4 \times \sim 5\%$ (Memory/Overhead) $\approx$ 60%.
-    *   **Final MFU:** After network communication and framework overheads are factored in, real MFU settles at **~45%**.
+    1. **Assumptions & Constraints:**
+       * Matmul operations (GEMMs) represent ~60% of wall-clock time.
+       * Memory-bound ops (LayerNorm, softmax) represent ~20%.
+       * Communication and Framework overhead represent ~20%.
+    2. **Calculations:**
+       * GEMM Utilization: 98% \times 0.60 = 58.8% contribution.
+       * Non-GEMM Utilization: 5% (memory bound) \times 0.40 = 2.0% contribution.
+       * Blended MFU: 58.8% + 2.0% = 60.8%.
+       * Adjust for pipeline stalls/sync overheads, reducing it further.
+    3. **Conclusion & Interpretation:**
+       * The overall system settles around **45% MFU** because non-GEMM operations drastically dilute the peak compute performance. **Result: Amdahl's-Law-Bound (System Bottlenecks)**.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,20 +9,25 @@ bloom_level: analyze
 phase: training
 title: Root Causing H2D Serialization in CUDA Streams
 scenario: A vision transformer processing 4K images operates at 20 QPS. Profiling shows the GPU is completely idle ~34% of the time. The application uses `cudaMemcpyAsync` to transfer the 500MB input batch to the GPU, followed immediately by the forward pass kernel invocation.
-question: Why is the GPU idle ~34% of the time despite using cudaMemcpyAsync, and how would you overlap transfer and compute?
+question: "Why is the GPU idle ~34% of the time despite using cudaMemcpyAsync, and how would you overlap transfer and compute?"
 details:
   realistic_solution: |
-    The root cause is stream serialization. Although `cudaMemcpyAsync` is non-blocking to the host CPU, if it is placed on the same default CUDA stream (Stream 0) as the compute kernel, the GPU strictly serializes the operations. The GPU waits for the entire 500MB transfer over PCIe to finish before launching the compute kernel, resulting in idle compute units during the transfer. The solution is to use dual CUDA streams (a dedicated copy stream and a compute stream) and implement double-buffering. Transfer batch N+1 on the copy stream while batch N is computing on the compute stream, synchronizing them via `cudaEventRecord` and `cudaStreamWaitEvent`.
+    The root cause is stream serialization. Although `cudaMemcpyAsync` is non-blocking to the host CPU, if it is placed on the same default CUDA stream (Stream 0) as the compute kernel, the GPU strictly serializes the operations. The solution is to use dual CUDA streams (a dedicated copy stream and a compute stream) and implement double-buffering.
   common_mistake: |
     **The Pitfall:** Assuming that invoking `cudaMemcpyAsync` automatically guarantees overlap with compute.
     **The Rationale:** Candidates write the API call but ignore CUDA stream semantics, unaware that placing both operations on the default stream forces strict serialization.
     **The Consequence:** Leaving massive amounts of GPU compute capacity idle while the accelerator waits for host-to-device PCIe transfers to finish.
   napkin_math: |
-    - **Bandwidth:** 500MB input batch. PCIe Gen4 x16 effective bandwidth = 32 GB/s.
-    - **Transfer & Compute:** Transfer time = 500MB / 32 GB/s = 15.6 ms. Compute time = 30 ms.
-    - **Serialized:** Serialized total time per batch = 15.6 ms + 30 ms = 45.6 ms (21.9 QPS).
-    - **Overlapped:** Overlapped via separate streams: total time per batch = max(15.6 ms, 30 ms) = 30 ms.
-    - **Conclusion: Throughput increases from 21.9 QPS to 33.3 QPS, eliminating the ~34% idle time.**
+    1. **Assumptions & Constraints:**
+       - 500MB input batch.
+       - PCIe Gen4 x16 effective bandwidth = 32 GB/s.
+    2. **Calculations:**
+       - Transfer time = 500MB / 32 GB/s = 15.6 ms.
+       - Compute time = 30 ms.
+       - Serialized total time per batch = 15.6 + 30 = 45.6 ms (21.9 QPS).
+       - Overlapped via separate streams = max(15.6, 30) = 30 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: PCIe-Bound mitigation**. Throughput increases to 33.3 QPS, eliminating the ~34% idle time.
 status: published
 provenance: imported
 requires_explanation: false

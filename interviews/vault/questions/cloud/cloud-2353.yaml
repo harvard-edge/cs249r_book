@@ -8,8 +8,8 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: Petabyte-Scale Multimodal Streaming
-scenario: You are designing data ingestion for training a multimodal model on 4,000 preemptible GPUs. The 20 PB dataset (2MB images, 10MB videos) is in Cloud Object Storage. Each GPU processes 500 MB/s.
-question: How would you design ingestion to sustain 2 TB/s throughput without hitting API rate limits, excessive costs, or cache-warming penalties?
+scenario: 'You are designing data ingestion for training a multimodal model on 4,000 preemptible GPUs. The 20 PB dataset (2MB images, 10MB videos) is in Cloud Object Storage. Each GPU processes 500 MB/s.'
+question: 'How would you design ingestion to sustain 2 TB/s throughput without hitting API rate limits, excessive costs, or cache-warming penalties?'
 details:
   realistic_solution: |
     Adopt a streaming-first architecture using large sequential shards to transform the access pattern from IOPS-bound to throughput-bound. Group the small files into 2GB uncompressed tarballs (e.g., WebDataset format). Locality design: Cloud Object Store acts as the primary tier. Each node streams 2GB tarballs directly into host memory via HTTPS, bypassing local disk entirely for the primary read path. Because nodes are preemptible, relying on a local NVMe cache would incur massive cache-warming penalties upon respawning. Instead, local NVMe is strictly utilized as a constrained ring buffer for cross-shard shuffling (holding ~200GB of recent samples), allowing instant resumption of training on new nodes while maintaining sequential streaming efficiency from the cloud.
@@ -18,11 +18,14 @@ details:
     **The Rationale:** Candidates apply traditional HPC paradigms or naive object storage access without calculating API costs or IOPS limits.
     **The Consequence:** Millions of GET requests result in IOPS throttling and ruinous cloud API bills (tens of thousands of dollars per day).
   napkin_math: |
-    - **Aggregate throughput:** 4,000 GPUs * 500 MB/s = 2 TB/s.
-    - **Small files approach (avg 5MB):** 2 TB/s / 5MB = 400,000 GETs/sec. Cost ≈ $0.0004 per 1k GETs = $0.16/sec ≈ $13,800/day.
-    - **Tarball approach (2GB shards):** 2 TB/s / 2GB = 1,000 GETs/sec. Cost ≈ $0.0004/sec ≈ $35/day.
-    - **Per-node bandwidth:** 8 GPUs * 500 MB/s = 4 GB/s (32 Gbps).
-    - **Conclusion: 2GB streaming shards eliminate IOPS bottlenecks and drop API costs by >99%, easily fitting within a standard 100 Gbps cloud NIC.**
+    1. **Assumptions & Constraints:**
+       - Throughput requirement: 4,000 GPUs * 500 MB/s = 2 TB/s.
+       - Small files approach: 5 MB average size.
+       - Shard approach: 2 GB WebDataset tarballs.
+    2. **Calculations:**
+       - Small Files IOPS = 2 TB/s / 5 MB = 400,000 GETs/sec. Cost = 400,000 * 3600 * 24 / 1000 * $0.0004 = ~$13,824/day.
+       - Shard IOPS = 2 TB/s / 2 GB = 1,000 GETs/sec. Cost = 1,000 * 3600 * 24 / 1000 * $0.0004 = ~$35/day.
+    3. **Conclusion & Interpretation:** **Result: IO-Bound (API Limits)**. Streaming 2 GB shards transforms an IOPS-bound workload into a sequential throughput-bound workload, eliminating API throttling and dropping costs by >99%.
 status: published
 provenance: imported
 requires_explanation: false

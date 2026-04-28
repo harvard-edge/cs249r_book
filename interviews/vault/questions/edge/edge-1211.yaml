@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: Latency Spikes in Dynamic Batching on Jetson Orin
-scenario: You are running an object detection model on an NVIDIA Jetson Orin (275 TOPS INT8, 32 GB LPDDR5, 60W TDP) mounted on an autonomous delivery bot. The system uses dynamic batching with a maximum batch size of 8 and a timeout of 15ms. During peak navigation scenarios, the camera frame rate is a consistent 60 FPS, yet tail latency (p99) intermittently spikes beyond 35ms, causing navigation stutter, even though the Ampere GPU and DLA accelerators are not fully utilized.
+scenario: You are running an object detection model on an NVIDIA Jetson Orin mounted on an autonomous delivery bot. The system uses dynamic batching with a maximum batch size of 8 and a timeout of 15ms. During peak navigation scenarios, the camera frame rate is a consistent 60 FPS, yet tail latency (p99) intermittently spikes beyond 35ms, causing navigation stutter, even though the Ampere GPU and DLA accelerators are not fully utilized.
 question: Why do p99 latency spikes occur at 60 FPS with a 15ms dynamic batching timeout on Jetson Orin despite compute headroom?
 details:
   realistic_solution: The issue stems from the destructive interaction between the dynamic batching timeout and the deterministic frame arrival rate. At 60 FPS, a new frame arrives every 16.67ms. Since the dynamic batching timeout is set to 15ms, the system receives a frame, waits 15ms for a second frame that will not arrive in time, and then processes a batch of 1. This constant waiting adds a fixed 15ms penalty to every request. When combined with the actual inference time, the total latency exceeds the budget, and the processing rate falls behind the 60 FPS ingestion rate, causing queues to build up and tail latency to spike.
@@ -17,13 +17,16 @@ details:
     **The Rationale:** Candidates see hardware limits (60W TDP, LPDDR5) and jump to hardware bottlenecks, ignoring the logical interaction between arrival rates and batching timeouts.
     **The Consequence:** Misdiagnosing the problem and proposing unnecessary hardware or model optimizations instead of simply tuning the batching parameters.
   napkin_math: |
-    - Arrival rate: 60 FPS = 1 frame every 16.67ms.
-    - Dynamic batching timeout = 15ms.
-    - Frame 1 arrives at t=0. Batcher waits until t=15ms. Frame 2 has not arrived (due at 16.67ms).
-    - Batch of size 1 is sent to Jetson Orin Ampere GPU at t=15ms.
-    - Assume INT8 inference takes 10ms. Total latency for Frame 1 = 15ms (wait) + 10ms (compute) = 25ms.
-    - Effective processing throughput is bounded by 1 / 25ms = 40 FPS.
-    - **Result: Since camera ingestion (60 FPS) > processing throughput (40 FPS), the input queue grows indefinitely over time, pushing p99 latency well past 35ms.**
+    1. **Assumptions & Constraints:**
+       - Arrival rate: 60 FPS (1 frame every 16.67ms).
+       - Dynamic batching timeout = 15ms.
+       - INT8 inference time = 10ms.
+    2. **Calculations:**
+       - Batcher waits 15ms for Frame 2, which arrives at 16.67ms.
+       - Batch of size 1 processed. Total latency for Frame 1 = 15ms (wait) + 10ms (compute) = 25ms.
+       - Effective processing throughput = 1 / 25ms = 40 FPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: Ingestion rate (60 FPS) exceeds processing rate (40 FPS), causing unbounded queue growth and tail latency spikes.**
 status: published
 provenance: imported
 requires_explanation: false

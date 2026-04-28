@@ -8,21 +8,24 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Cloud New 0026
-scenario: You need to build a low-cost serving pipeline for a 7B model using older T4 16GB GPUs. The model weights barely fit in a single T4's VRAM, limiting the maximum sequence length.
-question: "How would you design a pipeline parallel serving architecture on T4 GPUs to maximize throughput and minimize latency for a 7B model?"
+scenario: You need to build a low-cost serving pipeline for a 7B model using older GPUs. The model weights barely fit in a single GPU's VRAM, limiting the maximum sequence length.
+question: How would you design a pipeline parallel serving architecture to maximize throughput and minimize latency for a 7B model?
 details:
-  realistic_solution: 'Implement a continuous-batching Pipeline Parallel (PP=2) architecture across two T4 GPUs connected via PCIe Gen3. Split the transformer layers equally. The first T4 processes initial layers and streams intermediate hidden states to the second T4. To hide the slow PCIe transfer, use micro-batching with heavy overlap: as T4-A processes token N, T4-B processes token N-1. Use highly quantized INT8 weights to free up the 16GB GDDR6 for larger KV-cache batch sizes, maximizing throughput.'
+  realistic_solution: 'Implement a continuous-batching Pipeline Parallel (PP=2) architecture across two GPUs connected via PCIe Gen3. Split the transformer layers equally. The first processes initial layers and streams intermediate hidden states to the second. To hide the slow PCIe transfer, use micro-batching with heavy overlap: as GPU-A processes token N, GPU-B processes token N-1. Use highly quantized INT8 weights to free up the 16GB GDDR6 for larger KV-cache batch sizes, maximizing throughput.'
   common_mistake: |
     **The Pitfall:** Using Tensor Parallelism (TP) over PCIe instead of Pipeline Parallelism (PP).
-    **The Rationale:** Candidates default to TP because it is standard on NVLink-connected H100s, ignoring the slow PCIe Gen3 interconnect on T4s.
+    **The Rationale:** Candidates default to TP because it is standard on NVLink-connected H100s, ignoring the slow PCIe Gen3 interconnect on older hardware.
     **The Consequence:** The synchronous all-reduce operations required for every layer in TP over PCIe catastrophically bottleneck the system.
   napkin_math: |
-    - 7B model in INT8 = 7 GB.
-    - A single T4 has 16 GB, leaving ~9 GB for KV cache if run on one GPU.
-    - Pipeline Parallel (PP=2) uses 2x T4s (16 GB each), storing 3.5 GB weights per GPU, leaving 12.5 GB for KV cache per GPU.
-    - Intermediate state transfer size: batch_size * hidden_size * 2 bytes. For batch=32, hidden_size=4096: 32 * 4096 * 2 = 262 KB.
-    - T4 PCIe Gen3 bandwidth is 16 GB/s. Transfer time: 262 KB / 16 GB/s ≈ 16 microseconds.
-    - **Result: 16 microseconds of transfer overhead is easily hidden by micro-batching overlap.**
+    1. **Assumptions & Constraints:**
+       - 7B model in INT8 = 7 GB.
+       - Hardware: 16 GB VRAM, PCIe Gen3 (16 GB/s).
+       - PP=2 distributes the load across 2 GPUs.
+    2. **Calculations:**
+       - PP=2 uses 3.5 GB weights per GPU, leaving 12.5 GB for KV cache.
+       - Intermediate state transfer size (batch=32, hidden_size=4096): 32 * 4096 * 2 bytes = 262 KB.
+       - Transfer time over PCIe Gen3: 262 KB / 16 GB/s ≈ 16 microseconds.
+    3. **Conclusion & Interpretation:** **Result: Compute-Bound.** The 16 microseconds of transfer overhead is completely hidden by micro-batching overlap, bypassing the slow PCIe bottleneck.
 status: published
 provenance: imported
 requires_explanation: true

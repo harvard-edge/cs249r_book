@@ -8,21 +8,31 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: 'KV-Cache: Mastery — Long-Context KV Cache Strategy for Mobile Code Assistant'
-scenario: Design the complete KV cache strategy for a 3B LLM code assistant on A17 Pro (35 TOPS, 8GB) that must handle 32K-token codebases. The current 4096-token limit is insufficient.
+scenario: Design the KV cache strategy for a 3B LLM code assistant on an edge device with 8GB RAM that must handle 32K-token codebases. The current 4096-token limit is insufficient.
 question: How would you design a memory-efficient KV cache, eviction policy, and quality preservation strategy for a 32K context?
 details:
   realistic_solution: |
-    32K full KV at bf16: 3B model (32 layers, GQA-8, head_dim=128): 32K × 32 × 2 × 8 × 128 × 2B = 32K × 131KB = 4.19GB. Plus 750MB model + 2GB OS = 6.94GB > 8GB. Doesn't fit. Solutions: INT4 KV + sliding window + sparse attention.
+    Deploying a 32K full KV cache in BF16 is mathematically impossible on an 8GB device due to the immense scale of the Key/Value matrices. The solution requires compounding structural memory optimizations:
+    1. **INT4 KV Cache Quantization:** Downcasting KV caches to 4-bit shrinks the memory requirement by 4x with minimal perplexity degradation.
+    2. **Local Sliding Window Attention:** Expire/evict standard tokens outside a sliding 4096-token local window.
+    3. **Attention Sinks (Landmarks):** Preserve the first ~1024 tokens (the system prompt and crucial context) permanently in cache to anchor the attention distribution, preventing the model's logic from decaying over long sequences.
   common_mistake: |
-    **The Pitfall:** Proposing solutions without verifying memory constraints.
-    **The Rationale:** Candidates assume standard architectures scale linearly without quantifying the infeasibility of a 32K full KV cache in 8GB RAM.
-    **The Consequence:** Designing a system that immediately OOMs the mobile device.
+    **The Pitfall:** Proposing architectural changes (like Ring Attention) without actively calculating the hard hardware memory limits.
+    **The Rationale:** Candidates lean on trendy academic papers but fail to quantify the impossibility of holding a 4.2 GB cache in a constrained 8GB device already running an OS and model weights.
+    **The Consequence:** Designing an elegant software system that immediately triggers a hard OS-level OOM crash upon processing its first large codebase.
   napkin_math: |
-    - **Full 32K KV Cache (bf16):** 3B model (32 layers, GQA-8, 128 head_dim). 32K * 32 * 2 * 8 * 128 * 2 bytes = 4.19 GB.
-    - **Available Memory:** 8GB - 2GB OS - 0.75GB model = 4.75GB. 4.19GB leaves no headroom and risks eviction.
-    - **INT4 Quantized KV:** 4.19 GB / 4 = 1.05 GB.
-    - **Sliding Window + Landmarks:** 4096 recent + 1024 landmark = 5120 tokens. 5120 * 131 KB = 671 MB.
-    - **Result:** **Combining INT4 KV and landmark tokens reduces the cache to ~1 GB, safely fitting within the 8GB limit.**
+    1. **Assumptions & Constraints:**
+       - Target Context: 32,768 tokens.
+       - Architecture: 3B model (32 layers, GQA-8, 128 head_dim). Precision: BF16 (2 bytes/param).
+       - System Overhead: 8GB total - 2GB OS - 0.75GB Weights = ~5.25 GB available RAM.
+    2. **Calculations:**
+       - Full BF16 KV Cache: 2 (K+V) * 32,768 tokens * 32 layers * 8 heads * 128 dim * 2 bytes = 4.19 GB.
+       - Capacity Check: 4.19 GB cache in a 5.25 GB budget guarantees catastrophic eviction.
+       - Optimized Strategy (INT4 + Window + Sinks): 
+         - Downcast to 4-bit: 4.19 GB / 4 = ~1.05 GB (for full 32k).
+         - Apply Windowing (4096 local + 1024 sink = 5120 active tokens): 5120 * 131 KB = ~671 MB.
+    3. **Conclusion & Interpretation:**
+       **Result: ~671 MB optimized KV cache (Memory-Capacity-Bound solved).** Compressing bit-depths and truncating attention topologies safely fits 32K functionality entirely within the 8GB edge envelope.
 status: published
 provenance: imported
 requires_explanation: true

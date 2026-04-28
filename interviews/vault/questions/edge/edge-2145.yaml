@@ -8,7 +8,7 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: Quantization Error Localization for Accuracy Drop on Coral Edge TPU
-scenario: A MobileNetV2 model quantized to INT8 for Coral Edge TPU (4 TOPS INT8, 2W) shows 89% top-1 accuracy (vs 91.5% FP32 baseline). The 2.5% accuracy drop is above the acceptable 1% threshold. Using per-layer sensitivity analysis, the team finds that layers 12-15 (inverted residual blocks at 14x14 spatial resolution) show the highest quantization error.
+scenario: A MobileNetV2 model quantized to INT8 for Coral Edge TPU shows 89% top-1 accuracy (vs 91.5% FP32 baseline). The 2.5% accuracy drop is above the acceptable 1% threshold. Using per-layer sensitivity analysis, the team finds that layers 12-15 (inverted residual blocks at 14x14 spatial resolution) show the highest quantization error.
 question: How would you fix the 2.5% INT8 accuracy drop when layers 12-15 are the most quantization-sensitive on Coral Edge TPU?
 details:
   realistic_solution: 'Sensitivity analysis shows layers 12-15 are problematic. Root cause options: (1) Activation distributions at 14×14 resolution have outliers from batch normalization folding. (2) Short residual path creates quantization error accumulation. (3) Depthwise conv layers have per-channel weight variance exceeding INT8 range. Fix strategy: re-quantize with per-channel weight quantization for layers 12-15 (vs per-tensor). Coral Edge TPU supports per-channel INT8 quantization for depthwise convs. Expected accuracy recovery: 1-1.5% → total loss ~1-1.5%. If insufficient: use bias correction or QAT (quantization-aware training) for just layers 12-15. QAT on 4 layers: ~2 hours fine-tuning vs full QAT (24 hours).'
@@ -17,11 +17,16 @@ details:
     **The Rationale:** Candidates instinctively throw more precision at accuracy problems, forgetting that the Coral Edge TPU strictly supports only INT8.
     **The Consequence:** The model is entirely delegated to the slow host CPU, blowing past latency and power budgets, instead of using targeted, native INT8 mixed-precision strategies.
   napkin_math: |
-    1. Define constraints: Accuracy gap is 2.5%. Target recovery > 1.5% to reach < 1% threshold.
-    2. Evaluate Per-channel quantization: Adds 0 runtime overhead on Coral (native hardware support).
-    3. Estimate recovery: Per-channel quantization on layers 12-15 recovers 1-1.5%.
-    4. Evaluate fallback (QAT): If residual gap > 1%, applying QAT just for layers 12-15 recovers additional 0.5-1% in ~2 hours.
-    **Per-channel quantization directly addresses the weight variance, adding no runtime overhead and recovering up to 1.5% accuracy.**
+    1. **Assumptions & Constraints:**
+       - Accuracy gap: 2.5% below FP32 baseline.
+       - Target recovery: > 1.5% to reach the acceptable < 1% loss threshold.
+       - Problematic layers: 12-15 (inverted residual blocks).
+    2. **Calculations:**
+       - Per-channel quantization runtime overhead: 0 ms (native Coral hardware support).
+       - Estimated recovery from per-channel quantization on layers 12-15: 1.0% - 1.5%.
+       - Estimated additional recovery from targeted QAT (fallback): 0.5% - 1.0% (requires ~2 hours).
+    3. **Conclusion & Interpretation:**
+       - **Result: Per-Channel Quantization Meets Threshold**. It directly addresses weight variance with zero runtime overhead, recovering up to 1.5% accuracy to hit the required threshold.
 status: published
 provenance: imported
 requires_explanation: false

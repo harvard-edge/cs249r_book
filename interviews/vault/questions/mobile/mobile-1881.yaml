@@ -8,42 +8,35 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: 5G Model Update Bottleneck
-scenario: A Snapdragon 8 Gen 3 phone downloads an updated 2 GB INT8 LLM over a 5G
-  connection averaging 150 Mbps, mmap-decrypts-and-rehashes chunks on a single Cryptography
-  Extension core (1.2 GB/s sustained), serialises them to UFS 4.0 storage (4 GB/s
-  sequential write), and finally pre-loads the decrypted weights into the Hexagon
-  NPU's mapped tensor heap (the NPU SMMU can ingest weights at ~6 GB/s once memory-mapped).
-  Each pipeline stage has a 64 MB ring buffer (page-pool); all four stages can overlap
-  end-to-end.
-question: Create a specification of per-stage rates for the four-stage Cloud -> 5G
-  modem -> Crypto/UFS -> NPU load pipeline, identify the binding bottleneck under
-  the 64 MB ring constraint, and determine whether the 3-minute end-to-end SLA is
-  feasible. Quantify the pipeline fill+drain cost added by the downstream NPU mapping
-  stage and confirm whether it changes the SLA outcome.
+scenario: A phone downloads an updated 2 GB INT8 LLM over a 5G connection averaging 150 Mbps, mmap-decrypts-and-rehashes chunks on a single Cryptography Extension core (1.2 GB/s sustained), serialises them to UFS 4.0 storage (4 GB/s sequential write), and finally pre-loads the decrypted weights into the Hexagon NPU's mapped tensor heap (the NPU SMMU can ingest weights at ~6 GB/s once memory-mapped). Each pipeline stage has a 64 MB ring buffer (page-pool); all four stages can overlap end-to-end.
+question: "Create a specification of per-stage rates for the four-stage Cloud -> 5G modem -> Crypto/UFS -> NPU load pipeline, identify the binding bottleneck under the 64 MB ring constraint, and determine whether the 3-minute end-to-end SLA is feasible. Quantify the pipeline fill+drain cost added by the downstream NPU mapping stage."
 visual:
   kind: svg
   path: mobile-1881.svg
-  alt: A linear pipeline diagram showing data flowing left-to-right from the Cloud
-    through the 5G modem, the Crypto/UFS stage, and into the phone's NPU.
+  alt: A linear pipeline diagram showing data flowing left-to-right from the Cloud through the 5G modem, the Crypto/UFS stage, and into the phone's NPU.
   caption: Model download and local transfer pipeline.
 details:
-  realistic_solution: 'Stage rates: download = 150 Mbps = 18.75 MB/s; decrypt = 1200
-    MB/s; UFS write = 4000 MB/s; NPU mapped-ingest = 6000 MB/s. Pipeline rate is gated
-    by the slowest stage - download at 18.75 MB/s - so end-to-end streaming time =
-    2048 MB / 18.75 = 109.2 s. The 64 MB ring buffer matters only if a downstream
-    stage stalls; here download is 64x slower than the next-slowest stage (decrypt)
-    and 320x slower than UFS, so the rings stay nearly empty. Pipeline fill+drain
-    (one ring per stage) = 64/1200 + 64/4000 + 64/6000 = 53 + 16 + 11 = 80 ms (negligible).
-    Total = 109.2 s + 0.08 s = 109.3 s, comfortably inside the 180 s SLA. Adding the
-    NPU mapping stage does not change the answer because download remains the binding
-    stage; even with an NPU at 1 GB/s the bind would still be download.'
-  common_mistake: 'Concluding UFS or NPU bandwidth dominates and ignoring that pipeline
-    rate equals the slowest stage. A second common slip: counting the full NPU pre-load
-    time as additive to streaming, when in an overlapped pipeline only the fill/drain
-    bubble is paid once.'
-  napkin_math: 'Stages: 18.75 -> 1200 -> 4000 -> 6000 MB/s. Bind = 18.75 MB/s. Stream
-    = 2048/18.75 = 109.2 s. Fill+drain = 64*(1/1200 + 1/4000 + 1/6000) = 80 ms. Total
-    = 109.3 s < 180 s SLA.'
+  realistic_solution: 'Stage rates: download = 150 Mbps = 18.75 MB/s; decrypt = 1200 MB/s; UFS write = 4000 MB/s; NPU mapped-ingest = 6000 MB/s. Pipeline rate is gated by the slowest stage - download at 18.75 MB/s - so end-to-end streaming time = 2048 MB / 18.75 = 109.2 s. The 64 MB ring buffer matters only if a downstream stage stalls; here download is 64x slower than the next-slowest stage (decrypt) and 320x slower than UFS, so the rings stay nearly empty. Pipeline fill+drain (one ring per stage) = 64/1200 + 64/4000 + 64/6000 = 53 + 16 + 11 = 80 ms (negligible). Total = 109.2 s + 0.08 s = 109.3 s, comfortably inside the 180 s SLA. Adding the NPU mapping stage does not change the answer because download remains the binding stage; even with an NPU at 1 GB/s the bind would still be download.'
+  common_mistake: |
+    **The Pitfall:** Concluding UFS or NPU bandwidth dominates and treating NPU pre-load time as additive to streaming.
+    **The Rationale:** Candidates forget that in an overlapped pipeline, the rate equals the slowest stage, and fill/drain bubbles are only paid once.
+    **The Consequence:** Incorrect SLA feasibility assessments and fundamentally flawed pipeline latency models.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Download: 150 Mbps (18.75 MB/s).
+       - Decrypt: 1200 MB/s.
+       - UFS Write: 4000 MB/s.
+       - NPU Ingest: 6000 MB/s.
+       - Model Size: 2048 MB.
+       - Ring Buffer: 64 MB per stage.
+    2. **Calculations:**
+       - Bottleneck Rate: min(18.75, 1200, 4000, 6000) = 18.75 MB/s.
+       - Streaming Time: 2048 MB / 18.75 MB/s = 109.2 s.
+       - Fill+Drain Overhead: 64 MB * (1/1200 + 1/4000 + 1/6000) = ~80 ms.
+       - Total Pipeline Time: 109.2 s + 0.08 s = 109.3 s.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound (Network)**
+       - The pipeline comfortably completes within the 180s SLA. The NPU mapping stage does not impact the binding bottleneck.
 status: published
 provenance: llm-draft
 expected_time_minutes: 6

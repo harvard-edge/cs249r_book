@@ -8,21 +8,27 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: PCIe Gen5 vs NVLink for Mixed Workloads
-scenario: A server has 4 A100 GPUs. GPUs 0-1 are connected via NVLink (600 GB/s), and GPUs 2-3 are connected via NVLink (600 GB/s), but the two pairs only connect via PCIe Gen4 (32 GB/s through the root complex). You want to run 4-way tensor parallelism.
+scenario: A server has 4 GPUs. GPUs 0-1 are connected via NVLink, and GPUs 2-3 are connected via NVLink, but the two pairs only connect via PCIe Gen4 through the root complex. You want to run 4-way tensor parallelism.
 question: What is the 4-way tensor-parallel AllReduce time for a 100 MB activation tensor, and which link is the bottleneck?
 details:
-  realistic_solution: 'Step 1: Intra-pair reduce-scatter via NVLink. GPUs 0-1 exchange 50 MB at 600 GB/s = 0.083ms. GPUs 2-3 same = 0.083ms. Parallel, total = 0.083ms. Step 2: Cross-pair AllReduce via PCIe. GPU 0 sends 50 MB to GPU 2 via PCIe at 32 GB/s = 1.56ms (bidirectional, so GPU 2 also sends to GPU 0). Step 3: Intra-pair all-gather via NVLink = 0.083ms. Total: 0.083 + 1.56 + 0.083 = 1.73ms. If all 4 had NVLink: 2 × 100 MB × 3/4 / 600 GB/s = 0.25ms. PCIe bottleneck makes it 6.9× slower. This is why nvidia-smi topo -m is critical before choosing parallelism strategy. Alternative: use 2-way TP (within NVLink pair) + 2-way PP (across PCIe) — PP only sends activations once per layer, not every layer''s AllReduce.'
+  realistic_solution: 'Step 1: Intra-pair reduce-scatter via NVLink. GPUs 0-1 exchange 50 MB at 600 GB/s = 0.083ms. GPUs 2-3 same = 0.083ms. Parallel, total = 0.083ms. Step 2: Cross-pair AllReduce via PCIe. GPU 0 sends 50 MB to GPU 2 via PCIe at 32 GB/s = 1.56ms (bidirectional, so GPU 2 also sends to GPU 0). Step 3: Intra-pair all-gather via NVLink = 0.083ms. Total: 0.083 + 1.56 + 0.083 = 1.73ms. If all 4 had NVLink: 2 x 100 MB x 3/4 / 600 GB/s = 0.25ms. PCIe bottleneck makes it 6.9x slower. This is why nvidia-smi topo -m is critical before choosing parallelism strategy. Alternative: use 2-way TP (within NVLink pair) + 2-way PP (across PCIe) — PP only sends activations once per layer, not every layer''s AllReduce.'
   common_mistake: |
     **The Pitfall:** Assuming NVLink connects all 4 GPUs in a full mesh.
     **The Rationale:** Candidates abstract away the physical server topology and assume "NVLink is available" means full-bandwidth connectivity everywhere.
     **The Consequence:** Designing a 4-way TP layout that violently degrades performance due to silent PCIe bottlenecks.
   napkin_math: |
-    - **Intra-Pair NVLink (Reduce-Scatter):** GPUs 0-1 exchange 50 MB at 600 GB/s = 0.083 ms.
-    - **Cross-Pair PCIe (AllReduce):** GPU 0 sends 50 MB to GPU 2 via PCIe at 32 GB/s = 1.56 ms.
-    - **Intra-Pair NVLink (All-Gather):** 0.083 ms.
-    - **Total PCIe Bottlenecked Time:** `0.083 + 1.56 + 0.083` = **1.73 ms**.
-    - **Full NVLink Mesh Time (Ideal):** `2 * 100 MB * (3/4) / 600 GB/s` = 0.25 ms.
-    - **Penalty:** The PCIe path makes the operation **6.9x slower**.
+    1. **Assumptions & Constraints:**
+       - Activation Tensor: 100 MB.
+       - NVLink Bandwidth: 600 GB/s.
+       - PCIe Gen4 Bandwidth: 32 GB/s.
+    2. **Calculations:**
+       - Intra-Pair (Reduce-Scatter): 50 MB / 600 GB/s = 0.083 ms.
+       - Cross-Pair (PCIe AllReduce): 50 MB / 32 GB/s = 1.56 ms.
+       - Intra-Pair (All-Gather): 0.083 ms.
+       - Total: 0.083 + 1.56 + 0.083 = 1.73 ms.
+       - Full Mesh Ideal: 2 * 100 * (3/4) / 600 = 0.25 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: PCIe Interconnect-Bound.** The topology bottleneck forces the collective over a 32 GB/s link, making the operation 6.9x slower than pure NVLink.
 status: published
 provenance: imported
 requires_explanation: false

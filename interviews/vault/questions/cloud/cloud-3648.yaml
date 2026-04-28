@@ -8,20 +8,27 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Flash Attention Backward Pass Memory Recomputation
-scenario: During training a 13B model on H100 (80GB HBM3) with seq_len=16384, you notice that Flash Attention uses more FLOPs than standard attention during the backward pass. A colleague suggests reverting to standard attention for training to reduce compute.
+scenario: During training a 13B model with seq_len=16384, you notice that Flash Attention uses more FLOPs than standard attention during the backward pass. A colleague suggests reverting to standard attention for training to reduce compute.
 question: Should you revert from Flash Attention to standard attention to reduce backward-pass FLOPs at seq_len=16384, and why?
 details:
   realistic_solution: Flash Attention backward recomputes the attention matrix (2x FLOPs for backward vs forward), but this is the only way to train with long sequences. The FLOP overhead is ~1.1-1.3x vs standard attention backward, but the memory saving enables training at all. Use gradient checkpointing at layer boundaries to further reduce peak memory.
   common_mistake: |
     **The Pitfall:** Comparing only FLOPs without accounting for memory capacity constraints.
     **The Rationale:** Standard attention has fewer FLOPs in the backward pass, making it seem computationally cheaper on paper.
-    **The Consequence:** At seq_len=16384, the N&times;N matrix is massive. Attempting standard attention will immediately result in an Out-Of-Memory (OOM) error, making training physically impossible.
+    **The Consequence:** At seq_len=16384, the N×N matrix is massive, resulting in an immediate Out-Of-Memory (OOM) error that makes training physically impossible.
   napkin_math: |
-    - **Standard Attention Memory:** Stores softmax(QK^T) for backward = 16384^2 &times; 2 bytes = 536.8 MB (approx 512 MB per head).
-    - **Total Standard Memory:** 13B model has 40 layers &times; 40 heads = 1600 heads. 1600 heads &times; 512 MB = **819,200 MB (&approx;819 GB)**.
-    - **Conclusion for Standard:** 819 GB > 80 GB H100 capacity. Impossible.
-    - **Flash Attention Memory:** Stores only Q, K, V, O. Each is 16384 &times; 128 &times; 2 bytes = 4 MB per head. Total per head = 16 MB.
-    - **Total Flash Memory:** 1600 heads &times; 16 MB = **25,600 MB (&approx;25 GB)**. Fits within 80GB.
+    1. **Assumptions & Constraints:**
+       - Sequence Length (N) = 16,384.
+       - 13B model: 40 layers, 40 heads = 1,600 total heads.
+       - Data format: 2 bytes (FP16/BF16).
+       - Available Capacity = 80 GB.
+    2. **Calculations:**
+       - Standard Attention Memory (softmax QK^T): 16384^2 * 2 bytes = 536.8 MB per head.
+       - Total Standard Memory: 1,600 heads * 536.8 MB = 858,880 MB (~858 GB).
+       - Flash Attention Memory (Q, K, V, O only, 128 dim): 16384 * 128 * 2 bytes * 4 tensors = 16.7 MB per head.
+       - Total Flash Memory: 1,600 heads * 16.7 MB = 26,720 MB (~26 GB).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (OOM without Flash Attention).** 858 GB heavily exceeds the 80 GB HBM capacity, making FLOP considerations secondary.
 status: published
 provenance: imported
 requires_explanation: false
@@ -31,11 +38,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: OK
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 1600 * 512MB is 819,200 MB (approx 819 GB or 0.8 TB), not 800TB.
 human_reviewed:
   status: not-reviewed
   by: null

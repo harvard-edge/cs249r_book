@@ -8,24 +8,28 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: CXL Memory Pooling for Inference Serving
-scenario: A new inference cluster uses CXL 3.0 to create a shared memory pool of 2 TB accessible by 8 MI300X GPUs. Each MI300X has 192 GB local HBM3 (5.3 TB/s) and accesses the CXL pool at 128 GB/s with 200ns additional latency.
-question: How would you tier the 405B model's weights and KV cache between MI300X local HBM3 and the 2 TB CXL pool?
+scenario: A new inference cluster uses CXL 3.0 to create a shared memory pool of 2 TB accessible by 8 GPUs. Each GPU accesses the CXL pool at 128 GB/s with 200ns additional latency.
+question: "How would you tier the 405B model's weights and KV cache between local HBM and the 2 TB CXL pool?"
 details:
-  realistic_solution: '405B model in FP16 = 810 GB total weights. 8 × MI300X local HBM = 1,536 GB. CXL pool = 2 TB. Strategy: (1) Hot layers (first and last 10 layers, attention weights) → local HBM. These are accessed every token and are latency-critical. Size: ~200 GB distributed across 8 GPUs. (2) Cold layers (middle MLP blocks) → CXL pool with prefetching. These are accessed sequentially and can tolerate 200ns extra latency if prefetched 2 layers ahead. Size: ~610 GB in CXL pool. (3) KV cache → always local HBM. At 8-way tensor parallelism, each GPU holds 1/8 of KV cache. (4) Prefetch engine: while layer N computes on GPU, layer N+2''s weights stream from CXL at 128 GB/s. Layer size: ~10 GB / 8 = 1.25 GB per GPU. Prefetch time: 1.25 GB / 128 GB/s = 9.8ms. Layer compute time: ~15ms. Prefetch completes before needed.'
+  realistic_solution: 'Hybrid sharding strategy: (1) Hot layers (first and last 10 layers, attention weights) → local HBM. These are accessed every token and are latency-critical. (2) Cold layers (middle MLP blocks) → CXL pool with prefetching. These are accessed sequentially and can tolerate 200ns extra latency if prefetched 2 layers ahead. (3) KV cache → always local HBM. At 8-way tensor parallelism, each GPU holds 1/8 of KV cache. (4) Prefetch engine: while layer N computes on GPU, layer N+2''s weights stream from CXL at 128 GB/s.'
   common_mistake: |
     **The Pitfall:** Putting the KV cache in the CXL pool because it's the largest memory consumer.
     **The Rationale:** Candidates see the massive CXL pool and assign the most memory-hungry component to it, ignoring latency characteristics.
     **The Consequence:** Severe inference latency degradation, because KV cache is accessed sequentially during every single decode step and cannot tolerate the 200ns CXL latency penalty or the lower 128 GB/s bandwidth.
   napkin_math: |
-    - Model weights (405B FP16) = 810 GB.
-    - Local HBM per GPU = 192 GB. Total cluster HBM = 1536 GB. CXL pool = 2 TB.
-    - Weights per GPU (8-way TP) = ~101 GB.
-    - Strategy: Hot weights (~200GB total) -> 25 GB to HBM per GPU. Cold weights (~610GB total) -> 76 GB to CXL pool per GPU.
-    - KV cache budget per GPU = 192 GB - 25 GB = 167 GB.
-    - Prefetch layer size = ~10 GB total / 8 = 1.25 GB per GPU.
-    - Prefetch time from CXL = 1.25 GB / 128 GB/s = 9.8 ms.
-    - Layer compute time ≈ 15 ms.
-    - **Prefetch ratio = 9.8ms / 15ms = 0.65 (fully overlaps compute).**
+    1. **Assumptions & Constraints:**
+       - 405B model FP16 = 810 GB.
+       - 8 GPUs, CXL pool = 2 TB.
+       - 8-way TP, CXL BW = 128 GB/s.
+    2. **Calculations:**
+       - Weights per GPU = ~101 GB.
+       - Hot weights (~200GB total) -> 25 GB to HBM per GPU.
+       - Cold weights (~610GB total) -> 76 GB to CXL pool per GPU.
+       - Prefetch layer size = ~10 GB total / 8 = 1.25 GB per GPU.
+       - Prefetch time = 1.25 GB / 128 GB/s = 9.8 ms.
+       - Layer compute time ≈ 15 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound**. Prefetch ratio = 9.8ms / 15ms = 0.65, fully overlapping compute.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,23 +8,29 @@ competency_area: optimization
 bloom_level: apply
 phase: training
 title: Calculate 2:4 Structured Sparsity Speedup on Tensor G3
-scenario: You are deploying a quantized on-device LLM (similar to Gemini Nano) on the Google Tensor G3. The model currently requires 10 GB of the available 12 GB LPDDR5X memory and runs at 3.5 TOPS, underutilizing the TPU's peak 7.5 TOPS capability due to memory bandwidth bottlenecks. You decide to apply a 2:4 structured sparsity pattern to the linear layers, which the Tensor G3 TPU supports natively for accelerated execution.
-question: How do 2:4 structured sparsity changes affect memory footprint and peak TOPS for the Tensor G3 LLM deployment?
+scenario: You are deploying a quantized on-device LLM. The model currently requires 10 GB of available memory and runs at 3.5 TOPS, underutilizing the NPU due to memory bandwidth bottlenecks. You apply a natively supported 2:4 structured sparsity pattern to the linear layers.
+question: How do 2:4 structured sparsity changes affect memory footprint and peak TOPS for the LLM deployment?
 details:
   realistic_solution: |
-    The candidate should identify that 2:4 structured sparsity halves the memory requirement for the targeted weights (by storing only 2 non-zero elements and a 2-bit index per 4 elements, though often hardware abstracts the index overhead or it's negligible compared to 8-bit/16-bit weights). They must apply the 50% reduction only to the 80% of the model representing the linear layers to find the new memory footprint. For compute, the TPU can effectively double its throughput on the sparse layers.
+    Implement 2:4 structured sparsity to alleviate memory bandwidth contention. This pattern enforces that exactly two out of every four adjacent weights in a linear layer are zero, allowing the hardware to pack the non-zero elements along with a 2-bit index matrix. Since linear layers typically constitute ~80% of an LLM's parameters, applying this sparsity halves their physical footprint and doubles the arithmetic throughput (since zero-multiplies are skipped at the hardware level). The remaining non-linear components (layer norms, embeddings) are unaffected.
   common_mistake: |
     **The Pitfall:** Assuming unstructured sparsity or uniform 50% sparsity across the entire model.
     **The Rationale:** Candidates forget that 2:4 structured sparsity requires specific hardware support to skip computations.
     **The Consequence:** They mistakenly assume a proportional 2x speedup and memory reduction everywhere, failing to realize it only applies to targeted linear layers.
   napkin_math: |
-    - Initial memory: 10 GB.
-    - Linear layers = 80% = 8 GB. Non-linear layers = 2 GB.
-    - 2:4 sparsity halves the linear layer weights: 8 GB / 2 = 4 GB (ignoring metadata overhead).
-    - New memory footprint = 4 GB + 2 GB = **6 GB**.
-    - Initial compute: 3.5 TOPS. Linear layers = 80% = 2.8 TOPS. Non-linear = 0.7 TOPS.
-    - With 2:4 sparsity support, linear layer throughput doubles: 2.8 TOPS * 2 = 5.6 TOPS.
-    - Total theoretical compute = 5.6 TOPS + 0.7 TOPS = **6.3 TOPS** (within the 7.5 TOPS peak).
+    1. **Assumptions & Constraints:**
+       - Initial Memory: 10 GB. Initial Compute: 3.5 TOPS.
+       - Linear layers comprise 80% of the model.
+       - 2:4 structured sparsity reduces targeted weight footprint by 50% and doubles compute throughput.
+    2. **Calculations:**
+       - Linear memory: 10 GB * 0.8 = 8 GB. Non-linear memory = 2 GB.
+       - New linear memory: 8 GB / 2 = 4 GB (ignoring 2-bit metadata overhead).
+       - Total new memory: 4 GB + 2 GB = 6 GB.
+       - Linear compute: 3.5 TOPS * 0.8 = 2.8 TOPS. Non-linear compute = 0.7 TOPS.
+       - New linear compute: 2.8 TOPS * 2 = 5.6 TOPS.
+       - Total new theoretical compute: 5.6 TOPS + 0.7 TOPS = 6.3 TOPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bandwidth-Bound.** Applying 2:4 structured sparsity shrinks the memory footprint to 6 GB and boosts effective throughput to 6.3 TOPS, directly alleviating the LPDDR5X bottleneck and maximizing hardware utilization.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,21 +8,26 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Hailo-8 VRAM Budgeting for Edge LLM Inference
-scenario: A leading automotive company is deploying an on-device conversational AI agent for in-car infotainment systems. The agent uses a highly optimized transformer-based language model, running on the Hailo-8 edge AI accelerator (26 TOPS INT8, 2.5W dataflow accelerator). The initial deployment is encountering frequent out-of-memory errors and unexpected latency spikes.
+scenario: An automotive company is deploying an on-device conversational AI agent on a Hailo-8 edge AI accelerator (26 TOPS INT8, 2.5W). The initial deployment is encountering frequent out-of-memory errors and unexpected latency spikes.
 question: How would you budget and optimize weights, activations, and KV-cache on Hailo-8 to stop OOMs and meet sub-100 ms conversational inference?
 details:
-  realistic_solution: 'A robust approach involves: 1. **Detailed Memory Profiling:** Use platform-specific tools to measure actual memory usage for weights, activations, and KV-cache under various operational scenarios. 2. **Aggressive Quantization & Pruning:** While weights are INT8, further exploration of mixed-precision or structured pruning can reduce overall footprint. 3. **KV-Cache Optimization:** Implement strategies like windowed attention, sparse attention, multi-query attention, or dynamic KV-cache eviction policies. 4. **Activation Management:** Optimize operator fusion, layer fusion, or consider recomputing specific activations on-the-fly if memory is critical and compute budget allows. 5. **Batch Size Tuning:** Determine the optimal inference batch size that balances throughput, latency, and peak memory. 6. **Hailo-8 Specifics:** Leverage the dataflow architecture by optimizing model partitioning and scheduling to maximize on-chip memory utilization and minimize costly external DRAM access.'
+  realistic_solution: Implement aggressive memory budgeting to manage the dynamic footprint. Apply FlashAttention-2 or Multi-Query Attention (MQA) to drastically compress the memory footprint of the autoregressive KV-cache. Quantize static weights to INT8, but meticulously profile the peak intermediate activations during the forward pass, employing activation recomputation (checkpointing) or layer fusion to prevent OOMs. Constrain the maximum sequence length to strictly guarantee the KV-cache remains within the hardware's strict SRAM boundaries.
   common_mistake: |
-    **The Pitfall:** Focusing solely on model weights when budgeting memory.
-    **The Rationale:** Candidates overlook the dynamic memory consumption of intermediate activations and the growing KV-cache required for conversational context.
-    **The Consequence:** Sizing calculations indicate the model fits, but it immediately crashes with OOMs in production due to unbudgeted activation and cache overhead.
+    **The Pitfall:** Sizing the system architecture strictly based on static model parameter counts (weights).
+    **The Rationale:** Candidates forget that Transformer architectures autoregressively build an unbounded KV-cache and generate massive intermediate activation tensors during the prefill phase.
+    **The Consequence:** The system fits in memory during offline testing but immediately crashes with hard OOM faults in production as the conversation context window expands.
   napkin_math: |
-    1. Calculate Weight Memory (15M INT8 params): 15,000,000 * 1 byte = 15 MB.
-    2. Calculate KV-Cache (FP16) for a sequence of 256 tokens, batch size 1, 4 layers, 4 heads, head dim 64:
-       - 4 (layers) * 4 (heads) * 256 (tokens) * 64 (dim) * 2 (K&V) * 2 bytes/FP16 = 1,048,576 bytes = 1 MB.
-    3. Estimate Peak Activations (FP16): ~10 MB for intermediate tensors during forward pass.
-    4. Sum Total Estimated Memory: 15 MB (weights) + 1 MB (KV-cache) + 10 MB (activations) = 26 MB.
-    **Total inference footprint is ~26 MB; accurately budgeting for dynamic KV-cache and activations prevents OOMs on limited system RAM.**
+    1. **Assumptions & Constraints:**
+       - Model: 15M INT8 parameters.
+       - Sequence: 256 tokens, Batch size 1, 4 layers, 4 heads, head dim 64.
+       - Datatype: FP16 for KV-Cache (2 bytes per value).
+    2. **Calculations:**
+       - Weight Memory = 15,000,000 * 1 byte = 15 MB.
+       - KV-Cache Footprint = 4 (layers) * 4 (heads) * 256 (tokens) * 64 (dim) * 2 (K&V) * 2 bytes = 1,048,576 bytes = 1 MB.
+       - Peak Activations (Estimate) = ~10 MB for forward pass intermediates.
+       - Total Memory Required = 15 MB + 1 MB + 10 MB = 26 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~26 MB total footprint. The system is Memory-Capacity-Bound; failing to account for the 11 MB of dynamic cache/activations guarantees an OOM on constrained edge devices.**
 status: published
 provenance: imported
 requires_explanation: true

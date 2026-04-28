@@ -8,20 +8,26 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: 'Realization: adapt MobileNetV1-0.25x for ESP32-S3 with resolution scaling'
-scenario: MobileNetV1-0.25x at 224x224 input (27M MACs, 225K params) is too slow at 450ms on ESP32-S3. You need <100ms per inference for a 5-class classifier using the camera module.
-question: How should MobileNetV1-0.25x be adapted with input resolution and stride changes to meet ESP32-S3 latency and SRAM limits?
+scenario: A baseline MobileNetV1-0.25x at 224x224 input requires 450ms on an ESP32-S3. You must hit a strict <100ms inference latency for a 5-class visual classifier.
+question: How must the MobileNetV1-0.25x input resolution and architectural stride pattern be adapted to satisfy the ESP32-S3 latency and SRAM constraints?
 details:
-  realistic_solution: 'Resolution 96x96: MobileNetV1 with 5x stride-2 layers would produce 96/32 = 3x3 final feature map — too small. Adjust: remove 2 of the stride-2 layers (use stride-1 for DW conv layers 8 and 10). Final feature map: 96/8 = 12x12 (still meaningful). MACs scale as (96/224)² × adjustment factor ≈ 0.18× original. 27M × 0.18 = 4.9M MACs. At 30M MACs/sec on ESP32-S3: 4.9M/30M = 163ms. Still over 100ms. Use MobileNetV1-0.25× + 64x64 input: 27M × (64/224)² = 2.2M MACs → 73ms. Fits SRAM: peak activation 64x64x8x1B = 32KB << 512KB.'
+  realistic_solution: To hit the <100ms target, the input resolution must be scaled down to 64x64. However, processing a 64x64 input through the default five stride-2 layers would collapse the spatial dimensions to an unusable 2x2 grid. The network must be architecturally modified by dropping the input resolution and converting two deep stride-2 layers into stride-1 layers (e.g., layers 8 and 10). This preserves an 8x8 final feature map, maintaining spatial information while quadratically dropping MAC operations.
   common_mistake: |
-    **The Pitfall:** Blindly reducing input resolution.
-    **The Rationale:** Candidates drop the input resolution without adjusting the architecture's stride pattern.
-    **The Consequence:** The deep stride-2 layers collapse the feature map to an unusable 3x3 or smaller grid before the final pooling, destroying spatial resolution and accuracy.
+    **The Pitfall:** Blindly reducing input resolution without adjusting stride patterns.
+    **The Rationale:** Candidates drop the input dimensions to lower the MAC count but fail to track the receptive field through the deep convolutional layers.
+    **The Consequence:** The unaltered stride-2 layers compress the feature map to an unusable 2x2 grid, utterly destroying spatial resolution and classification accuracy.
   napkin_math: |
-    - MobileNetV1-0.25x at 64x64 MACs = 27M * (64/224)² = 2.2M MACs.
-    - At ESP32-S3 throughput (~30M MACs/sec): 2.2M / 30M = **73ms (Fits <100ms)**.
-    - SRAM peak activation (DW block 5): 64/4=16x16x32 = 8KB.
-    - Full memory budget: ~50KB activations + 225KB weights = 275KB.
-    - **275KB << 512KB SRAM.** Fits securely.
+    1. **Assumptions & Constraints**:
+       - Baseline: 27M MACs at 224x224 -> 450ms.
+       - Target: <100ms deadline on ESP32-S3 (throughput ≈ 30M MACs/sec).
+       - Target resolution: 64x64.
+    2. **Calculations**:
+       - Resolution Scaling Factor: (64 / 224)^2 ≈ 0.0816.
+       - Adjusted MACs: 27M * 0.0816 ≈ 2.2M MACs.
+       - New Latency: 2.2M / 30,000,000 = ~73.3 ms.
+       - Peak SRAM (DW block): 16x16x32 = 8 KB activations.
+    3. **Conclusion & Interpretation**:
+       - **Result: Compute-Bound Scaling**. Scaling to 64x64 reduces operations to 2.2M MACs, perfectly hitting the ~73ms execution time and consuming a negligible fraction of the 512KB SRAM.
 status: published
 provenance: imported
 requires_explanation: true

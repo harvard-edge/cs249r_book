@@ -8,27 +8,26 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: KV-Cache Growth in RAG Pipelines
-scenario: >-
-  Your RAG system retrieves 10 document chunks (each 512 tokens) and prepends
-  them to the user query (256 tokens) before sending to Llama 3 70B. Total prompt:
-  5376 tokens. Users send follow-up questions that add another retrieval round. By
-  turn 3, the context is 16,128 tokens.
-question: >-
-  How does the RAG context growth to 16,128 tokens scale KV-cache memory, and what
-  does that imply for serving cost?
+scenario: 'Your RAG system retrieves 10 document chunks (each 512 tokens) and prepends them to the user query (256 tokens) before sending to Llama 3 70B. Total prompt: 5376 tokens. Users send follow-up questions that add another retrieval round. By turn 3, the context is 16,128 tokens.'
+question: How does the RAG context growth to 16,128 tokens scale KV-cache memory, and what does that imply for serving cost?
 details:
-  realistic_solution: 'KV-cache growth per turn: Turn 1: 5,376 tokens × 320 KB = 1.72 GB. Turn 2: 10,752 tokens × 320 KB = 3.44 GB. Turn 3: 16,128 tokens × 320 KB = 5.16 GB. At turn 3, each conversation consumes 5.16 GB — a single H100 (80 GB - 140 GB weights/2 GPUs = 10 GB available per GPU) supports only ~1-2 concurrent conversations. Cost impact: 10× more expensive per conversation than a 1K-context chatbot. Optimizations: (1) Prefix caching: if multiple users query the same documents, cache those documents'' KV entries (shared across users). If 70% of retrieved chunks are from a popular corpus, save 70% × 5120 tokens = 3584 tokens of redundant KV computation. (2) KV eviction for old retrieval: in turn 3, the 10 chunks from turn 1 may be irrelevant. Evict turn-1 retrieval KV (5120 tokens) and re-retrieve if needed. Reduces turn-3 KV to 10,752 tokens (3.44 GB). (3) Chunked attention: process retrieval chunks with local attention, only cross-attending at the final layer. Reduces KV for retrieved chunks by 80%.'
+  realistic_solution: 'KV-cache growth per turn: Turn 1: 5,376 tokens × 320 KB = 1.72 GB. Turn 2: 10,752 tokens × 320 KB = 3.44 GB. Turn 3: 16,128 tokens × 320 KB = 5.16 GB. At turn 3, each conversation consumes 5.16 GB — a single GPU supports only ~1-2 concurrent conversations. Optimizations: (1) Prefix caching: if multiple users query the same documents, cache those documents'' KV entries (shared across users). If 70% of retrieved chunks are from a popular corpus, save 70% × 5120 tokens = 3584 tokens of redundant KV computation.'
   common_mistake: |
-    **The Pitfall:** Treating RAG retrieval context like user-generated text.
-    **The Rationale:** Candidates often assume all context is unique per user, ignoring that RAG contexts are often partially shared across users (same documents).
-    **The Consequence:** Missing the opportunity for prefix caching, leading to vastly overestimated serving costs.
+    **The Pitfall:** Treating RAG retrieval context identically to unique user-generated text.
+    **The Rationale:** Candidates assume all context requires unique KV-cache allocations, ignoring that retrieved documents are often shared across many users.
+    **The Consequence:** Grossly overestimating HBM requirements and missing the opportunity to use prefix caching to slash costs by 3x.
   napkin_math: |
-    1. **Per turn KV growth:** 5376 tokens × 320 KB = 1.72 GB.
-    2. **3 turns:** 5.16 GB.
-    3. **Available HBM:** ~10 GB per GPU (80GB - 140GB weights/2 = 10GB).
-    4. **Max concurrent (turn 3):** 10 / 5.16 ≈ 1-2 conversations.
-    5. **With prefix caching (70% shared):** 1.72 - 0.7 × 1.64 = 0.57 GB new per turn.
-    6. **Cost reduction:** **~3×.**
+    1. **Assumptions & Constraints:**
+       - Turn 1: 5,376 tokens.
+       - Turn 3: 16,128 tokens.
+       - KV Cache size: 320 KB per token.
+       - Available HBM per GPU: ~10 GB.
+    2. **Calculations:**
+       - Turn 3 KV size: 16,128 * 320 KB = 5.16 GB per user.
+       - Concurrent users per GPU: 10 GB / 5.16 GB = ~1-2 users.
+       - With 70% shared prefix caching: 1.72 GB - (0.7 * 1.64 GB) = 0.57 GB marginal growth.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity-Bound**. Without prefix caching, a single GPU supports only 1-2 concurrent users at Turn 3. Prefix caching reduces the marginal KV footprint by nearly 3x, rescuing the unit economics.
 status: published
 provenance: imported
 requires_explanation: false

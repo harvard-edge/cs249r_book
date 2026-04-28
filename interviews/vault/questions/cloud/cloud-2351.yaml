@@ -8,8 +8,8 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: The Multi-AZ AllReduce Cost Explosion
-scenario: Your team expanded a 256-node H100 cluster by adding 128 new nodes in a secondary Availability Zone (AZ-B) because AZ-A hit a strict 3MW datacenter power cap. The cluster uses standard Dominant Resource Fairness (DRF) scheduling. Immediately after the expansion, average distributed training throughput dropped by 40% (from 160 to 96 TFLOPS/GPU), and your cloud provider's cross-AZ data transfer bill unexpectedly spiked by ~$170,000 per week.
-question: Why did adding 128 H100 nodes in AZ-B cut throughput by 40% and create a massive cross-AZ bill, and how should scheduling change?
+scenario: Your team expanded a 256-node cluster by adding 128 new nodes in a secondary Availability Zone (AZ-B) because AZ-A hit a strict 3MW datacenter power cap. The cluster uses standard Dominant Resource Fairness (DRF) scheduling. Immediately after the expansion, average distributed training throughput dropped by 40% (from 160 to 96 TFLOPS/GPU), and your cloud provider's cross-AZ data transfer bill unexpectedly spiked by ~$170,000 per week.
+question: Why did adding 128 nodes in AZ-B cut throughput by 40% and create a massive cross-AZ bill, and how should scheduling change?
 details:
   realistic_solution: |
     The root cause is a topology-agnostic scheduler causing synchronous training to span across Availability Zones. Standard DRF evaluates resource quantities but ignores physical network topology. When a 32-node job is submitted, the scheduler allocates nodes across both AZ-A and AZ-B. Synchronous training relies on Ring AllReduce; if a job spans AZs, gradients must traverse the inter-AZ link at every step. This inter-AZ link acts as a severe bottleneck that stalls the GPUs. Cloud providers charge for cross-AZ egress (~$0.01/GB). The constant streaming incurs massive costs. The solution is to implement locality-aware placement (gang-scheduling strictly within a single AZ).
@@ -18,13 +18,15 @@ details:
     **The Rationale:** Engineers assume standard schedulers are automatically network-aware and optimize for topology out of the box.
     **The Consequence:** The architectural bottleneck remains unaddressed, leading to permanently crippled throughput and escalating six-figure egress costs.
   napkin_math: |
-    - **Job size:** 32 nodes (256 GPUs). Model: 35B parameters = 70GB gradients (FP16).
-    - **Data Transfer:** Ring AllReduce transfers ~2 * model size = 140GB per step.
-    - **AZ Crossing:** If the logical ring crosses the AZ boundary, ~140 GB crosses the link per step.
-    - **Throughput Cost:** At 1 step/second, cross-AZ traffic is 140 GB/s.
-    - **Cost calculation:** 140 GB/s * 3,600 s/hr * $0.01/GB = $5,040/hour.
-    - **Weekly Bill:** Over a 168-hour week running at 20% duty cycle: $5040 * 33.6 hours = ~$169,344/week.
-    - **Conclusion: Inter-AZ links (100-400 Gbps) are vastly inferior to intra-AZ IB (3.2 Tbps), starving the GPUs and creating the massive egress bill.**
+    1. **Assumptions & Constraints:**
+       * Job size: 32 nodes (256 GPUs). Model: 35B parameters = 70GB gradients (FP16).
+       * Data Transfer: Ring AllReduce transfers ~2 * model size = 140GB per step.
+    2. **Calculations:**
+       * Throughput Cost: At 1 step/second, cross-AZ traffic is 140 GB/s.
+       * Cost calculation: 140 GB/s * 3,600 s/hr * $0.01/GB = $5,040/hour.
+       * Weekly Bill: Over a 168-hour week running at 20% duty cycle: $5040 * 33.6 hours = ~$169,344/week.
+    3. **Conclusion & Interpretation:**
+       * **Result: Network-Bound.** Inter-AZ links are vastly inferior to intra-AZ IB, starving the GPUs and creating the massive egress bill.
   options:
   - The new AZ-B nodes have defective networking hardware that drops packets, causing the 40% throughput loss and $170k/week egress cost due to TCP retransmissions. The scheduler should isolate these nodes.
   - A topology-agnostic scheduler allowed synchronous Ring AllReduce to span across AZ-A and AZ-B. The slow inter-AZ link bottlenecked the GPUs, and the massive gradient transfers incurred the ~$170k/week egress bill. The scheduler must enforce locality-aware, single-AZ placement.

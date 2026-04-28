@@ -8,18 +8,22 @@ competency_area: optimization
 bloom_level: understand
 phase: training
 title: Understanding the autograd graph lifecycle and preventing memory leaks
-scenario: 'A junior engineer runs a training loop on A100 (80GB) and observes GPU memory growing by ~200MB per step. After 400 steps the process crashes with OOM. The loss is computed correctly and backward() is called each step. The engineer cannot identify the leak.'
-question: 'What is the most likely cause of the ~200 MB per-step GPU memory growth, and how would you fix it?'
+scenario: A junior engineer runs a training loop on A100 (80GB) and observes GPU memory growing by ~200MB per step. After 400 steps the process crashes with OOM. The loss is computed correctly and backward() is called each step. The engineer cannot identify the leak.
+question: What is the most likely cause of the ~200 MB per-step GPU memory growth, and how would you fix it?
 details:
-  realistic_solution: 'Always detach tensors before storing for logging: losses.append(loss.item()) or losses.append(loss.detach().cpu()). Use torch.cuda.memory_summary() to identify the leak source. Profile with torch.cuda.memory_snapshot(). The fundamental rule: once backward() is called, the graph is freed. If you store a tensor before backward(), you keep the graph alive.'
+  realistic_solution: Always detach tensors before storing for logging by using `losses.append(loss.item())` or `losses.append(loss.detach().cpu())`. The fundamental rule of PyTorch autograd is that once `backward()` is called, the graph is freed. If you store a tensor before `backward()`, you keep the entire computational graph alive in memory.
   common_mistake: |
-    **The Pitfall:** Storing references to loss tensors without `.item()` or `.detach()`.
-    **The Rationale:** Engineers log `losses.append(loss)` naturally as they would with normal Python floats.
-    **The Consequence:** Each loss tensor holds a reference to the entire computational graph for that step, completely breaking garbage collection and causing rapid OOMs.
+    **The Pitfall:** Storing references to loss tensors directly without calling `.item()` or `.detach()`.
+    **The Rationale:** Naturally treating PyTorch tensors like standard Python floats in logging lists.
+    **The Consequence:** Each appended loss tensor preserves a reference to the entire computational graph for that step, completely breaking garbage collection and causing catastrophic OOM crashes.
   napkin_math: |
-    - **Graph Size:** A single forward pass creates ~4GB of activation nodes.
-    - **Leak Accumulation:** If stored in a list and not freed, 400 steps × 4GB = 1.6TB of cumulative references.
-    - **Visible Leak vs Peak:** Only the actual live memory of the scalar/small tensors (~200MB) might be immediately obvious per step, but the garbage collector cannot collect the massive graphs until references drop.
+    1. **Assumptions & Constraints:**
+       - Graph Size: ~4GB of activation nodes per forward pass.
+       - Steps to failure: 400.
+    2. **Calculations:**
+       - Cumulative Reference Size: 400 steps * 4 GB = 1.6 TB of un-collectable memory.
+    3. **Conclusion & Interpretation:**
+       - **Result: Graph Reference Leak.** The actual peak memory bounds rapidly exceed the 80GB HBM limit because the garbage collector cannot evict the massive computation graphs tied to the tiny scalar loss logs.
 status: published
 provenance: imported
 requires_explanation: false

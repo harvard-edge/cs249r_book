@@ -11,17 +11,21 @@ title: Gradient Checkpointing Impact on Synchronization Frequency
 scenario: Training a 30B parameter model on 32 GPUs with gradient checkpointing enabled. Checkpointing reduces activation memory by 10x but requires a second forward pass. The backward pass now takes 3x longer.
 question: How does gradient checkpointing change the compute-to-communication ratio and AllReduce overlap efficiency for the 30B model?
 details:
-  realistic_solution: 'Without checkpointing: backward=1200ms, AllReduce=600ms (33% of step). With checkpointing: backward=3600ms, AllReduce=600ms (14% of step). Compute-to-communication ratio improves from 2:1 to 6:1. AllReduce overlap efficiency increases: with 3600ms backward and 600ms AllReduce, nearly 100% overlap is achievable since AllReduce completes well before backward finishes. Step time: without checkpointing=1200+600=1800ms (sequential) or ~1250ms (overlapped). With checkpointing=3600ms (AllReduce fully hidden). Net: checkpointing adds 2400ms compute but saves ~350ms AllReduce tail → step time 3600ms. Without checkpointing but with overlap: 1250ms. Checkpointing is slower per step but enables larger models.'
+  realistic_solution: 'Without checkpointing: backward=1200ms, AllReduce=600ms (33% of step). With checkpointing: backward=3600ms, AllReduce=600ms (14% of step). Compute-to-communication ratio improves from 2:1 to 6:1. AllReduce overlap efficiency increases: with 3600ms backward and 600ms AllReduce, nearly 100% overlap is achievable since AllReduce completes well before backward finishes. Step time: without checkpointing=1200+600=1800ms (sequential) or ~1250ms (overlapped). With checkpointing=3600ms (AllReduce fully hidden). Net: checkpointing adds 2400ms compute but saves ~350ms AllReduce tail -> step time 3600ms. Without checkpointing but with overlap: 1250ms. Checkpointing is slower per step but enables larger models.'
   common_mistake: |
     **The Pitfall:** Assuming gradient checkpointing has no impact on AllReduce overlap efficiency.
     **The Rationale:** Candidates view checkpointing strictly as a memory vs compute tradeoff, failing to recognize that a longer backward pass drastically increases the time window available to hide network communication.
     **The Consequence:** Miscalculating the true step-time penalty of checkpointing by failing to account for the newly hidden network latency.
   napkin_math: |
-    1. Without checkpointing: backward=1200ms, AllReduce=600ms. Overlapped step ≈ 1250ms.
-    2. With checkpointing: backward=3600ms, AllReduce=600ms.
-    3. The 600ms AllReduce is completely hidden within the 3600ms backward pass.
-    4. Step time with checkpointing = 3600ms (2.9x slower).
-    **Gradient checkpointing is ~3x slower per step, but hides 100% of the network latency and prevents memory exhaustion.**
+    1. **Assumptions & Constraints:**
+       - Without checkpointing: backward=1200ms, AllReduce=600ms.
+       - With checkpointing: backward=3600ms, AllReduce=600ms.
+    2. **Calculations:**
+       - Without overlap time: ~1250ms.
+       - With checkpointing: 600ms network is 100% hidden within the 3600ms backward pass.
+       - New step time = 3600ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound.** Gradient checkpointing is ~3x slower per step, but hides 100% of the network latency and prevents memory exhaustion.
 status: published
 provenance: imported
 requires_explanation: false

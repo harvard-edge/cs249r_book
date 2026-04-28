@@ -8,21 +8,23 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Streaming LLM TBT Spikes
-scenario: You are deploying a real-time voice assistant backend using Llama-3-8B (FP16, ~16GB weights) on a single A10G GPU (24GB VRAM) for streaming token generation. The SLA requires Time-Between-Tokens (TBT) < 50ms. At 20 concurrent streams, TBT is 30ms. However, at 40 concurrent streams, P99 TBT suddenly spikes to over 200ms, and GPU compute utilization drops below 30%. The server uses static, contiguous memory allocation for the KV cache per request, assuming a maximum sequence length of 2048 tokens.
-question: Why does P99 TBT spike at 40 streams on the 24GB A10G, and what serving memory strategy fixes it?
+scenario: You are deploying a real-time voice assistant backend using Llama-3-8B (FP16, ~16GB weights) on a single GPU (24GB VRAM) for streaming token generation. The SLA requires Time-Between-Tokens (TBT) < 50ms. At 20 concurrent streams, TBT is 30ms. However, at 40 concurrent streams, P99 TBT suddenly spikes to over 200ms, and GPU compute utilization drops below 30%. The server uses static, contiguous memory allocation for the KV cache per request, assuming a maximum sequence length of 2048 tokens.
+question: Why does P99 TBT spike at 40 streams on the 24GB instance, and what serving memory strategy fixes it?
 details:
-  realistic_solution: The root cause is VRAM exhaustion causing requests to queue or swap to host RAM. Switch to PagedAttention to dynamically allocate memory in small blocks (pages) only as tokens are generated.
+  realistic_solution: VRAM exhaustion causes requests to swap to host RAM via PCIe. Switch to PagedAttention to dynamically allocate memory in small blocks only as tokens are generated.
   common_mistake: |
-    **The Pitfall:** Assuming the GPU lacks compute (FLOPs) to handle the batch size of 40, or trying to tune the dynamic batching timeout.
+    **The Pitfall:** Assuming the GPU lacks compute FLOPs or tuning the dynamic batching timeout.
     **The Rationale:** Spikes in TBT and dropped utilization look like classic compute scheduling issues.
-    **The Consequence:** Completely missing the memory capacity wall, failing to fix the PCIe swapping caused by static allocation.
+    **The Consequence:** Missing the memory capacity wall and failing to fix the PCIe swapping caused by static allocation.
   napkin_math: |
-    - **Model Weights:** 16 GB FP16.
-    - **KV Cache per Token:** 32 layers * 8 KV heads * 128 dim * 2 (K,V) * 2 bytes = 131 KB.
-    - **Cache per Stream:** Max sequence (2048 tokens) = 2048 * 131 KB = 268 MB per stream.
-    - **Memory for 40 Streams:** 40 streams * 268 MB = 10.7 GB.
-    - **Total Memory Needed:** 16 GB (weights) + 10.7 GB (cache) = 26.7 GB.
-    - **Result:** **This exceeds the A10G's 24 GB VRAM limit, causing PCIe swapping and TBT spikes at 40 streams.**
+    1. **Assumptions & Constraints:**
+       - Weights: 16 GB.
+       - Cache per stream (2048 tokens): 268 MB.
+    2. **Calculations:**
+       - Cache for 40 streams: 40 * 268 MB = 10.7 GB.
+       - Total Memory needed: 16 + 10.7 = 26.7 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound. 26.7 GB exceeds the 24 GB VRAM limit, causing PCIe swapping.**
 status: published
 provenance: imported
 requires_explanation: false

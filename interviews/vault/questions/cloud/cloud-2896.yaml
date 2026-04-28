@@ -8,20 +8,29 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Design EfficientNetV2 training pipeline for large-scale cloud fine-tuning
-scenario: You need to fine-tune EfficientNetV2-XL (208M params) on a proprietary 50M-image dataset using 8×H100 SXM5 GPUs. The model uses Fused-MBConv blocks with progressive learning (small images early, larger later).
+scenario: You need to fine-tune EfficientNetV2-XL (208M params) on a proprietary 50M-image dataset using 8 GPUs. The model uses Fused-MBConv blocks with progressive learning (small images early, larger later).
 question: What distributed training, gradient accumulation, and memory plan would let EfficientNetV2-XL fine-tune on 50M images in under 48 hours?
 details:
-  realistic_solution: 'Use DDP across 8 H100s with gradient checkpointing on the MBConv/Fused-MBConv blocks (reduces activation memory by ~60% at 30% compute overhead). Progressive training: epoch 1–20 at 128×128 (batch=512/GPU), epoch 21–40 at 224×224 (batch=256/GPU), epoch 41–60 at 380×380 (batch=64/GPU). Use BF16 mixed precision. Gradient accumulation of 4 steps at high resolution to maintain effective batch of 2048. Total effective batch = 8 GPUs × 64 × 4 accum = 2048.'
+  realistic_solution: 'Use DDP across 8 GPUs with gradient checkpointing on the MBConv/Fused-MBConv blocks (reduces activation memory by ~60% at 30% compute overhead). Progressive training: epoch 1-20 at 128x128 (batch=512/GPU), epoch 21-40 at 224x224 (batch=256/GPU), epoch 41-60 at 380x380 (batch=64/GPU). Use BF16 mixed precision. Gradient accumulation of 4 steps at high resolution to maintain effective batch of 2048. Total effective batch = 8 GPUs x 64 x 4 accum = 2048.'
   common_mistake: |
     **The Pitfall:** Using DDP without gradient checkpointing on large input resolutions.
     **The Rationale:** Candidates underestimate activation memory, which for EfficientNetV2-XL at high resolutions (e.g., 480x480) requires massive VRAM.
     **The Consequence:** Unavoidable OOM errors at any practical batch size on 80GB GPUs.
   napkin_math: |
-    - 1. Calculate parameter/optimizer memory: 208M params * 16 bytes (FP32 Adam) ≈ 3.3 GB.
-    - 2. Estimate activation memory with checkpointing: ~18 GB at 380x380 resolution with batch size 64.
-    - 3. Verify memory fit: 3.3 GB + 18 GB ≈ 21.3 GB < 80 GB HBM3.
-    - 4. Calculate required throughput: 50M images * 60 epochs = 3B images. 3B / (48 hours * 3600) = 17,361 images/sec. Per GPU (8 GPUs): ~2,170 images/sec.
-    - 5. Calculate required TFLOPS: 2,170 images/sec * 100 GFLOPs/image = **217 TFLOPS** per GPU (easily achievable on H100).
+    1. **Assumptions & Constraints:**
+       - EfficientNetV2-XL: 208M parameters.
+       - 50M images, 60 epochs total.
+       - Target completion time: 48 hours.
+       - 8 GPUs (80 GiB HBM3 each).
+       - FP32 Adam optimizer.
+    2. **Calculations:**
+       - Parameter/optimizer memory: 208M params * 16 bytes = 3.3 GiB.
+       - Activation memory (w/ checkpointing): ~18 GiB at 380x380, batch 64.
+       - Verify memory fit: 3.3 GiB + 18 GiB ≈ 21.3 GiB < 80 GiB HBM3.
+       - Required throughput: 50M images * 60 epochs = 3B images.
+       - Total images/sec required: 3B / (48 hours * 3600s) = 17,361 images/sec (~2,170 per GPU).
+       - Required TFLOPS per GPU: 2,170 images/sec * 100 GFLOPs/image = 217 TFLOPS.
+    3. **Conclusion & Interpretation:** **217 TFLOPS per GPU is easily achievable**. Result: **Compute-Bound**.
 status: published
 provenance: imported
 requires_explanation: true

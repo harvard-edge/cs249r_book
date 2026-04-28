@@ -8,21 +8,26 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: Zero-Copy Video Pipeline for Coral Edge TPU
-scenario: You are designing a real-time defect detection system processing high-resolution video streams. The inference engine runs on a Google Coral Edge TPU connected via a USB/PCIe interface to a host SoC. The model is quantized to INT8 to utilize the 4 TOPS capability of the Coral within its strict 2W power budget. However, initial profiling shows the system is missing the 30 FPS target (33ms latency limit) due to severe host-device data movement overhead, despite Edge TPU compute taking only 8ms. You must synthesize a novel memory architecture from first principles to optimize DMA transfers and pinned memory allocation between the camera, host SoC, and Edge TPU.
+scenario: You are designing a real-time defect detection system processing high-resolution video streams on a host SoC with an attached Google Coral Edge TPU. The INT8-quantized model easily meets the 33ms (30 FPS) deadline in pure compute (8ms), but system profiling reveals the pipeline frequently misses the target due to severe host-device data movement overhead.
 question: How would you design a zero-copy pinned-memory DMA pipeline from camera to Coral to meet the 33 ms 30 FPS deadline?
 details:
-  realistic_solution: The correct architecture bypasses the CPU data path by establishing a zero-copy pipeline using pinned, contiguous memory (like Linux dma-buf). The camera's hardware ISP downscales and converts the frame directly into this pinned buffer. The host CPU only handles control plane signaling, instantly initiating an asynchronous DMA transfer of the pre-processed INT8 tensor over the USB/PCIe interface directly to the Coral Edge TPU's memory.
+  realistic_solution: Leverage a zero-copy pipeline using contiguous, pinned memory (e.g., Linux `dma-buf`). Configure the camera's hardware ISP to downscale and convert the frame directly into this pinned buffer. The host CPU acts only as a control plane, initiating an asynchronous DMA transfer of the pre-processed INT8 tensor directly to the Edge TPU over PCIe/USB, completely bypassing user-space memory copies and reducing I/O latency to ~2ms.
   common_mistake: |
     **The Pitfall:** Focusing solely on the 4 TOPS INT8 compute limits and suggesting further model pruning.
     **The Rationale:** Completely ignoring the I/O bottleneck and CPU data path overhead in favor of pure ML ops.
     **The Consequence:** Designing a system that easily computes the model in 8ms but takes 25ms just to copy the data, fatally missing the 33ms target.
   napkin_math: |
-    - Raw 1080p RGB frame: 1920x1080x3 = 6.22 MB.
-    - Standard transfer (~400 MB/s): 15.5ms + 10ms OS copy overhead = 25.5ms.
-    - Total baseline latency: 25.5ms + 8ms compute = 33.5ms (misses 33ms target).
-    - Using ISP downscale to 512x512x3 INT8: 786 KB.
-    - Zero-copy DMA transfer of 786 KB: ~2ms.
-    - **Result: ISP (3ms) + DMA (2ms) + TPU (8ms) = 13ms per frame.**
+    1. **Assumptions & Constraints:**
+       - Target: 30 FPS (33ms total latency budget).
+       - TPU Compute time: 8ms.
+       - Baseline standard copy (1080p RGB, 6.22MB): ~25.5ms.
+    2. **Calculations:**
+       - Baseline latency = 25.5ms (I/O) + 8ms (Compute) = 33.5ms (Target missed).
+       - Optimized zero-copy DMA transfer (downscaled 512x512 INT8, 786 KB) = ~2ms.
+       - Hardware ISP processing time = ~3ms.
+       - Optimized total latency = 3ms (ISP) + 2ms (DMA) + 8ms (Compute) = 13ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 13ms per frame. Eliminating host CPU memory copies via zero-copy DMA resolves the memory-bandwidth bottleneck, easily meeting the 33ms deadline.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,19 +8,24 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: Optimizing Data Loading for Large-Scale A100 Training
-scenario: 'You manage a critical training workload on an A100 cluster (80 GB HBM2e, 312 TFLOPS FP16, 2.0 TB/s memory bandwidth per GPU). The training data consists of high-resolution images stored as uncompressed TFRecord files in an S3 bucket. You observe significant GPU underutilization (low SM occupancy) and identify data loading from S3 as the primary bottleneck.'
-question: "How would you fix the S3 TFRecord data-loading bottleneck that is starving the A100 training cluster?"
+scenario: 'You manage a critical training workload on a GPU cluster. The training data consists of high-resolution images stored as uncompressed TFRecord files in an S3 bucket. You observe significant GPU underutilization (low SM occupancy) and identify data loading from S3 as the primary bottleneck.'
+question: "How would you fix the S3 TFRecord data-loading bottleneck that is starving the training cluster?"
 details:
   realistic_solution: 'Transitioning from uncompressed TFRecord to a more columnar, compressed format like Parquet (or optimized TFRecord with appropriate compression like `ZLIB` or `GZIP` at record level, or `LZ4`/`Snappy` at block level) stored in an S3-compatible object storage optimized for large reads. Utilize a multi-threaded or multi-process data loader (e.g., `tf.data` API with `interleave` and `prefetch`) to parallelize data fetching and preprocessing. For image data, storing raw bytes within Parquet/TFRecord or using a format like WebP/JPEG2000 for compression before embedding. Leveraging a caching layer (e.g., local NVMe SSDs on compute instances, or an S3-accelerated file system) could also significantly reduce latency for frequently accessed data.'
   common_mistake: |
     **The Pitfall:** Assuming TFRecord is always optimal or failing to consider I/O patterns and compression.
-    **The Rationale:** Overlooking the high memory bandwidth (2.0 TB/s) of the A100, which rapidly outpaces network storage throughput.
+    **The Rationale:** Overlooking the high memory bandwidth (2.0 TB/s) of the GPU, which rapidly outpaces network storage throughput.
     **The Consequence:** The GPU sits idle waiting for network reads, wasting expensive compute resources.
   napkin_math: |
-    1. A 1 GB batch transferred from S3 at 100 MB/s takes **10 seconds**.
-    2. The A100 processes that 1 GB batch in `1 GB / 2000 GB/s` = **0.5 ms**.
-    3. **GPU Idle Time:** `10s / (10s + 0.0005s)` ≈ **99.99% idle**.
-    4. **Result:** Switching to Parquet with ZSTD compression reduces data size by 5-10x. With parallel downloads, batch load time approaches GPU compute time.
+    1. **Assumptions & Constraints:**
+       - Network download speed = 100 MB/s.
+       - GPU Memory Bandwidth = 2.0 TB/s.
+    2. **Calculations:**
+       - 1 GB batch load time = 1000 MB / 100 MB/s = 10 seconds.
+       - GPU process time = 1 GB / 2000 GB/s = 0.5 ms.
+       - GPU Idle Time = 10s / (10s + 0.0005s) ≈ 99.99%.
+    3. **Conclusion & Interpretation:**
+       - **Result: 99.99% GPU idle time waiting for network (I/O-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

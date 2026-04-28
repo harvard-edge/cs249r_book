@@ -8,20 +8,26 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: Architecting Low-Latency Profiling for Edge TPU
-scenario: You are designing an edge video analytics system using the Google Coral Edge TPU (USB form factor, 2W) to process multiple camera streams at 30 FPS. The models are fully quantized to INT8 to leverage the 4 TOPS compute capacity, but the system is sporadically dropping frames and failing to meet the 33ms latency target per frame.
+scenario: You are designing an edge video analytics system using the Google Coral Edge TPU to process multiple camera streams at 30 FPS. The models are fully quantized to INT8, but the system is sporadically dropping frames and failing to meet the 33ms latency target per frame.
 question: How would you profile Coral Edge TPU latency spikes to separate USB bandwidth, CPU-transfer, and operator-fallback bottlenecks without significantly impacting the device's 2W power budget?
 details:
-  realistic_solution: A strong L5 candidate will design a lightweight, tiered profiling architecture. First, they enforce build-time checks on the Edge TPU compiler logs to guarantee no operator fallbacks. For runtime, they architect an event-driven telemetry agent that uses lightweight instrumentation around PyCoral API calls to measure CPU-TPU data transfer versus pure inference time. They will only trigger deep host-CPU profiling or USB bus monitoring when the 33ms latency budget is breached, thereby preserving the strict 2W power envelope.
+  realistic_solution: Enforce build-time validation of compiler logs to ensure zero operators fall back to the host CPU. Implement an event-driven telemetry agent that minimally instruments the inference API calls. Crucially, the telemetry should only trigger a deep stack trace or USB bus capture when the 33ms latency threshold is breached, thereby avoiding the 'observer effect' where heavy profiling tools like eBPF consume the tight 2W CPU power envelope and skew latency measurements.
   common_mistake: |
     **The Pitfall:** Deploying heavy, general-purpose profiling tools like `perf` or continuous eBPF tracing.
     **The Rationale:** Candidates use standard server-class profiling methods on low-power edge host CPUs.
     **The Consequence:** These tools overwhelm the CPU, skewing latency measurements, breaching the 2W power envelope, and missing Edge TPU-specific operator fallbacks.
   napkin_math: |
-    1. At 30 FPS, total system latency budget per frame is 1000ms / 30 = 33.3ms.
-    2. INT8 model requires ~4 GOPS per frame. Theoretical compute time: 4 GOPS / 4000 GOPS/s = 1ms.
-    3. USB 3.0 provides ~400 MB/s practical throughput. Transferring a 1MB input tensor takes 1MB / 400MB/s = 2.5ms.
-    4. Theoretical inference + transfer = ~3.5ms.
-    5. **If latency > 33.3ms, the bottleneck is heavily skewed toward host I/O, queuing, or CPU fallbacks, validating the need for an I/O-focused profiling design.**
+    1. **Assumptions & Constraints:**
+       - Budget: 33.3 ms/frame.
+       - INT8 model operations: 4 GOPS.
+       - Edge TPU throughput: 4 TOPS (4000 GOPS).
+       - USB 3.0 practical throughput: 400 MB/s.
+    2. **Calculations:**
+       - Compute latency: 4 GOPS / 4000 GOPS = 1 ms.
+       - USB transfer latency (1 MB tensor): 1 MB / 400 MB/s = 2.5 ms.
+       - Theoretical inference + transfer: ~3.5 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU/IO bottleneck (~30 ms overhead).** The 33.3ms budget violation proves the delay is rooted in host-side queuing, CPU operator fallbacks, or USB bus contention, not TPU compute.
 status: published
 provenance: imported
 requires_explanation: true

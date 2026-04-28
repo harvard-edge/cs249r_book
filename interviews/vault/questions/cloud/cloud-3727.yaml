@@ -8,19 +8,23 @@ competency_area: compute
 bloom_level: evaluate
 phase: inference
 title: Batch Size Selection for Maximum MFU on A100 During Pre-Training
-scenario: 'Training a 13B LLM on an NVIDIA A100. At batch_size=32 (seq_len=2048), MFU is 45% (140 TFLOPS). At batch_size=128, MFU is 58% (181 TFLOPS). At batch_size=512, MFU drops to 51% (159 TFLOPS).'
-question: 'Why does MFU peak at batch_size=128 and drop at 512, and which batch size is optimal for this A100 13B training run?'
+scenario: Training a 13B LLM on an NVIDIA A100. At batch_size=32, MFU is 45% (140 TFLOPS). At batch_size=128, MFU is 58% (181 TFLOPS). At batch_size=512, MFU drops to 51% (159 TFLOPS).
+question: Why does MFU peak at batch_size=128 and drop at 512, and which batch size is optimal for this training run?
 details:
-  realistic_solution: 'Batch=32: small batch → GEMMs are small, tensor core utilization low (tiles don''t fill SM perfectly). MFU 45%. Batch=128: GEMMs larger → tile filling improves, pipeline depth increases → MFU peaks at 58%. Memory still manageable: 128×2048×8192×2B×5 (activations) ≈ 21GB per layer (too large; uses gradient checkpointing). Batch=512: activation memory pressure causes more gradient checkpointing recomputation → extra FLOPs counted; additionally, gradient sync overhead proportionally increases with larger gradients-per-step in gradient accumulation context. Or: at batch=512, optimizer state update and weight update overhead becomes significant. Optimal: batch=128 at 58% MFU = 181 TFLOPS effective.'
+  realistic_solution: 'Batch=32: GEMMs are small, tensor core utilization low. Batch=128: GEMMs larger, MFU peaks. Batch=512: activation memory pressure causes severe gradient checkpointing recomputation, inflating counted FLOPs or gradient sync overheads.'
   common_mistake: |
-    **The Pitfall:** Equating MFU with GPU utilization.
-    **The Rationale:** Candidates often focus solely on the fact that larger batches increase tensor core filling, forgetting that memory pressure introduces new overheads.
-    **The Consequence:** They fail to account for gradient synchronization overhead, memory pressure from large batch activations, and kernel occupancy changes that cause MFU to drop at extreme batch sizes.
+    **The Pitfall:** Equating MFU with true throughput.
+    **The Rationale:** Candidates focus solely on larger batches increasing tensor core filling, forgetting memory pressure overheads.
+    **The Consequence:** They select batch 512 and incur massive gradient synchronization and recompute overheads.
   napkin_math: |
-    * **A100 peak:** 312 TFLOPS BF16.
-    * **Effective throughput:** 32 -> 45% (140T), 128 -> 58% (181T), 512 -> 51% (159T).
-    * **Activation memory at 128:** 128 * 2048 * 8192 * 2 * 5 = 21GB.
-    * **Result:** Uses gradient checkpointing, incurs ~30% FLOPs overhead for recomputation but still achieves the **best total throughput at batch 128**.
+    1. **Assumptions & Constraints:**
+       - A100 peak: 312 TFLOPS BF16.
+    2. **Calculations:**
+       - Batch 32: 140 TFLOPS.
+       - Batch 128: 181 TFLOPS. (Activations = ~21GB).
+       - Batch 512: 159 TFLOPS.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound optimal point. Batch 128 balances tensor core saturation and memory pressure for maximum MFU.**
 status: published
 provenance: imported
 requires_explanation: false

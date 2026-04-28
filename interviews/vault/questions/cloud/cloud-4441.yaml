@@ -7,34 +7,25 @@ topic: disaggregated-serving
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: Decode Pool Scaling Policy Under Variable Output Length
-scenario: "A disaggregated decode pool processes requests with highly variable output lengths. 10% of requests generate 2000+ tokens (long-tail), occupying decode GPU slots for 40x longer than median requests and causing P99 TTOT to spike."
-question: How would you schedule the decode pool to prevent 2000+ token long-tail requests from spiking P99 TTOT?
+title: 'Decode Pool Scaling Policy Under Variable Output Length'
+scenario: 'A disaggregated decode pool processes requests with highly variable output lengths. 10% of requests generate 2000+ tokens (long-tail), occupying decode GPU slots for 40x longer than median requests and causing P99 TTOT to spike.'
+question: 'How would you schedule the decode pool to prevent 2000+ token long-tail requests from spiking P99 TTOT?'
 details:
-  realistic_solution: 'Multi-queue scheduling for decode pool: (1) Length prediction: at the end of prefill, use a lightweight length predictor (trained on prompt features) to estimate output length. Accuracy ~70% for broad buckets (short <50, medium 50-500, long 500+). (2) Preemptive multi-queue: assign requests to priority queues by predicted length. Short requests run at highest priority. Long requests are preempted after N tokens (configurable threshold) if short requests are waiting. (3) Preemption strategy: when a short request arrives and decode pool is full with a long request, pause the long request (checkpoint KV cache position + generated tokens), migrate to lower-priority queue. Resume when short requests clear. KV cache migration cost: negligible if within same GPU (just update scheduler state). (4) Max token budget per scheduling quantum: long requests get 50 tokens per quantum before yielding. Short requests run to completion.'
+  realistic_solution: 'Implement preemptive multi-queue scheduling: (1) Use lightweight length prediction at prefill. (2) Assign to priority queues. (3) Preempt long requests (checkpoint KV cache + pause) after N tokens if short requests are waiting. (4) Short requests run to completion.'
   common_mistake: |
     **The Pitfall:** Using strict FIFO scheduling in the decode pool.
     **The Rationale:** Candidates often assume that fairness (first-in, first-out) is the optimal scheduling strategy, ignoring the impact of variable workload lengths.
     **The Consequence:** Long requests that arrive early block short requests from completing, inflating P99 tail latency for the majority of users.
   napkin_math: |
-    - **Analyze decode pool:** 8xH100s. At 100 tok/sec per request, a 2000-token request occupies a slot for 20 seconds. A 50-token request takes 0.5 seconds.
-    - **Evaluate FIFO P99:** If long requests arrive in bursts, a short request's P99 wait time equals the long request's completion time (20 seconds).
-    - **Evaluate preemptive P99:** With preemption at a 50-token quantum, a short request waits for one quantum (0.5s) plus its own decode (0.5s) = 1s.
-    - **Conclusion:** Preemption yields a **20x P99 latency improvement** (1s vs 20s).
+    1. **Assumptions & Constraints:**
+       - Decode speed: 100 tokens/sec.
+       - Long request: 2000 tokens (20s duration).
+       - Short request: 50 tokens (0.5s duration).
+       - Preemption quantum: 50 tokens.
+    2. **Calculations:**
+       - FIFO P99 wait time: Short request blocked by 20s long request = 20.5s completion.
+       - Preemptive wait time: Long request yields after 50 tokens (0.5s). Short completes in +0.5s.
+       - Total preemptive completion = 1.0s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 20x P99 latency improvement (1s vs 20s). The system was Head-of-Line-Blocking-Bound.**
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 8
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-sonnet-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

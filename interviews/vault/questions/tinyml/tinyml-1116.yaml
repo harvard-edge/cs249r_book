@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Diagnosing CMSIS-NN SIMD Underutilization
-scenario: You are profiling an INT8 CNN deployed on an ARM Cortex-M4 (STM32F4) operating at 168 MHz with 256 KB SRAM and 1 MB flash. The core has no FPU but supports CMSIS-NN SIMD instructions that can execute 2x INT8 MACs per cycle. A pointwise 1x1 convolution layer requiring 500,000 MACs is taking 15 ms to execute, which is much slower than expected based on the core's capabilities.
+scenario: You are profiling an INT8 CNN deployed on an ARM Cortex-M4. A pointwise 1x1 convolution layer requiring 500,000 MACs is taking 15 ms to execute, which is much slower than expected based on the core's capabilities.
 question: Why does a 500K-MAC 1x1 convolution take 15 ms on a 168 MHz STM32F4 despite CMSIS-NN SIMD?
 details:
   realistic_solution: The bottleneck is almost certainly a suboptimal tensor memory layout, specifically using CHW instead of HWC. CMSIS-NN heavily relies on the HWC layout to load contiguous elements along the channel dimension into 32-bit registers to utilize the SIMD instructions. With a CHW layout, memory accesses are strided, which breaks SIMD vectorization and forces a fallback to a scalar loop dominated by memory fetch overhead.
@@ -17,12 +17,9 @@ details:
     **The Rationale:** Candidates forget that SRAM access is largely deterministic and operations are explicitly INT8, ignoring the impact of memory layout on SIMD utilization.
     **The Consequence:** Attempting to optimize the wrong components, failing to resolve the fundamental data layout bottleneck.
   napkin_math: |
-    - Theoretical peak throughput: 168 MHz * 2 MACs/cycle = 336,000,000 MACs/sec.
-    - Minimum theoretical time for 500k MACs = 500,000 / 336,000,000 = 1.48 ms.
-    - Observed latency is 15 ms, roughly 10x slower.
-    - Strided memory access in CHW layout typically adds 4-5 cycles of stall/fetch overhead per operation.
-    - 500,000 operations * 5 cycles / 168,000,000 cycles/sec = 14.88 ms.
-    - This perfectly aligns with the **15 ms profiler measurement.**
+    1. **Assumptions & Constraints:** Cortex-M4 at 168 MHz with CMSIS-NN SIMD (2x INT8 MACs/cycle). 500k MACs 1x1 conv.
+    2. **Calculations:** Peak throughput = 168 MHz * 2 = 336 MMAC/s. Minimum theoretical time = 500,000 / 336,000,000 = 1.48 ms. Observed latency = 15 ms (10x slower). CHW strided access adds ~4-5 cycles stall per fetch. 500,000 operations * 5 cycles / 168 MHz = 14.88 ms.
+    3. **Conclusion & Interpretation:** **15 ms observed time aligns with 5-cycle memory stalls from CHW layout** (Memory-Bound CPU Fallback).
 status: published
 provenance: imported
 requires_explanation: false

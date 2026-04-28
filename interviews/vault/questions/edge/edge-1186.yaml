@@ -8,27 +8,27 @@ competency_area: compute
 bloom_level: apply
 phase: both
 title: 'Edge Transformer Cost Realization: Size Phi-3 Deployment on Jetson Orin'
-scenario: You are sizing the memory footprint and decode latency for Phi-3-Mini (3.8B params) on Jetson Orin (102.4GB/s bandwidth). Assume 32 transformer layers, 2048 hidden dim, 32 attention heads, seq=512, batch=1.
+scenario: You are sizing the memory footprint and decode latency for Phi-3-Mini (3.8B params) on an edge device with 102.4GB/s bandwidth. Assume 32 transformer layers, 2048 hidden dim, 32 attention heads, seq=512, batch=1.
 question: Is the 2-second P99 SLO met for 100 output tokens using either INT8 or INT4 quantization?
 details:
-  realistic_solution: 'INT8 weights=3.8GB. KV cache (FP16) at seq=512 is 128MB. Total bandwidth per decode step: 3.928GB. Latency: 38.4ms/token. 100 tokens: 3.84s (Fails SLO). INT4 weights=1.9GB. KV at INT8 is 64MB. Total BW: 1.964GB. Latency: 19.2ms/token. 100 tokens: 1.92s (Meets SLO). Need INT4 with INT8 KV to meet 2s P99.'
+  realistic_solution: "To honor the 2-second P99 SLO, the deployment mandates INT4 weights coupled with an INT8 KV cache. Standard INT8 configurations demand heavy LPDDR memory traffic for the KV cache at every token generation step, yielding a 3.84s latency. Aggressive INT4 weight quantization combined with INT8 KV compression slices the per-step memory bandwidth payload, driving generation down to 1.92s and safely clearing the SLO."
   common_mistake: |
     **The Pitfall:** Calculating decode latency based only on model weight loading.
     **The Rationale:** Candidates fail to include the KV cache memory bandwidth, which scales with sequence length and must be read every token.
     **The Consequence:** Severe underestimation of token generation latency, leading to missed P99 SLOs in production.
   napkin_math: |
-    - FP16 KV per layer: 2 * 32 heads * 64 dim * 2 bytes = 8 KB/token.
-    - 32 layers: 256 KB/token.
-    - Sequence=512 FP16 KV size: 256 KB * 512 = 128 MB.
-    - INT8 weights (1 byte): 3.8 GB.
-    - INT8 decode step bandwidth: 3.8 GB + 128 MB = 3.928 GB.
-    - INT8 Latency: 3.928 GB / 102.4 GB/s = 38.4 ms/tok.
-    - INT8 100 tokens: 3.84s (Fails 2s SLO).
-    - INT4 weights (0.5 bytes): 1.9 GB.
-    - INT8 KV cache: 128 MB / 2 = 64 MB.
-    - INT4 step bandwidth: 1.9 GB + 64 MB = 1.964 GB.
-    - INT4 Latency: 1.964 / 102.4 = 19.2 ms/tok.
-    - INT4 100 tokens: **1.92s (Meets 2s SLO)**.
+    1. **Assumptions & Constraints:**
+       - Model: Phi-3-Mini (3.8B params).
+       - Hardware bandwidth: 102.4 GB/s.
+       - Architecture: 32 layers, 2048 dim, 32 heads, seq=512.
+    2. **Calculations:**
+       - FP16 KV size = 2 bytes * 32 heads * 64 dim/head * 2 ops * 32 layers * 512 seq = 128 MB.
+       - INT8 weights (1 byte) = 3.8 GB. Step BW = 3.8 GB + 0.128 GB = 3.928 GB.
+       - INT8 Latency/token = 3.928 / 102.4 = 38.4 ms. 100 tokens = 3.84s.
+       - INT4 weights (0.5 byte) = 1.9 GB. INT8 KV = 64 MB. Step BW = 1.964 GB.
+       - INT4 Latency/token = 1.964 / 102.4 = 19.2 ms. 100 tokens = 1.92s.
+    3. **Conclusion & Interpretation:**
+       - **INT4 weights + INT8 KV achieves 1.92s P99.** KV cache memory bandwidth dictates token generation latency.
 status: published
 provenance: imported
 requires_explanation: false

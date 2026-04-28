@@ -8,24 +8,29 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Mysterious Multi-Node Slowdown
-scenario: You are training a large model across two 8-GPU nodes connected by a 400 Gbps InfiniBand switch. Training throughput is <25% of peak, and profiling reveals the inter-node gradient synchronization step is the severe bottleneck.
+scenario: You are training a large model across two 8-GPU nodes connected by a 400 Gbps InfiniBand switch. Profiling reveals the inter-node gradient synchronization step is the severe bottleneck.
 question: What is the most likely cause for this drastic inter-node communication slowdown?
 details:
-  realistic_solution: The most likely culprit is a failure of RDMA (Remote Direct Memory Access) to function correctly over the InfiniBand fabric. When RDMA is disabled or misconfigured, communication libraries like NCCL fall back to a much slower protocol, typically IPoIB (IP over InfiniBand). This fallback path forces all communication through the hosts' CPUs and kernel network stacks, adding enormous latency and overhead. The CPU becomes a bottleneck, unable to saturate the 400 Gbps link, and the direct, low-latency GPU-to-remote-GPU communication path is lost. This explains the drastic drop in effective bandwidth and the resulting training slowdown.
+  realistic_solution: The most likely culprit is a failure of RDMA (Remote Direct Memory Access) to function correctly over the InfiniBand fabric. When RDMA is disabled or misconfigured, communication libraries like NCCL fall back to a much slower protocol, typically IPoIB (IP over InfiniBand). This fallback path forces all communication through the hosts' CPUs and kernel network stacks, adding enormous latency and overhead. The CPU becomes a bottleneck, unable to saturate the 400 Gbps link, and the direct, low-latency GPU-to-remote-GPU communication path is lost.
   common_mistake: |
     **The Pitfall:** Blaming the raw bandwidth of the interconnect itself ('InfiniBand is too slow') or misdiagnosing it as an intra-node NVLink/PCIe issue.
     **The Rationale:** Failing to consider the software protocol layer (RDMA vs IPoIB fallback) over the physical fabric.
     **The Consequence:** Wasting time debugging hardware links when the issue is an RDMA configuration or driver failure.
   napkin_math: |
-    - **Assume gradient size:** 100 GB must be exchanged.
-    - **Theoretical time (RDMA):** Over 400 Gbps (50 GB/s) InfiniBand, it takes ~2 seconds (100 GB / 50 GB/s).
-    - **Fallback time (IPoIB):** If RDMA fails, it falls back to CPU-bound IPoIB (~10 Gbps or 1.25 GB/s). Time = 100 GB / 1.25 GB/s = 80 seconds.
-    - **Conclusion:** **A 40× slowdown in synchronization annihilates throughput, clearly pointing to an RDMA failure.**
+    1. **Assumptions & Constraints:**
+       - Gradient size: 100 GB.
+       - RDMA InfiniBand bandwidth: 400 Gbps (50 GB/s).
+       - IPoIB fallback bandwidth: ~10 Gbps (1.25 GB/s).
+    2. **Calculations:**
+       - RDMA time: 100 GB / 50 GB/s = 2 seconds.
+       - IPoIB fallback time: 100 GB / 1.25 GB/s = 80 seconds.
+    3. **Conclusion & Interpretation:**
+       **Result: Network-Protocol Bound.** A 40x slowdown in synchronization points directly to CPU-bound IPoIB fallback due to an RDMA failure.
   options:
-  - The NVLink bandwidth within each node is insufficient to feed the InfiniBand NIC.
+  - The intra-node NVLink bandwidth is insufficient to feed the InfiniBand NIC. (NVLink trap)
   - RDMA has failed, forcing communication to use a slow, CPU-bound IP-over-InfiniBand fallback.
-  - The 400 Gbps InfiniBand switch does not have enough bandwidth for a model of this size.
-  - The PCIe bus connecting the InfiniBand NIC to the motherboard is saturated.
+  - The 400 Gbps InfiniBand switch lacks the capacity for this model size. (Raw BW trap)
+  - The PCIe bus connecting the InfiniBand NIC to the motherboard is saturated. (PCIe trap)
   correct_index: 1
 status: published
 provenance: imported

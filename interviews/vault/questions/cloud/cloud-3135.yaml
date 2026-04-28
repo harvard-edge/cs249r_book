@@ -8,19 +8,26 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: PagedAttention Memory Fragmentation
-scenario: 'You serve a 70B model on 8x A100-80GB with tensor parallelism. Without PagedAttention, KV cache is pre-allocated for max_seq_len=4096, but the average actual length is 512. The system must support 256 concurrent requests.'
-question: How much KV-cache VRAM is wasted per GPU by preallocating 4096 tokens when the average length is 512, and how does PagedAttention eliminate it?
+scenario: 'You serve a 70B model with tensor parallelism. Without PagedAttention, KV cache is pre-allocated for max_seq_len=4096, but the average actual length is 512. The system must support 256 concurrent requests.'
+question: 'How much KV-cache VRAM is wasted per GPU by preallocating 4096 tokens when the average length is 512, and how does PagedAttention eliminate it?'
 details:
-  realistic_solution: 'KV cache per request at max length: 80 layers x 2 (K+V) x 8 heads/GPU x 128 dim x 4096 tokens x 2B = 1.34GB (1.25 GiB) per request per GPU. For 256 requests: 320 GiB per GPU — exceeds the 80GB single GPU capacity, so you cap at ~50 concurrent requests. At avg length 512, actual usage is 1/8th = 160 MiB/request per GPU. Wasted: 1.09 GiB/request x 50 = 54.5 GiB wasted per GPU. PagedAttention uses 16-token blocks allocated on demand via a block table (like OS virtual memory pages), achieving ~96% utilization. This allows 400+ concurrent requests.'
+  realistic_solution: 'KV cache per request at max length: 80 layers x 2 (K+V) x 8 heads/GPU x 128 dim x 4096 tokens x 2B = 1.25 GiB per request per GPU. For 256 requests: 320 GiB per GPU — exceeds capacity, so you cap at ~50 requests. At avg length 512, actual usage is 160 MiB/request per GPU. Wasted: 1.09 GiB/request x 50 = 54.5 GiB wasted per GPU. PagedAttention uses 16-token blocks allocated on demand via a block table, achieving ~96% utilization and enabling 400+ concurrent requests.'
   common_mistake: |
     **The Pitfall:** Assuming pre-allocation memory waste is modest and can be brute-forced with more hardware.
     **The Rationale:** Standard PyTorch/Transformers implementations historically pad to max length, making developers blind to the true cost of variable-length generations.
     **The Consequence:** Wasting up to 87.5% of KV cache memory, hard-capping concurrency at ~50 requests instead of 400+, and drastically increasing serving costs.
   napkin_math: |
-    1. **Pre-allocation per request (per GPU):** 80 layers * 2 (K+V) * 8 heads/GPU * 128 dim * 4096 tokens * 2 bytes = 1,342,177,280 bytes = 1.25 GiB.
-    2. **Actual Usage:** At average 512 tokens, actual usage is 1/8th = 160 MiB.
-    3. **Wasted Memory:** 1.25 GiB - 0.156 GiB = 1.09 GiB wasted per request. For 50 requests, **54.5 GiB** is wasted per GPU (87.5% waste).
-    4. **PagedAttention Impact:** By allocating 16-token blocks on demand, 256 requests use 256 * 160 MiB = 40 GiB per GPU, fitting easily within the 80GB limit.
+    1. **Assumptions & Constraints:**
+       - 80 layers, 8 KV heads/GPU, 128 dim, FP16 (2 bytes).
+       - Pre-allocation max length: 4096 tokens.
+       - Average actual length: 512 tokens.
+    2. **Calculations:**
+       - Pre-allocation per request: 80 * 2 * 8 * 128 * 4096 * 2 bytes = 1.25 GiB.
+       - Actual Usage: At average 512 tokens, actual usage is 1/8th = 160 MiB.
+       - Wasted Memory: 1.25 GiB - 0.156 GiB = 1.09 GiB wasted per request. For 50 requests, 54.5 GiB is wasted per GPU (87.5% waste).
+       - PagedAttention: 256 requests use 256 * 160 MiB = 40 GiB per GPU, fitting easily within VRAM limits.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound. PagedAttention eliminates 87.5% waste by dynamically allocating memory in 16-token blocks.**
 status: published
 provenance: imported
 requires_explanation: true

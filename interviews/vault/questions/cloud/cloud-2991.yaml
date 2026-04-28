@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: 'Kernel Fusion: Implement Fused LayerNorm + Linear on H100'
-scenario: You need to implement a fused LayerNorm + Linear kernel for an H100 GPU (80GB HBM3, 3.35 TB/s) processing a 7B model with hidden size 4096. This is for batch size 1 (decode mode) and sequence length 1.
+scenario: You need to implement a fused LayerNorm + Linear kernel for an H100 GPU processing a 7B model with hidden size 4096. This is for batch size 1 (decode mode) and sequence length 1.
 question: For batch=1 decode, how much HBM traffic does fusing LayerNorm + Linear save for hidden size 4096, and what latency gain should you expect?
 details:
   realistic_solution: 'Fused kernel: load weight matrix once, compute LayerNorm statistics on-the-fly from input, apply normalization, multiply by weight matrix - all without writing intermediate LayerNorm output to HBM.'
@@ -17,11 +17,16 @@ details:
     **The Rationale:** Engineers know fusion saves memory bandwidth during training, and assume the same massive savings apply to batch=1 inference.
     **The Consequence:** They spend significant engineering effort fusing LayerNorm+Linear, not realizing the actual data movement is overwhelmingly dominated by reading the model weights, making the fusion savings negligible.
   napkin_math: |
-    - **Calculate Input/Output size:** Batch=1, seq=1, hidden=4096. `1 * 4096 * 2B = 8 KB`.
-    - **Calculate Weight size:** Linear weight: `4096 * 4096 * 2B = 32 MB`.
-    - **Calculate Unfused Traffic:** Read input (8KB) + write LN out (8KB) + read LN out (8KB) + read weights (32MB) + write out (8KB) = **32.03 MB**.
-    - **Calculate Fused Traffic:** Read input (8KB) + read weights (32MB) + write out (8KB) = **32.02 MB**.
-    - **Conclusion:** Fusion only saves 16KB of intermediate writes/reads, a **0.05% bandwidth savings**. The primary benefit is simply eliminating kernel launch overhead (2-3 \u03bcs).
+    1. **Assumptions & Constraints:**
+       - Hardware: H100 (3.35 TB/s HBM3).
+       - Dimensions: Batch=1, seq=1, hidden=4096.
+       - Precision: FP16/BF16 (2 bytes).
+    2. **Calculations:**
+       - Activation vector size: 1 * 4096 * 2 bytes = 8 KB.
+       - Linear weight size: 4096 * 4096 * 2 bytes = 33.5 MB.
+       - Unfused HBM Traffic: Input (8KB) + LN out write (8KB) + LN out read (8KB) + Weights (33.5MB) + Output (8KB) = 33.532 MB.
+       - Fused HBM Traffic: Input (8KB) + Weights (33.5MB) + Output (8KB) = 33.516 MB.
+    3. **Conclusion & Interpretation:** **Bandwidth savings are negligible (0.05%); the actual speedup comes strictly from removing a Kernel Launch Overhead.**
 status: published
 provenance: imported
 requires_explanation: false

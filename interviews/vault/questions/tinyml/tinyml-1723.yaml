@@ -8,21 +8,29 @@ competency_area: optimization
 bloom_level: apply
 phase: both
 title: Triple-Buffering Pipeline Throughput Constraint
-scenario: A Cortex-M4 (256 KB SRAM) pipeline gathers a 2 KB sample window via SPI DMA (5 ms), runs an ML model that uses a 12 KB activation tensor arena and produces a 512 B output (10 ms compute), and transmits via BLE DMA (5 ms). To maximise throughput, the team plans true triple-buffering - three frames are concurrently in flight at all times. Frame N is being transmitted via BLE, frame N+1 is being computed, and frame N+2 is being received via SPI.
-question: Apply a true triple-buffer scheme and compute the strict SRAM footprint needed, comparing it against ping-pong buffering.
+scenario: A Cortex-M4 pipeline gathers a 2 KB sample window via SPI DMA (5 ms), runs an ML model that uses a 12 KB activation tensor arena and produces a 512 B output (10 ms compute), and transmits via BLE DMA (5 ms). To maximise throughput, the team plans true triple-buffering - three frames are concurrently in flight at all times.
+question: "Apply a true triple-buffer scheme and compute the strict SRAM footprint needed, comparing it against ping-pong buffering."
 details:
-  realistic_solution: 'Triple-buffer SRAM accounting (3 frames in flight). Each I/O interface needs 3 slots so that producer and consumer never collide: SPI DMA fills one input slot while compute reads another and a third stays staged, and BLE DMA drains one output slot while compute writes another and a third is queued. The activation arena, however, is only live during the compute stage, and the Cortex-M4 runs compute sequentially - exactly one frame is in compute at any moment - so a SINGLE 12 KB arena suffices regardless of how many frames are in flight on the I/O sides. Triple-buffer SRAM = 3 * 2 KB (inputs) + 1 * 12 KB (arena, single copy) + 3 * 0.5 KB (outputs) = 6 + 12 + 1.5 = 19.5 KB, or 7.6% of 256 KB SRAM - comfortably feasible. Ping-pong (2 slots per interface, still single arena) = 2*2 + 12 + 2*0.5 = 17 KB (~6.6%). The throughput uplift of triple over double is essentially zero in this 3-stage pipeline - both schemes are gated by the 10 ms compute stage, so 100 fps maximum either way - so triple-buffering buys robustness to jitter and DMA-completion-IRQ latency, not raw throughput. Sensitivity. If the activation arena grows to 64 KB (larger model), the arena is still allocated once - triple-buffer cost rises to 3*2 + 64 + 3*0.5 = 71.5 KB (~28% of SRAM), still feasible. The arena only forces a fallback if the model itself does not fit, not because of buffering multiplicity.'
+  realistic_solution: 'Triple-buffer SRAM accounting requires 3 slots for I/O so that producer and consumer never collide. The activation arena, however, is only live during the compute stage, and the Cortex-M4 runs compute sequentially. Exactly one frame is in compute at any moment, so a SINGLE 12 KB arena suffices. Triple-buffer SRAM = 3 * 2 KB (inputs) + 1 * 12 KB (arena) + 3 * 0.5 KB (outputs) = 19.5 KB. Ping-pong = 2*2 + 12 + 2*0.5 = 17 KB. The throughput uplift of triple over double is essentially zero here because both are gated by the 10 ms compute stage.'
   common_mistake: |
     **The Pitfall:** Multiplying the activation arena by 3 along with the input/output buffers.
     **The Rationale:** Candidates incorrectly assume that every stage of the pipeline needs its own independent activation arena, ignoring that compute is strictly sequential.
     **The Consequence:** This leads to drastically overestimating SRAM requirements, potentially causing the team to abandon a feasible buffering strategy.
   napkin_math: |
-    1. **Inputs:** 3 * 2 = 6 KB.
-    2. **Arena:** 1 * 12 = 12 KB (single copy, compute is sequential).
-    3. **Outputs:** 3 * 0.5 = 1.5 KB.
-    4. **Triple-buffer total:** 6 + 12 + 1.5 = **19.5 KB** (~7.6% of 256 KB).
-    5. **Ping-pong total:** 2*2 + 12 + 2*0.5 = **17 KB** (~6.6%).
-    6. **With 64 KB arena:** 6 + 64 + 1.5 = **71.5 KB** (~28%, still feasible).
+    1. **Assumptions & Constraints:**
+       - Cortex-M4 (256 KB SRAM).
+       - Input DMA: 2 KB.
+       - Output DMA: 0.5 KB.
+       - Activation Arena: 12 KB.
+    2. **Calculations:**
+       - Triple-buffer inputs = 3 * 2 KB = 6 KB.
+       - Triple-buffer outputs = 3 * 0.5 KB = 1.5 KB.
+       - Single compute arena = 1 * 12 KB = 12 KB.
+       - Total triple-buffer = 6 + 1.5 + 12 = 19.5 KB.
+       - Ping-pong inputs (2) + outputs (2) + arena = 4 + 1 + 12 = 17 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: 19.5 KB vs 17 KB. Triple-buffering doesn't multiply the arena.**
+       - **Memory-Bound (Architecture Planning)**
 status: published
 provenance: llm-draft
 expected_time_minutes: 7

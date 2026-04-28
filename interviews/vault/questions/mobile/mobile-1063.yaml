@@ -8,20 +8,25 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: Analyze Transformer Token Budget on Snapdragon 8 Gen 3
-scenario: A mobile AI assistant uses a 1B parameter transformer on Snapdragon 8 Gen 3 (45 TOPS Hexagon NPU, 77 GB/s LPDDR5X, 12GB RAM). The model is INT4 quantized (500MB weights).
-question: How would you analyze the memory allocation for supporting a 4K context window with 10 concurrent conversation turns, given 32 layers, 8 KV heads, and a 64 head dimension?
+scenario: 'A mobile AI assistant uses a 1B parameter transformer on a mobile SoC. The model is INT4 quantized (500MB weights).'
+question: 'How would you analyze the memory allocation for supporting a 4K context window with 10 concurrent conversation turns, given 32 layers, 8 KV heads, and a 64 head dimension?'
 details:
-  realistic_solution: 'Available RAM: 12GB total. OS + Android: 4GB. App + model weights: 500MB + 500MB app = 1GB. Available for KV: 12 - 4 - 1 = 7GB. KV per token: 2(KV) × 32L × 8H × 64D × 2B (FP16) = 65,536B = 64KB/token. Per turn at 4K context: 4096 × 64KB = 256MB. 10 turns: 10 × 256MB = 2,560MB = 2.5GB < 7GB available. Headroom: 4.5GB. Maximum supported concurrent turns at 4K context: 7GB / 256MB = 27.3 → 27 turns. But attention over 10×4K=40K total context: O(40K²) × 32L computation may be intractable at decode speed — context compression needed.'
+  realistic_solution: 'Account for OS and background app memory (typically reserving 4GB+). Calculate the KV-cache requirement per token using exact precision, factoring in sequence length and batch size. Given the O(N^2) scaling of attention, employ KV-cache offloading or token eviction policies (e.g., Heavy-Hitter Oracle) to prevent OOM during extended 4K context conversations.'
   common_mistake: |
     **The Pitfall:** Allocating the full 12GB to the ML model.
     **The Rationale:** Candidates forget that phone RAM must simultaneously support the OS, camera, and active apps.
     **The Consequence:** In a real deployment, the OS will instantly kill the ML process for exceeding its restricted memory slice.
   napkin_math: |
-    *   **Available RAM:** `12GB - 4GB (OS) - 1GB (App/Weights) = 7GB`
-    *   **KV/Token (FP16):** `2(K,V) * 32L * 8H * 64D * 2 bytes = 65,536 bytes (64 KB)`
-    *   **KV per Turn (4K):** `4096 * 64 KB = 256 MB`
-    *   **10 Turns Total:** `10 * 256 MB = 2,560 MB (2.5 GB)`
-    *   **Result:** **2.5 GB easily fits in the 7GB available headroom.**
+    1. **Assumptions & Constraints:**
+       * Hardware: 12GB RAM total, 4GB OS reserve, 1GB App/Weights.
+       * KV-Cache params: 32 layers, 8 heads, 64 head dimension, FP16 (2 bytes).
+    2. **Calculations:**
+       * Available RAM: 12GB - 4GB (OS) - 1GB (App/Weights) = 7GB.
+       * KV/Token (FP16): 2(K,V) * 32L * 8H * 64D * 2 bytes = 65,536 bytes (64 KB).
+       * KV per Turn (4K): 4096 * 64 KB = 256 MB.
+       * Total KV (10 Turns): 10 * 256 MB = 2.5 GB.
+    3. **Conclusion & Interpretation:**
+       * **Result: Memory-Bound.** 2.5 GB easily fits in the 7GB available headroom, but attention computation over 40K total context necessitates context compression.
 status: published
 provenance: imported
 requires_explanation: false

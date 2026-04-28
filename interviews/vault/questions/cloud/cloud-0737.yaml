@@ -8,19 +8,25 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: The NVLink Domain Boundary
-scenario: 'You are running tensor-parallel inference for a 70B model across 8 GPUs in a DGX H100. All-reduce latency is 15µs. Your team wants to scale to 16 GPUs by adding a second DGX node. After connecting them via 400 Gbps InfiniBand, the all-reduce latency jumps to 150µs — a 10x increase.'
+scenario: 'You are running tensor-parallel inference for a 70B model across 8 GPUs in a DGX. All-reduce latency is 15µs. Your team wants to scale to 16 GPUs by adding a second node. After connecting them via 400 Gbps InfiniBand, the all-reduce latency jumps to 150µs.'
 question: 'What physical boundary did you cross?'
 details:
-  realistic_solution: 'You crossed the NVLink domain boundary. Inside a single DGX H100, 8 GPUs are connected via NVLink with 900 GB/s bisection bandwidth and ~1-2µs latency — the GPUs share a flat, switch-less memory fabric (NVSwitch). The moment you add a 9th GPU on a different node, communication must traverse: GPU → NVLink → NIC → InfiniBand switch → NIC → NVLink → GPU. Each hop adds latency. InfiniBand''s one-way latency is ~1-2µs per hop, but the full software stack (NCCL → libibverbs → RDMA → remote NCCL) adds 50-100µs of overhead. For tensor parallelism, which requires an all-reduce after every layer, this latency is catastrophic.'
+  realistic_solution: 'You crossed the NVLink domain boundary. Within a single DGX node, GPUs communicate via NVSwitch, an ultra-low latency memory fabric. Scaling to 16 GPUs forces Tensor Parallelism (TP) collective operations to traverse the host NIC and InfiniBand switch. The software stack overhead (NCCL, RDMA, libibverbs) introduces a massive fixed latency penalty per hop. For TP, which requires blocking all-reduces every layer, this inter-node latency is catastrophic and breaks latency SLAs.'
   common_mistake: |
     **The Pitfall:** Blaming the InfiniBand bandwidth.
     **The Rationale:** Candidates see a 10x slowdown and assume the 400 Gbps network isn't fast enough, wanting to "tune the network" or buy faster switches.
     **The Consequence:** They fail to realize the issue is the fixed software stack latency (RDMA, NIC transversals) when leaving the NVLink domain, leading to wasted effort optimizing throughput when latency is the real bottleneck.
   napkin_math: |
-    * **Intra-node (NVLink):** 2 MB / 900 GB/s + 1.5µs ≈ 4µs per layer.
-    * **Inter-node (InfiniBand):** 2 MB / 50 GB/s + 100µs overhead ≈ 140µs per layer.
-    * **Over 80 layers:** Intra-node total = 320µs. Inter-node total = 11.2 ms.
-    * **Result: The inter-node path adds 35x more communication time, breaking tensor parallelism scaling.**
+    1. **Assumptions & Constraints:**
+       * Intra-node (NVLink) latency: ~1.5µs per hop. Bandwidth: 900 GB/s.
+       * Inter-node (InfiniBand) latency overhead: ~100µs. Bandwidth: 50 GB/s.
+       * 80 model layers requiring all-reduce.
+    2. **Calculations:**
+       * Intra-node: 2 MB / 900 GB/s + 1.5µs ≈ 4µs per layer.
+       * Inter-node: 2 MB / 50 GB/s + 100µs ≈ 140µs per layer.
+       * Total across 80 layers: Intra-node = 320µs. Inter-node = 11.2 ms.
+    3. **Conclusion & Interpretation:**
+       * **Result: The inter-node path is severely Latency-Bound, adding 35x more communication time and breaking scaling.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,19 +8,26 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: both
 title: Tensor Parallelism Within vs Across Nodes
-scenario: A team proposes TP=16 across two 8-GPU DGX H100 nodes (NVLink within node: 900 GB/s, InfiniBand between nodes: 400 Gb/s = 50 GB/s). Compare this to TP=8 within a node + DP=2 across nodes.
+scenario: A team proposes TP=16 across two 8-GPU DGX H100 nodes. Compare this to TP=8 within a node + DP=2 across nodes.
 question: How would you quantify the communication overhead of each approach?
 details:
-  realistic_solution: "TP=16 across 2 nodes: every layer requires 2 AllReduce operations (forward + backward). For hidden_dim=8192, FP16, micro-batch=4, seq=2048: the full activation tensor is 4 * 2048 * 8192 * 2B = 128 MB. With 80 layers: 160 AllReduces per step, half crossing the IB link. Cross-node AllReduce of 128 MB at 50 GB/s (using 2x multiplier for AllReduce): 2 * 128 MB / 50 = ~5.12ms each * 80 cross-node = 409.6ms. NVLink AllReduce: 2 * 128 MB / 450 = 0.57ms * 80 = 45.6ms. Total TP=16 comm: 455.2ms. TP=8+DP=2: TP AllReduce is NVLink-only: 0.57ms * 160 = 91.2ms. DP gradient sync: 14 GB over IB at 50 GB/s = 280ms, but overlaps with backward pass. Net exposed comm: ~91.2ms + 20ms residual DP sync = 111.2ms. TP=8+DP=2 exposes significantly less non-overlappable communication. TP across nodes is worse because TP communication cannot be overlapped with compute."
+  realistic_solution: "TP requires high-frequency AllReduce operations in the critical path that cannot be overlapped with compute. TP=16 across nodes forces AllReduce traffic over 50 GB/s InfiniBand, creating a catastrophic bottleneck compared to 900 GB/s NVLink. DP gradient sync occurs during the backward pass and can be heavily overlapped using ZeRO-style sharding. Thus, TP=8+DP=2 exposes significantly less non-overlappable communication latency."
   common_mistake: |
     **The Pitfall:** Treating cross-node bandwidth the same as intra-node bandwidth.
     **The Rationale:** Believing that 400 Gbps InfiniBand is "fast enough" to handle any topology.
     **The Consequence:** Running TP across the slow link decimates training throughput because TP communication happens in the critical path and cannot be overlapped.
   napkin_math: |
-    * Cross-node AllReduce (TP=16): 80 layers * 128 MB * 2 (multiplier) / 50 GB/s = 409.6 ms non-overlappable.
-    * Intra-node AllReduce (TP=8): 80 layers * 128 MB * 2 / 900 GB/s = 22.7 ms (or ~45.6 ms depending on directionality).
-    * NVLink vs IB ratio: 900 GB/s / 50 GB/s = 18x.
-    * **TP across nodes adds massive non-overlappable latency per layer compared to DP.**
+    1. **Assumptions & Constraints:**
+       - InfiniBand (Cross-node): 50 GB/s
+       - NVLink (Intra-node): 900 GB/s
+       - Activation tensor: 128 MB (per layer)
+       - Layers: 80
+    2. **Calculations:**
+       - Cross-node AllReduce (TP=16): 80 * 128 MB * 2 / 50 GB/s = 409.6 ms non-overlappable
+       - Intra-node AllReduce (TP=8): 80 * 128 MB * 2 / 900 GB/s = 22.7 ms
+       - NVLink vs IB bandwidth ratio: 900 / 50 = 18x
+    3. **Conclusion & Interpretation:**
+       - **Result: Communication-Bound (Interconnect Bottleneck)**
 status: published
 provenance: imported
 requires_explanation: false

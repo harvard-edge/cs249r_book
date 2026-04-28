@@ -7,34 +7,23 @@ topic: pipeline-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Interleaved Pipeline Schedule to Reduce Bubble
-scenario: You have a 64-layer GPT model split across 8 MI300X GPUs. Using the standard GPipe schedule with m=16 micro-batches gives a 30% bubble. A colleague suggests switching to an interleaved (1F1B) schedule.
-question: How would an interleaved 1F1B schedule with virtual stages change the bubble fraction and memory use for the 8-stage, m=16 pipeline?
+title: 'Interleaved Pipeline Schedule to Reduce Bubble'
+scenario: 'You have a 64-layer GPT model split across 8 MI300X GPUs. Using the standard GPipe schedule with m=16 micro-batches gives a 30% bubble.'
+question: 'How would an interleaved 1F1B schedule with virtual stages change the bubble fraction and memory use for the 8-stage, m=16 pipeline?'
 details:
-  realistic_solution: 'Use interleaved 1F1B with v=2 virtual stages: each GPU holds 2 non-contiguous model chunks (layers 1-8 and layers 33-40, etc.). Bubble fraction reduces to (p-1)/(m×v+p-1) = 7/(32+7) = 17.9% vs 30% with standard GPipe. Memory overhead: 2× activation recomputation checkpoints per GPU. Combine with selective activation checkpointing for the v=2 chunks to stay within 192 GB MI300X HBM3.'
+  realistic_solution: 'Use interleaved 1F1B with v=2 virtual stages: each GPU holds 2 non-contiguous model chunks (e.g., layers 1-8 and 33-40). Combine with selective activation checkpointing to stay within 192GB MI300X HBM3.'
   common_mistake: |
     **The Pitfall:** Assuming the interleaved 1F1B schedule is a pure win without evaluating memory constraints.
     **The Rationale:** Candidates see the bubble reduction math but forget that interleaved schedules require storing more in-flight micro-batch activations.
-    **The Consequence:** The model hits OOM (Out Of Memory) errors, forcing smaller batch sizes that negate the pipeline throughput gains.
+    **The Consequence:** The model hits Out-Of-Memory (OOM) errors, forcing smaller batch sizes that negate the pipeline throughput gains.
   napkin_math: |
-    - **Calculate standard GPipe bubble:** (p-1)/(m+p-1) = 7 / (16+7) = 30.4%.
-    - **Calculate interleaved 1F1B bubble:** With v=2 virtual stages, bubble ≈ (p-1)/(m×v+p-1) = 7 / (32+7) = 17.9%.
-    - **Calculate bubble reduction:** 30.4% → 17.9% = 41% less bubble.
-    - **Analyze memory overhead:** Standard stores m=16 micro-batch activations per stage. Interleaved stores 2v micro-batch activations, leading to **4x more peak activations** (which fits in the MI300X's 192 GB HBM3).
+    1. **Assumptions & Constraints:**
+       - Pipeline stages (p) = 8, micro-batches (m) = 16, virtual stages (v) = 2.
+       - Hardware: MI300X (192GB HBM3).
+    2. **Calculations:**
+       - GPipe bubble: (p-1)/(m+p-1) = 7 / 23 = 30.4%.
+       - Interleaved 1F1B bubble: (p-1)/(m×v+p-1) = 7 / 39 = 17.9%.
+       - Memory overhead: Standard stores m=16 activations/stage. Interleaved stores 2×v micro-batch activations, leading to 4x more peak activations.
+    3. **Conclusion & Interpretation:**
+       - **Result: Bubble reduced from 30.4% to 17.9% (41% less bubble), but requires 4x more peak activations. Tradeoff is Memory-Bound vs Compute-Bound.**
 status: published
-provenance: imported
-requires_explanation: true
-expected_time_minutes: 16
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: claude-sonnet-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

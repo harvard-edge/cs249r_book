@@ -8,19 +8,24 @@ competency_area: compute
 bloom_level: understand
 phase: both
 title: The Batching Tipping Point
-scenario: An engineering team is optimizing a BERT-Large (340M parameters) model for FP16 inference on an H100 GPU. For a single input sequence, the forward pass requires approximately 25 GFLOPs and reads 750 MB of data (weights, KV cache, activations).
+scenario: An engineering team is optimizing a BERT-Large (340M parameters) model for FP16 inference. For a single input sequence, the forward pass requires approximately 25 GFLOPs and reads 750 MB of data.
 question: What is the batch-1 arithmetic intensity, and how does increasing batch size shift the workload from memory-bound to compute-bound?
 details:
-  realistic_solution: The workload shifts from being memory-bound to compute-bound. At batch size 1, the Arithmetic Intensity is low, bottlenecked by the time it takes to read data from HBM. By increasing the batch size, the total FLOPs increase linearly, but the total memory read does not. The large weight matrix is read once, and only the per-input activation data scales with the batch. This reuse of weights drastically increases the ratio of compute to memory access (the AI), pushing the workload over the GPU's ridge point and into the compute-bound regime. By becoming compute-bound, the GPU can utilize its Tensor Cores more effectively, leading to higher achieved TOPS and better overall energy efficiency (TOPS/W).
+  realistic_solution: The workload strictly shifts from memory-bandwidth bound to compute-bound. At batch size 1, the Arithmetic Intensity (AI) is critically low, bottle-necked by transferring weights from HBM to SRAM. By increasing batch size, total FLOPs scale linearly but weight transfers do not (weights are broadcast across the batch). This drastic AI increase pushes the operation past the hardware ridge point, fully engaging the Tensor Cores.
   common_mistake: |
     **The Pitfall:** Assuming that all memory access scales linearly with batch size.
-    **The Rationale:** If you double the inputs, you intuitively expect to double the memory read.
-    **The Consequence:** Forgetting that the model's weights are read only once per kernel launch, leading to the incorrect conclusion that Arithmetic Intensity remains constant and the workload cannot become compute-bound.
+    **The Rationale:** If you double the input sequence count, intuition suggests you double the required memory read.
+    **The Consequence:** Failing to realize that model weights are read exactly once per kernel launch, incorrectly concluding the workload cannot escape the memory-bandwidth wall.
   napkin_math: |
-    1. Hardware Ridge Point: 989 TFLOPS / 3.35 TB/s = 295 FLOPs/byte.
-    2. Batch-1 Arithmetic Intensity (AI): 25 GFLOPs / 750 MB = 33.3 FLOPs/byte.
-    3. Analysis: Since 33.3 < 295, the batch size 1 workload is severely memory-bandwidth bound.
-    4. **Scaling: To become compute-bound, we must increase the batch size by roughly 9x (295 / 33) so that weight reuse pushes AI past the ridge point.**
+    1. **Assumptions & Constraints:**
+       - Batch-1 Compute: 25 GFLOPs.
+       - Batch-1 Memory Transfer: 750 MB.
+       - Hardware Ridge Point (H100): 989 TFLOPS / 3.35 TB/s = ~295 FLOPs/byte.
+    2. **Calculations:**
+       - Batch-1 Arithmetic Intensity (AI): 25 GFLOPs / 750 MB = 33.3 FLOPs/byte.
+       - Scaling Requirement: To cross the ridge point, AI must increase by 295 / 33.3 = ~8.8x.
+    3. **Conclusion & Interpretation:**
+       - **The AI shifts from ~33 FLOPs/Byte (Memory-Bound) to over 295 FLOPs/Byte (Compute-Bound) as batch size scales past 9. Result: Arithmetic-Intensity Bound.**
   options:
   - The workload remains memory-bound because Arithmetic Intensity is constant; both compute and memory scale linearly.
   - The workload is compute-bound at batch 1 and just becomes more compute-bound at batch 64.

@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: understand
 phase: both
 title: Tensor Parallelism AllReduce Overlap with Feedforward Computation
-scenario: In tensor-parallel training of a 70B LLM across 8 H100 GPUs (NVLink), each transformer layer requires two AllReduce operations: one after the attention block and one after the MLP block. These AllReduces are on the critical path.
+scenario: 'In tensor-parallel training of a 70B LLM across 8 GPUs (NVLink), each transformer layer requires two AllReduce operations: one after the attention block and one after the MLP block. These AllReduces are on the critical path.'
 question: Can standard tensor parallelism AllReduces be overlapped with computation, and what techniques partially address this?
 details:
   realistic_solution: "Standard tensor parallelism AllReduces cannot be overlapped because each produces a partial sum that is needed before the next layer starts. However, two techniques partially address this: (1) Async ReduceScatter + AllGather decomposition: split AllReduce into ReduceScatter (output partial results while computing) + AllGather (reconstruct while starting next layer's computation). The AllGather can partially overlap with the next layer's input processing. (2) Sequence parallelism: overlap the sequence dimension's AllGather with computation by processing received chunks as they arrive. Megatron-LM uses this to overlap 30-40% of communication."
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Conflating gradient synchronization (which happens at the end of the backward pass) with activation synchronization.
     **The Consequence:** Attempting to build communication overlaps that are mathematically impossible due to strict data dependencies, breaking the forward pass.
   napkin_math: |
-    *   **Activation Tensor:** Batch=4, Seq=2048, Hidden=8192, 2 bytes/element. Total = $4 \times 2048 \times 8192 \times 2$ $\approx$ 134 MB.
-    *   **Ring AllReduce Traffic:** per layer = $2 \times (7/8) \times 134$ MB $\approx$ 235 MB.
-    *   **NVLink Latency:** 235 MB / 450 GB/s $\approx$ 0.52 ms per AllReduce.
-    *   **Total Communication:** 192 AllReduces (2 per layer) × 0.52 ms $\approx$ 100 ms per step.
-    *   **Compute Comparison:** Compute per layer $\approx$ 5 ms (480 ms total). TP communication is **~21% of total compute time**.
+    1. **Assumptions & Constraints:**
+       * Batch=4, Seq=2048, Hidden=8192, FP16 (2 Bytes/element).
+       * NVLink: 450 GB/s Unidirectional.
+       * Ring AllReduce over 8 GPUs: Data Traffic = 2 * (7/8) * MessageSize.
+    2. **Calculations:**
+       * MessageSize: 4 \times 2048 \times 8192 \times 2 = 134 MB.
+       * Ring AllReduce Traffic: 2 \times (7/8) \times 134 MB \approx 235 MB.
+       * Latency per AllReduce: 235 MB / 450 GB/s \approx 0.52 ms.
+       * Total Communication (192 ops): 192 \times 0.52 ms \approx 100 ms.
+    3. **Conclusion & Interpretation:**
+       * TP communication takes **~21% of total compute time** (100ms vs 480ms compute). **Result: Network-Latency-Bound**.
 status: published
 provenance: imported
 requires_explanation: false

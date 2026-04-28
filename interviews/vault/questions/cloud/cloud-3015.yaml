@@ -8,35 +8,23 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: 'Latency Decomposition: Compare KV-Cache vs. No-Cache Decode Latency on H100'
-scenario: A serving team debates whether to enable KV-cache for a 7B-parameter model on H100. With KV-cache, each decode step reads model weights (14GB at FP16) plus KV entries for past tokens. Without KV-cache, the full attention recomputes over the sequence.
-question: At sequence length 1024, how does per-token decode latency compare with and without a KV cache for the 7B model?
+scenario: 'A serving team debates whether to enable KV-cache for a 7B-parameter model on H100. With KV-cache, each decode step reads model weights plus KV entries. Without KV-cache, the full attention recomputes over the sequence.'
+question: 'At sequence length 1024, how does per-token decode latency compare with and without a KV cache for the 7B model?'
 details:
-  realistic_solution: 'With KV-cache: each decode step reads 14GB weights + 2×(1024 tokens)×(4096 dim)×2 bytes×32 layers ≈ 14GB + 0.51GB = 14.51GB → 14.51GB/3.35TB/s ≈ 4.3ms/token. Without cache: full attention over 1024 tokens adds O(n²) ops. At 1024 tokens, attention FLOPs ≈ 2×1024²×4096×32 ≈ 275B FLOPs → 0.28ms on H100 at 989 TFLOPS, but memory for Q/K/V reads grows. KV-cache wins on latency at long sequences.'
+  realistic_solution: 'With KV-cache, inference is memory-bandwidth bound by weight and cache reading. Without KV cache, full attention adds O(n^2) operations per step, drastically inflating FLOPs, making KV-cache superior for long sequence latency.'
   common_mistake: |
     **The Pitfall:** Forgetting that without KV-cache, attention cost scales quadratically.
     **The Rationale:** Candidates fail to internalize the asymptotic complexity of self-attention during generation.
     **The Consequence:** They erroneously conclude that recomputation is cheaper than memory bandwidth at sequence length 1024, ignoring the massive FLOP explosion.
   napkin_math: |
-    - KV per layer per token: 2 (K, V) × 4096 (dim) × 2 bytes = 16 KB.
-    - 32 layers × 1024 tokens = 32,768 entries.
-    - KV Cache Size: 32,768 entries × 16 KB = 524,288 KB ≈ **512 MB**.
-    - Weights: 7B params × 2 bytes = 14 GB.
-    - Total read per step: 14 GB + 0.5 GB = **14.5 GB**.
-    - Memory-bound decode time: 14.5 GB / 3.35 TB/s ≈ **4.3 ms/token**.
+    1. **Assumptions & Constraints:**
+       - 7B params (14 GB at FP16).
+       - H100: 3.35 TB/s bandwidth, 989 TFLOPS.
+       - Sequence: 1024 tokens. Attention: 32 layers, 4096 dim.
+    2. **Calculations:**
+       - KV Cache Size: 32 layers × 1024 tokens × 2 (K, V) × 4096 dim × 2 bytes = 512 MB.
+       - With Cache: Read 14 GB + 0.5 GB = 14.5 GB/step. Time = 14.5 GB / 3.35 TB/s = ~4.3 ms.
+       - Without Cache: Recompute FLOPs = 2 × 1024² × 4096 × 32 = ~275B FLOPs. Time = ~0.28 ms (compute alone, ignores massive redundant Q/K/V memory access).
+    3. **Conclusion & Interpretation:**
+       - **Result: 4.3 ms memory-bound latency wins. The workload fundamentally remains Memory-Bandwidth-Bound, but KV Cache prevents quadratic scaling.**
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 8
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: claude-sonnet-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -8,20 +8,26 @@ competency_area: optimization
 bloom_level: create
 phase: inference
 title: Heterogeneous Scheduling for Multimodal Pipeline
-scenario: You are tasked with deploying a real-time multimodal assistant on the Apple A17 Pro. The pipeline consists of a streaming audio encoder, a lightweight vision transformer, and a 3B-parameter 4-bit quantized LLM. The system must run continuously within a ~5W thermal envelope while sharing 8 GB of unified memory across the 16-core Neural Engine, 6-core GPU, and CPU.
+scenario: You are tasked with deploying a real-time multimodal assistant. The pipeline consists of a streaming audio encoder, a vision transformer, and a 3B-parameter 4-bit quantized LLM.
 question: How should a heterogeneous multimodal pipeline be scheduled to reduce memory traffic and NPU stalls?
 details:
-  realistic_solution: The optimal solution involves a dynamic, memory-aware scheduling graph. First, apply aggressive vertical and horizontal layer fusion (e.g., fusing QKV projections with attention operations) specifically targeted for the 16-core Neural Engine to keep intermediate activations in local SRAM. Second, implement a pipelined execution model where the CPU orchestrates sequence management, the GPU handles dynamic shape non-linearities, and the Neural Engine processes dense matrix math, using zero-copy buffers in the 8 GB unified memory to simply pass pointers rather than copying data between domains.
+  realistic_solution: Architect a dynamic, memory-aware scheduling graph centered entirely around data locality. Execute aggressive vertical and horizontal operator fusion on the NPU to force intermediate activations into local SRAM, preventing any spillage to the LPDDR5X bus. Implement zero-copy buffer pointers across the unified memory architecture for orchestration, ensuring the CPU handles sequence routing and the GPU maps non-linear shapes without ever physically duplicating payload data.
   common_mistake: |
-    **The Pitfall:** Defaulting to a static layer-by-layer offloading strategy (e.g., sending all MatMuls to the NPU and unsupported ops to the CPU/GPU).
-    **The Rationale:** Candidates often map individual ops to the best processor without considering the cost of data movement between them.
-    **The Consequence:** This fails to account for the unified memory architecture, missing opportunities for zero-copy layer fusion, leading to severe memory bandwidth bottlenecks and thermal throttling before compute limits are reached.
+    **The Pitfall:** Defaulting to a highly static layer-by-layer offloading strategy (dumping all MatMuls to NPU and leaving unsupported ops to CPU).
+    **The Rationale:** Candidates mechanically map operators to the fastest silicon without modeling the severe penalty of data movement between the chips.
+    **The Consequence:** Total failure to exploit zero-copy layer fusion creates overwhelming memory bandwidth bottlenecks, triggering aggressive thermal throttling long before raw compute limits are reached.
   napkin_math: |
-    - **Model Footprint:** 3B parameters at 4-bit = ~1.5 GB for weights.
-    - **Bandwidth Demand:** 20 tokens/sec * 1.5 GB/token = **30 GB/s**.
-    - **Compute Demand:** 3B params * 2 MACs * 20 tok/sec = 120 GOPS (0.12 TOPS), which is trivial compared to the A17 Pro's 35 TOPS.
-    - **Intermediate Bandwidth Impact:** Without layer fusion, a single 10 MB activation written to and read from DRAM adds 10 MB * 2 (read+write) * 20 tok/sec = 400 MB/s.
-    - **Savings:** Fusing 10 such layers saves 10 * 400 MB/s = **4 GB/s**, preserving the shared memory bus and lowering power.
+    1. **Assumptions & Constraints:**
+       - LLM Model size: 3B parameters (INT4) = ~1.5 GB weights.
+       - Target throughput: 20 tokens/sec.
+       - NPU compute available: 35 TOPS.
+    2. **Calculations:**
+       - Weight Bandwidth Demand: 1.5 GB * 20 tok/sec = 30 GB/s.
+       - Compute Demand: 3B params * 2 MACs * 20 tok/sec = 120 GOPS (0.12 TOPS).
+       - No-fusion I/O penalty: Writing/reading a 10MB activation adds 400 MB/s (10 * 2 * 20).
+       - Fusing 10 layers saves: 10 * 400 MB/s = 4.0 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bandwidth-Bound.** Raw compute demand (0.12 TOPS) is trivial. Fusing layers to trap activations in SRAM prevents the catastrophic 4.0 GB/s bandwidth penalty, eliminating thermal throttling.
 status: published
 provenance: imported
 requires_explanation: true

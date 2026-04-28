@@ -7,43 +7,26 @@ topic: graceful-degradation
 competency_area: reliability
 bloom_level: analyze
 phase: inference
-title: Analyze Fallback Latency on Cortex-M4
-scenario: 'An audio classification system on an ARM Cortex-M4 (STM32F4) processes
-  50ms audio frames. It implements a fail-operational degradation ladder: a fast INT8
-  CNN (1 million MACs) runs first. If confidence < 0.8, it triggers a fallback INT8
-  CNN (4 million MACs). The STM32F4 runs at 168 MHz, has 256 KB SRAM, no FPU, and
-  uses CMSIS-NN SIMD (2x INT8 MACs/cycle). During field tests in noisy environments,
-  the system drops audio frames because processing time exceeds the 50ms deadline,
-  despite theoretical peak throughput suggesting it should take less than 15ms. Explain
-  why this latency overrun happens.'
-question: Why does an STM32F4 fail a 50 ms audio frame when a 1M-MAC CNN falls back
-  to a 4M-MAC CNN?
+title: Analyze Fallback Latency
+scenario: 'An audio classification system processes 50ms audio frames. It implements a fail-operational degradation ladder: a fast INT8 CNN runs first. If confidence < 0.8, it triggers a fallback INT8 CNN. During field tests in noisy environments, the system drops audio frames because processing time exceeds the 50ms deadline, despite theoretical peak throughput suggesting it should take less than 15ms.'
+question: Explain why this latency overrun happens on the MCU when falling back from a 1M-MAC to a 4M-MAC CNN.
 details:
-  realistic_solution: The theoretical peak performance assumes perfect data availability
-    in registers, which isn't realistic. The fallback scenario requires executing
-    both models sequentially (1M + 4M = 5M MACs). While the CMSIS-NN SIMD can do 2
-    MACs/cycle, keeping the pipeline fed requires constant fetching of weights from
-    the 1 MB flash and activations from the 256 KB SRAM. These memory bandwidth bottlenecks
-    and pipeline stalls reduce the effective MAC utilization. When combined with the
-    sequential execution overhead, the actual latency exceeds the 50ms frame budget.
-  common_mistake: Candidates often rely solely on the theoretical peak throughput
-    of 336 MMACs/s and assume computing 5 million total MACs takes only ~15ms. They
-    fail to analyze the memory access bottlenecks and pipeline stalls that prevent
-    the CPU from sustaining the peak SIMD MAC rate.
-  napkin_math: '1. Fallback total MACs: 1M (fast model) + 4M (fallback model) = 5M
-    total MACs.
-
-    2. Peak throughput: 168 MHz * 2 MACs/cycle = 336 MMACs/sec.
-
-    3. Theoretical minimum latency: 5M MACs / 336 MMACs/sec = 14.88 ms.
-
-    4. Realistic CMSIS-NN SIMD utilization bounded by SRAM/Flash memory bandwidth
-    on Cortex-M4 is typically 30-40%. Effective throughput: ~100 MMACs/sec.
-
-    5. Realistic compute latency: 5M MACs / 100 MMACs/sec = 50 ms.
-
-    6. 50 ms compute + feature extraction overhead > 50 ms audio frame, causing dropped
-    frames.'
+  realistic_solution: 'Theoretical peak performance assumes perfect data availability in registers, which is unrealistic. The fallback scenario requires executing both models sequentially (5M total MACs). Memory bandwidth bottlenecks from fetching weights from flash and activations from SRAM reduce effective MAC utilization. Combined with sequential execution overhead, the realistic latency exceeds the 50ms frame budget.'
+  common_mistake: |
+    **The Pitfall:** Relying purely on theoretical peak throughput.
+    **The Rationale:** Candidates calculate raw FLOPs but ignore SRAM/Flash memory bandwidth bottlenecks and pipeline stalls.
+    **The Consequence:** The system consistently misses the 50ms real-time deadline in noisy environments, dropping critical audio frames.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Fallback MACs: 1M + 4M = 5M total MACs.
+       - CPU Peak: 168 MHz * 2 MACs/cycle = 336 MMACs/sec.
+       - Realistic CMSIS-NN SIMD utilization: ~30-40%.
+    2. **Calculations:**
+       - Theoretical latency = 5M / 336 MMACs/sec = 14.88 ms.
+       - Effective throughput ≈ 100 MMACs/sec.
+       - Realistic compute latency = 5M / 100 MMACs/sec = 50 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound.** The 50 ms compute alone consumes the entire frame budget, leading to dropped frames when feature extraction overhead is added.
 status: published
 provenance: imported
 requires_explanation: false

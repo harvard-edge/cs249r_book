@@ -8,21 +8,25 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: inference
 title: Federated Averaging Memory and Communication Sizing on ESP32-S3
-scenario: We are deploying a cross-device federated learning system on a fleet of ESP32-S3 microcontrollers for smart home anomaly detection. Each device trains a local CNN with 150,000 parameters and syncs updates over WiFi.
-question: How should an ESP32-S3 federated learning client size memory buffers and communication for a 150K-parameter local CNN update?
+scenario: We are deploying a cross-device federated learning system on a fleet of ESP32-S3 microcontrollers. Each device trains a local CNN with 150,000 parameters and synchronizes updates over WiFi.
+question: How should the ESP32-S3 firmware manage memory buffers and communication schedules to process a 150K-parameter CNN update efficiently?
 details:
-  realistic_solution: The correct approach heavily utilizes the 8 MB PSRAM for staging while keeping active computations in SRAM. The device computes INT8 weight deltas using the vector extensions, applies compression (like sparsity or further quantization) to the deltas, and stores them in PSRAM. The WiFi radio is only awakened to transmit the compressed payload in one burst, minimizing active transmission time.
+  realistic_solution: The architecture must leverage the 8 MB PSRAM for staging gradients while confining active tensor arithmetic to the fast internal SRAM. The device computes INT8 weight deltas locally, applies Top-K Sparsification to the gradients, and buffers the compressed payload in PSRAM. The WiFi radio is subsequently awakened only to transmit this dense sparse-vector payload in a single high-speed burst, strictly minimizing active transmission time.
   common_mistake: |
-    **The Pitfall:** Treating gradients as raw 32-bit floats transmitted continuously.
-    **The Rationale:** Candidates port cloud FL logic directly to MCUs without adapting for radio power costs and tight SRAM limits.
-    **The Consequence:** They overflow the 512KB SRAM and drain the device battery via prolonged active WiFi transmission.
+    **The Pitfall:** Transmitting continuous streams of raw 32-bit floating-point gradients.
+    **The Rationale:** Candidates port cloud-native PyTorch Federated Learning logic directly to the MCU without adapting for radio power costs and tight SRAM limits.
+    **The Consequence:** They instantaneously overflow the 512KB SRAM and drain the device battery via prolonged, uncompressed active WiFi transmission.
   napkin_math: |
-    - For 150K parameters at INT8, one model copy is 150 KB.
-    - Computing deltas requires base model (150 KB) + local model (150 KB) = 300 KB.
-    - This leaves little of the 512 KB SRAM for the OS/network stack (~150 KB), so deltas (150 KB) must be staged in 8 MB PSRAM.
-    - Transmitting 150 KB raw over 1 Mbps WiFi takes (150 * 8) / 1000 = 1.2 seconds.
-    - Applying sparse update (e.g., top 10%) reduces payload to 15 KB + indices (30 KB) = 45 KB.
-    - Transmission time drops to **360 ms**, saving substantial power.
+    1. **Assumptions & Constraints**:
+       - 150,000 parameters.
+       - ESP32-S3: 512 KB SRAM, 8 MB PSRAM. WiFi at 1 Mbps.
+    2. **Calculations**:
+       - INT8 Model State: Base (150 KB) + Local (150 KB) = 300 KB.
+       - Raw transmission: (150 KB * 8 bits) / 1,000,000 bps = 1.2 seconds.
+       - Top-10% Sparsification: 15 KB payload + 30 KB indices = 45 KB total.
+       - Sparse transmission: (45 KB * 8 bits) / 1,000,000 bps = 360 ms.
+    3. **Conclusion & Interpretation**:
+       - **Result: Power-Bound Communication**. Utilizing PSRAM for staging and applying Top-10% Sparsification cuts the WiFi transmission window from 1.2s to 360ms, radically preserving battery life.
 status: published
 provenance: imported
 requires_explanation: false

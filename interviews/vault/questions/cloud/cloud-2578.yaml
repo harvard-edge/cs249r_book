@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: both
 title: Cloud Deepspeed Zero L5 0
 scenario: 'For a 30B model on 64 GPUs across 8 nodes (NVLink intra-node, 100 Gbps inter-node), you must select a parallelism strategy.'
-question: Which is more communication-efficient for the 30B model: flat ZeRO-3 across 64 GPUs or hierarchical ZeRO, and why?
+question: 'Which is more communication-efficient for the 30B model: flat ZeRO-3 across 64 GPUs or hierarchical ZeRO, and why?'
 details:
   realistic_solution: 'Option A (flat ZeRO-3): every layer requires all-gather across all 64 GPUs. Total param traffic: 60 GB x 3 (fwd gather + bwd gather + gradient reduce-scatter) = 180 GB per step. Inter-node time: 180 x (7/8) / 12.5 = 12.6s. Option B (hierarchical): ZeRO-2 within each 8-GPU node - params replicated intra-node (60 GB per GPU, fits in 80 GB). Gradient reduce-scatter within node at NVLink speed (fast). ZeRO-1 across nodes - only optimizer states sharded cross-node. Cross-node traffic: gradient AllReduce = 2 x (7/8) x 60 GB = 105 GB. Inter-node time = 105 / 12.5 GB/s = 8.4s. Option B cuts cross-node traffic by 33% and keeps parameter all-gathers strictly on fast NVLink.'
   common_mistake: |
@@ -17,26 +17,13 @@ details:
     **The Rationale:** Engineers fail to realize that inter-node Ethernet/InfiniBand is an order of magnitude slower than intra-node NVLink.
     **The Consequence:** Massive network bottlenecks during the forward/backward passes as parameters are fetched across slow inter-node links.
   napkin_math: |
-    - **Flat ZeRO-3 (A)**: Cross-node parameter traffic is `180 GB * (7/8) = 157.5 GB`. Time at 12.5 GB/s = `12.6s`.
-    - **Hierarchical ZeRO (B)**: Only gradients sync cross-node. `105 GB`. Time at 12.5 GB/s = `8.4s`.
-    - **Final Result**: Hierarchical ZeRO saves **>4s per step**, keeping parameter gathers strictly on fast NVLink.
+    1. **Assumptions & Constraints:**
+       - 30B model (60GB at FP16).
+       - 64 GPUs across 8 nodes.
+       - Network: NVLink intra-node, 100 Gbps (12.5 GB/s) inter-node.
+    2. **Calculations:**
+       - Flat ZeRO-3 (Option A): Cross-node parameter traffic = 60GB * 3 ops * (7/8 cross-node factor) = 157.5 GB. Time = 157.5 / 12.5 = 12.6s.
+       - Hierarchical ZeRO (Option B): Only gradients sync cross-node = 60GB * 2 * (7/8) = 105 GB. Time = 105 / 12.5 = 8.4s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound by Inter-Node Links.** Hierarchical ZeRO saves >4s per step by keeping high-bandwidth parameter gathers on NVLink.
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 12
-chains:
-- id: cloud-chain-490
-  position: 2
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

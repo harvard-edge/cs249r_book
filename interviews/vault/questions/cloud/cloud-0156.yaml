@@ -8,19 +8,23 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: The Prefill vs. Decode Dilemma
-scenario: You are optimizing an LLM serving system for a code completion assistant on H100s. The user experience is sensitive to both TTFT (time to first suggestion) and TPOT (throughput of the generated code block). Your profiler shows that prompt processing (prefill) is compute-bound, while token generation (decode) is memory-bound. A team member suggests doubling the batch size.
+scenario: You are optimizing an LLM serving system for a code completion assistant. The user experience is sensitive to both TTFT (time to first suggestion) and TPOT (throughput of the generated code block). Your profiler shows that prompt processing (prefill) is compute-bound, while token generation (decode) is memory-bound. A team member suggests doubling the batch size.
 question: "Why might doubling batch size improve aggregate TPOT but harm TTFT and user experience for the code completion assistant?"
 details:
-  realistic_solution: 'The suggestion is based on a misunderstanding of LLM inference bottlenecks. We need to analyze the two phases separately.'
+  realistic_solution: 'The suggestion conflates aggregate throughput with latency. Doubling the batch size increases queueing and the O(N^2) compute time required for prefill. While decoding throughput (tokens/sec) may improve for the batched group, the individual time to first token (TTFT) scales exponentially, drastically degrading the interactive user experience.'
   common_mistake: |
     **The Pitfall:** Conflating throughput (tokens/sec) with latency (ms/token).
     **The Rationale:** Engineers assume that techniques to improve aggregate throughput, like larger batches, will improve per-user perceived latency.
     **The Consequence:** A larger batch significantly increases queueing and prefill time, hurting TTFT without speeding up memory-bound token generation for the user.
   napkin_math: |
-    1. Model a 70B model (140 GB) on H100 (989 TFLOPS, 3.35 TB/s).
-    2. Prefill (1000 tokens) is compute-bound: 2 * 70B * 1000 = 140 TFLOPs. Time = 140 / 989 = 141 ms.
-    3. Decode is memory-bound, reading the entire 140 GB model per token: 140 GB / 3.35 TB/s = 41.8 ms/token.
-    4. **You cannot optimize both simultaneously; raising batch size improves decode throughput but exponentially delays prefill.**
+    1. **Assumptions & Constraints:**
+       - 70B model (140 GB in FP16), running on a GPU with 989 TFLOPS and 3.35 TB/s bandwidth.
+       - Prefill sequence length: 1000 tokens.
+    2. **Calculations:**
+       - Prefill compute: 2 * 70B * 1000 = 140 TFLOPs. Time = 140 TFLOPs / 989 TFLOPS = 141 ms.
+       - Decode memory: 140 GB read per token. Time = 140 GB / 3.35 TB/s = 41.8 ms/token.
+       - Doubling batch size doubles prefill time to 282 ms, delaying TTFT.
+    3. **Conclusion & Interpretation:** **Raising batch size improves decode throughput but exponentially delays prefill. Result: Compute-Bound for Prefill, Memory-Bound for Decode.**
 status: published
 provenance: imported
 requires_explanation: false

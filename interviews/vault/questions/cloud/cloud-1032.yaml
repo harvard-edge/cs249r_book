@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: training
 title: Mitigating Correlated Rack Failures in 2048-GPU Training
 scenario: You are architecting the fault-tolerance strategy for training a 175B parameter LLM on a cluster of 2048 A100 GPUs. The GPUs are densely packed into 8 racks (256 GPUs per rack), with each rack sharing a single Top-of-Rack (ToR) switch and a chilled-water cooling manifold.
-question: "Evaluate the trade-offs between node-local NVMe checkpointing and cross-rack asynchronous checkpointing, considering the impact of a correlated failure (e.g., a ToR switch crash or cooling leak) on training progress and cluster utilization."
+question: "Evaluate the trade-offs between node-local NVMe checkpointing and cross-rack asynchronous checkpointing, considering the impact of a correlated failure on training progress and cluster utilization."
 details:
   realistic_solution: 'Implement a hierarchical fault-tolerance strategy. Utilize fast, high-frequency local checkpoints to NVMe arrays (~1.1s per node) for isolated GPU/software crashes, paired with periodic (e.g., hourly) cross-rack asynchronous checkpoints over the 400Gbps spine link (~56s) for correlated rack-level failures. The ~1.5% compute overhead for hourly remote checkpoints is ROI-positive given the $8,192 cost of losing 2 hours of work on 2048 GPUs.'
   common_mistake: |
@@ -17,12 +17,20 @@ details:
     **The Rationale:** Assuming node failures are purely independent events and ignoring correlated failure modes.
     **The Consequence:** Checkpoints become completely inaccessible when the entire ToR switch or rack power fails, destroying all local state simultaneously.
   napkin_math: |
-    - A 175B model's training state (FP16 params + FP32 Adam optimizer) is ~2.8TB.
-    - Across 256 nodes, this is ~11GB per node.
-    - Saving 11GB to local NVMe array (at 10GB/s) takes **~1.1s** per node.
-    - Transferring 2.8TB cross-rack over a shared 400Gbps (50GB/s) spine link takes **~56 seconds**.
-    - At $2/GPU/hr, losing 2 hours of work on 2048 GPUs due to a ToR failure costs $8,192.
-    - Spending 56 seconds every hour on remote checkpoints wastes **~1.5%** of compute but provides an ROI-positive insurance policy against highly correlated rack outages.
+    1. **Assumptions & Constraints:**
+       - Model state: ~2.8 TB.
+       - GPUs: 2048 (256 nodes, 8 GPUs/node).
+       - Local NVMe speed: 10 GB/s.
+       - Spine link bandwidth: 400 Gbps (50 GB/s).
+       - GPU Cost: $2/hr.
+    2. **Calculations:**
+       - State per node: 2.8 TB / 256 nodes = ~11 GB/node.
+       - Local NVMe write time: 11 GB / 10 GB/s = 1.1 seconds.
+       - Cross-rack write time: 2.8 TB / 50 GB/s = 56 seconds.
+       - Cost of 2-hour rack failure: 2048 GPUs * 2 hours * $2/hr = $8,192.
+       - Hourly cross-rack overhead: 56s / 3600s = ~1.55%.
+    3. **Conclusion & Interpretation:**
+       - **Result: Reliability-Bound Tradeoff.** A 1.5% compute overhead for cross-rack checkpoints is highly ROI-positive insurance against catastrophic $8K correlated rack failures, while 1.1s local checkpoints handle isolated node crashes.
 status: published
 provenance: imported
 requires_explanation: false

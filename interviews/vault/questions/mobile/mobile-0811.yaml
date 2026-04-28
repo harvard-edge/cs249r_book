@@ -11,16 +11,24 @@ title: Mobile New 0011
 scenario: You quantize a MobileNet to INT8. The model size drops by 4x, but inference latency on the mobile CPU remains identical to the FP32 version. Profiling reveals the CPU's floating-point vector units are fully saturated.
 question: Why did INT8 quantization reduce MobileNet size but not CPU inference latency?
 details:
-  realistic_solution: The symptom of unchanged latency with fully saturated FP32 ALUs indicates the occurrence of fake quantization or a lack of native INT8 operator support. The model weights are stored in INT8 (saving disk/RAM space) but are cast back to FP32 at runtime before the actual multiply-accumulate operations. The CPU executes FP32 math, thereby nullifying any expected compute speedup.
+  realistic_solution: |
+    The symptom of unchanged latency combined with fully saturated FP32 Vector ALUs definitively points to "Fake Quantization" (or a total lack of native INT8 operator support in the inference engine). While the model weights are successfully compressed to INT8 on disk/RAM (yielding the 4x storage reduction), the inference engine forcibly inserts transparent `Dequantize` nodes before every operation. At runtime, the engine casts the INT8 weights back up to FP32 and executes standard floating-point math, entirely nullifying any expected arithmetic speedup.
   common_mistake: |
-    **The Pitfall:** Assuming that a smaller model file size automatically guarantees faster quantized integer execution.
-    **The Rationale:** Engineers see the 4x storage reduction and assume the compute pipeline will naturally utilize INT8 ALUs without verifying native operator support.
-    **The Consequence:** The system incurs hidden dequantization overhead at runtime, completely negating any expected compute speedups.
+    **The Pitfall:** Assuming that a smaller file size automatically and structurally guarantees faster quantized integer execution.
+    **The Rationale:** Engineers observe the 4x weight reduction and naively assume the hardware compiler will natively utilize highly optimized INT8 integer ALUs without explicitly validating operator support.
+    **The Consequence:** The system incurs hidden dequantization overhead continuously at runtime, completely negating any compute speedups and sometimes running even slower than the FP32 baseline.
   napkin_math: |
-    1. Storage reduction: 10MB FP32 -> 2.5MB INT8 (4x smaller).
-    2. Baseline Compute: 100M FP32 MACs takes ~10ms.
-    3. Fake Quantization overhead: The engine inserts dequantize nodes (INT8 -> FP32), costing ~1ms.
-    4. Total execution: 100M FP32 MACs (10ms) + dequantize overhead (1ms) = **~11ms latency**.
+    1. **Assumptions & Constraints:**
+       - Storage Target: FP32 (10 MB) -> INT8 (2.5 MB), achieving 4x reduction.
+       - Target Compute: 100M MACs.
+       - Execution path: Engine lacking native INT8 `Conv2D` operators.
+    2. **Calculations:**
+       - Expected Latency (Native INT8): 100M MACs ~2.5 ms.
+       - Actual Latency (FP32 Pipeline): 100M MACs ~10 ms.
+       - Fake Quantization Penalty: Continuous `Cast(INT8 -> FP32)` nodes inject an additional ~1 ms overhead.
+       - Total execution: 10 ms (math) + 1 ms (casting) = 11 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 11ms Fake Quantization Latency (Compute-Bound).** The absence of strict INT8 hardware pathways forces runtime unrolling, destroying arithmetic acceleration.
 status: published
 provenance: imported
 requires_explanation: false

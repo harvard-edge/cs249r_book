@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: MI300X Paged KV Cache Allocation
-scenario: You are architecting a multi-tenant inference service using an AMD MI300X (192 GB HBM3) for a 70B parameter FP16 model. You must design a paged attention pool that guarantees zero OOMs, reserving 20% of the total HBM for intermediate activations.
-question: Create a memory allocation specification calculating the maximum concurrent requests supported if each request can reach 8192 tokens, and the model has 80 layers, 8 KV heads, and a head dimension of 128.
+scenario: You are architecting a multi-tenant inference service for a 70B parameter FP16 model. You must design a paged attention pool that guarantees zero OOMs, reserving 20% of the total memory for intermediate activations.
+question: "Create a memory allocation specification calculating the maximum concurrent requests supported if each request can reach 8192 tokens, and the model has 80 layers, 8 KV heads, and a head dimension of 128."
 visual:
   kind: svg
   path: cloud-2864.svg
@@ -18,15 +18,24 @@ visual:
 details:
   realistic_solution: The model weights occupy 70B * 2 bytes = 140GB. Activations reserve 20% of 192GB = 38.4GB. This leaves 192 - 140 - 38.4 = 13.6GB for the KV cache pool. The KV cache size per token is 2 (K,V) * 80 (layers) * 8 (KV heads) * 128 (dim) * 2 (bytes) = 327.68 KB/token. The total KV pool can hold 13.6GB / 327.68KB = 41,503 tokens. At a maximum of 8192 tokens per request, the service can support floor(41,503 / 8192) = 5 concurrent requests.
   common_mistake: |
-    **The Pitfall:** Sizing the KV cache against the entire 192GB memory pool.
+    **The Pitfall:** Sizing the KV cache against the entire memory pool.
     **The Rationale:** Candidates forget to subtract both the static model weights and the necessary dynamic buffer for intermediate activations.
     **The Consequence:** Setting concurrency limits far too high, resulting in guaranteed OOM crashes in production.
   napkin_math: |
-    1. Weights: 70B * 2 bytes = 140 GB.
-    2. Activations (20%): 192 GB * 0.20 = 38.4 GB.
-    3. KV Cache Pool Remaining: 192 - 140 - 38.4 = 13.6 GB.
-    4. Token size: 2 (K,V) * 80 (layers) * 8 (heads) * 128 (dim) * 2 (bytes) = 327.68 KB/token.
-    5. **Result: Max Requests = 13.6 GB / (327.68 KB * 8192) = 5 concurrent requests.**
+    1. **Assumptions & Constraints:**
+       - Total HBM: 192 GB.
+       - Model: 70B parameters, FP16 (2 bytes/param).
+       - Activations reserve: 20% of total memory.
+       - Max tokens per request: 8192.
+       - Architecture: 80 layers, 8 KV heads, 128 head dim, FP16.
+    2. **Calculations:**
+       - Weights: 70B * 2 bytes = 140 GB.
+       - Activations (20%): 192 GB * 0.20 = 38.4 GB.
+       - KV Cache Pool Remaining: 192 - 140 - 38.4 = 13.6 GB.
+       - Token size: 2 (K,V) * 80 layers * 8 heads * 128 dim * 2 bytes = 327.68 KB/token.
+       - Max Requests: 13.6 GB / (327.68 KB * 8192) = 5.18.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity Bound.** The system strictly supports a maximum of 5 concurrent requests at full context length before crashing.
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

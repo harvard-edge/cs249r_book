@@ -11,16 +11,21 @@ title: TensorRT PTQ Calibration on Orin with 200 Scenes
 scenario: A robotics team is using TensorRT 8.6 on Jetson AGX Orin to deploy a PointPillars LiDAR detector. The team has only 200 unlabeled scenes locally and must choose between TensorRT's INT8 calibrators. A first pass with MinMax produced a 3% mAP drop, but spot-checks on night scenes showed double-digit recall loss. QAT is infeasible.
 question: Evaluate which TensorRT INT8 calibrator best fits the 200-scene constraint, and what concrete TensorRT mitigations are available before resorting to QAT.
 details:
-  realistic_solution: 'Calibrator choice. IInt8EntropyCalibrator2 minimises KL divergence between the FP32 and INT8 activation distributions and is TensorRT''s default for vision; on the 3D-feature pyramid in PointPillars it typically beats Min-Max by 1-2% mAP because LiDAR feature distributions have heavy tails that Min-Max stretches across. The legacy percentile calibrator can edge it out for very long-tailed distributions. Switch to IInt8EntropyCalibrator2 first - free win, no retraining. The 200-scene coverage gap remains: PTQ can only adapt scales to whatever calibration sees, so night scenes will still degrade. Mitigations available in TensorRT without labels: (1) keep per-channel quantization on weights (the default; do not disable), it usually preserves 0.5-1% mAP vs per-tensor weights; (2) use layer-precision overrides (setPrecision(kFP16)) on the small first convs and the final detection head, which carry the heaviest accuracy burden and have negligible TOPS impact; (3) mixed FP16/INT8 builds via --best instead of --int8 - retain INT8 in the heavy 3D-conv backbone, FP16 elsewhere; (4) Orin-specific: offload sensitive layers to DLA in FP16 (--useDLACore=0/1) so the GPU INT8 only runs the well-quantized backbone. QAT is the right answer long-term but blocked here. Recommendation: switch to Entropy calibrator + FP16 head/first-conv override + DLA fallback for sensitive layers; collect a 2k-scene labeled night-driving set for QAT in the next release.'
+  realistic_solution: |
+    IInt8EntropyCalibrator2 minimises KL divergence between the FP32 and INT8 activation distributions and is TensorRT's default for vision; on the 3D-feature pyramid in PointPillars it typically beats Min-Max by 1-2% mAP because LiDAR feature distributions have heavy tails that Min-Max stretches across. Mitigations available in TensorRT without labels: (1) keep per-channel quantization on weights (the default; do not disable), it usually preserves 0.5-1% mAP vs per-tensor weights; (2) use layer-precision overrides (`setPrecision(kFP16)`) on the small first convs and the final detection head, which carry the heaviest accuracy burden and have negligible TOPS impact; (3) mixed FP16/INT8 builds via `--best` instead of `--int8`; (4) Orin-specific: offload sensitive layers to DLA in FP16 (`--useDLACore=0/1`) so the GPU INT8 only runs the well-quantized backbone. Recommendation: switch to Entropy calibrator + FP16 head/first-conv override + DLA fallback for sensitive layers; collect a 2k-scene labeled night-driving set for QAT in the next release.
   common_mistake: |
     **The Pitfall:** Treating QAT vs Post-Training Quantization (PTQ) as the only available choices.
     **The Rationale:** Unawareness of TensorRT's deep PTQ configuration knobs (calibrator choice, per-layer overrides, DLA fallback).
     **The Consequence:** Abandoning INT8 entirely or investing weeks in attempting QAT without labels, when simple PTQ parameter tuning could recover the accuracy gap.
   napkin_math: |
-    * **MinMax vs Entropy**: Entropy calibrator on heavy-tail distributions typically beats MinMax by 1-2% mAP.
-    * **Per-Channel Weight INT8**: Preserves 0.5-1% mAP vs per-tensor.
-    * **Layer Precision Overrides**: FP16 for first/last layers costs <5% latency but preserves massive accuracy.
-    * **Conclusion**: Combining Entropy Calibrator + FP16 overrides recovers the maximum possible accuracy without Quantization-Aware Training (QAT).
+    1. **Assumptions & Constraints:**
+       - Problem: Heavy-tail LiDAR feature distribution.
+       - Constraint: 200 unlabeled scenes (QAT impossible).
+    2. **Calculations:**
+       - Calibrator Gain: Entropy Calibrator recovers 1-2% mAP over MinMax.
+       - Precision Override Gain: FP16 on first/last layers saves ~1% mAP with <5% TOPS impact.
+    3. **Conclusion & Interpretation:**
+       - **Result: Combining Entropy PTQ + FP16 overrides recovers accuracy without labels. Bottleneck: Calibration Data-Bound.**
 status: published
 provenance: llm-draft
 expected_time_minutes: 7

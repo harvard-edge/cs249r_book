@@ -11,15 +11,20 @@ title: Checkpoint Storm Mitigation Strategy
 scenario: Your multi-tenant GPU cluster runs 50 training jobs. During peak hours, 10+ jobs checkpoint simultaneously, causing a 'filesystem brownout' that degrades all I/O for 15 minutes.
 question: "For 50 jobs causing 15-minute filesystem brownouts during checkpoints, should you stagger schedules, use local NVMe plus async copy, or add storage?"
 details:
-  realistic_solution: 'Option A (staggered schedules): reduces peak I/O by spreading writes over time. But maintaining a global checkpoint schedule across 50 independent jobs is brittle — jobs start/stop, intervals drift, and the scheduler becomes a single point of failure. Helps somewhat but does not solve the fundamental problem. Option B (local NVMe + async copy): each GPU writes to fast local NVMe (3-7 GB/s per node), which completes in seconds. Then a background daemon copies to shared storage at a throttled rate. Training resumes immediately after local write. This decouples checkpoint latency from shared FS bandwidth. The risk: if the node dies before async copy completes, the checkpoint is lost — mitigate with replication to a peer node. Option C (dedicated storage tier): expensive infrastructure ($100K+) but provides guaranteed bandwidth. Recommendation: B is the best cost/benefit — it nearly eliminates checkpoint-induced training pauses and requires minimal coordination. Add A as a complementary soft measure.'
+  realistic_solution: 'Option A (staggered schedules): reduces peak I/O by spreading writes over time. But maintaining a global checkpoint schedule across 50 independent jobs is brittle. Option B (local NVMe + async copy): each GPU writes to fast local NVMe (3-7 GB/s per node), which completes in seconds. Then a background daemon copies to shared storage at a throttled rate. Training resumes immediately after local write. Option C (dedicated storage tier): expensive infrastructure. Recommendation: B is the best cost/benefit - it nearly eliminates checkpoint-induced training pauses and requires minimal coordination.'
   common_mistake: |
     **The Pitfall:** Only staggering checkpoints.
     **The Rationale:** It seems logically sound to just prevent simultaneous writes by scheduling them apart.
     **The Consequence:** It is operationally complex and fragile; job start times drift, new jobs arrive, and maintaining a global schedule across independent jobs eventually fails, bringing back the brownouts.
   napkin_math: |
-    - Local NVMe write: 280MB at 3GB/s = 0.1s (instant).
-    - Async copy at 1GB/s throttled: 280MB in 0.3s background.
-    - **Training resumes in <1s vs a 15-minute brownout.**
+    1. **Assumptions & Constraints:**
+       - Checkpoint size: 280MB per GPU.
+       - Local NVMe: 3 GB/s. Shared FS limit: 15-minute brownout.
+    2. **Calculations:**
+       - Local NVMe Write Time: 280 MB / 3 GB/s = ~0.1s.
+       - Throttled Async Copy Time: 280 MB / 1 GB/s = 0.28s.
+    3. **Conclusion & Interpretation:**
+       - **Local NVMe decoupled checkpointing drops the synchronous pause from 15 minutes to <1s. Result: I/O-Bound mitigated.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The torch.compile Graph Break Cascade
-scenario: You apply `torch.compile()` to a 7B transformer expecting a 2× inference speedup, but only see 1.1×. The compilation log shows 47 graph breaks caused by dynamic control flow, Python logging in the forward pass, and an embedded third-party tokenizer.
+scenario: You apply `torch.compile()` to a 7B transformer expecting a 2x inference speedup, but only see 1.1x. The compilation log shows 47 graph breaks caused by dynamic control flow, Python logging, and an embedded third-party tokenizer.
 question: "What is a graph break, why did these patterns cause 47 of them, and how do you eliminate them to recover the speedup?"
 details:
   realistic_solution: 'A graph break is where TorchDynamo (the Python bytecode tracer) encounters an operation it cannot represent in the FX graph, forcing a fallback to eager mode. Your 47 breaks come from three sources: (1) Data-dependent control flow (`if token_count > max_len`) — the tracer cannot statically resolve the branch. Fix: use `torch.cond()` or guard with `torch._dynamo.mark_dynamic()`. (2) Python side effects (logging inside forward) — I/O operations cannot be captured in a computational graph. Fix: move logging outside the compiled region or use `torch._dynamo.allow_in_graph()`. (3) Third-party library calls (tokenizer) — opaque Python functions break tracing. Fix: move tokenizer outside the compiled function boundary. Priority: eliminate breaks in the hot path first. The 47 breaks likely fragment the model into ~48 tiny subgraphs, each compiled independently — no cross-subgraph fusion is possible. Reducing to 0 breaks allows the entire model to be one fused graph.'
@@ -17,10 +17,14 @@ details:
     **The Rationale:** Failing to understand that every graph break forces a fallback to Python eager execution.
     **The Consequence:** Destroying cross-operator fusion benefits and adding massive dispatch overhead, completely neutralizing the compiler's speedup.
   napkin_math: |
-    - Expected: 1 compiled graph, full fusion, ~2× speedup.
-    - Actual: 48 fragmented subgraphs.
-    - Cross-subgraph dispatch overhead: 48 breaks × ~30 μs = 1.4ms added latency per step.
-    - **Conclusion:** **If baseline inference is 15ms, the dispatch overhead alone eats 10% of runtime, turning a 2× theoretical speedup into a marginal 1.1× gain.**
+    1. **Assumptions & Constraints:**
+       - Expected: 1 compiled graph, full fusion.
+       - Actual: 48 fragmented subgraphs due to 47 graph breaks.
+    2. **Calculations:**
+       - Cross-subgraph dispatch overhead: 48 breaks * ~30 \mu s = ~1.4 ms.
+       - Baseline inference: ~15 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: CPU-Dispatch Bound.** The 1.4 ms dispatch overhead alone eats 10% of the runtime, fragmenting kernels and neutralizing the compiler's fusion benefits.
 status: published
 provenance: imported
 requires_explanation: false
@@ -33,8 +37,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

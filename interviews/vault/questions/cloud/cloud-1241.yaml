@@ -8,24 +8,27 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Overlapping Transfer and Compute via Streams
-scenario: You are deploying a custom inference pipeline on a single NVIDIA A100 PCIe Gen4 GPU. Each request
-  requires moving 160MB of input data from the host CPU to the GPU, running a neural network forward pass
-  that takes exactly 12ms, and returning a negligible amount of output data. Assume the effective Host-to-Device
-  (H2D) transfer bandwidth over PCIe Gen4 is exactly 32MB/ms. Calculate the total pipeline latency for
-  processing 1,000 independent requests sequentially, comparing a naive synchronous implementation to
-  a fully pipelined implementation utilizing pinned memory and independent CUDA execution streams.
-question: "What total latency is required for 1,000 requests in the naive synchronous pipeline versus a fully pipelined pinned-memory CUDA stream design?"
+scenario: You are deploying a custom inference pipeline on a single PCIe Gen4 GPU. Each request requires moving 160MB of input data from the host CPU to the GPU, running a neural network forward pass that takes exactly 12ms, and returning a negligible amount of output data.
+question: "Assuming an effective Host-to-Device (H2D) transfer bandwidth of 32MB/ms, what total latency is required for 1,000 requests in a naive synchronous pipeline versus a fully pipelined pinned-memory CUDA stream design?"
 details:
-  realistic_solution: Allocate host input buffers using pinned memory and dispatch H2D transfers onto
-    a dedicated CUDA stream while the compute kernel runs concurrently, hiding the transfer latency completely
-    and dropping total execution time to ~12 seconds.
-  common_mistake: Failing to allocate host buffers as pinned (page-locked) memory, which silently forces
-    the GPU driver to serialize transfers and compute even when using separate CUDA streams, resulting
-    in the naive 17-second execution time.
-  napkin_math: 'H2D Transfer Time = 160MB / (32MB/ms) = 5ms. Compute Time = 12ms. Synchronous (Naive)
-    total = 1000 * (5ms + 12ms) = 17,000ms. Asynchronous (Streams + Pinned Memory) total: The 5ms transfer
-    of request N+1 overlaps with the 12ms compute of request N. Total Time = Initial transfer + 1000 *
-    max(Transfer, Compute) = 5ms + 1000 * max(5ms, 12ms) = 5ms + 12,000ms = 12,005ms.'
+  realistic_solution: Allocate host input buffers using pinned memory (`cudaHostAlloc`) and dispatch H2D transfers onto a dedicated CUDA stream while the compute kernel runs concurrently on another stream. This hides the transfer latency completely behind the compute latency.
+  common_mistake: |
+    **The Pitfall:** Failing to allocate host buffers as pinned (page-locked) memory.
+    **The Rationale:** Without pinned memory, the GPU driver is forced to serialize transfers and compute, even if separate CUDA streams are explicitly programmed.
+    **The Consequence:** The transfer and compute times sum together, resulting in a 41% increase in overall pipeline latency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Input size: 160 MB per request.
+       - H2D Bandwidth: 32 MB/ms.
+       - Compute time: 12 ms per request.
+       - Number of requests: 1,000.
+    2. **Calculations:**
+       - Transfer time per request: 160 MB / 32 MB/ms = 5 ms.
+       - Synchronous Naive Total: 1,000 * (5 ms + 12 ms) = 17,000 ms.
+       - Pipelined Asynchronous Total: The 5 ms transfer of request N+1 overlaps with the 12 ms compute of request N.
+       - Pipeline duration: Initial transfer + 1,000 * max(Transfer, Compute) = 5 ms + 1,000 * 12 ms = 12,005 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 17,000ms (Sync) vs 12,005ms (Async).** The fully pipelined design is **Compute-Bound**, masking the 5ms I/O latency entirely.
 status: published
 provenance: imported
 requires_explanation: false

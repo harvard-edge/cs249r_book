@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Debugging a graph break in torch.compile during transformer training
-scenario: You apply `torch.compile` to a ViT-L training loop on H100 but the speedup is only 8% instead of the expected 35%. Using `TORCH_LOGS='graph_breaks'`, you see 47 breaks per forward pass. The model uses a custom attention mask that branches on the input tensor's shape at runtime.
+scenario: You apply `torch.compile` to a ViT-L training loop but the speedup is only 8% instead of the expected 35%. Using `TORCH_LOGS='graph_breaks'`, you see 47 breaks per forward pass. The model uses a custom attention mask that branches on the input tensor's shape at runtime.
 question: Why is torch.compile only giving an 8% speedup, and how would you fix the 47 graph breaks?
 details:
   realistic_solution: 'Use `torch.compile(model, dynamic=True)` to handle dynamic shapes without retracing. Refactor the custom attention mask to use `torch.where()` or `masked_fill()` instead of Python branching. For truly unavoidable breaks, use `fullgraph=False` and profile which breaks cost the most. Target: reduce to <5 breaks per forward pass.'
@@ -17,10 +17,15 @@ details:
     **The Rationale:** It's advertised as a simple 1-line wrapper that "just works".
     **The Consequence:** Dynamic control flow forces a fallback to eager mode for each subgraph, adding kernel launch and Python interpreter overhead that completely erases the fusion benefits.
   napkin_math: |
-    1. Each graph break adds $\sim 0.5-2\text{ms}$ overhead (kernel launch + Python interpreter fallback).
-    2. $47\text{ breaks} \times 1\text{ms} \approx 47\text{ms}$ per forward pass.
-    3. At a 200ms total step time, breaks continuously consume ~23.5% of the runtime.
-    4. **This massive eager-mode overhead explains exactly why the expected 35% speedup is crushed down to 8%.**
+    1. **Assumptions & Constraints:**
+       - `torch.compile` graph breaks per forward pass: 47.
+       - Kernel launch + Python interpreter fallback overhead per break: ~1ms.
+       - Total step time: 200ms.
+    2. **Calculations:**
+       - Overhead time = 47 breaks * 1ms = 47ms per forward pass.
+       - Overhead percentage = 47ms / 200ms = 23.5% of total runtime.
+    3. **Conclusion & Interpretation:**
+       - **Result: Overhead-Bound.** This massive eager-mode overhead explains exactly why the expected 35% speedup is crushed down to 8%.
 status: published
 provenance: imported
 requires_explanation: false

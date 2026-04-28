@@ -8,20 +8,24 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: 'Network Bandwidth Bottlenecks: Master PCIe+NVLink Communication Overlap Strategy'
-scenario: 'A 13B model is trained on 16 H100 GPUs across 2 DGX nodes (8 GPUs/node, NVLink 900GB/s intra-node, 8x 200Gb/s InfiniBand inter-node). The communication pattern includes within-node TP-2 all-reduces, between-node DP-8 gradient AllReduce, and data loading via PCIe.'
-question: What communication schedule and optimizations are needed for 13B training on 16 H100s across two DGX nodes to reach over 90% GPU utilization?
+scenario: A 13B model is trained on 16 GPUs across 2 nodes. The communication pattern includes within-node TP-2 all-reduces, between-node DP-8 gradient AllReduce, and data loading via PCIe.
+question: "What communication schedule and optimizations are needed for 13B training on 16 GPUs across two nodes to reach over 90% GPU utilization?"
 details:
-  realistic_solution: 'TP-2 within node: per layer, 2 all-reduces * 84MB (seq=2048, hidden=5120, batch=4) / 450GB/s = 0.37ms * 40 layers = 14.9ms/fwd+bwd. DP-8 (gradient AllReduce after backward). Gradient: 13B/2=6.5B per TP shard * 2B = 13GB per DP participant. Ring AllReduce data sent per GPU: 2 * 7/8 * 13GB = 22.75GB. At 25GB/s per GPU IB: 22.75GB / 25GB/s = 910ms. Backward pass compute is ~100ms. If we start AllReduce early (50% overlap), we hide ~50ms. Total step time = TP_comm(14.9ms) + compute(200ms) + IB_unoverlapped(860ms) = 1074.9ms. GPU Efficiency: 200/1074.9 = 18.6%. To reach >90% util, total step must be <= 222ms, meaning IB unoverlapped must be < 7ms. This requires 400Gb/s IB *and* aggressive gradient compression (e.g., 8x PowerSGD), or switching to FSDP/ZeRO-3 over pure DP to shard the gradients.'
+  realistic_solution: 'DP-8 (gradient AllReduce after backward). Gradient: 13B/2=6.5B per TP shard * 2B = 13GB per DP participant. Ring AllReduce data sent per GPU: 2 * 7/8 * 13GB = 22.75GB. At 25GB/s per GPU IB: 22.75GB / 25GB/s = 910ms. Backward pass compute is ~100ms. If we start AllReduce early (50% overlap), we hide ~50ms. Total step time = TP_comm(14.9ms) + compute(200ms) + IB_unoverlapped(860ms) = 1074.9ms. GPU Efficiency: 200/1074.9 = 18.6%. To reach >90% util, total step must be <= 222ms, meaning IB unoverlapped must be < 7ms. This requires 400Gb/s IB *and* aggressive gradient compression (e.g., 8x PowerSGD), or switching to FSDP/ZeRO-3 over pure DP to shard the gradients.'
   common_mistake: |
     **The Pitfall:** Dividing the gradient size by the number of parallel rings.
     **The Rationale:** Candidates incorrectly assume that using multiple parallel rings reduces the total communication volume per GPU.
     **The Consequence:** Underestimating network transfer times and failing to implement the necessary compression algorithms.
   napkin_math: |
-    * **DP-8 AllReduce Transfer:** 2 × (7/8) × 13 GB = 22.75 GB per GPU
-    * **Base Transfer Time:** 22.75 GB / 25 GB/s = 910 ms
-    * **Base Efficiency:** 200ms compute / 1075ms total = 18.6% utilization
-    * **Optimized Transfer:** 8x compression = 910 ms / 8 = 113.75 ms
-    * **Result:** **With compression and overlap, exposed communication drops to ~63ms, pushing utilization towards 90%.**
+    1. **Assumptions & Constraints:**
+       * 13 GB Gradient, 25 GB/s transfer speed.
+       * DP-8 scaling.
+    2. **Calculations:**
+       * DP-8 AllReduce Transfer: 2 * (7/8) * 13 GB = 22.75 GB per GPU.
+       * Base Transfer Time: 22.75 GB / 25 GB/s = 910 ms.
+       * Base Efficiency: 200ms compute / 1075ms total = 18.6% utilization.
+       * Optimized Transfer: 8x compression = 910 ms / 8 = 113.75 ms.
+    3. **Conclusion & Interpretation:** **Result: 113.75 ms Transfer (Network-Bound)**. With compression and overlap, exposed communication drops to ~63ms, pushing utilization towards 90%.
 status: published
 provenance: imported
 requires_explanation: true

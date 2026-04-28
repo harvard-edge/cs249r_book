@@ -8,38 +8,23 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The SLO vs. Throughput Squeeze
-scenario: 'You are designing an LLM serving system for a 13B model on H100 GPUs. Your workload consists of long conversations (average 2048 prompt tokens, 2048 completion tokens). The business requires a P99 TTFT of less than 400ms.'
-question: 'What maximum static batch size can meet the 400ms P99 TTFT SLO for 2048-token prompts and completions, and what does it imply for throughput?'
+scenario: 'You are designing an LLM serving system for a 13B model on H100 GPUs. Workload consists of long conversations (2048 prompt, 2048 completion). The business requires a P99 TTFT of less than 400ms.'
+question: 'What maximum static batch size can meet the 400ms P99 TTFT SLO, and what does it imply for throughput?'
 details:
-  realistic_solution: 'The P99 TTFT is dominated by waiting for the previous batch''s decode phase to complete. For a 13B model on H100 at batch=1: model weights = 26 GB (FP16), decode = 26 GB / 3.35 TB/s = 7.76 ms/token, so 2048 tokens of decode = 15.9 seconds. Prefill = 2 × 13B × 2048 / 989 TFLOPS ≈ 54-108 ms depending on utilization. Total batch time ≈ 16 seconds. Even at B=1, a worst-case arriving request waits 16 seconds — 40× the 400 ms SLO. Static batching fundamentally fails because the long decode phase blocks all new prefills. Continuous batching solves this by interleaving prefill of new requests between decode iterations (~7.76 ms apart), achieving P99 TTFT ≈ prefill time + one decode step ≈ 116 ms.'
+  realistic_solution: 'Continuous batching is mandatory. For a 13B model on H100 at batch=1, prefill takes ~108ms and decode takes ~16 seconds. A worst-case arriving request waits 16 seconds (40x the 400ms SLO). Static batching fundamentally fails because the long decode phase blocks all new prefills.'
   common_mistake: |
     **The Pitfall:** Focusing only on the inference time for a single request.
-    **The Rationale:** Candidates ignore the queuing dynamics that dominate P99 latency, calculating the best-case TTFT (an empty queue) and assuming plenty of headroom.
-    **The Consequence:** The system is deployed and immediately violates the SLO under load because requests wait behind massive static batches.
+    **The Rationale:** Candidates ignore queuing dynamics that dominate P99 latency, calculating best-case TTFT.
+    **The Consequence:** The system violates the SLO under load because requests wait behind massive static batches.
   napkin_math: |
-    - **Prefill Time per Sequence:** FLOPs = 2 × 13e9 × 2048 = 53.25 TFLOPs. At 50% MFU on H100 (494.5 TFLOPS) = 108 ms.
-    - **Decode Time per Token:** 26 GB / 3.35 TB/s = 7.76 ms/token.
-    - **Total Decode Time:** 2048 × 7.76 ms = 15.9 seconds.
-    - **Static Batch Wait Time (B=1):** 108 ms + 15,900 ms ≈ 16.0 seconds.
-    - **P99 TTFT Analysis:** A new request waits for the previous batch to finish. P99 TTFT = 16,000 ms wait + 108 ms prefill = **16.1 seconds**.
-    - **Result:** 16.1s is far greater than the 400 ms SLO. Static batching is **fundamentally incompatible** with strict TTFT SLOs for long completions.
-status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-chains:
-- id: cloud-chain-428
-  position: 2
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+    1. **Assumptions & Constraints:**
+       - 13B model on H100 (3.35 TB/s bandwidth, 494.5 TFLOPS MFU).
+       - 2048 tokens prefill, 2048 decode.
+    2. **Calculations:**
+       - Prefill Time: (2 * 13e9 * 2048) / 494.5 TFLOPS = 108 ms.
+       - Decode Time per Token: 26 GB / 3.35 TB/s = 7.76 ms/token.
+       - Total Decode Time: 2048 * 7.76 ms = 15.9 seconds.
+       - Static Batch Wait (B=1): 108 ms + 15,900 ms = ~16 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 16.1s P99 TTFT with static batching.**
+       - **Conclusion: Queue-Bound; static batching is mathematically incompatible with the SLO.**

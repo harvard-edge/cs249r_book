@@ -8,33 +8,25 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: Mastering Context Window Management for Long-Running Edge Agents
-scenario: A Jetson Orin (32GB LPDDR5) runs a long-horizon maintenance agent with a
-  2B LLM (4096-token context window). Each maintenance session accumulates conversation
-  history — after 45 minutes of interaction, the context fills completely and the
-  agent loses early session context. Prefill time for a full 4096-token context is
-  2.1 seconds. Design a context compression strategy that preserves critical information
-  while keeping prefill under 500ms.
-question: How would you compress the 2B LLM maintenance agent's context to preserve
-  critical information while keeping prefill under 500 ms?
+scenario: An edge device runs a long-horizon maintenance agent with a 2B LLM (4096-token context window). Each maintenance session accumulates conversation history — after 45 minutes of interaction, the context fills completely and the agent loses early session context. Prefill time for a full 4096-token context is 2.1 seconds.
+question: Design a context compression strategy that preserves critical information while keeping prefill under 500ms.
 details:
-  realistic_solution: 'Three-tier context management: (1) Permanent slot (512 tokens):
-    session metadata, initial diagnostic state, critical readings — never evicted.
-    (2) Summarized history (1024 tokens): every 20 exchanges, compress prior turns
-    using a fast extractive summarizer (not LLM-based). Compression ratio: 20 turns
-    * 100 tokens avg = 2000 tokens → 200-token summary (10:1). (3) Recent working
-    context (2560 tokens): last 15-20 turns verbatim. Prefill for 512+1024+2048=3584
-    tokens at Orin: 3584/4096 * 2.1s = 1.84s — still over 500ms. Use INT4 to double
-    throughput: 0.92s. Further: keep recent context at 1536 tokens: 512+1024+1536=3072
-    tokens: 0.79s. Or reduce 2B→1B model.'
-  common_mistake: Simply truncating the oldest messages when the context fills, discarding
-    potentially critical early diagnostic information (e.g., initial error codes,
-    baseline sensor readings) that the agent needs for accurate diagnosis.
-  napkin_math: 'Prefill scales linearly with context length. Full 4096 tokens: 2.1s.
-    500ms target: 2.1 * (target/4096) = 0.5s → target = 4096 * 0.5/2.1 = 975 tokens.
-    Alternatively with INT4 (2x throughput): 4096 * 0.5/1.05 = 1950 tokens for prefill.
-    Tiered budget: permanent(512) + summary(512) + recent(926) = 1950 tokens with
-    INT4, prefill = 0.5s. Information loss: summarization captures ~85% of diagnostic
-    relevance per compression event.'
+  realistic_solution: 'Implement three-tier context management: (1) A permanent slot for session metadata and initial diagnostics that is never evicted. (2) A summarized history using a fast extractive summarizer. (3) A recent working context for the last 15-20 turns verbatim. To meet the 500ms latency, compute the maximum token allowance and strictly bound the tiered window. Using INT4 quantization doubles prefill throughput.'
+  common_mistake: |
+    **The Pitfall:** Simply truncating the oldest messages (sliding window) when the context fills.
+    **The Rationale:** Taking the easiest implementation path for standard chatbots.
+    **The Consequence:** Discarding critical early diagnostic information (e.g., initial error codes, baseline readings), causing the agent to hallucinate or restart diagnoses constantly.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Context size: 4096 tokens.
+       - Prefill time: 2.1 seconds (full context).
+       - Latency budget: < 500ms.
+    2. **Calculations:**
+       - Linear scaling: 2.1s * (target / 4096) = 0.5s -> Target tokens = 975.
+       - With INT4 (2x throughput): Target tokens = 1950.
+       - Tiered Budget: 512 (Permanent) + 512 (Summary) + 926 (Recent) = 1950 tokens.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound Prefill**. Hitting the 500ms interactive threshold requires aggressively bounding the context window below 1950 tokens using tiered summarization.
 status: published
 provenance: imported
 requires_explanation: true

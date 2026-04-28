@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: CUDA Graphs vs Fusion for Inference
-scenario: You are evaluating optimization strategies for an LLM inference engine on NVIDIA A100 GPUs. The engine processes a custom attention block consisting of 80 sequential element-wise and reduction operations per layer. During token generation (batch size 1), profiling shows the GPU is idle 85% of the time despite 100% single-thread CPU utilization. The team is debating between implementing CUDA Graphs or writing a custom fused Triton kernel. The application requires continuous dynamic batching with frequently changing sequence lengths up to 4096.
+scenario: You are evaluating optimization strategies for an LLM inference engine on NVIDIA GPUs. The engine processes a custom attention block consisting of 80 sequential element-wise and reduction operations per layer. During token generation (batch size 1), profiling shows the GPU is idle 85% of the time despite 100% single-thread CPU utilization. The team is debating between implementing CUDA Graphs or writing a custom fused Triton kernel. The application requires continuous dynamic batching with frequently changing sequence lengths up to 4096.
 question: Would CUDA Graphs or a custom fused Triton kernel better address the dynamic batch-1 attention bottleneck, and why?
 details:
   realistic_solution: Implement a custom fused Triton kernel. While CUDA Graphs effectively eliminate CPU launch overhead, capturing a separate graph for every unique batch size and sequence length combination is impractical for dynamic LLM inference. A fused kernel permanently reduces the launch count regardless of input shape dimensions.
@@ -17,11 +17,17 @@ details:
     **The Rationale:** CUDA Graphs are easier to implement than writing custom Triton kernels, so engineers default to them.
     **The Consequence:** Highly dynamic sequence lengths force constant graph recompilation, leading to massive memory overhead and worse latency.
   napkin_math: |
-    *   **Operations:** 80 ops/layer × 32 layers = 2,560 kernel launches per token.
-    *   **CPU Overhead (Unfused):** 2,560 launches × 5µs/launch = 12.8ms per token dispatch latency.
-    *   **Operations (Fused):** Fusing 80 ops into 1 kernel per layer = 32 launches per token.
-    *   **CPU Overhead (Fused):** 32 launches × 5µs/launch = 0.16ms.
-    *   **Savings:** 12.8ms - 0.16ms = **12.64ms saved per token.**
+    1. **Assumptions & Constraints:**
+       - 80 operations per layer, 32 layers.
+       - Unfused launch overhead: 5 µs per kernel.
+    2. **Calculations:**
+       - Unfused launches per token: 80 ops * 32 layers = 2,560 launches.
+       - Unfused CPU overhead: 2,560 * 5 µs = 12.8 ms per token.
+       - Fused launches per token: 1 kernel * 32 layers = 32 launches.
+       - Fused CPU overhead: 32 * 5 µs = 0.16 ms per token.
+       - Latency savings: 12.8 ms - 0.16 ms = 12.64 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (CPU). The 12.8 ms CPU dispatch overhead massively stalls the GPU; fusing kernels saves 12.64 ms per token without the memory bloat of CUDA Graphs.**
 status: published
 provenance: imported
 requires_explanation: false

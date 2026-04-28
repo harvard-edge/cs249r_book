@@ -8,19 +8,24 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Why FlashAttention is Faster Despite More FLOPs
-scenario: FlashAttention performs more total FLOPs than standard attention (due to recomputation in the backward pass) yet runs 2-4× faster on GPU. A colleague claims 'doing more compute can't possibly be faster.'
-question: "Why can FlashAttention run faster than standard attention despite doing extra recomputation FLOPs?"
+scenario: FlashAttention performs more total FLOPs than standard attention (due to recomputation in the backward pass) yet runs 2-4x faster on GPU. A colleague claims doing more compute cannot possibly be faster.
+question: Why can FlashAttention run faster than standard attention despite doing extra recomputation FLOPs?
 details:
-  realistic_solution: 'Standard attention materializes the N×N attention matrix to HBM: O(N²) memory reads/writes. FlashAttention tiles the computation, keeping Q, K, V blocks in SRAM (192 KB on A100) and never materializing the full matrix. This trades extra FLOPs (recomputing softmax statistics in backward) for eliminating O(N²) HBM traffic. On A100: 312 TFLOPS compute but only 2 TB/s bandwidth. The attention matrix for seq_len=2048 = 2048² × 2 bytes = 8 MB per head per layer. Writing and reading this 8 MB costs 8 MB / 2 TB/s = 4 μs, but the extra recomputation FLOPs cost << 1 μs at 312 TFLOPS. The memory wall makes the recomputation essentially free. This is the roofline model in action: in the memory-bound regime, adding compute costs nothing.'
+  realistic_solution: Standard attention materializes the NxN attention matrix to HBM. FlashAttention tiles the computation, keeping Q, K, V blocks in SRAM and never materializing the full matrix. This trades extra FLOPs for eliminating O(N^2) HBM traffic. The memory wall makes the recomputation essentially free.
   common_mistake: |
     **The Pitfall:** Equating raw FLOPs directly with wall-clock time.
-    **The Rationale:** It seems unintuitive that doing more math could result in a faster execution.
-    **The Consequence:** Engineers avoid recomputation techniques, leaving their models severely memory-bound.
+    **The Rationale:** It seems unintuitive that doing more math could result in a faster execution timeline.
+    **The Consequence:** Engineers avoid recomputation techniques, leaving their models severely memory-bound and slow.
   napkin_math: |
-    - Standard attention: write/read N² matrix = 2048² * 2B = 8 MB per head.
-    - Round-trip HBM traffic = 16 MB. At 2 TB/s, this takes 8 μs.
-    - FlashAttention: Stays in SRAM, zero HBM traffic for intermediates. Extra FLOPs take ~1 μs.
-    - **Avoiding HBM traffic saves ~8 μs, netting a 7 μs gain per head.**
+    1. **Assumptions & Constraints:**
+       - Sequence length (N) = 2048.
+       - HBM Bandwidth = 2 TB/s, Compute = 312 TFLOPS.
+    2. **Calculations:**
+       - Standard attention N^2 size = 2048^2 * 2 bytes = 8 MB per head.
+       - Round-trip HBM traffic = 16 MB. Time at 2 TB/s = 16 MB / 2 TB/s = 8 us.
+       - FlashAttention HBM traffic = 0. Extra compute time at 312 TFLOPS < 1 us.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Bandwidth).** Avoiding HBM traffic saves ~8 us, netting a 7 us latency reduction per head despite the extra arithmetic operations.
 status: published
 provenance: imported
 requires_explanation: false

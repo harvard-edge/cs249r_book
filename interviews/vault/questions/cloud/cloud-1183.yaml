@@ -8,18 +8,23 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Diagnosing ECMP Hash Collisions in RoCEv2 Clusters
-scenario: 'You are debugging a 1024-GPU H100 cluster running Llama-3 70B distributed training over a strictly non-blocking RoCEv2 Clos network (400Gbps links). During the All-Reduce communication phase, telemetry shows severe tail latency and stragglers. Switch counters reveal that 30% of the spine uplinks are saturated at 100% utilization, while the other 70% remain nearly idle. The network relies entirely on standard ECMP for load balancing.'
-question: "What root cause explains the spine uplink imbalance, and what telemetry would confirm ECMP hash collisions?"
+scenario: 'You are debugging a 1024-GPU cluster running distributed training over a non-blocking RoCEv2 Clos network. During All-Reduce, telemetry shows severe tail latency. Switch counters reveal 30% of spine uplinks are at 100% utilization, while 70% remain nearly idle. The network relies entirely on standard ECMP.'
+question: 'What root cause explains the spine uplink imbalance, and what telemetry would confirm ECMP hash collisions?'
 details:
-  realistic_solution: 'Identify that ECMP relies on static 5-tuple hashing. Because AI distributed training (via NCCL) creates a small number of massive, long-lived elephant flows, uniform flow hashing leads to inevitable hash collisions with >90% probability. When multiple 400Gbps flows collide on the same uplink, effective bandwidth is halved or worse. The fix is to implement packet-level or flowlet-level load balancing (e.g., adaptive routing on the switch ASIC) that distributes traffic based on real-time link utilization rather than static hashing.'
+  realistic_solution: 'Standard ECMP utilizes static 5-tuple hashing. Because distributed ML training (via NCCL) creates a small number of massive, long-lived elephant flows, uniform static hashing leads to mathematically inevitable hash collisions. When multiple 400Gbps flows collide on the same uplink, bandwidth is halved. The fix requires packet-level or flowlet-level adaptive routing on the switch ASIC to balance based on real-time link utilization.'
   common_mistake: |
     **The Pitfall:** Assuming ECMP dynamically monitors link utilization and routes around congestion.
-    **The Rationale:** Misunderstanding that standard ECMP relies on static 5-tuple hashing, not dynamic load balancing.
-    **The Consequence:** Incorrectly attributing the imbalance to physical link failures or cable issues, rather than fundamental hash collisions.
+    **The Rationale:** Candidates misunderstand that standard ECMP relies strictly on static 5-tuple hashing, not dynamic load balancing.
+    **The Consequence:** Incorrectly attributing the imbalance to physical hardware failures rather than fundamental protocol hash collisions.
   napkin_math: |
-    1. If 4 massive flows (each demanding 400Gbps) use ECMP across 4 available 400Gbps uplinks.
-    2. Probability of perfect distribution (one flow per link) = `4! / 4^4` = `24 / 256` ≈ **9.4%**.
-    3. **Result:** >90% of the time, multiple flows will hash to the same link, immediately halving effective bandwidth.
+    1. **Assumptions & Constraints:**
+       - 4 massive flows (400Gbps each), 4 available 400Gbps uplinks.
+       - ECMP static hashing.
+    2. **Calculations:**
+       - Probability of perfect distribution = 4! / 4^4 = 24 / 256 = ~9.4%.
+       - Probability of collision = 100% - 9.4% = 90.6%.
+    3. **Conclusion & Interpretation:**
+       - **Result: >90% of the time, flows hash to the same link, halving effective bandwidth (Hash-Bound).**
 status: published
 provenance: imported
 requires_explanation: false
@@ -38,4 +43,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-created_at: '2026-03-23T22:06:14.447761'

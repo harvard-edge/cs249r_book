@@ -8,33 +8,25 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Federated LoRA Aggregation for Edge Fleet Personalization
-scenario: A fleet of industrial edge devices each fine-tune local LoRA adapters on
-  device-specific sensor data. The central server wants to aggregate these into a
-  global adapter without transmitting raw data. Design a federated averaging protocol
-  for LoRA.
-question: How would you aggregate device-trained LoRA adapters into a global adapter
-  without transmitting raw sensor data?
+scenario: A fleet of industrial edge devices each fine-tune local LoRA adapters on device-specific sensor data. The central server wants to aggregate these into a global adapter without transmitting raw data.
+question: How would you design a communication-efficient federated averaging protocol for LoRA?
 details:
-  realistic_solution: 'Federated LoRA aggregation: (1) Correct aggregation: compute
-    delta_W_i = B_i * A_i for each client, then average: delta_W_global = mean(delta_W_i).
-    Decompose back via SVD to get global B_global, A_global for re-distribution. Problem:
-    delta_W is d × d = 32MB per matrix for re-transmission. (2) Communication-efficient:
-    transmit only B_i and A_i (r*d = 64KB per matrix per layer) and compute the product
-    server-side. Server computes delta_W_global = mean(B_i * A_i), then factorizes
-    via truncated SVD. (3) Add differential privacy: clip client updates to L2 norm
-    1.0 and add Gaussian noise sigma=0.1 before uploading B_i, A_i. (4) Weighted aggregation:
-    weight by dataset size n_i: delta_W_global = sum(n_i * B_i * A_i) / sum(n_i).'
-  common_mistake: Applying standard FedAvg (averaging all model parameters) to LoRA
-    adapters without considering that the A and B matrices should not be averaged
-    independently. Averaging A matrices across clients and B matrices separately gives
-    a different result than averaging the full delta_W = B*A due to the nonlinearity
-    of the composition.
-  napkin_math: '100 edge devices, r=8, 32 layers, Q+V matrices: upload per device
-    = 4 matrices (Q_A, Q_B, V_A, V_B) * 32 layers * 8 * 4096 * 2B = 8.39MB. At 10 Mbps uplink: 6.7
-    seconds per device. 100 devices parallel: 6.7 seconds. Server computation: compute
-    B_i*A_i for 100 devices: 100 * 32 * 4 * 8 * 4096 * 4096 FLOP = 1.72 TFLOP = 0.0017
-    seconds on H100. Distribution back: 8.39MB * 100 devices = 839MB at 1 Gbps =
-    6.7 seconds. Total round: ~14 seconds.'
+  realistic_solution: 'To be communication-efficient, transmit only the low-rank B and A matrices (r*d bytes per matrix) rather than the full computed delta_W matrix. The server computes the global product and then factorizes via truncated SVD before returning the updated adapters. Additionally, implement differential privacy by clipping client updates and adding Gaussian noise before upload.'
+  common_mistake: |
+    **The Pitfall:** Applying standard FedAvg (averaging all model parameters directly) to LoRA adapters without considering the nonlinear composition of the A and B matrices.
+    **The Rationale:** Treating adapters as standard weights rather than understanding their low-rank algebraic constraints.
+    **The Consequence:** Corrupted global model convergence because averaging A matrices across clients and B matrices separately gives mathematically incorrect updates.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 100 devices, rank=8, 32 layers. Q+V matrices (4 mats per layer).
+       - Precision: FP16 (2 bytes).
+       - Uplink: 10 Mbps (1.25 MB/s).
+    2. **Calculations:**
+       - Payload size: 4 matrices * 32 layers * 8 rank * 4096 dim * 2 bytes = 8.39 MB.
+       - Upload time: 8.39 MB / 1.25 MB/s = 6.7 seconds (parallel across devices).
+       - Server FLOP computation: negligible (1.72 TFLOP = 0.0017s).
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound Aggregation**. By transmitting A/B matrices rather than the full delta_W, the payload stays small enough to complete a global synchronization round in under 15 seconds.
 status: published
 provenance: imported
 requires_explanation: true

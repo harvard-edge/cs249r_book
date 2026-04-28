@@ -8,22 +8,27 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Design Memory Management for Multi-Model Pipeline on Jetson Orin
-scenario: We are deploying a real-time autonomous robotics perception system on an NVIDIA Jetson Orin edge device. The system requires running an object detection model on the Ampere GPU and a semantic segmentation model on the DLA accelerator concurrently, utilizing a shared 64 GB LPDDR5 unified memory under a strict 60W TDP budget.
+scenario: We are deploying a real-time autonomous robotics perception system on an edge device. The system requires running an object detection model on the GPU and a semantic segmentation model on the DLA accelerator concurrently, utilizing shared LPDDR5 unified memory under a strict 60W TDP budget.
 question: How would you design a memory management specification to handle peak pressure, prevent OOMs, and minimize fragmentation for concurrent GPU/DLA inference?
 details:
-  realistic_solution: A robust specification involves pre-allocating static memory pools (tensor arenas) for the maximum expected tensor sizes during system initialization to eliminate runtime fragmentation and allocation overhead. The design should utilize zero-copy memory access between the CPU and Ampere GPU/DLA to avoid redundant buffer duplication. Additionally, it must implement an application-level memory watchdog that gracefully degrades pipeline resolution or drops frames before hitting the system's critical OS-level OOM thresholds.
+  realistic_solution: A robust specification involves pre-allocating static memory pools (tensor arenas) for the maximum expected tensor sizes during system initialization to eliminate runtime fragmentation and allocation overhead. The design should utilize zero-copy memory access between the CPU, GPU, and DLA to avoid redundant buffer duplication. Additionally, it must implement an application-level memory watchdog that gracefully degrades pipeline resolution or drops frames before hitting the system's critical OS-level OOM thresholds.
   common_mistake: |
-    **The Pitfall:** Treating the 64 GB LPDDR5 as abundant and using dynamic allocation.
-    **The Rationale:** Candidates fail to account for the unified memory architecture where CPU, GPU, and DLA share the same pool, overlooking the severe memory fragmentation caused by dynamic tensor allocations.
+    **The Pitfall:** Treating the shared LPDDR5 as abundant and using standard dynamic allocation.
+    **The Rationale:** Candidates fail to account for the unified memory architecture where CPU, GPU, and accelerators share the exact same physical pool, overlooking the severe memory fragmentation caused by dynamic tensor allocations.
     **The Consequence:** Fragmentation eventually exhausts contiguous blocks needed by the memory controller, leading to unpredictable latency spikes and OOM killer eviction.
   napkin_math: |
-    *   Total unified memory: 64 GB LPDDR5. Reserved for OS: ~4 GB. Available: 60 GB.
-    *   Ampere GPU Object Detector weights (FP16): 6 GB.
-    *   DLA Segmentation weights (INT8): 2 GB.
-    *   Pre-allocated static I/O buffers for DLA: 100 MB.
-    *   Pre-allocated tensor arena for GPU inference (batch size 4): 4 * 25 MB = 100 MB.
-    *   Video decode ring buffer (5 seconds @ 30fps, 4K RGB): 150 * 3840 * 2160 * 3 bytes = ~3.7 GB.
-    *   **Total static footprint = 6 + 2 + 0.1 + 0.1 + 3.7 = ~11.9 GB. Raw capacity is fine, but zero dynamic allocations must be enforced to prevent fragmentation.**
+    1. **Assumptions & Constraints:**
+       * Total unified memory: 64 GB LPDDR5 (60 GB available after OS reservation).
+       * GPU Object Detector weights (FP16): 6 GB.
+       * DLA Segmentation weights (INT8): 2 GB.
+       * 4K RGB 30fps stream.
+    2. **Calculations:**
+       * Pre-allocated static I/O buffers for DLA: 100 MB.
+       * Pre-allocated tensor arena for GPU inference (batch size 4): 4 * 25 MB = 100 MB.
+       * Video decode ring buffer (5 seconds @ 30fps, 4K RGB): 150 frames * 3840 * 2160 * 3 bytes = ~3.7 GB.
+       * Total static footprint = 6 GB + 2 GB + 0.1 GB + 0.1 GB + 3.7 GB = ~11.9 GB.
+    3. **Conclusion & Interpretation:**
+       * **Raw capacity is highly adequate (11.9 GB < 60 GB), but zero dynamic allocations must be enforced strictly to prevent 24/7 runtime fragmentation. Result: Memory Contention-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,19 +8,26 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: Hailo-8 End-to-End Latency Decomposition for Object Detection
-scenario: You are deploying an INT8 object detection model on a Hailo-8 accelerator (dataflow architecture without local DRAM). The host CPU captures a 1080p RGB image, preprocesses it, and streams it to the Hailo-8 over PCIe. The model requires 13 GOPS per inference. After inference, the Hailo-8 streams raw INT8 bounding box predictions back to the host CPU, which runs Non-Maximum Suppression (NMS). CPU preprocessing takes 3 ms, host-memory PCIe streaming takes 1 ms each way, and CPU postprocessing takes 2 ms.
-question: What is the total end-to-end latency per frame including preprocessing, PCIe transfers, Hailo-8 inference, and NMS?
+scenario: You are deploying an INT8 object detection model on a dataflow accelerator without local DRAM. The host CPU captures a 1080p RGB image, preprocesses it, and streams it to the accelerator over PCIe. The model requires 13 GOPS per inference. After inference, raw INT8 bounding box predictions stream back to the host CPU, which runs Non-Maximum Suppression (NMS). CPU preprocessing takes 3 ms, host-memory PCIe streaming takes 1 ms each way, and CPU postprocessing takes 2 ms.
+question: What is the total end-to-end latency per frame assuming a 26 TOPS peak accelerator?
 details:
-  realistic_solution: 'The end-to-end latency must sum all sequential components in the pipeline: CPU preprocessing, host-to-device PCIe streaming, Hailo-8 inference compute, device-to-host PCIe streaming, and CPU postprocessing. Because the Hailo-8 is a dataflow accelerator that streams directly from host memory, these transfer times are explicit and unavoidable steps in the critical path.'
+  realistic_solution: 'The end-to-end latency must sum all sequential components in the pipeline: CPU preprocessing, host-to-device PCIe streaming, inference compute, device-to-host PCIe streaming, and CPU postprocessing. Because the accelerator lacks local DRAM and streams from host memory, explicit transfer times are unavoidable steps in the critical path.'
   common_mistake: |
-    **The Pitfall:** Ignoring data transfer overheads and CPU processing times.
-    **The Rationale:** Candidates often focus purely on the theoretical accelerator compute time (GOPS / TOPS).
-    **The Consequence:** A vastly underestimated end-to-end latency, especially critical on architectures like Hailo-8 that lack local DRAM and rely on host memory streaming.
+    **The Pitfall:** Ignoring data transfer overheads and CPU processing times when sizing real-time pipelines.
+    **The Rationale:** Focusing purely on the theoretical accelerator compute time (GOPS / TOPS).
+    **The Consequence:** A vastly underestimated end-to-end latency, leading to dropped frames and violated safety contracts on architectures lacking local DRAM.
   napkin_math: |
-    * **Compute Time**: 13 GOPS / 26 TOPS = 13e9 / 26e12 seconds = 0.5 ms.
-    * **Data Transfers**: H2D (1.0 ms) + D2H (1.0 ms) = 2.0 ms.
-    * **Host Processing**: Preprocessing (3.0 ms) + Postprocessing NMS (2.0 ms) = 5.0 ms.
-    * **Total Latency**: 0.5 + 2.0 + 5.0 = **7.5 ms**
+    1. **Assumptions & Constraints:**
+       - Hardware Compute Peak: 26 TOPS.
+       - Model Compute: 13 GOPS.
+       - Pre/Post processing: 3ms and 2ms.
+       - PCIe Transfers: 1ms H2D, 1ms D2H.
+    2. **Calculations:**
+       - Compute Latency: 13 GOPS / 26,000 GOPS = 0.5 ms.
+       - Pipeline Latency: 3.0ms (pre) + 1.0ms (H2D) + 0.5ms (compute) + 1.0ms (D2H) + 2.0ms (post).
+       - Total: 7.5 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound Pipeline**. The end-to-end latency is 7.5 ms, clearly showing that transfer and CPU overheads absolutely dominate the raw accelerator compute time.
 status: published
 provenance: imported
 requires_explanation: false
@@ -29,8 +36,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- reasoning_competency and reasoning_mode are 'None' but the question tests pipeline latency analysis and quantitative analysis.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -8,19 +8,26 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: The Edge LLM Context Window
-scenario: Your team wants to run a 3B-parameter LLM (Phi-3-mini, INT4 quantized) on a Jetson Orin Nano (8 GB unified LPDDR5, 68 GB/s bandwidth) for a conversational robotics assistant. The robot needs to maintain a 4096-token context window for multi-turn dialogue. During testing, the first response is fast (40 tokens/sec), but by the 10th turn of conversation, generation has slowed to 8 tokens/sec and the system is swapping.
+scenario: Your team wants to run a 3B-parameter LLM (Phi-3-mini, INT4 quantized) on an edge SoC for a conversational robotics assistant. The robot needs to maintain a 4096-token context window for multi-turn dialogue. During testing, the first response is fast (40 tokens/sec), but by the 10th turn of conversation, generation has slowed to 8 tokens/sec and the system is swapping.
 question: What went wrong with the multi-turn generation latency, and how is memory bandwidth involved?
 details:
   realistic_solution: The KV-cache is eating your memory alive, and it grows with every token generated across every conversation turn.
   common_mistake: |
-    **The Pitfall:** "The model is too large for the device."
-    **The Rationale:** Candidates focus on the parameter size alone (a 3B INT4 model is ~1.5 GB, well within 8 GB) and miss the real memory consumer: the KV-cache, which grows with every token.
-    **The Consequence:** Wasting time trying to further quantize the model parameters instead of optimizing the KV-cache (e.g., using GQA, sliding window attention, or KV quantization).
+    **The Pitfall:** Concluding that "The model is too large for the device".
+    **The Rationale:** Candidates focus on the static parameter size alone (a 3B INT4 model is ~1.5 GB, well within RAM) and miss the real memory consumer: the KV-cache, which grows linearly with sequence length.
+    **The Consequence:** Wasting time trying to further quantize the model parameters instead of optimizing the KV-cache using Grouped Query Attention (GQA), sliding window attention, or KV quantization.
   napkin_math: |
-    *   KV-cache per token (FP16, 32 layers, 32 heads, 96 head_dim): 2 (K,V) * 32 layers * 32 heads * 96 dim * 2 bytes = 393,216 bytes (~384 KB).
-    *   At 4096 tokens, KV-cache size: 4096 * 384 KB = ~1.5 GB.
-    *   Memory bandwidth for KV-cache reads during generation at 4096 tokens and 40 tokens/sec: 1.5 GB * 40 tokens/sec = 60 GB/s.
-    *   **This 60 GB/s nearly saturates the 68 GB/s available bandwidth on the Orin Nano, while uncontrolled KV-cache growth pushes the system into swap memory.**
+    1. **Assumptions & Constraints:**
+       * Phi-3-mini (32 layers, 32 heads, 96 head_dim).
+       * FP16 precision for KV cache.
+       * 4096 context tokens generating at 40 tokens/sec.
+       * SoC memory bandwidth is ~68 GB/s.
+    2. **Calculations:**
+       * KV-cache per token = 2 (K,V) * 32 layers * 32 heads * 96 dim * 2 bytes = 393,216 bytes (≈384 KB).
+       * Total KV-cache at 4096 tokens = 4096 * 384 KB = ≈1.5 GB.
+       * Memory bandwidth needed for KV-cache reads at 40 tokens/sec = 1.5 GB * 40 tokens/sec = 60 GB/s.
+    3. **Conclusion & Interpretation:**
+       * **The 60 GB/s completely saturates the available 68 GB/s bandwidth, while uncontrolled KV-cache growth pushes the system into swap memory. Result: Memory Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

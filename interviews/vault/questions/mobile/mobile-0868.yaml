@@ -8,21 +8,24 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Analyzing Multi-Model Pipeline Memory Pressure on A17 Pro
-scenario: An iOS compound AI app on A17 Pro (8GB RAM, 35 TOPS) runs three models simultaneously: a 2GB vision model, a 1.5GB NLP encoder, and a 0.8GB text generation model. iOS kills apps exceeding 4GB RAM. At peak, the pipeline holds all three models resident plus KV caches and image buffers.
+scenario: 'An iOS compound AI app runs three models simultaneously: a 2GB vision model, a 1.5GB NLP encoder, and a 0.8GB text generation model. At peak, the pipeline holds all three models resident plus KV caches and image buffers.'
 question: How would you analyze the memory pressure and identify which models can be hot-swapped vs kept resident to stay within the 4GB app memory limit?
 details:
-  realistic_solution: 'Full memory budget: models(4.3GB) + KV cache for 1024 tokens in text gen model (2*layers*head_dim*2bytes*1024 = for a 0.8GB INT4 model ~1B params, 22 layers: 2*22*64*2*1024=5.5MB) + image buffers (4K image: 4096*3072*4=48MB) + iOS overhead(200MB) = 4.55GB — exceeds limit by 550MB. Solution: hot-swap vision model (2GB) out of Metal memory after encoding, before text generation. Resident during text gen: NLP encoder(1.5GB) + text gen(0.8GB) + buffers(0.25GB) = 2.55GB. Load vision only during camera frame processing, evict immediately after.'
+  realistic_solution: 'Calculate the full memory budget: models (4.3GB) + KV cache for 1024 tokens in text gen model (~5.5MB) + image buffers (4K image: 48MB) + iOS Jetsam framework overhead (200MB) = 4.55GB. This exceeds the limit by 550MB. Implement hot-swapping for the vision model (2GB) out of Metal memory after encoding, before text generation. Keep resident during text gen: NLP encoder (1.5GB) + text gen (0.8GB) + buffers (0.25GB) = 2.55GB.'
   common_mistake: |
     **The Pitfall:** Summing model sizes (4.3GB) and assuming it 'barely' fits or relies on swap.
     **The Rationale:** Candidates fail to account for runtime overheads like framework padding, KV caches, and image decode buffers.
-    **The Consequence:** The app immediately hits the hard 4GB iOS memory limit and is forcefully terminated in production.
+    **The Consequence:** The app hits the hard iOS Jetsam memory limit and is forcefully terminated in production.
   napkin_math: |
-    - **Model Footprint:** 2 GB + 1.5 GB + 0.8 GB = 4.3 GB.
-    - **Overhead:** iOS framework (200 MB) + Image buffer (8 MB) + KV cache (~6 MB) = ~214 MB.
-    - **Peak Total:** 4.3 GB + 0.214 GB = **4.514 GB** (Exceeds 4 GB iOS limit).
-    - **Optimization (Hot-Swap):** Evict the 2 GB vision model after encoding.
-    - **Peak During NLP Phase:** 1.5 GB + 0.8 GB + 0.214 GB = **2.514 GB** (Safely under 4 GB).
-    - **Conclusion:** Hot-swapping is mandatory to avoid the OS killing the app.
+    1. **Assumptions & Constraints:**
+      - Model Footprint: 2 GB + 1.5 GB + 0.8 GB = 4.3 GB.
+      - Overhead: iOS framework (200 MB) + Image buffer (8 MB) + KV cache (~6 MB) = ~214 MB.
+      - iOS App Limit: 4 GB.
+    2. **Calculations:**
+      - Peak Total: 4.3 GB + 0.214 GB = 4.514 GB.
+      - Peak During NLP Phase (Vision Evicted): 1.5 GB + 0.8 GB + 0.214 GB = 2.514 GB.
+    3. **Conclusion & Interpretation:**
+      - **Result: Hard Limit Exceeded.** Hot-swapping is mandatory to prevent the OS from killing the app.
 status: published
 provenance: imported
 requires_explanation: false

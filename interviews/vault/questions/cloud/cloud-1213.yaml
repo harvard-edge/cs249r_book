@@ -7,39 +7,25 @@ topic: energy-per-operation
 competency_area: power
 bloom_level: analyze
 phase: both
-title: Diagnosing High TDP in Low-Util Inference
-scenario: "A cluster running LLMs on A100 GPUs is hitting its 20kW per-rack power limit. Profiling shows tensor core ALUs executing FP16 operations at only 20% of peak throughput, yet the GPUs persistently run at their maximum 400W TDP. The workload is configured for interactive chat with a batch size of 1."
-question: "Why do A100s hit 400W TDP at batch size 1 despite only 20% tensor-core utilization, and what mitigations reduce the draw?"
+title: 'Diagnosing High TDP in Low-Util Inference'
+scenario: 'A cluster running LLMs on A100 GPUs is hitting its 20kW per-rack power limit. Profiling shows tensor core ALUs executing FP16 operations at only 20% of peak throughput, yet the GPUs persistently run at their maximum 400W TDP. The workload is configured for interactive chat with a batch size of 1.'
+question: 'Why do A100s hit 400W TDP at batch size 1 despite only 20% tensor-core utilization, and what mitigations reduce the draw?'
 details:
-  realistic_solution: The root cause is the massive energy cost of memory access compared to computation. An FP16 multiply-accumulate (MAC) operation consumes ~0.5-1 pJ, whereas fetching the corresponding parameters from High Bandwidth Memory (HBM) consumes tens of picojoules. In a memory-bound decoding workload (batch size 1), the system must fetch a weight from HBM for exactly one ALU operation. Consequently, the memory controllers, interconnect fabric, and caches run at maximum bandwidth and dominate the 400W TDP, while the ALUs sit mostly idle waiting for data. To resolve this, you must increase the batch size (to amortize the HBM read energy across multiple operations) or apply weight quantization (e.g., INT8/INT4) to reduce the memory fetch payload and energy per parameter.
+  realistic_solution: 'The root cause is the massive energy cost of memory access compared to computation. Fetching parameters from HBM consumes tens of picojoules per FP16 MAC. In batch size 1, memory bandwidth runs at max while ALUs starve. Increase batch size or use INT8/INT4 weight quantization to reduce HBM traffic.'
   common_mistake: |
     **The Pitfall:** Assuming that power consumption correlates strictly with ALU compute utilization.
     **The Rationale:** Candidates often believe that if compute utilization is low, power draw should be low, and they suggest undervolting the compute units.
     **The Consequence:** Proposed optimizations fail to reduce power draw because they ignore the true bottleneck: data movement from HBM.
   napkin_math: |
-    - **Define energy costs:** E_MAC ≈ 1 pJ (FP16 compute). E_HBM ≈ 80 pJ/byte (Data transfer).
-    - **Analyze batch size 1:** Every MAC operation requires loading one FP16 weight (2 bytes).
-    - **Calculate memory energy:** 2 bytes * 80 pJ/byte = 160 pJ per MAC.
-    - **Calculate total operation energy:** 160 pJ (Data) + 1 pJ (Compute) = 161 pJ.
-    - **Conclusion: The power ratio is 160 / 161 = ~99%, meaning 99% of the power budget is spent moving data, explaining why the GPUs hit 400W TDP despite low compute utilization.**
+    1. **Assumptions & Constraints:**
+       - FP16 compute (MAC): ~1 pJ.
+       - HBM data transfer: ~80 pJ/byte.
+       - Batch size: 1 (1 weight load per MAC).
+    2. **Calculations:**
+       - Memory energy per FP16 weight (2 bytes): 2 × 80 pJ = 160 pJ.
+       - Compute energy per MAC: 1 pJ.
+       - Total energy per operation: 160 pJ + 1 pJ = 161 pJ.
+       - Power ratio: 160 / 161 = ~99% spent on memory.
+    3. **Conclusion & Interpretation:**
+       - **Result: 99% of energy goes to data movement. The TDP is Memory-Bandwidth-Power-Bound.**
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 10
-chains:
-- id: cloud-chain-129
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-created_at: '2026-03-23T22:12:32.500961'

@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Gradient Checkpointing Break-Even Analysis for 70B Model on A100
-scenario: You are training a 70B model on 64x A100 80GB GPUs with tensor parallelism-8. Each A100 holds an 8.75B parameter shard. Without gradient checkpointing, activation memory is 6GB/GPU at batch=8. With checkpointing, activation is 0.5GB but requires a 33% recomputation overhead.
+scenario: You are training a 70B model on 64x A100 GPUs with tensor parallelism-8. Each A100 holds an 8.75B parameter shard. Without gradient checkpointing, activation memory is 6GB/GPU at batch=8. With checkpointing, activation is 0.5GB but requires a 33% recomputation overhead.
 question: Does this 64x A100 tensor-parallel 70B training setup need activation checkpointing at batch=8, given the 6GB activation footprint?
 details:
   realistic_solution: 'Memory breakdown per GPU: Weights (8.75B, BF16) = 17.5GB. Gradients (BF16) = 17.5GB. Optimizer states (Adam, FP32) = 8.75B × 12B = 105GB — but with ZeRO-1 across 8 DP groups = 105/8 = 13.1GB per DP rank. Total fixed: 17.5+17.5+13.1 = 48.1GB. Activations without checkpointing: 6GB. Total: 54.1GB < 80GB — checkpointing NOT needed for this config. With per-GPU total 54GB, 26GB headroom. Checkpointing would save 5.5GB but add 33% compute overhead → don''t use it here. If batch doubles to 16: activations = 12GB, total = 60.1GB — still fits. Batch = 32: activations = 24GB, total = 72.1GB — fits. Batch = 48: activations = 36GB, total = 84.1GB > 80GB — checkpointing required.'
@@ -17,10 +17,19 @@ details:
     **The Rationale:** Engineers focus solely on the size of the model weights and the activations.
     **The Consequence:** They incorrectly estimate available VRAM and misjudge whether gradient checkpointing's 33% compute penalty is necessary.
   napkin_math: |
-    - **Fixed memory per GPU:** Weights (17.5GB) + Gradients (17.5GB) + ZeRO-1 optimizer (13.1GB) = 48.1GB.
-    - **Total at batch=8:** 48.1GB + 6GB activations = 54.1GB (< 80GB).
-    - **Conclusion:** Checkpointing is NOT needed at batch <= 32 (72.1GB total).
-    - **Threshold:** At batch=48 (84.1GB > 80GB), checkpointing becomes mandatory.
+    1. **Assumptions & Constraints:**
+       - GPU Memory: A100 (80GB).
+       - Model Shard: 8.75B parameters (BF16).
+       - Activations (batch=8): 6GB.
+    2. **Calculations:**
+       - Weights memory: 8.75B * 2 bytes = 17.5GB.
+       - Gradients memory: 17.5GB.
+       - Optimizer (ZeRO-1 across 8 DP ranks): (8.75B * 12 bytes) / 8 = 13.1GB.
+       - Total fixed memory: 17.5 + 17.5 + 13.1 = 48.1GB.
+       - Total memory at batch=8: 48.1GB + 6GB = 54.1GB.
+       - Total memory at batch=48: 48.1GB + 36GB = 84.1GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound Optimization**. Checkpointing is unnecessary at batch=8 (54.1GB < 80GB) and only becomes mandatory at batch=48.
 status: published
 provenance: imported
 requires_explanation: false

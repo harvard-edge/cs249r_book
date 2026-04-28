@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: training
 title: 'Scaling Data Parallelism: 100 Gbps Ethernet vs 400 Gbps InfiniBand'
 scenario: You are scaling the training of a 7B parameter model across a 16-node cluster (128 GPUs total). The cross-node interconnect is currently 100 Gbps Ethernet with hierarchical AllReduce. A proposal is on the table to upgrade the cross-node network to 400 Gbps InfiniBand NDR.
-question: Is the 400 Gbps InfiniBand upgrade necessary for 16-node 7B data-parallel training, given 380 ms compute per step?
+question: "Is the 400 Gbps InfiniBand upgrade necessary for 16-node 7B data-parallel training, given 380 ms compute per step?"
 details:
   realistic_solution: 'Inter-node ring AllReduce traffic = 2*(N-1)/N * gradient. On 100 Gbps Ethernet it takes 2.10s — fatally network-bound. On 400 Gbps IB NDR (50 GB/s) it takes 0.525s. With 70% bucketed overlap, exposed time is ~157 ms, which is well within the 380 ms compute budget, making the 400 Gbps upgrade both necessary and sufficient.'
   common_mistake: |
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Candidates forget the 2*(N-1)/N ring factor, effectively under-counting bus traffic by ~2x.
     **The Consequence:** The network transfer time is severely underestimated, leading to poorly planned, network-bound deployments.
   napkin_math: |
-    1. **Gradient Size:** 7B parameters * 2 bytes (FP16/BF16) = 14 GB.
-    2. **Inter-node Traffic:** AllReduce traffic = 2 * (15/16) * 14 GB = 26.25 GB.
-    3. **100 Gbps Ethernet (12.5 GB/s):** 26.25 GB / 12.5 GB/s = 2.10 s.
-    4. **400 Gbps IB NDR (50 GB/s):** 26.25 GB / 50 GB/s = 0.525 s.
-    5. **Overlap Exposed Time:** With 70% bucketed overlap, exposed time is ~157 ms (0.525 s * 0.3 = 0.1575 s).
-    6. **Conclusion:** **The exposed communication time of 157 ms is less than the 380 ms compute time, making the 400 Gbps upgrade necessary and sufficient.**
+    1. **Assumptions & Constraints:**
+       - 7B parameters in FP16/BF16 = 14 GB. N=16 nodes.
+       - 100 Gbps Ethernet (12.5 GB/s) vs 400 Gbps IB (50 GB/s).
+       - Compute per step: 380 ms. 70% communication overlap.
+    2. **Calculations:**
+       - Inter-node Ring AllReduce Traffic: 2 × (15/16) × 14 GB = 26.25 GB.
+       - 100 Gbps Time: 26.25 GB / 12.5 GB/s = 2.10 s.
+       - 400 Gbps Time: 26.25 GB / 50 GB/s = 0.525 s.
+       - Exposed time on 400 Gbps: 0.525 s × (1 - 0.7) = 157.5 ms.
+    3. **Conclusion & Interpretation:** **Exposed communication (157 ms) easily hides behind compute (380 ms) with 400 Gbps IB, making the upgrade essential. Result: Network-Bound (Mitigated).**
 status: archived
 provenance: imported
 requires_explanation: false

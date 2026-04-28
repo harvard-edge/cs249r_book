@@ -8,28 +8,24 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The SLO Violation Cascade
-scenario: 'Your team runs a multi-tenant LLM serving platform on H100 GPUs. It must handle two distinct
-  workloads:
-
-  1. **Interactive Chat:** High-priority requests with a strict P99 Time-To-First-Token (TTFT) SLO of
-  150ms.
-
-  2. **Batch Summarization:** Low-priority jobs that process 100k+ token documents, where overall throughput
-  (TPOT) is the goal.'
+scenario: 'Your team runs a multi-tenant LLM serving platform on H100 GPUs. It must handle two distinct workloads: 1. Interactive Chat (High-priority, strict P99 TTFT SLO of 150ms). 2. Batch Summarization (Low-priority, 100k+ token documents, throughput goal).'
 question: "Why won't adding replicas fix 150ms chat TTFT when 100k-token summarization prefills run on the same H100 pool?"
 details:
-  realistic_solution: The playbook is wrong because simply adding more replicas will not solve the core
-    problem; it will just create more GPUs that exhibit the same failure mode. The root cause is **Head-of-Line
-    Blocking at the CUDA kernel level**.
-  common_mistake: The most common incorrect diagnosis is simply 'the GPU is overloaded, so we need more
-    of them.' This mistakes high utilization for productive work. Engineers often assume 100% utilization
-    means the system is at its global throughput limit, failing to see that a single low-priority task
-    can create a 'head-of-line blocking' scenario that starves high-priority tasks of their latency budget,
-    even if the scheduler is 'prioritizing' them in software.
-  napkin_math: Let's assess the duration of the blocking low-priority kernel. A 100k token batch prefill
-    on a 70B model requires 2 * 70B * 100,000 = 14 PFLOPs. On an H100 (989 TFLOPS), this single monolithic
-    CUDA kernel takes 14,000 / 989 = 14.16 seconds to execute. Because CUDA kernels are non-preemptible,
-    a chat request arriving immediately after waits 14s, destroying the SLO.
+  realistic_solution: |
+    The playbook is wrong because simply adding more replicas will not solve the core problem; it will just create more GPUs that exhibit the same failure mode. The root cause is Head-of-Line Blocking at the CUDA kernel level.
+  common_mistake: |
+    **The Pitfall:** Assuming high GPU utilization means the system needs more replicas.
+    **The Rationale:** SREs apply standard web-service scaling rules, failing to recognize Head-of-Line blocking at the non-preemptible CUDA kernel level.
+    **The Consequence:** Indiscriminately throwing more hardware at the problem without actually fixing the latency starvation for high-priority interactive traffic.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 70B model, 100k token batch prefill.
+       - H100 peak compute: 989 TFLOPS.
+    2. **Calculations:**
+       - FLOPs required = 2 * 70B * 100,000 = 14 PFLOPs.
+       - Kernel execution time = 14,000 TFLOPS / 989 TFLOPS = 14.16 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound (Head-of-Line Blocking)**. Because CUDA kernels are non-preemptible, a chat request arriving behind the summarization job waits 14 seconds, completely destroying the 150ms SLO.
 status: published
 provenance: imported
 requires_explanation: false
@@ -40,8 +36,7 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: WARN
 validation_issues_pro:
-- The Napkin Math section is incomplete; it sets up the problem of a long-running kernel but does not
-  calculate its duration.
+- The Napkin Math section is incomplete; it sets up the problem of a long-running kernel but does not calculate its duration.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -8,23 +8,27 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: Tail Latency Impact of PFC Storms
-scenario: Your 256-A100 cluster experiences PFC storms lasting 2ms on average, occurring
-  once per minute per ToR on average. Each storm pauses all 8 GPU ports on the
-  affected ToR. Training uses synchronous data-parallel SGD with AllReduce. Quantify
-  the impact on training throughput, considering that AllReduce is a barrier operation.
-question: What is the throughput impact of 2ms PFC storms once per minute per ToR
-  in this 256-A100 synchronous AllReduce job?
+scenario: 'Your 256-A100 cluster experiences PFC storms lasting 2ms on average, occurring once per minute per ToR on average. Each storm pauses all 8 GPU ports on the affected ToR. Training uses synchronous data-parallel SGD with AllReduce.'
+question: "What is the throughput impact of 2ms PFC storms once per minute per ToR in this 256-A100 synchronous AllReduce job?"
 details:
-  realistic_solution: 'With 32 ToR switches (256 GPUs / 8 per ToR), each experiencing 1 storm per minute (rate = 1/60 per sec), the probability that at least one ToR experiences a PFC storm in any given second is: 1 - (1 - 1/60)^32 ≈ 42%. Expected number of storms per minute across the cluster: 32. Each 2ms storm creates a bubble in the AllReduce barrier. If a training iteration takes 100ms, a 2ms stall is a 2% slowdown per affected iteration. With 32 storms per minute, and each storm potentially aligning with an AllReduce: 32 × 2ms = 64ms of stall per minute = 0.107% throughput loss. However, if storms are correlated (congestion cascade), multiple ToRs stall simultaneously, and impact compounds to 1-5% throughput loss.'
-  common_mistake: Only accounting for the direct 2ms pause and ignoring the barrier
-    effect. In synchronous training, the slowest GPU determines the iteration time,
-    so a PFC storm on any one of 32 ToR switches stalls all 256 GPUs.
-  napkin_math: 'P(at least one storm in a 1-second window across 32 ToRs, each with
-    rate 1/60 per second) = 1 - (1 - 1/60)^32 ≈ 42%. The formula 1 - (59/60)^32 gives
-    the per-second probability, not per-minute. Each storm: 2ms stall. If training
-    iteration = 100ms: 2ms/100ms = 2% overhead per affected iteration. 32 storms/min
-    × 2ms = 64ms wasted/min out of 60,000ms = 0.1% direct loss, but barrier amplification
-    can push this to 1-5% in practice.'
+  realistic_solution: 'With 32 ToR switches (256 GPUs / 8 per ToR), each experiencing 1 storm per minute (rate = 1/60 per sec), the probability that at least one ToR experiences a PFC storm in any given second is: 1 - (1 - 1/60)^32 ≈ 42%. Expected number of storms per minute across the cluster: 32. Each 2ms storm creates a bubble in the AllReduce barrier. If a training iteration takes 100ms, a 2ms stall is a 2% slowdown per affected iteration. With 32 storms per minute, and each storm potentially aligning with an AllReduce: 32 × 2ms = 64ms of stall per minute = 0.107% direct throughput loss. However, if storms are correlated (congestion cascade), multiple ToRs stall simultaneously, and impact compounds to 1-5% throughput loss.'
+  common_mistake: |
+    **The Pitfall:** Calculating the throughput impact by only looking at the direct time a single ToR is paused, ignoring the global synchronization semantics.
+    **The Rationale:** Engineers assume network stalls affect only the local rack's throughput, failing to model the cascading "barrier effect" inherent in synchronous AllReduce operations.
+    **The Consequence:** Network unreliability is deemed "minor" (0.1% impact) while it actually inflicts severe multi-percentage-point degradation across the entire massive-scale cluster.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 256 GPUs across 32 ToR switches (8 GPUs per ToR).
+       - PFC storm rate: 1 per minute per ToR. Duration: 2ms.
+       - Training uses synchronous AllReduce barrier. Iteration time: 100ms.
+    2. **Calculations:**
+       - Expected cluster-wide storms: 32 ToRs × 1 storm/min = 32 storms/min.
+       - With a global barrier, a 2ms delay on ANY ToR delays ALL 256 GPUs.
+       - Stalled time per minute = 32 storms × 2ms stall = 64ms wasted per minute.
+       - Direct loss = 64ms / 60,000ms = 0.107%.
+       - Real-world impact: A 2ms pause during a 100ms step delays the entire step by 2%. 32 affected steps = 32 × 2% = ~1-5% compounding throughput loss depending on correlation.
+    3. **Conclusion & Interpretation:**
+       - **Result: Barrier-Amplified Stall**. The synchronous nature of AllReduce acts as a severe multiplier. A localized 2ms micro-burst of congestion acts as a global handbrake on the entire 256-GPU cluster.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,20 +8,29 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Hexagon NPU Transformer Scheduling for LLMs
-scenario: You are tasked with optimizing an LLM inference pipeline on a Hexagon NPU (45 TOPS INT8, 12-16 GB LPDDR5X). The complex computation graph includes numerous matrix multiplications, convolutions, and custom element-wise operations.
-question: How would you design transformer operator scheduling on Hexagon NPU to maximize throughput and minimize LPDDR5X traffic?
+scenario: You are tasked with optimizing an LLM inference pipeline on a mobile NPU. The complex computation graph includes numerous matrix multiplications, convolutions, and custom element-wise operations that generate heavy intermediate activations.
+question: How would you design transformer operator scheduling on the NPU to maximize throughput and minimize memory traffic?
 details:
   realistic_solution: |
-    A realistic solution involves a multi-pronged approach: 1. Graph Analysis and Partitioning: Analyze the computation graph to identify data dependencies and potential parallel execution paths. Partition the graph into subgraphs that can run concurrently. 2. Memory Aware Scheduling: Implement a dynamic memory allocation and reuse strategy. Prioritize in-place operations where possible and schedule operators that consume common intermediate tensors close together in execution to maximize cache hits and minimize re-fetching from LPDDR5X. Use graph coloring algorithms or similar techniques for memory buffer management. 3. Parallelism Exploitation: Leverage the NPU's multi-core architecture by scheduling independent operations on different cores. 4. Hardware-Aware Layer Fusion: Profile the model on the Hexagon NPU to identify bottlenecks. Apply compiler-driven or manual fusion for specific operations (e.g., MatMul-Add-ReLU, Conv-BN-ReLU) that are known to benefit from fusion on Hexagon architecture. 5. Double Buffering: For critical data transfers or computation stages, consider double buffering to overlap data movement with computation, hiding memory latency.
+    A realistic solution involves a hardware-aware multi-pronged approach:
+    1. **Graph Analysis and Partitioning:** Partition the graph to identify subgraphs where execution can be localized strictly within the NPU's SRAM (e.g., TCM - Tightly Coupled Memory).
+    2. **Hardware-Aware Layer Fusion:** Profile the model to apply compiler-driven fusion (e.g., MatMul-Add-ReLU, FlashAttention-2). This prevents intermediate tensors from ever spilling out to the slow LPDDR memory.
+    3. **Memory Aware Scheduling (Tiling):** Implement a dynamic memory allocation strategy. Schedule operators that consume common intermediate tensors sequentially. Use advanced tiling techniques to process data in blocks that fit exactly into the SRAM.
+    4. **Double Buffering:** For unavoidable data transfers, use asynchronous DMA with double buffering to completely hide the latency of fetching weights and activations behind the arithmetic execution of the systolic array.
   common_mistake: |
-    **The Pitfall:** Overlooking memory locality and blindly applying generic fusion strategies.
-    **The Rationale:** Candidates prioritize parallel execution without considering LPDDR5X transfer costs or apply fusion without understanding the Hexagon NPU's instruction set.
-    **The Consequence:** Frequent data transfers dominating latency, resulting in underutilized NPU cores and performance degradation.
+    **The Pitfall:** Blindly parallelizing operators across NPU cores without considering intermediate tensor locality.
+    **The Rationale:** Candidates apply cloud-GPU paradigms, prioritizing compute saturation over memory locality, unaware of the severe penalty of LPDDR traffic on edge devices.
+    **The Consequence:** Massive intermediate activations spill to main memory, causing the memory bus to become a catastrophic bottleneck while the NPU cores sit idle.
   napkin_math: |
-    - **Memory Transfer Time:** Moving a 1GB INT8 tensor over 60 GB/s bandwidth takes ~33 ms (read + write = 2GB/60 = ~33ms).
-    - **Compute Time:** A layer requiring 45 GOPS takes 45 * 10^9 / (45 * 10^12) = 0.001 seconds (1 ms).
-    - **Example Block:** 20 GOPS takes 0.44 ms compute if NPU-bound. Memory bottlenecks can inflate this to 10-50 ms.
-    - **Result:** **Memory transfer (33ms) completely dwarfs compute time (1ms); scheduling must prioritize minimizing LPDDR5X access.**
+    1. **Assumptions & Constraints:**
+       - NPU Bandwidth: ~60 GB/s (LPDDR5X).
+       - NPU Compute: 45 TOPS.
+       - Tensor Size: 1 GB of INT8 layer weights and intermediate activations.
+    2. **Calculations:**
+       - Unoptimized Memory Transfer Time (Read + Write): 2 GB / 60 GB/s = ~33 ms.
+       - Compute Time (45 GOPS layer): 45 GOPS / 45 TOPS = 1 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 33ms transfer vs 1ms compute (Memory-Bandwidth-Bound).** Without operator fusion and localized SRAM scheduling, memory traffic completely dwarfs raw compute execution by a factor of 33x.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,8 +8,8 @@ competency_area: memory
 bloom_level: apply
 phase: training
 title: Realizing Selective Layer Activation Storage for Inference-Time KV Cache vs. Training Activations
-scenario: You are transitioning a 7B model from fine-tuning to inference serving. During fine-tuning, all layer activations are stored for the backward pass. During inference, no backward pass occurs, but KV cache grows with sequence length. A colleague claims inference always uses less memory than training for the same batch size and sequence length.
-question: Is inference always lower-memory than training at the same batch and sequence length, and when can KV cache exceed training activations?
+scenario: 'You are transitioning a 7B model from fine-tuning to inference serving. During fine-tuning, all layer activations are stored for the backward pass. During inference, no backward pass occurs, but KV cache grows with sequence length.'
+question: "Is inference always lower-memory than training at the same batch and sequence length, and when can KV cache exceed training activations?"
 details:
   realistic_solution: 'Training activation memory (with gradient checkpointing, checkpoint every layer): approximately 2 × B × S × H × 2 bytes per layer for residual stream only. For 7B (32 layers, H=4096, S=2048, B=4): 32 × 2 × 4 × 2048 × 4096 × 2 B = 4.3 GB. KV cache during inference: 2 × num_layers × num_heads × head_dim × S_generated × B × dtype. For 7B at S=32K context, B=64 concurrent sequences: 2 × 32 × 32 × 128 × 32768 × 64 × 2 B ≈ 1 TiB. KV cache at large batch + long context (1 TiB) vastly exceeds training activation memory (4.3 GB).'
   common_mistake: |
@@ -17,10 +17,14 @@ details:
     **The Rationale:** Engineers assume inference is memory-light because it lacks a backward pass.
     **The Consequence:** Underprovisioning inference infrastructure, leading to immediate OOMs when sequence lengths scale.
   napkin_math: |
-    1. Training Activations (B=4, S=2048): 32 layers * 4 * 2048 * 4096 * 2 bytes = 4.3 GB.
-    2. KV Cache (B=64, S=32K context): 2 * 32 layers * 32 heads * 128 dim * 32768 tokens * 64 batch * 2 bytes = 1 TiB.
-    3. Crossover Condition: KV > training activation when B_infer * S_ctx > B_train * S_train * (32 layers) / (2 * num_heads * head_dim).
-    4. **Result: Inference memory (1 TiB KV Cache) can vastly exceed training memory (4.3 GB) at large sequence lengths.**
+    1. **Assumptions & Constraints:**
+       - 7B model: 32 layers, H=4096, B=4, S=2048 for training.
+       - Inference KV cache: B=64, context S=32K, 32 heads, head_dim=128.
+    2. **Calculations:**
+       - Training Activations: 32 layers × 4 × 2048 × 4096 × 2 bytes = 4.3 GB.
+       - KV Cache: 2 × 32 layers × 32 heads × 128 dim × 32768 tokens × 64 batch × 2 bytes = 1.1 TiB.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory Bound. Inference memory (1.1 TiB KV Cache) vastly exceeds training memory (4.3 GB) at large sequence lengths.**
 status: published
 provenance: imported
 requires_explanation: false

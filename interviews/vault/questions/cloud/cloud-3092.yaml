@@ -8,22 +8,18 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: 'Systolic Array Optimization: Fix Low MFU on TPU v5e'
-scenario: A TPU v5e (197 TFLOPS BF16) runs BERT-large inference at 15 TFLOPS (7.6% MFU). Profiling shows 85% of time in two operations: GeLU activation (memory-bound) and layer normalization (memory-bound). The remaining 15% is GEMM compute.
+scenario: 'A TPU v5e (197 TFLOPS BF16) runs BERT-large inference at 15 TFLOPS (7.6% MFU). Profiling shows 85% of time in two operations: GeLU activation (memory-bound) and layer normalization (memory-bound). The remaining 15% is GEMM compute.'
 question: Why is BERT-large at only 7.6% MFU on TPU v5e, and how much speedup should fusing GeLU, LayerNorm, and Linear deliver?
 details:
   realistic_solution: 'GeLU+LN are element-wise: AI ≈ 1 FLOP/byte vs TPU ridge 240 → systolic array unutilized. Fusing GeLU+LN into GEMM prologue/epilogue eliminates separate memory round-trips. GeLU bandwidth: BERT FFN intermediate=4096, seq=128, batch=64: 64*128*4096*2=64MB. Reading and writing takes 128MB. At 819 GB/s, pure memory transfer is ~0.16ms. However, un-fused element-wise operations on accelerators often suffer from severe kernel launch overheads and sub-optimal memory access patterns. Fusion eliminates this overhead and the memory round trips, shifting the bottleneck back to the GEMMs.'
   common_mistake: |
-    **The Pitfall:** Optimizing the GEMM portion instead of memory-bound operations.
-    **The Rationale:** Candidates focus on the core matrix multiplications, missing Amdahl's Law which points to GeLU and LN as the actual bottlenecks.
-    **The Consequence:** Wasted optimization effort on the 15% compute portion while the systolic array remains idle during the dominant 85% memory-bound operations.
+    **The Pitfall:** Optimizing the core GEMM matrix multiplications instead of the memory-bound element-wise operations.
+    **The Rationale:** Candidates focus on matrix ops, missing Amdahl's Law which points directly to GeLU and LN as the actual timeline bottlenecks.
+    **The Consequence:** Wasted optimization effort on the 15% compute portion while the systolic array remains idle during the dominant 85% execution time.
   napkin_math: |
-    * BERT-large (24 layers, hidden=1024) at batch=64, seq=128 (8192 tokens).
-    * Total GEMM FLOPs: 12 * 2 * 8192 * 1024^2 * 24 ≈ 4.95 TFLOPs.
-    * Current time: 4.95 TFLOPs / 15 TFLOPS = 330 ms.
-    * If GEMM runs at 65% MFU (128 TFLOPS), GEMM time = 4.95T / 128T = 38.6 ms.
-    * The remaining ~291 ms (88% of time) is spent in memory-bound operations and overhead (GeLU+LN).
-    * Fusion eliminates the majority of this 291 ms overhead.
-    * Speedup: 330 ms / 38.6 ms = **8.5x speedup**.
+    1. **Assumptions & Constraints:** BERT-large (batch=64, seq=128). TPU v5e (197 TFLOPS). Current MFU = 7.6% (15 TFLOPS, 330 ms/step).
+    2. **Calculations:** Total FLOPs = 4.95 TFLOPs. At 65% GEMM MFU (128 TFLOPS), GEMM time = 4.95 TFLOPs / 128 TFLOPS = 38.6 ms. Overhead (GeLU+LN) = 330 ms - 38.6 ms = 291.4 ms. Fusing eliminates majority of this memory round-trip overhead. Speedup = 330 ms / 38.6 ms = ~8.5x.
+    3. **Conclusion & Interpretation:** **Result: ~8.5x speedup by fusing memory-bound ops. Memory-Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

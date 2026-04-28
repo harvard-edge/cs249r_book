@@ -8,22 +8,25 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Production Debugging of Tensor Memory Leaks
-scenario: 'A PyTorch-based NLP serving API handles 500 QPS. The Kubernetes pods have a 16GB memory limit. Over time, memory usage grows linearly by 50MB per hour per pod. Every ~12 days, pods are OOMKilled by the kernel, causing brief 502 Bad Gateway errors.'
-question: 'How would you stop the PyTorch serving pods from OOMKilling every ~12 days while debugging the underlying memory leak?'
+scenario: A PyTorch-based NLP serving API handles 500 QPS. The Kubernetes pods have a 16GB memory limit. Over time, memory usage grows linearly by 50MB per hour per pod. Every ~12 days, pods are OOMKilled by the kernel, causing brief 502 Bad Gateway errors.
+question: How would you stop the PyTorch serving pods from OOMKilling every ~12 days while debugging the underlying memory leak?
 details:
-  realistic_solution: 'Address the root cause using memory profiling while implementing a graceful mitigation strategy. 1) Mitigation: Implement `max-requests` recycling in the WSGI/ASGI server (e.g., Gunicorn or Uvicorn) to gracefully restart worker processes after serving 100,000 requests, returning memory to the OS without dropping client traffic. 2) Debugging: Deploy a memory profiler (like `tracemalloc` or PyTorch torch.cuda.memory_summary) in a shadow environment. In PyTorch, this specific linear leak is almost always caused by accumulating loss/metrics using tensors without calling `.item()`, which keeps the entire computation graph alive in memory.'
+  realistic_solution: Implement `max-requests` recycling in the WSGI/ASGI server (e.g., Gunicorn or Uvicorn) to gracefully restart worker processes after serving a threshold of requests, returning memory to the OS without dropping client traffic. In parallel, deploy `tracemalloc` or PyTorch `torch.cuda.memory_summary`. This specific linear leak is almost always caused by accumulating loss/metrics using tensors without calling `.item()`, which keeps the entire computation graph alive in memory.
   common_mistake: |
     **The Pitfall:** Blindly increasing the pod memory limit to 32GB.
-    **The Rationale:** Treating the symptom (running out of RAM) instead of the cause (the leak) or mitigating it gracefully.
-    **The Consequence:** The OOMKills are merely delayed to every 24 days without solving the underlying reliability risk.
+    **The Rationale:** Treating the symptom (running out of RAM) instead of mitigating the actual underlying application leak.
+    **The Consequence:** The OOMKills are merely delayed (e.g., to every 24 days), providing a false sense of security without solving the fundamental reliability risk.
   napkin_math: |
-    - **Leak Rate:** 50 MB/hour.
-    - **Base Memory Footprint:** 4 GB.
-    - **Headroom:** 16 GB - 4 GB = 12 GB.
-    - **Time to OOM:** 12,000 MB / 50 MB/hr = 240 hours = 10 days.
-    - **Traffic:** 500 QPS across 10 pods = 50 QPS/pod.
-    - **Throughput:** 50 QPS × 3600s = 180,000 requests/hour.
-    - **Mitigation:** Setting `max_requests=100000` forces a worker restart every ~33 minutes, limiting max leaked memory to ~27 MB before OS cleanup.
+    1. **Assumptions & Constraints:**
+       - Traffic: 500 QPS across 10 pods (50 QPS/pod).
+       - Pod Limit: 16 GB. Base Memory: 4 GB. Headroom: 12 GB.
+       - Leak Rate: 50 MB/hour.
+    2. **Calculations:**
+       - Time to OOM: 12,000 MB / 50 MB/hr = 240 hours = 10 days.
+       - Throughput per Pod: 50 QPS * 3600s = 180,000 requests/hour.
+       - Mitigation Restart Cycle (max_requests=100k): Occurs every ~33 minutes.
+    3. **Conclusion & Interpretation:**
+       - **Result: Controlled Restart.** Setting a WSGI/ASGI `max_requests` limit aggressively recycles workers, limiting maximum leaked memory to ~27 MB and completely preventing the OOMKills.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,27 +8,25 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Evaluating MoE All-to-All Topology
-scenario: You are training a 100B parameter Mixture of Experts (MoE) model (8 experts per layer) on a
-  cluster of 512 A100 GPUs (64 nodes, 8 GPUs/node). Intra-node bandwidth is 600 GB/s (NVLink); inter-node
-  bandwidth is 400 Gbps (InfiniBand HDR). Profiling shows Model FLOPs Utilization (MFU) has plummeted
-  to 30%, with accelerators severely stalled during the All-to-All token routing phase. The infrastructure
-  team proposes a $2M hardware upgrade to 800 Gbps NDR networking to brute-force the bottleneck. The algorithms
-  team proposes keeping the current hardware but implementing a hierarchical topology by restricting Expert
-  Parallelism (EP=8) strictly to intra-node groups. Evaluate these trade-offs and justify the most effective
-  design decision.
-question: "Would you spend $2M on 800 Gbps NDR or keep 400 Gbps and restrict EP=8 to intra-node NVLink groups, and why?"
+scenario: You are training a 100B parameter Mixture of Experts (MoE) model (8 experts per layer) on a cluster of 512 A100 GPUs (64 nodes, 8 GPUs/node). Intra-node bandwidth is 600 GB/s (NVLink); inter-node bandwidth is 400 Gbps (InfiniBand HDR). Profiling shows Model FLOPs Utilization (MFU) has plummeted to 30%, with accelerators severely stalled during the All-to-All token routing phase. The infrastructure team proposes a $2M hardware upgrade to 800 Gbps NDR networking to brute-force the bottleneck. The algorithms team proposes keeping the current hardware but implementing a hierarchical topology by restricting Expert Parallelism (EP=8) strictly to intra-node groups.
+question: Would you spend $2M on 800 Gbps NDR or keep 400 Gbps and restrict EP=8 to intra-node NVLink groups, and why?
 details:
-  realistic_solution: Reject the hardware upgrade and implement intra-node Expert Parallelism. By ensuring
-    all 8 experts reside within a single 8-GPU node, the heavy All-to-All routing communication is confined
-    entirely to the high-bandwidth NVLink domain. Inter-node communication is then restricted to standard
-    Data Parallel AllReduce, which can be efficiently overlapped with computation.
-  common_mistake: Candidates often justify the costly hardware upgrade (NDR) without realizing that a
-    flat All-to-All across 512 GPUs generates an O(N) explosion of small messages, meaning the phase will
-    likely remain latency-bound even with doubled bandwidth.
-  napkin_math: 'Inter-node IB bandwidth: 400 Gbps = 50 GB/s per GPU. Intra-node NVLink: 600 GB/s per GPU.
-    By confining the MoE All-to-All payload to NVLink, the effective bandwidth for routing increases by
-    12x (600 / 50). A routing step taking 120ms across InfiniBand drops to ~10ms over NVLink, fully lifting
-    the communication-bound constraint without capital expenditure.'
+  realistic_solution: Reject the hardware upgrade and implement intra-node Expert Parallelism. By ensuring all 8 experts reside within a single 8-GPU node, the heavy All-to-All routing communication is confined entirely to the high-bandwidth NVLink domain. Inter-node communication is then restricted to standard Data Parallel AllReduce, which can be efficiently overlapped with computation.
+  common_mistake: |
+    **The Pitfall:** Throwing expensive networking hardware at an O(N) collective communication problem.
+    **The Rationale:** Candidates assume that simply doubling the inter-node bandwidth will solve the stall, failing to recognize the exponential explosion of small messages in flat All-to-All operations.
+    **The Consequence:** Wasting $2M on a hardware upgrade that yields marginal MFU improvements because the workload remains latency-bound by small message routing.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Inter-node IB HDR bandwidth: 400 Gbps (50 GB/s per GPU)
+       - Intra-node NVLink bandwidth: 600 GB/s per GPU
+       - Expert Parallelism degree: EP=8
+    2. **Calculations:**
+       - Flat All-to-All over InfiniBand effective bandwidth = 50 GB/s
+       - Hierarchical All-to-All over NVLink effective bandwidth = 600 GB/s
+       - Bandwidth uplift factor = 600 / 50 = 12x
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound (Latency)**. Confining the heavy MoE All-to-All routing to the NVLink domain yields a 12x bandwidth increase, fully resolving the stall without a $2M capital expenditure.
 status: published
 provenance: imported
 requires_explanation: true

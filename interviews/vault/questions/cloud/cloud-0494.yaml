@@ -8,25 +8,30 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Tensor Parallel Scaling Cliff
-scenario: You are scaling out a 175B parameter model using tensor parallelism. On a single H100 node (8 GPUs), your step time is 500ms. When you scale to two nodes (16 GPUs), your step time only drops to 420ms (a 1.2x speedup). Profiling reveals that 90% of your total step time is now spent in `all-reduce` communication primitives.
+scenario: You are scaling out a 175B parameter model using tensor parallelism. On a single node, your step time is 500ms. When you scale to two nodes, your step time only drops to 420ms (a 1.2x speedup). Profiling reveals that 90% of your total step time is now spent in `all-reduce` communication primitives.
 question: What primary bottleneck explains the 420ms step time and 90% all-reduce overhead when scaling tensor parallelism to two nodes?
 details:
-  realistic_solution: The root cause is the 'Infiniband Wall'. While the 8 GPUs within a single node communicate over the ultra-high-bandwidth 900 GB/s NVLink fabric, the moment the training job spans two nodes, the cross-node communication must traverse the much slower 400 Gbps (50 GB/s) InfiniBand network. For tensor parallelism, which requires constant, high-volume exchanges of activations and gradients, this ~18x drop in bandwidth (`900 GB/s / 50 GB/s`) becomes the dominant bottleneck, completely destroying scaling efficiency.
+  realistic_solution: The root cause is the 'Infiniband Wall'. While GPUs within a single node communicate over the ultra-high-bandwidth 900 GB/s NVLink fabric, the moment the training job spans two nodes, the cross-node communication must traverse the much slower 400 Gbps (50 GB/s) InfiniBand network. For tensor parallelism, which requires constant, high-volume exchanges of activations and gradients, this ~18x drop in bandwidth (`900 GB/s / 50 GB/s`) becomes the dominant bottleneck, completely destroying scaling efficiency.
   common_mistake: |
-    **The Pitfall:** Blaming the PCIe bus or assuming the intra-node fabric cannot handle 16 GPUs.
+    **The Pitfall:** Blaming the PCIe bus or assuming the intra-node fabric cannot handle the scaling.
     **The Rationale:** Engineers underestimate the massive orders-of-magnitude performance gap between intra-node (NVLink) and inter-node (InfiniBand) interconnects.
     **The Consequence:** Futile attempts to debug node-local software configurations instead of shifting to Pipeline or Data parallelism for cross-node scaling.
   napkin_math: |
-    - Intra-node NVLink bandwidth: ~900 GB/s.
-    - Inter-node InfiniBand bandwidth: ~50 GB/s (400 Gbps).
-    - Time for a 2 GB activation tensor `all-reduce` over NVLink: 2 GB / 900 GB/s ≈ 2.2 ms.
-    - Time for the same tensor over InfiniBand: 2 GB / 50 GB/s = 40 ms.
-    - **Across 96 layers, this 18x inter-node bandwidth drop adds ~3.8 seconds of pure network wait, destroying tensor parallelism scaling.**
+    1. **Assumptions & Constraints:**
+       - Intra-node NVLink bandwidth: ~900 GB/s.
+       - Inter-node InfiniBand bandwidth: ~50 GB/s (400 Gbps).
+       - Tensor parallelism requires an `all-reduce` of a 2 GB activation tensor across 96 layers.
+    2. **Calculations:**
+       - Time for `all-reduce` over NVLink: 2 GB / 900 GB/s = ~2.2 ms.
+       - Time for `all-reduce` over InfiniBand: 2 GB / 50 GB/s = 40 ms.
+       - Additional delay across 96 layers: (40 ms - 2.2 ms) * 96 = ~3.6 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** The 18x inter-node bandwidth drop adds ~3.6 seconds of pure network wait, destroying tensor parallelism scaling.
   options:
-  - The `all-reduce` operation is forced to cross the node boundary, hitting the InfiniBand bandwidth limit (50 GB/s), which is ~18x slower than the intra-node NVLink (900 GB/s).
-  - Data is being copied from GPU to the host CPU, then sent over the network, bottlenecking on the PCIe Gen5 bus.
-  - The complexity of a 16-GPU `all-reduce` has saturated the 900 GB/s NVLink fabric, which can't handle the increased traffic from doubling the GPUs.
-  - The network is experiencing high packet loss, forcing TCP retransmits. The system is not using RDMA, which is adding tail latency.
+  - The `all-reduce` operation hits the InfiniBand bandwidth limit (50 GB/s), adding ~3.6 seconds of network wait per step.
+  - The `all-reduce` operation hits the PCIe Gen5 bus limit (64 GB/s), adding ~2.8 seconds of network wait per step.
+  - The `all-reduce` operation hits the InfiniBand bandwidth limit (400 GB/s), adding ~0.45 seconds of network wait per step.
+  - The `all-reduce` operation hits the NVLink bandwidth limit (900 GB/s), adding ~0.2 seconds of network wait per step.
   correct_index: 0
 status: published
 provenance: imported
@@ -38,10 +43,3 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
 math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

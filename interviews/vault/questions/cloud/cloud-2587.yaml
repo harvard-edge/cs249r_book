@@ -11,15 +11,23 @@ title: Cloud Rlhf Infrastructure L5 0
 scenario: You are setting up infrastructure for RLHF on a 70B model.
 question: For 70B RLHF, which setup should you choose among colocated PPO, separate generation/training clusters, and DPO, and why?
 details:
-  realistic_solution: 'Option A (colocated): all models on same GPUs. Memory: 70B * (16+16+2+2) = 2,520 GB -> 32+ A100s. Advantage: low latency between generation and training. Disadvantage: complex memory management, GPU utilization is low during generation phase (training GPUs idle) and vice versa. Option B (separate clusters): generation cluster (policy inference, fast sampling) and training cluster (PPO update). Better utilization - each cluster optimized for its workload. But: must transfer generated samples between clusters, adding latency and complexity. Option C (DPO): only needs policy + reference = 70B * (16+2) = 1,260 GB -> 16 A100s. Half the memory, simpler orchestration, no reward model training needed. Trade-off: DPO may be slightly less effective than PPO for complex preferences, but 50% cheaper and much simpler to implement.'
+  realistic_solution: 'DPO only needs policy + reference. Half the memory, simpler orchestration, no reward model training needed. Trade-off: DPO may be slightly less effective than PPO for complex preferences, but it is 50% cheaper and much simpler to implement.'
   common_mistake: |
     **The Pitfall:** Defaulting to PPO-based RLHF without considering DPO alternatives.
     **The Rationale:** Teams follow the original PPO paradigm because it's well-known, assuming it's strictly necessary for alignment.
     **The Consequence:** This requires hosting reward and critic models, doubling the memory footprint and introducing massive orchestration complexity for negligible quality gains.
   napkin_math: |
-    - **PPO Memory (Colocated):** Requires policy, reference, reward, and critic models. `70B * (16+16+2+2) bytes = 2,520 GB`. Needs **~32 A100s** ($64/hr).
-    - **DPO Memory:** Only needs policy and reference models. `70B * (16+2) bytes = 1,260 GB`. Needs **~16 A100s** ($32/hr).
-    - **Conclusion:** DPO yields a **50% cost savings** and halves infrastructure complexity while maintaining ~95-100% of PPO quality.
+    1. **Assumptions & Constraints:**
+       - Model size: 70B parameters.
+       - PPO requires 4 models (Policy, Reference, Reward, Critic).
+       - DPO requires 2 models (Policy, Reference).
+       - State memory footprint relies on standard Adam FP32/FP16 mixed precision states (~16 bytes per param for training, 2 bytes for frozen).
+    2. **Calculations:**
+       - PPO Memory (Colocated): 70B * (16 [Policy train] + 16 [Critic train] + 2 [Ref frozen] + 2 [Reward frozen]) bytes = 70B * 36 = 2,520 GB.
+       - PPO Hardware: 2,520 GB / 80 GB = 31.5 -> ~32 A100s.
+       - DPO Memory: 70B * (16 [Policy train] + 2 [Ref frozen]) bytes = 70B * 18 = 1,260 GB.
+       - DPO Hardware: 1,260 GB / 80 GB = 15.75 -> ~16 A100s.
+    3. **Conclusion & Interpretation:** **DPO cuts memory overhead by 50%, shifting from a 32-GPU cluster to a 16-GPU cluster.**
 status: published
 provenance: imported
 requires_explanation: false

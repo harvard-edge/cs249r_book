@@ -8,31 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: 'Optimizing Object Detection on Google Tensor G3: Operator Scheduling for MobileNetV3-SSD vs. EfficientDet-Lite'
-scenario: An ML engineering team is deploying a real-time object detection model on a device with a 7.5 TOPS TPU and 12 GB LPDDR5X RAM. Model A (MobileNetV3-SSD) requires 5 GOPs and 500MB peak intermediate memory. Model B (EfficientDet-Lite) requires 3 GOPs and 350MB peak intermediate memory.
-question: How would you optimize execution via operator scheduling, and which model achieves better throughput on the Tensor G3?
+scenario: 'An ML engineering team is deploying a real-time object detection model on a mobile device. Model A (MobileNetV3-SSD) requires 5 GOPs and 500MB peak intermediate memory. Model B (EfficientDet-Lite) requires 3 GOPs and 350MB peak intermediate memory.'
+question: 'How would you optimize execution via operator scheduling, and which model achieves better throughput?'
 details:
-  realistic_solution: 'A realistic solution involves a multi-pronged approach starting with detailed on-device profiling to identify actual bottlenecks. For operator scheduling:
-
-
-    1.  **Memory Reuse:** Analyze the computational graph of each model to identify opportunities for aggressive memory aliasing and reuse of intermediate tensor buffers. Tools like TensorFlow Lite''s memory planner can determine optimal buffer allocations to minimize peak memory usage, which is critical for the 12 GB LPDDR5X RAM, preventing out-of-memory errors or excessive paging, even though 12GB is quite generous.
-
-    2.  **Parallel Operator Execution:** Decompose the computational graph into independent subgraphs or operations. The Tensor G3''s TPU likely supports parallel execution units. Identify operations that can run concurrently without data dependencies. For example, in multi-head architectures or BiFPN, parallel branches could be scheduled simultaneously. Overlapping computation with data transfers between host CPU and TPU can also boost parallelism.
-
-    3.  **Layer Fusion:** Identify sequences of operations that can be fused into a single, optimized custom kernel (e.g., Conv-BN-ReLU, or groups of element-wise operations). This reduces kernel launch overhead and improves data locality by keeping intermediate results on-chip, minimizing costly accesses to LPDDR5X. For MobileNetV3''s depthwise-separable convolutions, further fusion of pointwise convolutions might be possible. EfficientDet''s BiFPN layers offer strong fusion opportunities due to repeated patterns of upsampling, concatenation, and convolutions.
-
-
-    Considering the Tensor G3''s 7.5 TOPS TPU, Model B (EfficientDet-Lite with 3 GOPs) appears more promising. Its lower GOPs and smaller peak memory footprint (350 MB) suggest it has more headroom on the TPU and might be less memory-bound. The architecture''s compound scaling and BiFPN could also benefit significantly from layer fusion, as many repeated small operations are ideal candidates for custom fused kernels, reducing overall execution time and increasing throughput.'
+  realistic_solution: 'While GOPs differ, memory bandwidth dictates mobile FPS. Use TensorFlow Lite memory planner to analyze the computational graph for operator fusion (e.g., Conv-BN-ReLU). Model B''s smaller activation footprint drastically reduces DRAM spilling, making it superior for memory-bound NPUs.'
   common_mistake: |
     **The Pitfall:** Focusing solely on theoretical FLOPS and ignoring intermediate memory traffic.
     **The Rationale:** Candidates assume compute is the only bottleneck without considering the memory bandwidth required to repeatedly move intermediate activation tensors.
     **The Consequence:** The deployed model becomes heavily memory-bound, performing far below its theoretical FPS limit.
   napkin_math: |
-    *   **Max Theoretical Compute:** `7.5 TOPS = 7500 GOPS`
-    *   **Model A Max FPS:** `7500 / 5 = 1500 FPS`
-    *   **Model B Max FPS:** `7500 / 3 = 2500 FPS`
-    *   **Memory Transfer Bottleneck (Model A):** Moving 500MB 10 times = 5GB.
-    *   **Bandwidth Delay:** `5000 MB / 60,000 MB/s = 83ms`
-    *   **Result:** **The memory bandwidth bottleneck caps actual performance at ~12 FPS, proving the smaller 350MB footprint of Model B is vastly superior.**
+    1. **Assumptions & Constraints:**
+       * Hardware: 7.5 TOPS, 60 GB/s bandwidth.
+       * Model A: 5 GOPs, 500MB intermediate memory. Model B: 3 GOPs, 350MB intermediate memory.
+    2. **Calculations:**
+       * Model A Max Compute FPS: 7500 GOPS / 5 GOPs = 1500 FPS.
+       * Model B Max Compute FPS: 7500 GOPS / 3 GOPs = 2500 FPS.
+       * Memory Transfer Delay (Model A, 10 layers): 5000 MB / 60,000 MB/s = 83ms (~12 FPS).
+    3. **Conclusion & Interpretation:**
+       * **Result: Memory-Bound.** The memory bandwidth bottleneck caps actual performance at ~12 FPS, proving the smaller footprint of Model B is vastly superior.
 status: published
 provenance: imported
 requires_explanation: false

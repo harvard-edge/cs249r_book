@@ -8,17 +8,27 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Edge Transformer Cost Mastery: Full Edge LLM Deployment Analysis'
-scenario: 'Design a complete edge LLM deployment for a factory floor assistant using
-  Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W). Model: Phi-3-Mini-4K (3.8B params,
-  INT4). Requirements: <2s for 200 token response, 10 simultaneous users, 24/7 operation.
-  Calculate: memory footprint, decode throughput, concurrent user capacity, and annual
-  operating cost. Specify if Jetson Orin can handle this or if more hardware is needed.'
-question: Can one Jetson Orin handle Phi-3-Mini-4K INT4 for 10 simultaneous users
-  with <2s 200-token responses, and what is its annual cost?
+scenario: 'Design a complete edge LLM deployment for a factory floor assistant using Jetson Orin. Model: Phi-3-Mini-4K (3.8B params, INT4). Requirements: <2s for 200 token response, 10 simultaneous users, 24/7 operation.'
+question: Can one Jetson Orin handle Phi-3-Mini-4K INT4 for 10 simultaneous users with <2s 200-token responses, and what is its annual cost?
 details:
-  realistic_solution: 'Phi-3-Mini-4K INT4: 3.8B*0.5bytes=1.9GB weights. KV cache per user, seq=4K: per token per layer = 2 (K+V) * 3072 (head_dim*heads) * 2 bytes = 12,288 bytes = 12KB per token. 32 layers: 384KB per token. 4K context: 4096*384KB=1.5GB per user. 10 users: 15GB KV. Total: 1.9+15=16.9GB << 32GB. Fits! However, decode throughput must load both weights AND KV cache each step. Total memory transferred per step: 1.9GB + 15GB = 16.9GB. Latency per step: 16.9GB/102.4GB/s=165ms. For 200 tokens: 200 * 165ms = 33 seconds per user response. This vastly exceeds the 2s SLO. The system FAILS the latency requirement due to massive KV cache memory bandwidth at 4K context. Annual power: 60W*8760*$0.10/1000=$52.6/yr.'
-  common_mistake: 'Calculating decode latency only for the model weight loading without including KV cache memory bandwidth, which dominates the latency when sequence length and concurrent users are high. Also incorrectly dividing per-user token count by aggregate multi-user throughput.'
-  napkin_math: 'Phi-3 INT4: 1.9GB. KV 10 users at 4K: KV per token = 32 layers * 2 * 32 heads * 96 head_dim * 2 bytes = 384KB. 4K tokens = 1.5GB per user. 10 users = 15GB. Total memory = 16.9GB < 32GB \u2713. Decode batch=10: weights (1.9GB) + KV (15GB) = 16.9GB loaded per step. Time per step = 16.9 / 102.4 = 165ms. User response: 200 tokens * 165ms = 33 seconds. Fails 2s SLO. Single Jetson Orin cannot handle 10 simultaneous users at 4K context within 2s.'
+  realistic_solution: 'While the model and KV cache fit within the 32GB RAM, the decode phase fails the latency requirement. Decode throughput is bottlenecked by loading both weights AND the massive 10-user KV cache from memory for every single generated token. The memory bandwidth cannot sustain the <2s SLA. Annual power cost is trivial (~$52).'
+  common_mistake: |
+    **The Pitfall:** Calculating decode latency based only on model weights, ignoring the KV cache memory bandwidth.
+    **The Rationale:** Candidates treat KV cache as static storage rather than dynamic memory that must be read per step.
+    **The Consequence:** Deploying a system that fits in memory but catastrophically fails latency SLAs under concurrent load.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hardware: Jetson Orin 32GB (102.4 GB/s bandwidth, 60W)
+       - Model: 3.8B INT4 ~ 1.9GB weights
+       - SLA: 200 tokens in <2s (10ms/token max)
+    2. **Calculations:**
+       - KV Cache (4K context, 10 users): ~1.5GB/user = 15GB total.
+       - Memory footprint: 1.9GB + 15GB = 16.9GB (Fits in 32GB).
+       - Decode memory per step: 1.9GB weights + 15GB KV = 16.9GB transfer.
+       - Time per decode step: 16.9 GB / 102.4 GB/s = 165 ms/token.
+       - 200 tokens * 165 ms = 33 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Fails Latency SLA.** 33 seconds vastly exceeds the 2s requirement due to KV cache bandwidth saturation.
 status: published
 provenance: imported
 requires_explanation: true

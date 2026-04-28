@@ -8,18 +8,23 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: The Interactive API Latency Spike
-scenario: You are managing an interactive LLM API using a 70B model on H100 GPUs. Users are complaining about poor Time To First Token (TTFT), with P99 latency exceeding your 500ms SLA. The system uses static batching with a fixed timeout of 100ms to form batches. Monitoring shows that during peak load, GPU utilization is spiky (oscillating between 90% and 20%) and the request queue is consistently long.
-question: What is the most likely cause of the P99 TTFT exceeding 500ms with static batching and spiky GPU utilization?
+scenario: You are managing an interactive LLM API using a 70B model. Users are complaining about poor Time To First Token (TTFT), with P99 latency exceeding your 500ms SLA. The system uses static batching with a fixed timeout of 100ms to form batches. Monitoring shows that during peak load, GPU utilization is spiky (oscillating between 90% and 20%) and the request queue is consistently long.
+question: "What is the most likely cause of the P99 TTFT exceeding 500ms with static batching and spiky GPU utilization?"
 details:
-  realistic_solution: 'The most likely cause is head-of-line blocking induced by the static batching strategy. A new, short-sequence request arriving in the queue is forced to wait up to the full 100ms timeout for a batch to form. If it gets batched with a long-running request from another user, it must also wait for that entire generation to complete. This inflates the wait time (W) for every request. The spiky GPU utilization confirms this: the GPU processes a batch quickly, then waits idly while the next batch is slowly formed by the timeout mechanism. Switching to a continuous batching scheduler (like vLLM''s) would solve this by processing requests on a token-by-token basis, eliminating idle time and head-of-line blocking.'
+  realistic_solution: 'The most likely cause is head-of-line blocking induced by the static batching strategy. A new, short-sequence request arriving in the queue is forced to wait up to the full 100ms timeout for a batch to form. If it gets batched with a long-running request from another user, it must also wait for that entire generation to complete. This inflates the wait time (W) for every request. Switching to continuous batching (like vLLM) solves this by processing requests on a token-by-token basis, eliminating idle time and head-of-line blocking.'
   common_mistake: |
-    **The Pitfall:** Assuming the H100 is compute-bound or blaming the network latency.
+    **The Pitfall:** Assuming the GPU is compute-bound or blaming the network latency.
     **The Rationale:** Engineers often focus exclusively on aggregate throughput (TPOT) and assume larger batching always yields better system performance.
     **The Consequence:** Failing to diagnose head-of-line blocking, resulting in severe P99 TTFT SLA violations that cannot be fixed by simply adding more hardware.
   napkin_math: |
-    1. **Queueing Delay (W_q):** With static batching, W_q includes up to the 100ms timeout *plus* the service time of the *longest* request in the previous batch.
-    2. **Head-of-Line Blocking:** If a 1-token request is batched with a 500-token request, its generation is blocked until all 500 tokens complete.
-    3. **Conclusion:** **Continuous batching decoupling reduces W_q by iterating token-by-token, preventing short requests from being trapped behind long ones.**
+    1. **Assumptions & Constraints:**
+       - Static batching with 100ms timeout.
+       - High variance in request length (1 to 500 tokens).
+    2. **Calculations:**
+       - Queueing Delay (W_q): W_q includes up to 100ms timeout + service time of longest request.
+       - Head-of-Line Blocking: 1-token request blocked by 500-token request.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound**. Continuous batching decoupling reduces W_q by iterating token-by-token, preventing short requests from being trapped behind long ones.
 status: published
 provenance: imported
 requires_explanation: false

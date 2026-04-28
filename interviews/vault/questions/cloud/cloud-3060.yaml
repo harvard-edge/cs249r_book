@@ -8,24 +8,27 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: 'Pipeline Parallelism Realization: Memory per Stage for LLaMA-70B'
-scenario: Size the per-GPU memory requirements for 8-stage pipeline parallelism of LLaMA-70B on H100 (80GB HBM3). The model has 80 layers, hidden dim 8192, 64 attention heads, and is trained with an Adam optimizer and gradient checkpointing. Assume data parallelism (DP) degree is 1.
+scenario: Size the per-GPU memory requirements for 8-stage pipeline parallelism of LLaMA-70B on H100. The model has 80 layers, hidden dim 8192, 64 attention heads, and is trained with an Adam optimizer and gradient checkpointing. Assume data parallelism (DP) degree is 1.
 question: For 8-stage pipeline parallel LLaMA-70B training on 80GB H100s with DP=1, how much memory does each stage need, does it fit, and what headroom remains?
 details:
-  realistic_solution: '70B params / 8 stages = 8.75B params/stage. BF16 weights: 8.75B * 2B = 17.5GB. Adam optimizer requires FP32 states normally (first moment, second moment, FP32 master weights = 12 bytes/param), but with BF16 Adam it is 6 bytes/param = 52.5 GB. Gradients are another 2 bytes/param = 17.5 GB. With DP=1, ZeRO parallelism cannot be used to shard optimizer states because there are no DP peers. The total memory for BF16 Adam would be 17.5 + 52.5 + 17.5 = 87.5 GB, which OOMs the 80 GB limit. The solution is to use 8-bit Adam (2 bytes/param = 17.5 GB), bringing total footprint to 17.5 + 17.5 + 17.5 + 0.335 (acts) = 52.8 GB, leaving ~27.2 GB headroom.'
+  realistic_solution: |
+    70B / 8 stages = 8.75B parameters. BF16 Weights = 17.5 GB. BF16 Adam optimizer demands 6 bytes/param = 52.5 GB. Gradients = 17.5 GB. Total = 87.5 GB, causing immediate OOM on an 80 GB limit. ZeRO-3 cannot save you because Data Parallelism degree is 1. The mandatory architectural solution is to implement 8-bit Adam (2 bytes/param = 17.5 GB), bringing total footprint down to ~53 GB and leaving ~27 GB of headroom.
   common_mistake: |
     **The Pitfall:** Forgetting the optimizer state memory entirely, or incorrectly assuming ZeRO can be used when Data Parallelism is 1.
-    
-    **The Rationale:** Engineers frequently estimate memory strictly based on weight size (17.5 GB) and falsely conclude it easily fits, neglecting the massive footprint of the Adam optimizer states (which are 3-6x the size of the weights in FP32/BF16).
-    
+    **The Rationale:** Engineers frequently estimate memory strictly based on weight size (17.5 GB) and falsely conclude it easily fits, neglecting the massive footprint of the Adam optimizer states.
     **The Consequence:** Training jobs crash with Out-Of-Memory errors immediately upon initialization, forcing a complete redesign of the parallelism strategy or forcing adoption of quantized optimizers.
   napkin_math: |
-    - **Weights per stage**: 70B / 8 = 8.75B params. At 2 bytes/param = 17.5 GB.
-    - **Optimizer state (BF16 Adam)**: 8.75B * 6 bytes/param = 52.5 GB.
-    - **Gradient buffer**: 8.75B * 2 bytes/param = 17.5 GB.
-    - **Activations (checkpointed)**: ~335 MB.
-    - **Total without ZeRO (DP=1)**: 17.5 + 52.5 + 17.5 + 0.335 = 87.8 GB.
-    - **Result**: **Does NOT fit** in 80 GB.
-    - **Solution**: Must use 8-bit Adam (2 bytes/param -> 17.5 GB), reducing total memory to 17.5 + 17.5 + 17.5 + 0.335 = **52.8 GB**, leaving **27.2 GB headroom**.
+    1. **Assumptions & Constraints:**
+       - Model: LLaMA-70B (8 stages).
+       - GPUs: 80 GB H100. DP=1 (ZeRO cannot be used).
+       - Weights per stage: 70B / 8 = 8.75B parameters.
+    2. **Calculations:**
+       - Weights (BF16): 8.75B * 2 bytes = 17.5 GB.
+       - Optimizer State (BF16 Adam): 8.75B * 6 bytes = 52.5 GB.
+       - Gradients (BF16): 8.75B * 2 bytes = 17.5 GB.
+       - Total without ZeRO: 17.5 + 52.5 + 17.5 = 87.5 GB (Exceeds 80 GB limit).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Capacity-Bound.** The standard Adam optimizer states consume 3x the memory of the weights, causing an immediate OOM. Switching to 8-bit Adam reduces optimizer memory to 17.5 GB, bringing total footprint to ~53 GB and allowing the model to safely fit.
 status: published
 provenance: imported
 requires_explanation: false

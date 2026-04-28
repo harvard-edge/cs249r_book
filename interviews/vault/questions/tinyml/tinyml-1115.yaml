@@ -8,7 +8,7 @@ competency_area: power
 bloom_level: analyze
 phase: inference
 title: ESP32-S3 Brownout During Concurrent Vision Inference and WiFi TX
-scenario: You are deploying a wake-word and image classification pipeline on an ESP32-S3 (240 MHz dual-core Xtensa, 512 KB SRAM, 8 MB PSRAM, vector extensions for INT8). The system mostly sleeps, but upon acoustic wake-up, it captures an image, runs a quantized CNN, and transmits the result over WiFi. In field testing, the device frequently resets with a 'Brownout detector was triggered' error precisely when the vision model finishes and transmission begins, despite the LiPo battery being over 80% charged.
+scenario: You are deploying a wake-word and image classification pipeline on an ESP32-S3. The system mostly sleeps, but upon acoustic wake-up, it captures an image, runs a quantized CNN, and transmits the result over WiFi. In field testing, the device frequently resets with a 'Brownout detector was triggered' error precisely when the vision model finishes and transmission begins, despite the LiPo battery being over 80% charged.
 question: Why does ESP32-S3 vision inference plus WiFi TX trigger brownout on an 80% charged LiPo battery?
 details:
   realistic_solution: 'The root cause is a transient current spike exceeding the voltage regulator''s capacity or the battery''s instantaneous discharge capability. Running both Xtensa cores at 240 MHz with vector instructions active draws significant power. When the WiFi modem simultaneously fires a TX burst, the combined peak current causes a sudden voltage drop, triggering the hardware brownout reset. The solution is to implement power capping by temporally decoupling the peak loads: use DVFS to scale the CPU down to 80MHz or pause inference during WiFi TX bursts.'
@@ -17,12 +17,19 @@ details:
     **The Rationale:** Candidates fixate on software execution boundaries or model sizes, completely ignoring the physical power domain interactions.
     **The Consequence:** Software optimizations are pursued that do not resolve the underlying hardware power delivery failure.
   napkin_math: |
-    - **Step 1:** CPU @ 240MHz (both cores active + vector ALU): ~100mA.
-    - **Step 2:** WiFi TX burst (802.11b, max power): ~340mA.
-    - **Step 3:** PSRAM/Flash continuous access: ~40mA.
-    - **Step 4:** Total instantaneous peak current: 100 + 340 + 40 = 480mA.
-    - **Step 5:** If the LiPo has an internal resistance of 0.5 ohms, the V=IR drop is 0.48A * 0.5Ω = 0.24V drop on a nominal 3.3V rail.
-    - **Result:** **This pushes the supply voltage below the 3.1V ESP32-S3 hardware brownout threshold, causing the reset.**
+    1. **Assumptions & Constraints:**
+       - CPU @ 240MHz (both cores active + vector ALU): ~100mA.
+       - WiFi TX burst (802.11b, max power): ~340mA.
+       - PSRAM/Flash continuous access: ~40mA.
+       - LiPo internal resistance: 0.5 ohms.
+       - ESP32-S3 hardware brownout threshold: 3.1V.
+       - Nominal 3.3V rail.
+    2. **Calculations:**
+       - Total instantaneous peak current: 100mA + 340mA + 40mA = 480mA.
+       - V=IR drop: 0.48A * 0.5 ohms = 0.24V.
+       - Supply voltage under load: 3.3V - 0.24V = 3.06V.
+    3. **Conclusion & Interpretation:**
+       - **Result: Power-Bound.** The 3.06V supply voltage falls below the 3.1V ESP32-S3 hardware brownout threshold, causing the reset.
 status: published
 provenance: imported
 requires_explanation: false

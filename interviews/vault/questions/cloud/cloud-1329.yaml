@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: Estimating Graph Fusion Bandwidth Savings
-scenario: You are deploying a Transformer model on a GPU with 2000 GB/s HBM bandwidth. In eager mode, an attention block processes inputs Q, K, and V (10MB each) sequentially: it computes P = Q * K^T (writing a 50MB intermediate to HBM), applies Softmax on P (reading and writing 50MB), and computes S * V to produce output O (10MB). By enabling a graph compiler (like XLA or TorchInductor), the entire attention mechanism is fused into a single kernel, avoiding intermediate materialization to HBM.
+scenario: You are deploying a Transformer model on a GPU. In eager mode, an attention block processes inputs Q, K, and V sequentially, materializing a 50MB intermediate to HBM. By enabling a graph compiler, the entire attention mechanism is fused into a single kernel, avoiding intermediate materialization to HBM.
 question: How much HBM traffic and latency does compiler fusion save per attention block?
 details:
   realistic_solution: By fusing the operations, the intermediate 50MB tensor P is kept entirely within SRAM. The compiler reduces the total memory traffic from 240MB (eager) to just 40MB (fused), saving 200MB of HBM traffic per block. At 2000 GB/s, this saves 100 microseconds of latency per block.
@@ -17,13 +17,19 @@ details:
     **The Rationale:** Candidates often assume compute FLOPs change during fusion, or forget to account for both the read and write operations of the intermediate 50MB tensor across the three distinct eager-mode kernels.
     **The Consequence:** Underestimating the massive bandwidth and latency savings provided by kernel fusion.
   napkin_math: |
-    1. **Eager Traffic (QK^T):** Read 10MB(Q) + 10MB(K), Write 50MB(P) = 70MB.
-    2. **Eager Traffic (Softmax):** Read 50MB(P), Write 50MB(S) = 100MB.
-    3. **Eager Traffic (S*V):** Read 50MB(S) + 10MB(V), Write 10MB(O) = 70MB.
-    4. **Total Eager Traffic:** 70 + 100 + 70 = 240MB.
-    5. **Fused Traffic:** Read 10MB(Q) + 10MB(K) + 10MB(V) = 30MB. Write 10MB(O). Total Fused = 40MB.
-    6. **Savings:** 240MB - 40MB = 200MB saved.
-    7. **Latency Saved:** 200MB / 2000 GB/s = 0.2 GB / 2000 GB/s = 0.0001 seconds = **100 microseconds**.
+    1. **Assumptions & Constraints:**
+       - GPU Bandwidth: 2000 GB/s.
+       - Inputs (Q, K, V): 10MB each. Output (O): 10MB.
+       - Intermediate tensor (P, S): 50MB each.
+    2. **Calculations:**
+       - Eager Traffic (Q*K^T): Read 20MB (Q,K) + Write 50MB (P) = 70MB.
+       - Eager Traffic (Softmax): Read 50MB (P) + Write 50MB (S) = 100MB.
+       - Eager Traffic (S*V): Read 60MB (S,V) + Write 10MB (O) = 70MB.
+       - Total Eager Traffic: 70 + 100 + 70 = 240MB.
+       - Fused Traffic: Read 30MB (Q,K,V) + Write 10MB (O) = 40MB.
+       - Bandwidth Saved: 240MB - 40MB = 200MB.
+       - Latency Saved: 200MB / 2000 GB/s = 0.0001 seconds = 100 microseconds.
+    3. **Conclusion & Interpretation:** **Graph fusion saves 200MB of HBM traffic and 100 microseconds of latency per block by keeping intermediates in SRAM. Result: Memory-Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

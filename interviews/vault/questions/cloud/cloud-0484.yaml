@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Two-Node Scaling Cliff
-scenario: You are an ML Systems Engineer at a startup scaling up the training of a new 175B parameter LLM. On a single DGX H100 server with 8 GPUs connected by NVLink, you achieve a stable training throughput. To accelerate training, you are given a second, identical server connected via an InfiniBand NDR switch (400 Gbps). When you scale the job from 8 GPUs to 16 GPUs across the two nodes, you observe that your training throughput only increases by 20%, far short of the near-linear scaling you expected. Your profiler shows that the time spent in the `all_reduce` communication step has increased dramatically.
+scenario: You are an ML Systems Engineer at a startup scaling up the training of a new 175B parameter LLM. On a single DGX H100 server with 8 GPUs connected by NVLink, you achieve a stable training throughput. To accelerate training, you are given a second, identical server connected via an InfiniBand NDR switch. When you scale the job from 8 GPUs to 16 GPUs across the two nodes, you observe that your training throughput only increases by 20%, far short of the near-linear scaling you expected. Your profiler shows that the time spent in the `all_reduce` communication step has increased dramatically.
 question: "What hardware bottleneck is responsible for the poor 8-to-16 GPU scaling and increased all_reduce time?"
 details:
   realistic_solution: The bottleneck is the InfiniBand network connecting the two servers. While extremely fast for a traditional HPC network, its bandwidth is an order of magnitude lower than the NVLink fabric connecting the GPUs within a single server. The `all_reduce` operation for synchronizing gradients, which was previously contained within the ultra-high-bandwidth NVLink domain, must now traverse the significantly slower inter-node link. This creates a communication bottleneck that dominates the total step time, leading to poor scaling efficiency.
@@ -17,10 +17,16 @@ details:
     **The Rationale:** Engineers underestimate the massive bandwidth gap between on-node (NVLink) and off-node (InfiniBand) interconnects.
     **The Consequence:** They waste time trying to optimize NCCL or software settings when the fundamental limit is the physical network bandwidth dropping by an order of magnitude.
   napkin_math: |
-    - The gradients for a 175B parameter model (FP16) require transferring ~350 GB of data during an all-reduce step.
-    - NVLink domain bandwidth is roughly 900 GB/s.
-    - InfiniBand NDR bandwidth is only 50 GB/s (400 Gbps).
-    - **The network physically cannot support the required volume at the same rate, severely bottlenecking multi-node scaling.**
+    1. **Assumptions & Constraints:**
+       - Model: 175B parameters (FP16).
+       - NVLink domain bandwidth: ~900 GB/s.
+       - InfiniBand NDR bandwidth: 50 GB/s (400 Gbps).
+    2. **Calculations:**
+       - Gradient transfer per all-reduce step: ~350 GB (FP16).
+       - Intra-node transfer: 350 GB / 900 GB/s ≈ 0.38s.
+       - Inter-node transfer: 350 GB / 50 GB/s = 7s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bandwidth-Bound. The network physically cannot support the required volume at the same rate, severely bottlenecking multi-node scaling.**
   options:
   - The PCIe Gen5 bus connecting the GPUs to the CPU is saturated by the increased data load from 16 GPUs.
   - The InfiniBand network connecting the two servers has insufficient bandwidth for the gradient exchange of a 175B model.

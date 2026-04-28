@@ -8,21 +8,25 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Diagnosing MoE AllToAll Network Bottlenecks
-scenario: You are debugging performance for an 8x8B Mixture-of-Experts (MoE) model training on 64 H100
-  GPUs (8 nodes, 8 GPUs/node). Intra-node bandwidth is 900 GB/s via NVLink, but inter-node is limited
-  to 4x 400 Gbps InfiniBand NICs per node. Profiling shows GPU utilization drops to 22% during the expert
-  routing phase, with network metrics revealing severe InfiniBand switch buffer overflows and packet drops.
-  What is the root cause of this bottleneck during the AllToAll phase, and how do you mitigate it?
+scenario: You are debugging performance for an 8x8B Mixture-of-Experts (MoE) model training on 64 GPUs. Profiling shows GPU utilization drops to 22% during the expert routing phase, with network metrics revealing severe InfiniBand switch buffer overflows and packet drops.
 question: "What is the root cause of this bottleneck during the AllToAll phase, and how do you mitigate it?"
 details:
-  realistic_solution: The root cause is network incast from 64 GPUs simultaneously sending data to each
-    other. Mitigation involves implementing a hierarchical AllToAll (routing locally over NVLink first,
-    then chunking over IB, then locally) or enabling InfiniBand congestion control (DCQCN).
-  common_mistake: Assuming the bottleneck is purely total bandwidth capacity and suggesting adding more
-    NICs, while ignoring the bursty, many-to-many network incast problem that causes switch buffer exhaustion.
-  napkin_math: In naive AllToAll across 64 GPUs, there are 64 * 63 = 4,032 concurrent micro-burst flows
-    hitting the leaf switches. If each GPU sends an 8MB token batch, that's 512MB of burst traffic, which
-    easily overwhelms typical 16MB-32MB top-of-rack switch shared buffers.
+  realistic_solution: |
+    The root cause is network incast from 64 GPUs simultaneously sending data to each other. Mitigation involves implementing a hierarchical AllToAll (routing locally over NVLink first, then chunking over IB, then locally) or enabling InfiniBand congestion control (DCQCN) with optimized ECN thresholds.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is purely total bandwidth capacity and suggesting adding more NICs.
+    **The Rationale:** Candidates ignore the bursty, many-to-many network incast problem that causes switch buffer exhaustion, applying simple throughput math instead of queueing realities.
+    **The Consequence:** Wasted CapEx on NICs without resolving the micro-burst packet drops and buffer overflows.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 64 GPUs performing naive AllToAll over InfiniBand.
+       - Token batch size: 8MB per GPU.
+       - Top-of-rack (ToR) switch shared buffer: 16MB-32MB.
+    2. **Calculations:**
+       - Concurrent micro-burst flows: 64 * 63 = 4,032 flows.
+       - Total burst traffic hitting leaf switches: 64 * 8MB = 512MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Switch Buffer-Bound (Incast).** 512MB burst massively exceeds the 32MB shared buffer.
 status: published
 provenance: imported
 requires_explanation: false

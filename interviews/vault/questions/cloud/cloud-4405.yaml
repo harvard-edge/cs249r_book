@@ -8,12 +8,24 @@ competency_area: latency
 bloom_level: create
 phase: both
 title: Disaggregated Prefill-Decode Architecture for Tail Latency Control
-scenario: Your LLM serving team observes that long-prompt requests (input > 4K tokens) are causing p99 TTFT (time to first token) to spike to 3.2 seconds, even when the median prompt is 256 tokens with p50 TTFT of 80ms. GPU utilization is 72%. Your current monolithic architecture runs prefill and decode on the same H100 pool. Design a disaggregated prefill/decode architecture that achieves p99 TTFT < 500ms while maintaining end-to-end p99 generation latency < 4 seconds for a 500-token output. Include the KV cache transfer cost in your analysis.
-question: How would you design a disaggregated prefill/decode architecture to get p99 TTFT below 500 ms and p99 500-token latency below 4 s, including KV transfer?
+scenario: Your LLM serving team observes that long-prompt requests (input > 4K tokens) are causing p99 TTFT to spike to 3.2 seconds, even when the median prompt is 256 tokens with p50 TTFT of 80ms. GPU utilization is 72%. Your current monolithic architecture runs prefill and decode on the same GPU pool.
+question: How would you design a disaggregated prefill/decode architecture that achieves p99 TTFT < 500ms while maintaining end-to-end p99 generation latency < 4 seconds for a 500-token output, including the KV cache transfer cost?
 details:
-  realistic_solution: 'Disaggregation design: separate prefill fleet (compute-optimized: H100 @ 989 TFLOPS) from decode fleet (memory-bandwidth-optimized: MI300X @ 5.3 TB/s). Prefill H100: 4K-token prefill takes 4,096 × 2 FLOPs × 70B params = 573 TFLOPs. On a single H100 (989 TFLOPS), this takes 579ms (compute-bound), which fails the 500ms SLA. We must use Tensor Parallelism (TP=2) for the prefill fleet. TP=2 prefill takes 573 / (2 × 989 × 0.9) ≈ 322ms. KV cache size for 4K tokens (80 layers, GQA-8): ~1.34GB. Transfer at 400 Gbps (50 GB/s) Ethernet = 26.8ms. Total TTFT ≈ 349ms. Target p99 < 500ms met. End-to-end for 500 tokens on a single MI300X: 500 steps × (140GB / 5.3 TB/s) = 500 × 26.4ms = 13.2s, failing the SLA. To achieve < 4s, we must use Tensor Parallelism (TP=4) on the decode fleet. TP=4 aggregate bandwidth = 21.2 TB/s. Step time = 6.6ms. 500 tokens × 6.6ms = 3.3s. Meets <4s SLA.'
-  common_mistake: Ignoring the KV cache transfer overhead in disaggregated architectures. After prefill finishes on a prefill GPU, the KV cache (often 10-100MB for long contexts) must be transferred to the decode GPU before generation begins. At 400 Gbps NVLink or 100 Gbps Ethernet, this transfer takes non-trivial time and can dominate TTFT for long sequences.
-  napkin_math: 'Prefill compute: 2 × 70B params × 4,096 tokens = 573 TFLOPs. Single H100 = 579ms (Fails SLA). TP=2 H100 ≈ 322ms. KV cache size (70B, GQA-8): 80 layers × 2 (K,V) × 8 heads × 128 dim × 4,096 tokens × 2 bytes = 1.34 GB. Transfer over 400 Gbps (50 GB/s) = 26.8ms. TTFT = 322ms + 26.8ms ≈ 349ms (well under 500ms p99). Decode latency: 500 tokens. Single MI300X step: 140GB / 5.3 TB/s = 26.4ms. Total = 13.2s (Fails SLA). With TP=4: 140GB / 21.2 TB/s = 6.6ms. Total = 3.3s (Meets <4s SLA). Note: batching increases throughput but does not decrease single-request generation latency.'
+  realistic_solution: 'Design a separate prefill fleet (compute-optimized) from decode fleet (memory-bandwidth-optimized). Use Tensor Parallelism (TP=2) for prefill to meet TTFT SLA, then transfer the KV cache via fast network links, and use TP=4 for decode to meet the generation latency SLA.'
+  common_mistake: |
+    **The Pitfall:** Ignoring the KV cache transfer overhead in disaggregated architectures.
+    **The Rationale:** Engineers focus on compute decoupling but forget the data movement latency between prefill and decode fleets.
+    **The Consequence:** The system misses TTFT SLAs because the KV cache transfer latency dominates for long contexts.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 70B params, 4K tokens.
+       - H100 compute (989 TFLOPS), MI300X decode (5.3 TB/s).
+    2. **Calculations:**
+       - Prefill compute: 2 * 70B * 4096 = 573 TFLOPs. Single H100 = 579ms. TP=2 H100 ≈ 322ms.
+       - KV cache transfer: 1.34 GB over 50 GB/s Ethernet = 26.8ms. TTFT ≈ 349ms.
+       - Decode (MI300X): 140GB / 5.3 TB/s = 26.4ms/step. TP=4 decode = 6.6ms/step. 500 tokens = 3.3s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Disaggregated architecture with TP=2 for prefill and TP=4 for decode meets SLAs.**
 status: published
 provenance: imported
 requires_explanation: true

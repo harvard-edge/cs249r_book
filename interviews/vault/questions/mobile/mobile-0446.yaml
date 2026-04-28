@@ -8,21 +8,26 @@ competency_area: precision
 bloom_level: apply
 phase: inference
 title: The Night-Vision Accuracy Collapse
-scenario: You are an ML engineer on the automotive team, optimizing a driver drowsiness detection model for a new car. In FP16, the model achieves 99% accuracy. To meet the 15 FPS target, you quantize it to INT8 using post-training static quantization. The model's accuracy on the daytime validation set is 98.5%, but it collapses to less than 50% on night-time driving clips. Profiling reveals activation spikes in key CNN layers when headlights appear.
+scenario: "You are an ML engineer optimizing a driver drowsiness detection model. In FP16, the model achieves 99% accuracy. To meet the 15 FPS target, you quantize it to INT8 using post-training static quantization (PTQ). Daytime accuracy is 98.5%, but it collapses to <50% at night. Profiling reveals activation spikes in key CNN layers when headlights appear."
 question: "Why does INT8 PTQ keep 98.5% daytime accuracy but collapse below 50% on night clips with headlight activation spikes?"
 details:
   realistic_solution: |
-    The most likely cause is a quantization range mismatch due to an unrepresentative calibration dataset. Post-training static quantization determines the scaling factor from a small sample of data. Your calibration set was likely dominated by daytime images where activation values are low. At night, headlight glare causes activation values to spike far beyond the calibrated maximum, leading to clipping (overflow). The INT8 values saturate at 127, erasing critical information. The solution is to create a new calibration dataset that includes a representative mix of both daytime and night-time clips, especially those with high-dynamic-range scenes like headlight glare. Re-running quantization with this new dataset will produce a more robust scaling factor that can handle the full range of activation values seen in production.
+    The accuracy collapse is caused by severe clipping overflow due to an unrepresentative calibration dataset. Post-Training Quantization (PTQ) establishes its affine mapping scale factor using activation distributions from the calibration data. Without high-dynamic-range night clips (headlights), the scale is set too narrowly. When headlight spikes occur, they far exceed the integer range maximum (127), saturating the tensors and destroying spatial feature integrity. Inject diverse, high-magnitude edge cases into the calibration set.
   common_mistake: |
     **The Pitfall:** Blaming the hardware or quantization algorithm immediately.
     **The Rationale:** Engineers assume the NPU's INT8 is buggy or jump to complex solutions like QAT without diagnosing the unrepresentative calibration dataset.
     **The Consequence:** Wasting time on model re-architecture instead of simply fixing the calibration data.
   napkin_math: |
-    - **Daytime calibration max activation:** 6.0.
-    - **INT8 scale factor:** S = 6.0 / 127 ≈ 0.047.
-    - **Nighttime headlight activation:** Spikes to e.g., 20.0.
-    - **Quantized value:** 20.0 / 0.047 ≈ 425 (overflows INT8 max of 127).
-    - **Result:** **Saturated values erase critical information, causing accuracy collapse.**
+    1. **Assumptions & Constraints:**
+       - Daytime calibration max activation: 6.0.
+       - Nighttime headlight activation: 20.0.
+       - Target precision: INT8 (max value 127).
+    2. **Calculations:**
+       - PTQ Scale Factor (S): 6.0 / 127 = 0.047.
+       - Nighttime float quantization: 20.0 / 0.047 = 425.5.
+       - Clipped integer: min(425, 127) = 127.
+    3. **Conclusion & Interpretation:**
+       - **Result: Massive data loss.** The out-of-distribution high values saturate to 127, creating a **numerical-overflow bottleneck** that ruins inference.
   options:
   - The mobile NPU has buggy INT8 support. Keep the problematic layers in FP16 (mixed precision) and quantize the rest.
   - The model architecture is unstable. Add more Batch Normalization layers to better regulate activation distributions before re-quantizing.

@@ -11,19 +11,21 @@ title: TEEs for Cloud Medical Inference
 scenario: Deploying a 5GB Vision Transformer (ViT-L) for medical image diagnosis on public cloud infrastructure. Strict HIPAA mandates require data-in-use encryption. Expected peak load is 200 QPS. You must utilize Trusted Execution Environments (TEEs).
 question: How would you deploy the 5GB ViT-L with TEEs for HIPAA data-in-use encryption while supporting 200 QPS?
 details:
-  realistic_solution: Utilize Confidential VMs (e.g., AMD SEV-SNP or Intel TDX) paired with Confidential GPUs (e.g., NVIDIA H100 with CC enabled). CPU TEEs strictly limit enclave memory (often 128MB-512MB natively without paging penalties) and lack parallel compute. Confidential GPUs provide full memory encryption at hardware speed but introduce latency during CPU-to-GPU memory transfers via PCIe due to bounce buffers and encryption overhead. To amortize this PCIe encryption penalty, implement dynamic batching. The tradeoff here is slightly increased baseline latency (waiting for the batch window) in exchange for massively higher throughput and strict compliance with data-in-use encryption regulations.
+  realistic_solution: Utilize Confidential VMs (e.g., AMD SEV-SNP or Intel TDX) paired with Confidential GPUs (e.g., NVIDIA H100 with CC enabled). CPU TEEs strictly limit enclave memory and lack parallel compute. Confidential GPUs provide full memory encryption at hardware speed but introduce latency during CPU-to-GPU memory transfers via PCIe due to bounce buffers and encryption overhead. To amortize this PCIe encryption penalty, implement dynamic batching. The tradeoff here is slightly increased baseline latency in exchange for massively higher throughput.
   common_mistake: |
     **The Pitfall:** Using CPU-based TEEs (like Intel SGX) for the entire model.
     **The Rationale:** CPU TEEs lack the memory bandwidth, parallel compute, and enclave memory size required for large ViTs.
     **The Consequence:** Results in massive out-of-memory errors and multi-second latencies, completely failing the 200 QPS target.
   napkin_math: |
-    - **Target Batch Size:** 8 (1024x1024x3 image = ~3MB, Total 24MB).
-    - **PCIe C-GPU Encryption Limit:** Bounce buffers drop effective bandwidth to ~10GB/s.
-    - **Transfer Time:** 24MB / 10GB/s = ~2.4ms.
-    - **Execution Time:** H100 BS=8 ViT-L forward pass = ~15ms.
-    - **Total Time:** 17.4ms per batch.
-    - **Throughput Needed:** 200 QPS / 8 = 25 batches/sec (40ms interval).
-    - **Final Result:** **Dynamic batching adds slightly to latency (40ms + 17.4ms = 57.4ms) but easily supports 200 QPS with TEE protection.**
+    1. **Assumptions & Constraints:**
+       - 200 QPS target. 5GB ViT-L. Target Batch Size: 8 (3MB each = 24MB).
+       - PCIe C-GPU Encryption: 10GB/s effective. H100 BS=8 forward: 15ms.
+    2. **Calculations:**
+       - Transfer Time: 24MB / 10GB/s = 2.4ms.
+       - Total Time: 2.4ms + 15ms = 17.4ms.
+       - Interval for 200 QPS: 8 / 200 = 40ms.
+    3. **Conclusion & Interpretation:**
+       - **Dynamic batching takes 17.4ms per 40ms window, easily supporting 200 QPS with TEE protection. Result: Latency-Bound mitigated.**
 status: published
 provenance: imported
 requires_explanation: false

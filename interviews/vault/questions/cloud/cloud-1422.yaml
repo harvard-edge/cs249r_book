@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnosing Input Stationary Bottlenecks in MLP Workloads
-scenario: You are porting a DLRM model with $4096 \times 4096$ MLP layers to a legacy accelerator with a 64×64 MAC array and 2MB SRAM. The chip uses a strict Input Stationary (IS) dataflow. At batch size 256, DRAM bandwidth (800 GB/s) is saturated but MAC utilization is 4%.
+scenario: You are porting a DLRM model with $4096 \times 4096$ MLP layers to a legacy accelerator with a 64x64 MAC array and 2MB SRAM using a strict Input Stationary (IS) dataflow. At batch size 256, DRAM bandwidth (800 GB/s) is saturated but MAC utilization is 4%.
 question: Why does the Input Stationary dataflow bottleneck MLP layers, and how do you quantify the architectural mismatch?
 details:
   realistic_solution: The Input Stationary architecture pins input activations in the MACs and streams weights. Since the 64x64 array only holds a tile of 64 inputs at once, a batch of 256 requires 4 passes. This means the massive 32MB weight matrix is redundantly loaded from DRAM 4 times per layer, thrashing bandwidth. The fix is to transpose the matrix formulation in software (switching inputs and weights) to trick the compiler into treating the massive weights as the 'stationary inputs'.
@@ -17,14 +17,17 @@ details:
     **The Rationale:** Failing to realize that at Batch=256, the layer should be compute-bound, but the hardware dataflow is forcing redundant memory reads.
     **The Consequence:** Attempting to prune or quantize the model when a simple software transpose (treating weights as inputs) would fix the dataflow mismatch.
   napkin_math: |
-    - Weights = $4096 \times 4096 \times 2\text{B (FP16)} = 33.55\text{ MB}$.
-    - The 64×64 IS array holds 64 input tokens at a time.
-    - Input tiles needed for Batch 256 = 256 / 64 = 4 passes.
-    - Weight data loaded from DRAM = 4 passes × 33.55 MB = 134.2 MB per layer.
-    - Total compute = $2 \times 256 \times 4096 \times 4096 = 8.59\text{ GFLOPs}$.
-    - Arithmetic Intensity = $8.59\text{ GFLOPs} / 134.2\text{ MB} \approx 64\text{ FLOPs/Byte}$.
-    - Max throughput at 800 GB/s = $800 \times 64 = 51.2\text{ TFLOPs/s}$.
-    - **Result: This low arithmetic intensity heavily bottlenecks the chip, driving MAC utilization to single digits.**
+    1. **Assumptions & Constraints:**
+       - Weights: $4096 \times 4096$ FP16 = 33.55 MB.
+       - Hardware: Input Stationary, 64x64 MAC array, 800 GB/s DRAM.
+    2. **Calculations:**
+       - Input tiles for Batch 256: 256 / 64 = 4 passes.
+       - Weight data loaded: 4 passes * 33.55 MB = 134.2 MB per layer.
+       - Total compute: $2 \times 256 \times 4096 \times 4096 = 8.59\text{ GFLOPs}$.
+       - Arithmetic Intensity: 8.59 GFLOPs / 134.2 MB = 64 FLOPs/Byte.
+       - Max throughput: 800 GB/s * 64 = 51.2 TFLOPs/s.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bandwidth Bound (Dataflow Mismatch).** The Input Stationary architecture forces redundant memory reads, tanking arithmetic intensity and MAC utilization.
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,9 +40,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-created_at: '2026-03-23T22:56:47.956402'

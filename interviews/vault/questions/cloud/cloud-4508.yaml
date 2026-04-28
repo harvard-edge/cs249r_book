@@ -8,28 +8,26 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: Single-Batch Token Latency
-scenario: A 30B parameter LLM is served on a single H100 SXM (3.35 TB/s HBM bandwidth)
-  at batch size 1, using speculative decoding with a 1B FP16 draft model that proposes
-  4 tokens per step. Empirically the draft model runs at 1.4 ms per forward pass
-  and the target model accepts ~70% of proposed tokens.
-question: Calculate the effective latency per accepted token under speculative decoding,
-  comparing it against the plain memory-bandwidth-bound autoregressive baseline.
-  Identify the acceptance-rate threshold below which speculative decoding underperforms
-  plain decoding.
+scenario: A 30B parameter LLM is served on a single GPU at batch size 1, using speculative decoding with a 1B FP16 draft model that proposes 4 tokens per step. Empirically the draft model runs at 1.4 ms per forward pass and the target model accepts ~70% of proposed tokens.
+question: "Calculate the effective latency per accepted token under speculative decoding, comparing it against the plain memory-bandwidth-bound autoregressive baseline. Identify the acceptance-rate threshold below which speculative decoding underperforms plain decoding."
 details:
-  realistic_solution: 'Plain decode: 60 GB FP16 weights / 3.35 TB/s = 17.9 ms/token.
-    Speculative: each step costs 4 * 1.4 ms (draft) + 17.9 ms (target verifies all
-    4 candidates in parallel) = 23.5 ms, producing E[accepted] = 1 + 4*0.7 = 3.8
-    tokens (1 always-correct + 4 proposals). Effective latency = 23.5 / 3.8 = 6.18
-    ms/accepted-token, a 2.9x speedup. Break-even acceptance rate p* satisfies (1+4p)/23.5
-    = 1/17.9, giving p* = 0.078. Below 8% acceptance, speculative decoding is slower
-    than plain.'
-  common_mistake: Reporting only the plain-decode 17.9 ms answer, or assuming the
-    draft model''s overhead is negligible without checking that the breakeven acceptance
-    threshold is non-trivial when target verification time is much larger than draft
-    forward time.
-  napkin_math: 'Plain: 17.9 ms/token. Spec: (4*1.4 + 17.9)/(1+4*0.7) = 23.5/3.8 =
-    6.18 ms/token. Speedup: 17.9/6.18 = 2.9x. Breakeven p* = 0.078.'
+  realistic_solution: 'Plain decode: 60 GB FP16 weights / 3.35 TB/s = 17.9 ms/token. Speculative: each step costs 4 * 1.4 ms (draft) + 17.9 ms (target verifies all 4 candidates in parallel) = 23.5 ms, producing E[accepted] = 1 + 4*0.7 = 3.8 tokens (1 always-correct + 4 proposals). Effective latency = 23.5 / 3.8 = 6.18 ms/accepted-token, a 2.9x speedup. Break-even acceptance rate p* satisfies (1+4p)/23.5 = 1/17.9, giving p* = 0.078. Below 8% acceptance, speculative decoding is slower than plain.'
+  common_mistake: |
+    **The Pitfall:** Assuming the draft model's overhead is negligible.
+    **The Rationale:** Focusing purely on the target model's speedup without verifying the breakeven acceptance rate.
+    **The Consequence:** Deploying speculative decoding on tasks with low acceptance (e.g., code generation with a poor draft model), resulting in net latency regression.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Target Model: 30B FP16 (60GB weights). Memory Bandwidth: 3.35 TB/s.
+       - Draft Model: 4 proposals, 1.4ms per pass. Acceptance: 70%.
+    2. **Calculations:**
+       - Plain Decode = 60 GB / 3.35 TB/s = 17.9 ms/token.
+       - Speculative Step = (4 * 1.4 ms) + 17.9 ms = 23.5 ms.
+       - Expected Accepted = 1 + (4 * 0.70) = 3.8 tokens.
+       - Effective Latency = 23.5 ms / 3.8 = 6.18 ms/token.
+       - Breakeven Acceptance (p*) = (1 + 4p) / 23.5 = 1 / 17.9 -> p* = 0.078 (7.8%).
+    3. **Conclusion & Interpretation:**
+       - **Result: 2.9x Speedup (Memory-Bandwidth-Bound).** Effective latency drops to 6.18ms. Speculative decoding becomes a net slowdown if acceptance falls below 8%.
 status: draft
 provenance: llm-draft
 expected_time_minutes: 6

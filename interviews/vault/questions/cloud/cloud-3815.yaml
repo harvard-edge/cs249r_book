@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: 'MoE Training Instability: Expert Collapse Diagnosis'
-scenario: During MoE training on 128 H100 GPUs, you notice that after 50K steps, your training loss suddenly spikes and doesn't recover. Inspecting the router statistics, you find that expert 5 receives 0 tokens and expert 2 receives 45% of all tokens. The remaining 55% is spread across the other 6 experts.
+scenario: During MoE training on 128 GPUs, training loss suddenly spikes after 50K steps. Inspecting the router statistics, you find that expert 5 receives 0 tokens and expert 2 receives 45% of all tokens. The remaining 55% is spread across the other 6 experts.
 question: What caused this expert collapse, and how do you recover the training run?
 details:
   realistic_solution: 'This is expert collapse — a runaway feedback loop: (1) expert 2''s weights become slightly better → router sends more tokens → expert 2 gets better training signal → router sends even more tokens → expert 5 gets zero tokens → expert 5''s weights don''t update → expert 5 becomes permanently dead. The loss spike occurs when expert 2 becomes overloaded and starts dropping tokens (capacity overflow), suddenly losing 45% of the batch''s MLP computation. Recovery strategy: (1) Roll back to a checkpoint before collapse (monitor router entropy during training — when entropy drops below threshold, save). (2) Reinitialize the dead expert: copy expert 2''s weights to expert 5 (with small noise perturbation), then add noise to the router''s bias toward expert 5. (3) Increase α (load-balancing coefficient) from 0.01 to 0.03-0.05 for a warmup period. (4) Add a Z-loss (penalizes large router logits) to prevent any expert from dominating the softmax. (5) Use expert choice routing for the recovery phase. Prevention: set α appropriately from the start, use Z-loss, monitor per-expert token counts with early-stopping alerts.'
@@ -17,10 +17,9 @@ details:
     **The Rationale:** Engineers assume forcing better distribution will magically pull the router out of its rut.
     **The Consequence:** If collapse has already occurred, the router's weights are stuck. The dead expert's routing scores are heavily negative and will completely fail to recover with standard gradient updates.
   napkin_math: |
-    1. Baseline uniform router entropy (8 experts): H = -Σ p_i log p_i = ln(8) ≈ 2.08.
-    2. Collapsed state: Expert 2 = 0.45. Expert 5 = 0. Other 6 experts = (1 - 0.45) / 6 = 0.0917 each.
-    3. Collapsed entropy: H ≈ -(0.45*ln(0.45) + 6 * 0.0917*ln(0.0917)) ≈ 1.67.
-    4. **Result: The ~20% drop in entropy signals total collapse; Expert 2 exceeds safe capacity limits (e.g., 1.25x capacity drops if >15.6% assigned).**
+    1. Assumptions & Constraints: 8 experts. Uniform baseline entropy H = -Σ p_i ln(p_i) = ln(8) ≈ 2.08. Collapsed state: E2 = 0.45, E5 = 0, Other 6 = 0.55 / 6 ≈ 0.0917 each.
+    2. Calculations: Collapsed H ≈ -(0.45*ln(0.45) + 6*0.0917*ln(0.0917)) ≈ 1.67.
+    3. Conclusion & Interpretation: **Result: ~20% drop in entropy signals total collapse. Bottleneck: Routing Capacity Overflow.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,32 +8,24 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: both
 title: Optimizing Privacy Guardrails on Edge TPU
-scenario: You are deploying a privacy guardrail model that detects and blurs bystander
-  faces on a smart camera powered by a Google Coral Edge TPU (4 TOPS INT8, 2W). A
-  recent update introduced a fairness-aware custom activation function to reduce demographic
-  bias, but inference latency spiked to 80ms per frame. Profiling shows the compiler
-  partitioned the model because the new operation lacks INT8 support, forcing intermediate
-  data back to the host CPU over the USB/PCIe bus. Analyze this bottleneck and quantify
-  the performance impact of refactoring the model to be fully TPU-compatible.
-question: What is causing the Coral privacy model's 80ms latency spike, and how would
-  you refactor it to be fully TPU-compatible?
+scenario: A privacy guardrail model on a Coral Edge TPU (4 TOPS INT8, 2W) experienced a latency spike to 80ms after a fairness-aware custom activation was added.
+question: What is causing the Coral privacy model's 80ms latency spike, and how would you refactor it to be fully TPU-compatible?
 details:
-  realistic_solution: Analyze the Edge TPU compiler logs to pinpoint the unsupported
-    operation causing the CPU fallback. Refactor the model to replace the custom activation
-    with a supported INT8 equivalent (like ReLU6) and use Quantization-Aware Training
-    (QAT) to recover the fairness metrics. Recompiling a fully INT8 model ensures
-    100% on-device execution, eliminating transfer overhead.
-  common_mistake: Candidates often suggest moving to a higher-power edge device, violating
-    the 2W constraint, or abandoning the fairness improvements entirely. Many fail
-    to recognize the severe latency penalty caused by intermediate memory transfers
-    when a model graph is partitioned between the TPU and host CPU.
-  napkin_math: 'Initial partitioned state: TPU executes supported layers in 8ms, but
-    intermediate USB/PCIe data transfer and host CPU execution add 72ms (Total latency
-    = 80ms, throughput = 12.5 FPS). Optimized state: The fully INT8 mapped model requires
-    ~600 Mega-operations. At 4 TOPS (4 * 10^12 OPS), the theoretical compute time
-    is just 0.15ms (600M / 4T). Factoring in base USB/PCIe I/O overhead (~8ms), total
-    latency drops to ~8ms. This yields ~125 FPS, a 10x throughput improvement while
-    strictly adhering to the 2W power envelope.'
+  realistic_solution: The Edge TPU compiler lacks support for the custom activation function, forcing a graph partition. The TPU executes the first half, copies intermediate tensors over the slow USB/PCIe bus to the host CPU for the custom activation, and then copies data back. Refactor the model to replace the custom activation with an INT8-supported equivalent (e.g., ReLU6) and use Quantization-Aware Training (QAT) to recover fairness metrics, eliminating host-memory round-trips.
+  common_mistake: |
+    **The Pitfall:** Abandoning the 2W constraint by switching to heavier hardware.
+    **The Rationale:** Believing the 80ms latency is due to a lack of raw compute power rather than intermediate I/O synchronization overhead.
+    **The Consequence:** Breaking the thermal and power budget of the embedded device instead of fixing the compiler fallback.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Device: Coral Edge TPU (4 TOPS). Power: 2W.
+       - Model: ~600 Mega-operations. Partitioned latency: 80ms.
+    2. **Calculations:**
+       - Theoretical TPU Compute: 600,000,000 / 4,000,000,000,000 = 0.15 ms.
+       - I/O Overhead (PCIe/USB): ~8 ms base.
+       - Host fallback penalty: 80ms - 8.15ms = ~71.85 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound. CPU fallback causes a 71.85ms penalty. Recompiling fully to INT8 reduces total latency to ~8ms.**
 status: published
 provenance: imported
 requires_explanation: false

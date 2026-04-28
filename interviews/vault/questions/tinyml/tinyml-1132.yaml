@@ -8,31 +8,28 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: XIP vs DMA Paging on nRF5340
-scenario: You are deploying an always-on keyword spotting CNN on the Nordic nRF5340 (128 MHz app core, 256 KB SRAM, 1 MB flash, ~5mA active). The model requires 120 KB for intermediate activation buffers and 200 KB for quantized weights. Since the total memory footprint exceeds the 256 KB SRAM, you must evaluate two memory architectures: (A) storing weights in flash and reading them directly via XIP (Execute-in-Place) during inference, or (B) allocating a 32 KB SRAM double-buffer to dynamically page weights from flash via DMA.
+scenario: You deploy a keyword spotting CNN on the nRF5340 (128 MHz, 256 KB SRAM). The model requires 120 KB activations and 200 KB weights. Since the total exceeds SRAM, you evaluate Execute-in-Place (XIP) from Flash versus dynamically paging weights to a 32 KB SRAM buffer via DMA.
 question: What are the latency and power trade-offs between XIP and DMA double-buffering for weights on the nRF5340?
 details:
-  realistic_solution: Given the nRF5340's 128 MHz app core, flash access incurs significant wait states compared to zero-wait-state SRAM, which severely degrades MAC throughput if executing directly (Option A). Option B (DMA double-buffering) is the superior architectural choice. By using 32 KB of the remaining 136 KB SRAM (256 KB - 120 KB), the system can page in the next weight chunk via DMA while the CPU computes on the current chunk. This overlaps memory access with compute, maximizing the 128 MHz core utilization and allowing the device to return to a low-power sleep state faster, which is critical for optimizing the ~5mA active power budget.
+  realistic_solution: |
+    DMA double-buffering is vastly superior. Paging weights into the 32 KB SRAM buffer hides the Flash latency behind CPU compute, whereas XIP execution incurs massive wait-state penalties at 128 MHz, degrading MAC throughput.
   common_mistake: |
-    **The Pitfall:** Assuming XIP is zero-cost or evaluating only static memory capacity.
-    **The Rationale:** Candidates forget the significant wait-state penalty of reading from flash at 128 MHz compared to zero-wait-state SRAM.
-    **The Consequence:** They choose XIP, which severely degrades MAC throughput and increases power consumption.
+    **The Pitfall:** Assuming Execute-in-Place (XIP) from Flash is a zero-cost memory extension.
+    **The Rationale:** Candidates evaluate static memory capacity but forget the high wait-state penalty of reading Flash memory at 128 MHz.
+    **The Consequence:** Choosing XIP severely degrades throughput, increasing execution time and draining the battery.
   napkin_math: |
-    *   **Option A (XIP)**: Reading 200 KB from flash at 128 MHz incurs ~3 cycles per byte.
-    *   **Wait-state penalty**: 204,800 bytes * 3 cycles/byte = 614,400 cycles.
-    *   **Latency addition**: 614,400 / 128,000,000 = 4.8 ms per inference.
-    *   **Power waste**: 4.8 ms * 5 mA = 24 µC per inference.
-    *   **Conclusion**: **Option B (DMA) completely hides the 614k cycle fetch behind CPU compute, saving ~240 µA continuous current at 10 inferences/sec.**
+    1. **Assumptions & Constraints:**
+       - App core: 128 MHz; Current: ~5 mA
+       - Weights: 200 KB (204,800 bytes)
+       - XIP Wait-states: ~3 cycles/byte
+    2. **Calculations:**
+       - XIP penalty = 204,800 bytes * 3 cycles = 614,400 cycles
+       - Latency addition = 614,400 / 128,000,000 = 4.8 ms
+       - Power waste = 4.8 ms * 5 mA = 24 µC per inference
+    3. **Conclusion & Interpretation:**
+       - **Result: 24 µC saved per inference. Compute-Bound.** DMA completely hides the 614k cycle fetch behind parallel CPU execution.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 12
 validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed

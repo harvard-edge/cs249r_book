@@ -8,20 +8,27 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The Real-Time Ad Bidding SLA
-scenario: You are designing a cloud service for real-time ad bidding which must respond to 99.9% of requests within a 50ms SLA. Your inference model, running on a dedicated H100, has an average processing time of 30ms. However, due to feature variability, you observe that 5% of requests are 'complex' and take 80ms to process.
-question: Can the current single-H100 ad bidding system meet the 99.9% under 50ms SLA with 5% of requests taking 80ms, and why?
+scenario: You are designing a cloud service for real-time ad bidding which must respond to 99.9% of requests within a 50ms SLA. Your inference model has an average processing time of 30ms. However, due to feature variability, you observe that 5% of requests are 'complex' and take 80ms to process.
+question: Can the current single-server ad bidding system meet the 99.9% under 50ms SLA with 5% of requests taking 80ms, and why?
 details:
-  realistic_solution: No, the system cannot meet the SLA. While the average time is acceptable, the P95 latency of 80ms guarantees failure. Any request that takes 80ms will immediately miss its own 50ms deadline. More importantly, it occupies the server for an extra 30ms, forcing the next request to wait in a queue. This initial wait time is then added to the next request's processing time, likely causing it to miss its deadline as well. This creates a cascade of failures. Since 5% of requests trigger this failure mode, it's impossible to achieve a 99.9% success rate.
+  realistic_solution: No, the system unequivocally fails the SLA. While the arithmetic mean is acceptable, the P95 latency of 80ms creates fatal head-of-line blocking. An 80ms request misses its own deadline, and by occupying the compute thread, it forces subsequent requests to wait. This initial wait time is compounded onto the next request's processing time, generating a cascading backlog of missed SLAs until traffic subsides.
   common_mistake: |
-    **The Pitfall:** Looking only at the average processing time (30ms).
-    **The Rationale:** 30ms is well under the 50ms SLA deadline, so the system superficially appears healthy.
-    **The Consequence:** Completely ignoring the cascading failure effect of tail latency in any system with queues and strict deadlines.
+    **The Pitfall:** Approving the system by looking exclusively at the average processing time (30ms).
+    **The Rationale:** 30ms is mathematically well under the 50ms SLA threshold, making the system superficially appear healthy.
+    **The Consequence:** Completely ignoring the cascading queueing physics of tail latency, resulting in a systemic production failure when the first 80ms payload arrives.
   napkin_math: |
-    1. **Deadline:** 50ms SLA.
-    2. **Slow Request:** An 80ms request arrives, immediately missing the deadline by 30ms.
-    3. **Queue Forms:** A 'fast' 30ms request arrives just after the slow one started. It must wait 80ms for the server to become free.
-    4. **Cascading Failure:** The total time for the 'fast' request becomes 80ms (wait) + 30ms (process) = 110ms. It also catastrophically misses the 50ms deadline.
-    5. **Conclusion:** **With a 5% chance of this state occurring, it triggers cascading misses, making a 99.9% success rate mathematically impossible.**
+    1. **Assumptions & Constraints:**
+       - SLA Deadline: 50ms (99.9% target).
+       - P50 Process Time: 30ms.
+       - P95 Process Time (5% chance): 80ms.
+       - Architecture: Single-server FIFO queue.
+    2. **Calculations:**
+       - Slow request processing: Takes 80ms -> Misses SLA by 30ms.
+       - Subsequent 'fast' request: Waits in queue for 80ms.
+       - Cascaded total time: 80ms (wait) + 30ms (process) = 110ms.
+       - Second request also fails the 50ms SLA.
+    3. **Conclusion & Interpretation:**
+       - **With a 5% chance of an 80ms stall, cascading queue delays make a 99.9% success rate mathematically impossible. Result: Tail-Latency Bound.**
 status: published
 provenance: imported
 requires_explanation: false

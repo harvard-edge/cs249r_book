@@ -8,39 +8,24 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Disaggregation vs. Colocation Break-Even Analysis
-scenario: 'Your team is deciding whether to adopt disaggregated serving or stick with
-  colocated serving for a new 13B FP16 model deployment. Workload: 70% short input/output
-  (input ≤256, output ≤64), 30% long input/long output (input 4096, output 512). TTFT
-  SLO: 100 ms. TPOT SLO: 40 ms. H100 cluster of 32 GPUs. Perform a break-even analysis:
-  at what request rate does disaggregation outperform colocation on cluster throughput,
-  accounting for the KV transfer overhead?'
-question: At what request rate does disaggregated serving outperform colocation for
-  the 13B mixed workload on 32 H100s after KV transfer overhead?
+scenario: 'Your team is deciding whether to adopt disaggregated serving or stick with colocated serving for a new 13B FP16 model deployment. Workload: 70% short input/output (≤256/≤64), 30% long input/output (4096/512). TTFT SLO: 100 ms. TPOT SLO: 40 ms. H100 cluster of 32 GPUs. Perform a break-even analysis.'
+question: At what request rate does disaggregated serving outperform colocation for the 13B mixed workload on 32 H100s after KV transfer overhead?
 details:
-  realistic_solution: 'Collocated (32 H100s, each doing prefill+decode): Each GPU
-    serves mixed workload. TTFT for short requests (256 tokens, 13B model): 2×13e9×256/(989e12)
-    = 6.7 ms — trivially within SLO. Long prefill (4096 tokens): 2×13e9×4096/(989e12)
-    = 107 ms — exceeds 100 ms TTFT SLO! Colocation fails for long inputs. Disaggregated:
-    8 H100 prefill + 24 H100 decode (1:3 ratio for 70/30 split). Long prefill on dedicated
-    prefill GPU: 107 ms (borderline). Need chunked prefill to get under 100 ms: chunk
-    to 3840 tokens → 100 ms. KV transfer adds 13.4 ms (2×8×128×4096×40×2 = 671 MB for
-    13B with GQA, at 50 GB/s). Total TTFT: ~114 ms — still over. Fix: use
-    H100 SXM5 burst mode or reduce model to FP8 for prefill. Break-even point: at
-    <300 RPS with 30% long requests, colocation is operationally simpler and meets
-    all SLOs except long-input TTFT. Above 300 RPS, disaggregation''s ability to independently
-    scale prefill/decode provides 40% more throughput.'
-  common_mistake: 'Saying disaggregation is always better or always worse. The break-even
-    depends on the workload mix: when the workload is dominated by short requests
-    (low compute/bandwidth ratio variance), colocation is simpler and competitive.'
-  napkin_math: '13B FP16 prefill, 4096 tokens, H100: 2×13e9×4096/989e12 = 107.6 ms.
-    SLO = 100 ms: colocation fails for long inputs. Disaggregated prefill with chunked
-    (3840 tok chunk): 2×13e9×3840/989e12 ≈ 100.8 ms — still slightly over. Need TP=2
-    prefill: 107.6/2 = 53.8 ms — safely within 100 ms SLO with KV transfer. Cost:
-    2 H100s per long prefill. Break-even: at 300 RPS × 30% long = 90 long req/s, dedicate
-    90 × 2 GPUs × 0.054 s = 9.7 GPU-equivalents to prefill. 32-9.7 = 22.3 GPUs for
-    decode. Throughput: 22.3 × 24 req/s (H100 decode) × 512 output = 273 k tok/s.
-    Colocation at same 300 RPS: 32 × (24 req/s per GPU × 512) = 393 k tok/s but TTFT
-    SLO violated. Disaggregation is mandatory above minimum long-input load.'
+  realistic_solution: 'Collocated (32 H100s, each doing prefill+decode): Each GPU serves mixed workload. TTFT for short requests (256 tokens, 13B model): 2×13e9×256/(989e12) = 6.7 ms — trivially within SLO. Long prefill (4096 tokens): 2×13e9×4096/(989e12) = 107 ms — exceeds 100 ms TTFT SLO! Colocation fails for long inputs. Disaggregated: 8 H100 prefill + 24 H100 decode (1:3 ratio for 70/30 split). Long prefill on dedicated prefill GPU: 107 ms (borderline). Need chunked prefill to get under 100 ms: chunk to 3840 tokens → 100 ms. KV transfer adds 13.4 ms (2×8×128×4096×40×2 = 671 MB for 13B with GQA, at 50 GB/s). Total TTFT: ~114 ms — still over. Fix: use H100 SXM5 burst mode or reduce model to FP8 for prefill. Break-even point: at <300 RPS with 30% long requests, colocation is operationally simpler and meets all SLOs except long-input TTFT. Above 300 RPS, disaggregation''s ability to independently scale prefill/decode provides 40% more throughput.'
+  common_mistake: |
+    **The Pitfall:** Saying disaggregation is always better or always worse.
+    **The Rationale:** Engineers ignore that the break-even fundamentally depends on the workload mix and the variance in compute-to-bandwidth ratios.
+    **The Consequence:** The team over-engineers a disaggregated setup for a uniform short-request workload, adding KV-transfer latency for absolutely zero benefit.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 13B FP16 model. H100 (989 TFLOPS). 32 GPUs.
+       - Long prefill: 4096 tokens. TTFT SLO = 100ms.
+    2. **Calculations:**
+       - Colocated long prefill: 2 * 13e9 * 4096 / 989e12 = 107.6 ms (Fails 100ms SLO).
+       - Disaggregated with TP=2 prefill: 107.6 / 2 = 53.8 ms + 13.4 ms KV transfer ≈ 67 ms (Passes).
+       - Break-even at 300 RPS: 30% long = 90 long req/s. Requires 9.7 GPU-equivalents, leaving 22.3 for decode.
+    3. **Conclusion & Interpretation:**
+       - **Result: Above the minimum long-input load, disaggregation is mandatory to meet the TTFT SLO and provides 40% more throughput. Colocation is TTFT-Bound for long inputs.**
 status: published
 provenance: imported
 requires_explanation: false

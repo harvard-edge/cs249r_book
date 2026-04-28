@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: DLRM Embedding Table Sharding Strategy
-scenario: A production DLRM has 50 embedding tables of varying sizes, totaling 400 GB. You need to fit these across 8 GPUs with 80 GB HBM each.
+scenario: A production DLRM has 50 embedding tables of varying sizes, totaling 400 GB. You need to fit these across 8 GPUs.
 question: How would you shard the 400 GB embeddings across the 8 GPUs, and why not shard every table evenly across all GPUs?
 details:
   realistic_solution: 'Use table-wise sharding as the primary strategy: assign entire tables to individual GPUs, balancing total memory per GPU. For tables that exceed single-GPU capacity (e.g., a 100 GB table), use row-wise sharding for those specific tables only. The key insight: table-wise sharding minimizes AllToAll communication because lookups to a table stay on one GPU. Row-wise sharding requires gathering partial embeddings from all GPUs for every lookup. Mixed sharding (table-wise + row-wise for oversized tables) is the production approach used in Meta''s DLRM infrastructure.'
@@ -17,10 +17,15 @@ details:
     **The Rationale:** Candidates intuitively apply generic tensor sharding concepts without considering the sparse lookup patterns of embedding tables.
     **The Consequence:** Every single lookup requires cross-GPU communication for every table, creating a massive AllToAll network bottleneck.
   napkin_math: |
-    1. **Capacity:** 400 GB across 8 GPUs = ~50 GB per GPU (fits easily within 80 GB).
-    2. **Row-wise penalty:** 50 tables × batch_size lookups × 7/8 remote = massive AllToAll volume.
-    3. **Table-wise benefit:** Only cross-table feature interactions require AllToAll communication.
-    **Conclusion:** A mixed sharding approach (table-wise for most, row-wise only for massive tables) reduces AllToAll communication volume by ~10×.
+    1. **Assumptions & Constraints:**
+       - 50 tables, 400 GB total.
+       - 8 GPUs, 80 GB HBM each (640 GB total capacity).
+    2. **Calculations:**
+       - Capacity per GPU: 400 GB / 8 = ~50 GB (fits easily within 80 GB).
+       - Row-wise communication penalty: 50 tables * batch_size * (7/8) remote lookups = massive AllToAll volume.
+       - Table-wise communication: Only cross-table feature interactions require AllToAll communication, avoiding lookup broadcasts.
+    3. **Conclusion & Interpretation:**
+       **Result: 10x Communication Reduction (Network-Bound Mitigated).** A mixed sharding approach (table-wise for most, row-wise only for massive tables) minimizes AllToAll communication volume.
 status: published
 provenance: imported
 requires_explanation: false

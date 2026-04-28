@@ -8,19 +8,26 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Evaluating Sequential Storage Patterns for Distributed Training
-scenario: Your team is training a ViT-L model on an 8-node H100 cluster (64 GPUs total) using a shared parallel file system (Lustre) backed by NVMe SSDs capable of 200 GB/s aggregate bandwidth. The training pipeline currently reads individual 500KB JPEG images from a flat directory of 500 million files. Network metrics (NDR 400G InfiniBand) show low utilization, yet GPUs are consistently starved for data (utilization < 40%).
-question: Why are 64 H100 GPUs starved while reading 500M individual 500KB JPEGs from Lustre, and what data layout should you use?
+scenario: Your team is training a ViT-L model on an 8-node cluster using a shared parallel file system (Lustre) backed by NVMe SSDs capable of 200 GB/s aggregate bandwidth. The training pipeline currently reads individual 500KB JPEG images from a flat directory of 500 million files. Network metrics show low utilization, yet GPUs are consistently starved for data.
+question: Why are 64 GPUs starved while reading 500M individual 500KB JPEGs from Lustre, and what data layout should you use?
 details:
-  realistic_solution: Repack the individual JPEGs into large, contiguous 1GB-2GB shard files (e.g., using WebDataset tar archives or TFRecords). This shifts the storage workload from metadata-heavy random IOPS to pure sequential IO, allowing the file system to operate at its peak sequential throughput and easily saturate the required GPU ingestion rate.
+  realistic_solution: "Repack the individual JPEGs into large, contiguous 1GB-2GB shard files (e.g., using WebDataset tar archives or TFRecords). This shifts the storage workload from metadata-heavy random IOPS to pure sequential IO, allowing the file system to operate at its peak sequential throughput and easily saturate the required GPU ingestion rate."
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is raw network bandwidth or CPU decoding speed.
     **The Rationale:** Ignoring the metadata overhead of standard file systems when dealing with millions of small files.
     **The Consequence:** Attempting to add more data loading workers or compress the images further, which only worsens the metadata IOPS bottleneck.
   napkin_math: |
-    - **Demand:** 64 GPUs * 500 imgs/sec/GPU = 32,000 imgs/sec.
-    - **Bandwidth Required:** 32,000 * 500KB = ~16 GB/s.
-    - **Metadata Bottleneck:** Reading individual files requires 32,000 file opens (metadata operations) per second. If the Lustre metadata server caps at 10,000 IOPS, throughput hits a wall at 10,000 * 500KB = **5 GB/s**, starving the GPUs.
-    - **Solution:** Packing into 1GB shards (2,000 imgs/shard) reduces IOPS to just 16 file opens/sec, easily unlocking the required 16 GB/s sequential throughput.
+    1. **Assumptions & Constraints:**
+       * 64 GPUs requiring 500 images/sec each.
+       * Single Image size: 500 KB.
+       * Lustre metadata IOPS limit: ~10,000 IOPS.
+    2. **Calculations:**
+       * Demand: 64 \times 500 = 32,000 imgs/sec.
+       * Required Bandwidth: 32,000 \times 500 KB = 16 GB/s.
+       * IOPS Bottleneck: 10,000 IOPS \times 500 KB = 5 GB/s (hard wall).
+       * Solution (1GB Shards): 1GB shard = 2000 images. Requires only 16 file opens/sec.
+    3. **Conclusion & Interpretation:**
+       * Millions of small files saturate the metadata server at 5 GB/s. Sharding unlocks **16 GB/s sequential reads**. **Result: Metadata-IOPS-Bound**.
 status: published
 provenance: imported
 requires_explanation: false

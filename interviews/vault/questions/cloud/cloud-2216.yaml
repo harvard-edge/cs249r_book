@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: The NUMA-Unaware Inference Regression
-scenario: After migrating your inference service from bare-metal servers to Kubernetes, P99 latency increased by 40% despite running on identical 2-socket hardware with 4 GPUs per socket. CPU/GPU utilization and memory usage look normal, and pods are pinned to specific GPUs.
-question: What is the Kubernetes scheduler missing that explains the 40% latency increase?
+scenario: 'After migrating your inference service from bare-metal servers to Kubernetes, P99 latency increased by 40% despite running on identical 2-socket hardware with 4 GPUs per socket. CPU/GPU utilization and memory usage look normal, and pods are pinned to specific GPUs.'
+question: 'What is the Kubernetes scheduler missing that explains the 40% latency increase?'
 details:
   realistic_solution: 'The scheduler is NUMA-unaware. In a 2-socket system, GPUs 0-3 are attached to NUMA node 0 and GPUs 4-7 to NUMA node 1. Each CPU socket has local memory controllers. When the Kubernetes pod is scheduled on CPU cores from NUMA node 1 but pinned to a GPU on NUMA node 0, every CPU-GPU data transfer crosses the QPI/UPI interconnect between sockets — adding ~100ns per cache line and halving effective PCIe bandwidth. The fix: use Kubernetes topology manager with the ''single-numa-node'' policy, which co-locates CPU cores, memory, and GPU on the same NUMA domain.'
   common_mistake: |
@@ -17,12 +17,15 @@ details:
     **The Rationale:** Candidates assume orchestration tools inherently add massive latency, rather than looking at physical hardware topology.
     **The Consequence:** Wasting time tuning network settings when the real issue is cross-socket PCIe traffic overhead.
   napkin_math: |
-    1. **Local NUMA PCIe transfer:** ~25 GB/s effective (PCIe Gen4 x16).
-    2. **Remote NUMA PCIe transfer:** ~12-15 GB/s (QPI/UPI hop adds ~40% overhead).
-    3. **Inference Batch (50MB):** Local transfer = 50MB / 25 GB/s = 2.0ms.
-    4. **Remote transfer:** 50MB / 13 GB/s = 3.8ms.
-    5. **Delta:** 1.8ms base penalty per batch.
-    **Conclusion:** At P99 with queueing amplification, this constant 1.8ms penalty easily compounds to a 40% increase over a typical 12ms baseline latency.
+    1. **Assumptions & Constraints:**
+       - PCIe Gen4 x16 local transfer speed: ~25 GB/s.
+       - Cross-socket QPI/UPI hop penalty: ~40% overhead (~13-15 GB/s effective).
+       - Inference Batch Size: 50 MB.
+    2. **Calculations:**
+       - Local transfer latency = 50 MB / 25 GB/s = 2.0 ms.
+       - Remote transfer latency = 50 MB / 13 GB/s = ~3.8 ms.
+       - Latency Delta = 3.8 ms - 2.0 ms = 1.8 ms per batch.
+    3. **Conclusion & Interpretation:** **Result: IO-Bound (NUMA)**. At P99 with queueing amplification, this constant 1.8 ms penalty compounds significantly, accounting for the 40% latency increase.
 status: published
 provenance: imported
 requires_explanation: false

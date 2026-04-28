@@ -8,19 +8,23 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Activation Checkpointing Granularity Trade-off for 405B Model Training on H100
-scenario: Training Llama-3-405B on 512 H100s. Without activation checkpointing, peak activation memory per GPU exceeds 80GB. With full checkpointing (checkpoint every layer), recomputation overhead is 33%. With selective checkpointing (checkpoint only attention, not MLP), recomputation is 15%.
+scenario: Training Llama-3-405B on 512 GPUs. Without activation checkpointing, peak activation memory per GPU exceeds 80GB. With full checkpointing, recomputation overhead is 33%. With selective checkpointing, recomputation is 15%.
 question: Analyze the memory-compute trade-off and determine whether you should use full or selective activation checkpointing.
 details:
   realistic_solution: 'Full checkpointing: save only layer inputs, recompute all activations in backward. Saves: all intermediate activations per layer (~4GB × 128 layers / 512 GPUs = 1GB). Cost: 33% more FLOPs. Selective checkpointing (checkpoint only attention): attention activations are large (seq²×heads) and expensive to recompute. MLP activations are small and cheap. Strategy: checkpoint attention (save softmax output), don''t checkpoint MLP. Memory savings: attention activations: 32 heads × 8192² × 2B = 4GB per layer → with checkpointing saves 4GB per layer. MLP activations: 8192×32768×2B = 536MB per layer — recompute. Selective saves attention activation (60% of savings) at 15% recomputation cost vs full checkpointing 100% savings at 33% cost. Selective is 33% more compute-efficient per memory saved.'
   common_mistake: |
     **The Pitfall:** Applying uniform full checkpointing without recognizing component differences.
-    **The Rationale:** Candidates often assume all layers or components have similar recomputation costs and memory footprints.
+    **The Rationale:** Candidates assume all layers or components have similar recomputation costs and memory footprints.
     **The Consequence:** Over-penalizing compute with full checkpointing when MLP activations are cheap to recompute but attention is expensive, missing a 33% efficiency gain.
   napkin_math: |
-    1. **Full checkpointing:** 33% FLOPs overhead, saves 100% intermediate activations. Efficiency = 100% / 33% = 3.0 memory/compute.
-    2. **Selective checkpointing (attention only):** 15% FLOPs overhead, saves ~60% of activation memory. Efficiency = 60% / 15% = 4.0 memory/compute.
-    3. **Comparison:** Selective is 33% more efficient (4.0 vs 3.0).
-    4. **Conclusion:** **Use selective checkpointing.**
+    1. **Assumptions & Constraints:**
+       - Full checkpointing: 33% FLOPs overhead, saves 100% of intermediate activation memory.
+       - Selective checkpointing (attention only): 15% FLOPs overhead, saves ~60% of activation memory.
+    2. **Calculations:**
+       - Full Efficiency Ratio: 100% savings / 33% overhead = 3.03% memory saved per % compute.
+       - Selective Efficiency Ratio: 60% savings / 15% overhead = 4.0% memory saved per % compute.
+       - Efficiency Gain: 4.0 / 3.03 = 1.32 (32% more efficient).
+    3. **Conclusion & Interpretation:** **Selective checkpointing is 32% more compute-efficient per memory byte saved, prioritizing large attention tensors over cheap MLP layers. Result: Memory-Efficiency-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

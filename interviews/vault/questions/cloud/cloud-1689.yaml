@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing PCIe DataLoader Bottlenecks
-scenario: Your team is training a high-resolution vision model on a node with 8x NVIDIA A100 GPUs and a dual-socket AMD EPYC CPU. GPU utilization is hovering around 55%. Profiling shows the PCIe Gen4 x16 bus is heavily underutilized, yet CPU utilization is pegged at 100% across all data loading workers. The training loop explicitly uses `images = batch.to(device, non_blocking=True)` to overlap compute with data transfers, but the main thread is still blocking on the transfer.
+scenario: Your team is training a high-resolution vision model on a node with 8x GPUs and a dual-socket CPU. GPU utilization is hovering around 55%. Profiling shows the PCIe Gen4 x16 bus is heavily underutilized, yet CPU utilization is pegged at 100% across all data loading workers. The training loop explicitly uses `images = batch.to(device, non_blocking=True)` to overlap compute with data transfers, but the main thread is still blocking on the transfer.
 question: "Why is the CPU bottlenecked, and how do you achieve true asynchronous transfers?"
 details:
   realistic_solution: Set `pin_memory=True` in the PyTorch DataLoader. This allocates the batch in page-locked (pinned) memory, allowing the GPU's DMA engine to fetch data directly over PCIe without CPU intervention. This eliminates the blocking host-side memory copy and enables `non_blocking=True` to successfully overlap the host-to-device transfer with the previous batch's GPU computation.
@@ -17,11 +17,15 @@ details:
     **The Rationale:** Candidates trust the parameter name without understanding that if the host tensor is in pageable (swappable) memory, the CPU is forced to perform a synchronous, blocking copy to a temporary pinned buffer.
     **The Consequence:** Puzzling performance bottlenecks where the CPU is pegged at 100% and GPUs are starved, despite seemingly correct code.
   napkin_math: |
-    - For a 1GB batch with pageable memory: CPU copy to staging buffer at ~40GB/s DRAM bandwidth takes ~25ms (completely blocking the CPU).
-    - DMA transfer at ~25GB/s PCIe bandwidth takes ~40ms.
-    - With `pin_memory=True`: CPU copy time is 0ms.
-    - The DMA transfer handles the 1GB in ~40ms strictly in the background via the PCIe controller.
-    - **Result:** **This recovers 25ms of CPU time per batch, allowing full pipeline overlap.**
+    1. **Assumptions & Constraints:**
+       - 1GB batch size.
+       - DRAM BW = 40GB/s, PCIe BW = 25GB/s.
+    2. **Calculations:**
+       - Pageable memory: CPU copy = 1GB / 40GB/s = 25ms.
+       - DMA transfer = 1GB / 25GB/s = 40ms.
+       - With `pin_memory=True`: CPU copy time = 0ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: PCIe-Bound mitigation**. Recovering 25ms of CPU time per batch allows full pipeline overlap.
 status: published
 provenance: imported
 requires_explanation: false

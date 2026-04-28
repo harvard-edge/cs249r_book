@@ -8,7 +8,7 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Translation API's Latency Crisis
-scenario: You are an ML Systems Engineer responsible for a real-time translation API running on GPUs. The service has a strict P99 Time-To-First-Token (TTFT) SLA of 250ms. Users are complaining about slow initial responses. Your dashboard shows the following stable metrics: prefill time is 150ms, static batching timeout is 200ms, average generated sequence length is 50 tokens, and decode time is 20ms/token.
+scenario: 'You are an ML Systems Engineer responsible for a real-time translation API running on GPUs. The service has a strict P99 Time-To-First-Token (TTFT) SLA of 250ms. Users are complaining about slow initial responses. Your dashboard shows the following stable metrics: prefill time is 150ms, static batching timeout is 200ms, average generated sequence length is 50 tokens, and decode time is 20ms/token.'
 question: What causes the 250ms TTFT SLA miss when static batching adds a 200ms window on top of 150ms prefill time?
 details:
   realistic_solution: The root cause is head-of-line blocking induced by the static batching strategy. A request's total time-to-first-token is its wait time in the queue plus the GPU's processing time. In the worst-case scenario, a request arrives just after a batch has been dispatched. It must wait the full 200ms timeout period before it can even be considered for processing. This wait time, when added to the 150ms prefill time, results in a P99 TTFT of 350ms, which violates the 250ms SLA. The high TPOT (throughput) is achieved at the expense of TTFT. The correct solution is to implement continuous batching (or 'dynamic batching'), which decouples batching from request arrival and can add incoming requests to an in-flight batch, dramatically reducing queueing delay.
@@ -17,17 +17,21 @@ details:
     **The Rationale:** Engineers assume a faster GPU or smaller model is the only solution, forgetting that in a statically batched system, wait time often dominates end-to-end latency.
     **The Consequence:** Wasting resources on model optimization when the architectural fix (dynamic/continuous batching) is required to eliminate head-of-line blocking.
   napkin_math: |
-    * TTFT = Queue Wait Time + Prefill Time.
-    * Worst-case scenario (GPU idle): Request arrives right after a batching window starts.
-    * Queue Wait Time = 200 ms.
-    * Total TTFT = 200 ms + 150 ms = **350 ms** (Misses 250ms SLA).
-    * Worst-case scenario (GPU busy): Request waits for previous batch generation to finish (50 tokens * 20 ms/token = 1000 ms).
-    * Total TTFT = 1000 ms + 150 ms = **1150 ms** (Destroys 250ms SLA).
+    1. **Assumptions & Constraints:**
+       - TTFT = Queue Wait Time + Prefill Time.
+       - Prefill = 150 ms.
+       - Static batching timeout = 200 ms.
+       - Decode time = 20 ms/token, 50 tokens = 1000 ms.
+    2. **Calculations:**
+       - Worst-case (GPU idle): Request waits full 200ms timeout window. TTFT = 200 + 150 = 350 ms.
+       - Worst-case (GPU busy): Request waits for previous batch generation to finish. TTFT = 1000 + 150 = 1150 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Queue-Bound.** Head-of-line blocking misses the 250ms SLA.
   options:
-  - The hardware's prefill time of 150ms is too slow for this workload. The model needs to be optimized or run on newer hardware.
+  - The TTFT is 150ms + 50 tokens * 20ms = 1150ms, which means the model decode speed is the bottleneck.
   - The system is experiencing head-of-line blocking. A request can wait in the queue for up to 200ms before processing even begins, pushing the total TTFT to 350ms.
   - The request arrival rate is too high, overwhelming the system. The service needs more GPU replicas to handle the load.
-  - Network latency between the user and the datacenter is the likely cause, adding 100-200ms of un-accounted-for delay to every request.
+  - The TTFT is exactly 150ms since it does not include queue time, indicating a network latency issue.
   correct_index: 1
 status: published
 provenance: imported

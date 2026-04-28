@@ -11,16 +11,22 @@ title: The Unaligned Memory DMA Fault
 scenario: You configure a hardware DMA (Direct Memory Access) controller to stream incoming camera pixels directly into the `tensor_arena` array of your TFLite Micro model. It works perfectly on your Cortex-M4 dev board. You move the exact same C++ code to a Cortex-M0+ production board. The moment the DMA starts, the system crashes with a Hard Fault.
 question: Why does the exact same DMA code crash on the M0+?
 details:
-  realistic_solution: You hit an Unaligned Memory Access Fault. A 32-bit architecture processes 4 bytes per word. Addresses evenly divisible by 4 (0x1000, 0x1004) are aligned. The M4 CPU has hardware support to handle unaligned access, but the M0+ does not, immediately faulting if asked to do so.
+  realistic_solution: The issue is an Unaligned Memory Access Fault. The Cortex-M4 CPU includes hardware support to gracefully handle unaligned memory access, whereas the more constrained Cortex-M0+ does not. If `tensor_arena` is allocated at an address not divisible by 4 (e.g., a 1-byte offset), the M0+ will trigger a Hard Fault when the DMA or CPU attempts a 32-bit word fetch. The fix is to use compiler alignment attributes (e.g., `__attribute__((aligned(4)))`) on the memory buffer.
   common_mistake: |
     **The Pitfall:** Assuming the Cortex-M0+ simply lacks DMA capabilities.
     **The Rationale:** Engineers assume moving to a lower-end board removes major peripherals.
     **The Consequence:** Investigating nonexistent hardware missing features rather than fixing the memory alignment flags in the C++ allocation code.
   napkin_math: |
-    1. **Architecture:** 32-bit architecture = 4 bytes per word.
-    2. **Valid Access:** Addresses like 0x1000, 0x1004, 0x1008 are naturally aligned.
-    3. **The Fault:** An address like 0x1001 forces the CPU to read across two physical memory banks.
-    4. **Result:** The M0+ physically cannot perform this action, resulting in an immediate 0-cycle crash.
+    1. **Assumptions & Constraints:**
+       - Cortex-M0+ architecture: 32-bit (4 bytes per word).
+       - Aligned access: memory addresses divisible by 4 (e.g., 0x1000, 0x1004).
+       - Hardware features: Cortex-M4 supports unaligned access, M0+ does not.
+    2. **Calculations:**
+       - Example tensor allocation address: 0x1001 (unaligned).
+       - Cortex-M4: transparently performs two physical memory reads to fetch the 32-bit word.
+       - Cortex-M0+: triggers an immediate Hard Fault exception on 0x1001.
+    3. **Conclusion & Interpretation:**
+       - **Result: Hardware Exception on 0-cycle.** The crash is caused by an unaligned memory address being passed to a DMA controller on an architecture that strictly enforces word alignment.
 status: published
 provenance: imported
 requires_explanation: false

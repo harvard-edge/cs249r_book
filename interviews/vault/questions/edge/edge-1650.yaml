@@ -8,38 +8,23 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Dataflow Optimization for Sequenced Output
-scenario: You are deploying a sequence-to-sequence model for real-time sensor telemetry
-  parsing on a Hailo-8 accelerator (26 TOPS INT8, 2.5W). The Hailo-8 is a dataflow
-  architecture with no local DRAM, meaning all model weights and intermediate activations
-  must stream continuously from the host via PCIe. You must synthesize a novel architecture—choosing
-  between standard encoder-decoder, encoder-only, or decoder-only approaches—and design
-  the host-device streaming strategy to maximize inference throughput under these
-  extreme memory constraints.
-question: Which sequence model architecture and host-device streaming strategy would
-  maximize throughput on the DRAM-less Hailo-8?
+scenario: You are deploying a sequence-to-sequence model for real-time sensor telemetry parsing on a dataflow accelerator. Because it has no local DRAM, all weights and intermediate activations must stream continuously from the host via PCIe.
+question: Which sequence model architecture and host-device streaming strategy would maximize throughput on the DRAM-less dataflow accelerator?
 details:
-  realistic_solution: The optimal design is a heavily quantized, encoder-only architecture
-    with a non-autoregressive prediction head (such as CTC or a parallel sequence
-    decoder). Because the Hailo-8 excels at continuous dataflow through a fixed graph,
-    an encoder-only approach allows the weights to be streamed and pinned to the compute
-    units once per input sequence. This single-pass execution eliminates the iterative
-    weight-reloading penalty of autoregressive decoding, fully utilizing the device's
-    compute pipeline.
-  common_mistake: Candidates often choose a standard autoregressive encoder-decoder
-    or decoder-only LLM-style architecture due to task familiarity. They fail to recognize
-    that on a DRAM-less dataflow accelerator, autoregressive generation requires re-streaming
-    the entire weight matrix and the expanding KV cache across the PCIe bus for every
-    single generated token, severely bottlenecking the system and stranding the 26
-    TOPS of compute.
-  napkin_math: Assume PCIe Gen3 x4 with ~4 GB/s practical bandwidth and a 100M parameter
-    INT8 model (100MB). For autoregressive decoding, generating 1 token requires streaming
-    100MB of weights. Max token rate = 4 GB/s / 100 MB/token = 40 tokens/sec. Compute
-    needed per token is ~200 MOps. Compute time = 200M / 26 TOPS = 0.0000077s (>100,000
-    tokens/sec theoretical compute limit). The device operates at <0.1% compute utilization
-    due to the PCIe bottleneck. By switching to an encoder-only model that processes
-    a 100-token sequence in a single pass, the 100MB weights are streamed once per
-    sequence, yielding an effective 4,000 tokens/sec and vastly improving power efficiency
-    within the 2.5W budget.
+  realistic_solution: The optimal design is a heavily quantized, encoder-only architecture with a non-autoregressive prediction head (such as CTC or a parallel sequence decoder). Because the Hailo-8 excels at continuous dataflow through a fixed graph, an encoder-only approach allows the weights to be streamed and pinned to the compute units once per input sequence. This single-pass execution eliminates the iterative weight-reloading penalty of autoregressive decoding, fully utilizing the device's compute pipeline.
+  common_mistake: |
+    **The Pitfall:** Deploying standard autoregressive decoder models on a DRAM-less accelerator.
+    **The Rationale:** Candidates rely on task familiarity with LLMs, ignoring the severe memory bandwidth penalty of decoding token-by-token.
+    **The Consequence:** Re-streaming the entire weight matrix over PCIe for every single token causes catastrophic PCIe bottlenecking and >99% compute starvation.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model size: 100MB INT8. PCIe Gen3 x4 bandwidth: ~4 GB/s. Compute: 26 TOPS.
+    2. **Calculations:**
+       - Autoregressive Max Token Rate: 4 GB/s / 100 MB/token = 40 tokens/sec.
+       - Compute capability: 26 TOPS allows >100,000 tokens/sec.
+       - Utilization: 40 / 100,000 = <0.1% active compute.
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O-Bound Bottleneck.** Switching to an encoder-only (single-pass) architecture streams the 100MB weights once per sequence, dramatically increasing effective token throughput.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: KV Cache Capacity and Bandwidth Limits
-scenario: You are deploying a 7B parameter Transformer LLM (FP16, 32 layers, hidden dimension 4096) on a single NVIDIA A100 80GB GPU. You have allocated 14GB for model weights and 6GB for OS/workspace overhead, leaving the rest of VRAM entirely for the KV Cache. Assume a uniform sequence length of 2048 tokens per request.
+scenario: You are deploying a 7B parameter Transformer LLM (FP16, 32 layers, hidden dimension 4096) on a single 80GB GPU. You have allocated 14GB for model weights and 6GB for OS/workspace overhead, leaving the rest of VRAM entirely for the KV Cache. Assume a uniform sequence length of 2048 tokens per request.
 question: What are the KV cache size per token, maximum 2048-token batch size, and total memory read per decoding step?
 details:
   realistic_solution: 'Calculate KV cache per token: 2 (K+V) * 32 layers * 4096 dimension * 2 bytes = 524,288 bytes (512 KB). For 2048 tokens, each sequence requires exactly 1 GB of VRAM. With 60 GB available (80 - 14 - 6), the maximum batch size is 60. During the decoding phase, generating one token requires loading both the 14 GB of model weights and the 60 GB KV cache, creating a massive 74 GB memory bandwidth requirement per step.'
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Autoregressive decoding requires reading the entire KV cache from HBM into SRAM for every single generated token.
     **The Consequence:** Overestimating maximum batch size by 2x and drastically underestimating memory bandwidth requirements.
   napkin_math: |
-    - KV per token = 2 (K,V) * 32 (layers) * 4096 (d_model) * 2 (bytes/FP16) = 524,288 bytes (512 KB).
-    - KV per sequence = 512 KB * 2048 tokens = 1 GB.
-    - Available VRAM for KV = 80 GB total - 14 GB weights - 6 GB overhead = 60 GB.
-    - Max Batch Size = 60 GB / 1 GB per sequence = 60.
-    - Decoding memory read per step = 14 GB (weights) + (60 sequences * 1 GB KV) = 74 GB.
-    - **The KV cache takes 512 KB/token, max batch size is 60, and total memory read per decoding step is 74 GB.**
+    1. **Assumptions & Constraints:**
+       - Precision: FP16 (2 bytes). Layers: 32. Hidden dim: 4096.
+       - Available VRAM for KV: 80 GB - 14 GB (weights) - 6 GB (OS) = 60 GB.
+       - Sequence length: 2048.
+    2. **Calculations:**
+       - KV footprint per token = 2 (K+V) × 32 layers × 4096 dim × 2 bytes = 524,288 bytes (512 KB).
+       - KV footprint per sequence = 512 KB × 2048 tokens = 1 GB.
+       - Max batch size = 60 GB / 1 GB = 60 sequences.
+       - Decoding read per step = 14 GB (weights) + 60 GB (KV) = 74 GB.
+    3. **Conclusion & Interpretation:** **Batch size is capped at 60. Each decode step requires reading 74 GB. Memory-Capacity-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

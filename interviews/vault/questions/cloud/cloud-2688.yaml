@@ -8,22 +8,25 @@ competency_area: optimization
 bloom_level: apply
 phase: training
 title: Calculating Communication-Compute Overlap Ceiling
-scenario: A training step takes 80ms of compute on a single GPU. AllReduce for a 10B parameter model (gradient size: 20GB in FP16) across 1024 GPUs using ring AllReduce over 200 Gb/s InfiniBand takes 2×(N-1)/N × 20GB / 200 Gb/s.
+scenario: 'A training step takes 80ms of compute on a single GPU. AllReduce for a 10B parameter model (gradient size: 20GB in FP16) across 1024 GPUs using ring AllReduce over 200 Gb/s InfiniBand takes 2×(N-1)/N × 20GB / 200 Gb/s.'
 question: What is the AllReduce time for the 20GB gradient across 1024 GPUs over 200 Gb/s InfiniBand, and what training efficiency results?
 details:
   realistic_solution: 'Ring AllReduce time: 2 × (N-1)/N × message_size / bandwidth. N=1024, message=20GB=160Gb, bandwidth=200 Gb/s. Time = 2 × (1023/1024) × 160Gb / 200Gb/s = 2 × 0.999 × 0.8s = 1.598s ≈ 1.6s. Compute time: 80ms. AllReduce time: 1,600ms. Without overlap: step time = 80 + 1600 = 1680ms. Training efficiency = 80/1680 = 4.8%. With perfect overlap (overlap AllReduce with next forward pass): step time = max(80, 1600) = 1600ms. Efficiency = 80/1600 = 5.0%. The cluster is 95% communication-bound — a physical ceiling. Solutions: (1) gradient compression (reduce 20GB to 2GB → 160ms AllReduce), (2) pipeline parallelism (reduce data-parallel degree), (3) overlap gradients layer-by-layer instead of all at once.'
   common_mistake: |
     **The Pitfall:** Failing to properly convert bits to bytes, or forgetting the 2x multiplier native to the Ring AllReduce algorithm.
-    
     **The Rationale:** Engineers constantly mix up network nomenclature (gigabits Gbps) with memory capacity (gigabytes GB), and superficially read the collective formula without realizing Ring AllReduce demands two distinct passes (reduce-scatter and all-gather).
-    
     **The Consequence:** The projected communication time is miscalculated by an order of magnitude (usually 16x too fast), leading to disastrously naive scaling expectations for massive clusters.
   napkin_math: |
-    - **Bandwidth Conversion**: 200 Gb/s = 25 GB/s.
-    - **AllReduce Time**: 2 × 20GB / 25 GB/s = 1.6 seconds (1600ms).
-    - **Compute Time**: 80ms.
-    - **Efficiency (Without Overlap)**: 80 / (80 + 1600) = **4.8%**.
-    - **Result**: **The cluster is 95% bound by communication waits, proving a massive architectural ceiling.**
+    1. **Assumptions & Constraints:**
+       - 10B model, 20GB FP16 gradients.
+       - 1024 GPUs, 200 Gb/s InfiniBand.
+       - Compute step: 80ms.
+    2. **Calculations:**
+       - Bandwidth Conversion: 200 Gb/s = 25 GB/s.
+       - Ring AllReduce Time: 2 * (1023/1024) * 20 GB / 25 GB/s ≈ 1.6 seconds (1600ms).
+       - Efficiency (Without Overlap): 80ms / (80ms + 1600ms) = 4.8%.
+    3. **Conclusion & Interpretation:**
+       - **Result: 4.8% efficiency natively; the cluster is 95% Network-Bandwidth-Bound by communication waits.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,36 +8,29 @@ competency_area: precision
 bloom_level: apply
 phase: inference
 title: The Night-Vision Overflow
-scenario: You deploy a CNN-based drowsiness detection model on a vehicle's NPU (35 TOPS INT8). Post-training static quantization (PTSQ) using daytime driving data reduces latency from 40ms to 20ms, but accuracy on infrared night-driving inputs plummets to <50% because early layer activations clamp to the maximum INT8 value of 127.
+scenario: You deploy a CNN-based drowsiness detection model on a vehicle's NPU. Post-training static quantization (PTSQ) using daytime driving data reduces latency from 40ms to 20ms, but accuracy on infrared night-driving inputs plummets to <50% because early layer activations clamp to the maximum INT8 value of 127.
 question: How would you diagnose and solve this catastrophic performance drop under night-time conditions?
 details:
-  realistic_solution: The diagnosis is a classic calibration mismatch. The dynamic range of activation values produced by the model when processing infrared night-time imagery is significantly different from the range produced by daytime imagery. The original calibration dataset did not include this data distribution, so the calculated scale factor is incorrect for night-time inputs. This causes high-magnitude activations to be clipped, or 'saturated', at the max value of 127, destroying the information they carry and leading to wrong predictions. The solution is to create a new, representative calibration dataset that includes a diverse mix of driving conditions (day, night, dawn, dusk, IR camera on/off) and re-run the post-training quantization. This will provide the quantizer with the true, full dynamic range of the tensors, allowing it to set scale and zero-point values that prevent clipping across all expected conditions.
+  realistic_solution: "The root cause is a severe calibration distribution mismatch. The dynamic range of activation tensors produced by the model when processing infrared night-time imagery significantly exceeds the range established by daytime imagery. Because the original calibration dataset lacked this out-of-distribution (OOD) data, the static scale factor is incorrectly bounded, causing high-magnitude activations to saturate and clip at the maximum INT8 value of 127, destroying spatial information. The solution is to construct a representative calibration dataset encompassing diverse driving conditions and re-run PTSQ calibration using KL-divergence or MinMax optimization."
   common_mistake: |
     **The Pitfall:** Immediately blaming the quantization algorithm or the model architecture and resorting to expensive Quantization-Aware Training (QAT).
     **The Rationale:** Engineers fail to investigate the calibration dataset, assuming PTSQ is universally flawed rather than recognizing a simple data distribution mismatch.
     **The Consequence:** Wasting massive engineering resources on unnecessary retraining and architectural redesigns when a simple data fix would suffice.
   napkin_math: |
-    - **FP16 Throughput:** 0.7 TFLOPs / 0.04s (40ms) = 17.5 TFLOPS.
-    - **INT8 Throughput:** 35 TOPS (exactly double the FP16 compute).
-    - **Expected Latency:** 0.7 T-Ops / 35 TOPS = **20ms**.
-    - **Conclusion:** The math perfectly aligns; the hardware is executing flawlessly. The accuracy failure is purely a mathematical mapping error caused by out-of-distribution infrared calibration scales.
+    1. **Assumptions & Constraints:**
+       - FP16 latency: 40ms.
+       - FP16 compute requirement: 0.7 TFLOPs.
+       - NPU INT8 throughput: 35 TOPS.
+    2. **Calculations:**
+       - FP16 throughput: 0.7 TFLOPs / 0.04s = 17.5 TFLOPS.
+       - INT8 throughput: 35 TOPS (2x FP16 compute).
+       - Expected INT8 latency: 0.7 T-Ops / 35 TOPS = 0.02s = 20ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Out-Of-Distribution (OOD) Calibration Error.** The math perfectly aligns, indicating the hardware is executing flawlessly. The accuracy failure is purely a mathematical mapping error caused by out-of-distribution infrared calibration scales.
   options:
   - The calibration dataset is not representative of night-driving conditions, causing activation saturation. Re-quantize with a more diverse dataset including night-time samples.
   - Post-training quantization is too aggressive for this architecture. The only reliable solution is to implement full Quantization-Aware Training (QAT) to retrain the model from scratch.
   - The NPU likely has a hardware bug related to sparse feature maps from IR images. The problematic layers should be forced to run on the more reliable CPU.
-  - The model's architecture is fundamentally unstable for 8-bit precision. It must be redesigned with more normalization layers or replaced with a different model family like MobileNetV3.
+  - The model's architecture is fundamentally unstable for 8-bit precision. It must be redesigned with more normalization layers.
   correct_index: 0
-status: deleted
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 6
-deletion_reason: Duplicate of mobile-mobile-quantization-overflow-the-night-vision-overflow-366 (same title + track)
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
+status: published

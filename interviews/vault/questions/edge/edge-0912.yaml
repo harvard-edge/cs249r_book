@@ -11,15 +11,20 @@ title: AR Glasses Memory Fragmentation
 scenario: An AR headset runs continuous hand-tracking and SLAM. After 45 minutes of operation, the system crashes with a `std::bad_alloc` OOM error. Diagnostics show 1.2GB of physical RAM is still technically 'free' out of the 4GB total, but tensor allocation latency has spiked from 1us to 3ms right before the crash.
 question: How would you fix the bad_alloc crashes and 3ms tensor allocation latency despite 1.2GB free RAM?
 details:
-  realistic_solution: The system is suffering from catastrophic memory fragmentation caused by standard `malloc`/`free` handling variable-sized tensor allocations over long periods. The architecture must be redesigned to use a static Memory Pool or Arena Allocator. Perform an offline analysis of the model's computational graph to determine the maximum liveness footprint (the peak memory required at any point in the graph). Pre-allocate a single, contiguous block of memory (e.g., 50MB) at startup. Reuse offsets within this arena for intermediate activations, guaranteeing zero fragmentation and O(1) allocation time.
+  realistic_solution: The system is suffering from catastrophic memory fragmentation caused by standard `malloc`/`free` handling variable-sized tensor allocations over long periods. The architecture must be redesigned to use a static Memory Pool or Arena Allocator. Pre-allocate a single contiguous block of memory (e.g., 50MB) at startup. Reuse offsets within this arena for intermediate activations, guaranteeing zero fragmentation and O(1) allocation time.
   common_mistake: |
     **The Pitfall:** Writing a background garbage collection thread to defragment memory.
     **The Rationale:** Candidates treat this as a standard memory leak or general garbage collection issue rather than a real-time contiguous memory requirement.
     **The Consequence:** Introducing non-deterministic GC pauses that ruin real-time 60fps latency guarantees without solving the root fragmentation problem.
   napkin_math: |
-    - **Allocation Volume:** ~150 variable-sized allocations per frame.
-    - **Total Allocations:** 150 * 60 fps * 60 sec * 45 mins = ~24.3 million allocations.
-    - **Fragmentation Waste:** A 15% fragmentation waste on 2.5GB used = **375MB scattered in tiny holes**, failing contiguous 5MB tensor requests despite 1.2GB total free.
+    1. **Assumptions & Constraints:**
+       - Volume: ~150 variable-sized allocations per frame at 60 fps
+       - Duration: 45 minutes
+    2. **Calculations:**
+       - Total Allocations: 150 * 60 fps * 60 sec * 45 mins = ~24.3 million allocations
+       - Fragmentation Waste: 15% waste on 2.5GB used = 375MB scattered in tiny holes
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Fragmentation.** The allocator fails contiguous 5MB requests despite 1.2GB total free RAM.
 status: published
 provenance: imported
 requires_explanation: true

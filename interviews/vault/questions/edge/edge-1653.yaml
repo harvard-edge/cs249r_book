@@ -8,19 +8,25 @@ competency_area: cross-cutting
 bloom_level: create
 phase: both
 title: On-Device Intersectional Fairness Auditing at the Edge
-scenario: You are deploying a vision-based driver monitoring system on an NVIDIA Jetson Orin. The model must meet strict demographic parity and equalized odds constraints across 16 intersectional subgroups (age, gender, skin tone, eyewear) before alerting. Raw face data cannot leave the device due to privacy laws.
-question: How would you design a continuous, on-device fairness audit for 16 subgroups without exceeding the Jetson Orin's 60W TDP or disrupting the primary 30 FPS inference pipeline?
+scenario: You are deploying a vision-based driver monitoring system on an edge hardware accelerator. The model must meet strict demographic parity and equalized odds constraints across 16 intersectional subgroups before alerting. Raw face data cannot leave the device due to privacy laws.
+question: How would you design a continuous, on-device fairness audit for 16 subgroups without exceeding the 60W TDP or disrupting the primary 30 FPS inference pipeline?
 details:
-  realistic_solution: A robust solution involves deploying a heavily quantized (INT8) auxiliary attribute classifier specifically compiled for the Deep Learning Accelerator (DLA), completely isolating it from the main Ampere GPU workload. This lightweight model periodically samples frames (e.g., 1 FPS instead of 30 FPS) to estimate subgroup distributions and error rates. The aggregated, anonymized confusion matrices per subgroup are then periodically synced to the cloud to monitor equalized odds drift.
+  realistic_solution: A robust solution involves deploying a heavily quantized (INT8 PTQ) auxiliary attribute classifier specifically compiled for the dedicated DLA co-processor, completely isolating it from the main GPU workload. This lightweight model periodically samples frames (e.g., 1 FPS instead of 30 FPS) to estimate subgroup distributions. The aggregated confusion matrices are then periodically synced to the cloud.
   common_mistake: |
     **The Pitfall:** Running heavy attribute classifiers for every frame on the main GPU.
-    **The Rationale:** Candidates fail to separate the auditing pipeline's cadence from the main inference pipeline, lacking knowledge of the Orin's heterogeneous compute (DLA vs GPU).
+    **The Rationale:** Candidates fail to separate the auditing pipeline's cadence from the main inference pipeline, lacking knowledge of heterogeneous compute (DLA vs GPU).
     **The Consequence:** The audit steals critical compute from the primary task and immediately blows past the 60W thermal envelope.
   napkin_math: |
-    1. **Compute Allocation:** Assume the main model uses 200 TOPS on the GPU (out of 275 TOPS total).
-    2. **Audit Pipeline:** We allocate a small INT8 MobileNetV3 for attribute classification to the DLA, requiring ~0.5 GOPS per frame.
-    3. **Audit Cost:** Running at 1 FPS, it uses <0.001 TOPS, easily fitting in the remaining 75 TOPS budget.
-    4. **Memory Footprint:** Storing running confusion matrices for 16 subgroups requires trivial memory (16 * 4 INT32 values = **256 bytes**), leaving ample RAM for the primary pipeline.
+    1. **Assumptions & Constraints:**
+       - Hardware: Main GPU handles primary model, DLA handles audit. Total budget 275 TOPS.
+       - Main Model: 200 TOPS at 30 FPS.
+       - Audit model: INT8 MobileNetV3 (~0.5 GOPS/frame).
+    2. **Calculations:**
+       - Audit Compute at 1 FPS: 0.5 GOPS * 1 FPS = 0.0005 TOPS.
+       - Budget check: 200 TOPS + 0.0005 TOPS safely fits in 275 TOPS.
+       - Memory Footprint: 16 subgroups * 4 INT32 values (confusion matrix) = 256 bytes.
+    3. **Conclusion & Interpretation:**
+       - **Result: Highly Feasible**. The 0.0005 TOPS requirement is trivial for the DLA, and the 256 byte payload imposes zero network overhead, allowing continuous background auditing without disruption.
 status: published
 provenance: imported
 requires_explanation: true

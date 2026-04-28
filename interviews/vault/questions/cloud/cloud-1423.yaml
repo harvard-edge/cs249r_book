@@ -8,31 +8,32 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: Input Stationary Dataflow Memory Math
-scenario: You are optimizing a custom datacenter accelerator executing a linear projection layer Y = XW
-  using INT8 precision. Input activations X have a shape of 128 tokens x 128 hidden_dim. Weights W have
-  a shape of 128 hidden_dim x 4096 out_features. The accelerator features a 128x128 Processing Element
-  (PE) array, with each PE containing exactly 1 byte of local register space (16 KB total capacity across
-  the array). Assuming a simplified architecture with no intermediate SRAM cache (direct PE-to-DRAM communication),
-  calculate the total DRAM reads required for matrices X and W using an Input Stationary (IS) dataflow
-  versus a Weight Stationary (WS) dataflow.
+scenario: You are optimizing a custom datacenter accelerator executing a linear projection layer Y = XW using INT8 precision. Input activations X have a shape of 128 tokens x 128 hidden_dim. Weights W have a shape of 128 hidden_dim x 4096 out_features. The accelerator features a 128x128 Processing Element (PE) array, with each PE containing exactly 1 byte of local register space (16 KB total capacity across the array). The architecture has no intermediate SRAM cache.
 question: "How many DRAM reads do Input Stationary and Weight Stationary dataflows require for X and W on this 128x128 PE array?"
 details:
-  realistic_solution: In Input Stationary (IS) dataflow, the entire 16KB activation matrix X fits into
-    the PE array and is pinned once. The 512KB weight matrix W is streamed through, yielding 528KB total
-    DRAM reads (16KB + 512KB). In Weight Stationary (WS), the 512KB weight matrix must be tiled into 32
-    tiles (each 16KB) because the PE array can only hold 16KB. For each of the 32 weight tiles, the full
-    16KB of X must be re-streamed, adding 32 * 16KB = 512KB of redundant X reads. Total WS reads = 512KB
-    + 512KB = 1024KB. IS saves 496KB (48%) of DRAM traffic.
-  common_mistake: Candidates often assume the total DRAM read volume is simply the sum of matrix sizes
-    (16KB + 512KB = 528KB) for both dataflows, forgetting that Weight Stationary requires re-reading the
-    input activations for each weight tile.
-  napkin_math: "1. Data Sizes (INT8 = 1 byte):\n   X size = 128 * 128 = 16,384 bytes = 16 KB\n   W size\
-    \ = 128 * 4096 = 524,288 bytes = 512 KB\n\n2. Input Stationary (IS) Reads:\n   Pin X in PEs (fits\
-    \ perfectly): Read X once = 16 KB\n   Stream W through PEs: Read W once = 512 KB\n   Total IS Reads\
-    \ = 16 + 512 = 528 KB\n\n3. Weight Stationary (WS) Reads:\n   Pin W in PEs: W requires 32 tiles (512\
-    \ KB / 16 KB)\n   Read W once (across all tiles) = 512 KB\n   Stream X for each tile: 32 passes *\
-    \ 16 KB = 512 KB\n   Total WS Reads = 512 + 512 = 1,024 KB\n\nResult: IS saves 496 KB of DRAM reads\
-    \ per inference compared to WS."
+  realistic_solution: 'In Input Stationary (IS) dataflow, the entire 16KB activation matrix X fits into the PE array and is pinned once. The 512KB weight matrix W is streamed through. In Weight Stationary (WS), the 512KB weight matrix must be tiled into 32 tiles (each 16KB) because the PE array can only hold 16KB. For each of the 32 weight tiles, the full 16KB of X must be re-streamed.'
+  common_mistake: |
+    **The Pitfall:** Assuming total DRAM read volume is simply the sum of matrix sizes for both dataflows.
+    **The Rationale:** Candidates forget that Weight Stationary dataflow requires redundantly re-reading the entire input activation matrix for every single weight tile.
+    **The Consequence:** Selecting a suboptimal dataflow that doubles memory bandwidth pressure, crippling inference throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - INT8 = 1 byte/element.
+       - X shape = 128 x 128 = 16 KB.
+       - W shape = 128 x 4096 = 512 KB.
+       - PE Array Capacity = 16 KB.
+    2. **Calculations:**
+       - **Input Stationary (IS):**
+         - Pin X (16 KB): 16 KB read.
+         - Stream W: 512 KB read.
+         - Total IS Reads = 16 + 512 = 528 KB.
+       - **Weight Stationary (WS):**
+         - W requires 32 tiles (512 KB / 16 KB).
+         - Read W once = 512 KB.
+         - Stream X for each tile: 32 passes * 16 KB = 512 KB.
+         - Total WS Reads = 512 + 512 = 1024 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: IS requires 528 KB, WS requires 1024 KB.** The bottleneck is **Memory Bandwidth-Bound**, making IS optimal.
 status: published
 provenance: imported
 requires_explanation: false

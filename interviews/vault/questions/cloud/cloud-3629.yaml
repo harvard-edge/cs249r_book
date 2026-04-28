@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: Zero-Copy RDMA Registration and Memory Pinning for GPU Direct
-scenario: An engineer enables GPUDirect RDMA on H100 (80GB HBM3) to allow an InfiniBand NIC to DMA directly from GPU memory. The first implementation shows 40% higher latency than CPU-path RDMA.
+scenario: An engineer enables GPUDirect RDMA on a GPU to allow an InfiniBand NIC to DMA directly from GPU memory. The first implementation shows 40% higher latency than CPU-path RDMA.
 question: Why might GPUDirect RDMA show 40% higher latency than CPU-path RDMA, and how would you fix the memory registration issue?
 details:
   realistic_solution: 'Memory registration (ibv_reg_mr) pins physical pages and creates translation entries in HCA''s memory translation table. Cost: ~10μs per registration. Dynamic registration per-transfer doubles latency. Fix: pre-register gradient buffers at startup (static buffers). Also: GPUDirect RDMA requires NVLink/PCIe P2P access between GPU and HCA — ensure GPU and HCA are on the same PCIe root complex or NVLink fabric. BAR mapping overhead: first access to each GPU memory page via PCIe requires TLB fill. Warm up by touching all registered pages once. After optimization: GPUDirect RDMA should achieve 3-5μs vs CPU-path 5-8μs (due to GPU memory access patterns).'
@@ -17,11 +17,16 @@ details:
     **The Rationale:** Candidates overlook that HCA memory registration is an expensive, synchronous operation that pins physical pages.
     **The Consequence:** The overhead of dynamic registration completely negates the latency benefits of bypassing the CPU.
   napkin_math: |
-    - Dynamic registration penalty: 10 μs per transfer × 1000 transfers/s = 10 ms overhead/s.
-    - Pages for 40 GB buffer: 40 GB / 4 KB = 10,000,000 pages.
-    - Pre-registration cost: 10,000,000 pages × 0.1 μs/page = 1,000,000 μs = 1 second.
-    - If base latency is 10 μs, dynamic adds 4 μs (40% penalty).
-    - **Conclusion:** One-time 1s cost eliminates the per-transfer 40% latency penalty.
+    1. **Assumptions & Constraints:**
+       - Buffer: 40 GB. Page size: 4 KB.
+       - Dynamic registration penalty: 10 μs per transfer. Base latency: 10 μs.
+    2. **Calculations:**
+       - Dynamic registration penalty: 10 μs × 1000 transfers/s = 10 ms overhead/s.
+       - Pages for 40 GB buffer: 40 GB / 4 KB = 10,000,000 pages.
+       - Pre-registration cost: 10,000,000 pages × 0.1 μs/page = 1,000,000 μs = 1 second.
+       - Dynamic vs Base: 10 μs base + 4 μs dynamic = 40% penalty.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1s one-time registration cost eliminates 40% per-transfer latency penalty.** (Latency-Bound)
 status: published
 provenance: imported
 requires_explanation: false

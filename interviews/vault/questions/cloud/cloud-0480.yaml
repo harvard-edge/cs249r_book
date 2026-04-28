@@ -8,21 +8,24 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Two-Node Scaling Wall
-scenario: 'You are training a 70B parameter LLM using data parallelism across two servers, each with 8 H100 GPUs. You observe a near-linear speedup when scaling from 1 to 8 GPUs on a single server, but only a 1.2x speedup when scaling from one server (8 GPUs) to two servers (16 GPUs). Your profiler indicates that the `All-Reduce` collective for gradient synchronization is the major bottleneck. The nodes are connected with 400 Gbps InfiniBand NDR.'
-question: 'Diagnose the most likely cause of this poor scaling when the 70B LLM’s gradient All-Reduce crosses the 400 Gbps InfiniBand link.'
+scenario: You are training a 70B parameter LLM using data parallelism across two servers, each with 8 H100 GPUs. You observe a near-linear speedup when scaling from 1 to 8 GPUs on a single server, but only a 1.2x speedup when scaling from one server (8 GPUs) to two servers (16 GPUs). Your profiler indicates that the `All-Reduce` collective for gradient synchronization is the major bottleneck. The nodes are connected with 400 Gbps InfiniBand NDR.
+question: Diagnose the most likely cause of this poor scaling when the 70B LLM's gradient All-Reduce crosses the 400 Gbps InfiniBand link.
 details:
-  realistic_solution: 'The bottleneck is the InfiniBand network connecting the two servers. While NVLink provides extremely high bandwidth (900 GB/s per GPU) for communication *within* a single server, the communication *between* the two servers is limited by the much lower InfiniBand bandwidth. The `All-Reduce` operation requires every GPU to exchange gradients with every other GPU. Once you cross the server boundary, that traffic must go over the comparatively slow InfiniBand link, creating a scaling wall.'
+  realistic_solution: The bottleneck is the InfiniBand network connecting the two servers. While NVLink provides extremely high bandwidth for communication *within* a single server, the communication *between* the two servers is limited by the much lower InfiniBand bandwidth. The `All-Reduce` operation requires every GPU to exchange gradients. Once you cross the server boundary, that traffic must go over the comparatively slow InfiniBand link, creating a scaling wall.
   common_mistake: |
-    **The Pitfall:** Conflating different interconnects or blaming the PCIe bus.
-    **The Rationale:** Engineers might blame the on-server link (NVLink) or not appreciate the orders-of-magnitude performance difference between NVLink and InfiniBand.
-    **The Consequence:** Wasting time tuning intra-node topologies when the inter-node link is the physical bottleneck.
+    **The Pitfall:** Conflating intra-node NVLink bandwidth with inter-node InfiniBand bandwidth.
+    **The Rationale:** Assuming horizontal scaling across nodes maintains the same communication efficiency as scaling within a single node.
+    **The Consequence:** Wasting time tuning intra-node topologies or batch sizes when the physical inter-node link is the hard bottleneck.
   napkin_math: |
-    - **Model Size:** 70B FP16 = 140 GB.
-    - **Ring All-Reduce Volume:** 2 × (N-1)/N × 140 GB ≈ 280 GB per GPU.
-    - **Single Server (NVLink):** 280 GB / 900 GB/s = ~0.31 seconds.
-    - **Two Servers (InfiniBand NDR):** Crossing the node boundary is limited to 400 Gbps (50 GB/s).
-    - **Cross-Node Transfer Time:** 280 GB / 50 GB/s = 5.6 seconds.
-    - **Impact:** If compute takes 6 seconds, waiting 5.6 seconds for the network completely ruins Data Parallel scaling.
+    1. **Assumptions & Constraints:**
+       - Model: 70B FP16 (140 GB).
+       - NVLink Bandwidth: ~900 GB/s. InfiniBand Bandwidth: 400 Gbps (50 GB/s).
+    2. **Calculations:**
+       - Ring All-Reduce Volume: 2 * (N-1)/N * 140 GB ≈ 280 GB per GPU.
+       - Single Server (NVLink) Transfer: 280 GB / 900 GB/s = ~0.31 seconds.
+       - Cross-Node (InfiniBand) Transfer: 280 GB / 50 GB/s = 5.6 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound (Inter-Node).** Waiting 5.6 seconds for the network severely limits Data Parallel scaling across nodes compared to the 0.31s intra-node communication time.
   options:
   - The NVLink switch within each server is saturated by the 8-GPU All-Reduce traffic, creating a bottleneck.
   - The PCIe Gen5 bus connecting the GPUs to the CPU is unable to handle the gradient data from 8 GPUs simultaneously.

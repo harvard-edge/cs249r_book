@@ -8,30 +8,32 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Edge Systolic Array Design: Optimal Tiling for Jetson Orin DLA'
-scenario: Design the tiling strategy for running YOLOv8-nano (INT8, 4.2M params, 8.7
-  GOPS) on the Jetson Orin's DLA (Deep Learning Accelerator, 2 DLA cores, each 5.5
-  TOPS INT8). Specify tile sizes for the first convolution layer (3, 640, 640 input
-  -> 32 filters, 3x3 stride 2), memory layout, and expected latency.
-question: How should the first YOLOv8-nano convolution be tiled for Jetson Orin DLA
-  SRAM, and what latency should the two DLA cores achieve?
+scenario: Design the tiling strategy for running YOLOv8-nano (INT8, 4.2M params, 8.7 GOPS) on the Jetson Orin's DLA (Deep Learning Accelerator, 2 DLA cores, each 5.5 TOPS INT8). Specify tile sizes for the first convolution layer (3, 640, 640 input -> 32 filters, 3x3 stride 2), memory layout, and expected latency.
+question: How should the first YOLOv8-nano convolution be tiled for Jetson Orin DLA SRAM, and what latency should the two DLA cores achieve?
 details:
-  realistic_solution: 'DLA SRAM per core: ~3MB. Conv1: input=(3,640,640) INT8 = 1.23MB.
-    Output=(32,320,320) INT8 = 3.28MB. Weight: 32*3*3*3*1=864 bytes. Total: 1.23+3.28+0=4.51MB
-    > 3MB SRAM. Must tile. Tile: input=(3,128,640)=245KB, output=(32,64,320)=655KB.
-    Total=900KB < 3MB. Number of tiles: ceil(640/128) = 5 tiles vertically. Each DLA
-    core: process 5 tiles of first conv. Two cores: 2.5 tiles each (spatial split).
-    Weight=864 bytes, fits entirely in SRAM across all tiles. Latency: FLOPs=2*32*320*320*3*3*3=176M.
-    At 5.5 TOPS: 176M/5.5T=0.032ms per core. Both cores: 0.016ms for this layer.'
-  common_mistake: Tiling based on the full feature map without checking if each DLA
-    core's on-chip SRAM (typically 3-4MB) can hold the tile and intermediate results
-    simultaneously.
-  napkin_math: 'Input: 3*640*640*1=1,228,800 bytes=1.23MB. Output: 32*320*320=3,276,800
-    bytes=3.28MB. Weight: 32*3*3*3=864 bytes. Together=4.51MB > 3MB SRAM. Tile: split
-    input into H=128 strips with 2-pixel overlap (3x3 filter): 5 tiles of (3,130,640).
-    Tile input=3*130*640=249,600 bytes=244KB. Tile output=32*64*320=655,360=640KB.
-    Together=884KB << 3MB SRAM. FLOPs: 2 * 32 * (64*320) * 27 = 35.4M per tile.
-    5 tiles = 177M. Per DLA (2.5 tiles each): 88.5M FLOPs. At 5.5 TOPS: 88.5M/5500G=0.016ms.
-    Both DLAs in parallel: 0.016ms. Full YOLO inference on DLA: ~8ms for entire network.'
+  realistic_solution: 'DLA SRAM per core is typically ~3MB. The first conv requires 4.51MB, exceeding SRAM. Implement spatial tiling by splitting the input vertically into 5 strips with 2-pixel overlaps. Distribute the tiles symmetrically across the two DLA cores to process entirely within SRAM without spilling to LPDDR5.'
+  common_mistake: |
+    **The Pitfall:** Processing the full feature map sequentially without spatial tiling.
+    **The Rationale:** Candidates forget the rigid SRAM constraints of fixed-function accelerators like the DLA.
+    **The Consequence:** The DLA exhausts SRAM, forces LPDDR5 thrashing, and absolutely tanks inference throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Input: (3, 640, 640), INT8.
+       - Output: (32, 320, 320), INT8.
+       - Weight: 32 filters, 3x3.
+       - DLA SRAM: ~3MB per core. 5.5 TOPS per core.
+    2. **Calculations:**
+       - Full Input = 3 * 640 * 640 = 1.23 MB.
+       - Full Output = 32 * 320 * 320 = 3.28 MB.
+       - Full footprint = 4.51 MB (Exceeds 3MB SRAM).
+       - Tile: split into 5 horizontal strips (H=128 + overlap).
+       - Tile Input = 3 * 130 * 640 = 244 KB.
+       - Tile Output = 32 * 64 * 320 = 640 KB.
+       - Tile footprint = 884 KB (Fits in SRAM).
+       - Total FLOPs = 2 * 32 * (320*320) * (3*3*3) = 177 MFLOPs.
+       - Compute latency per core (half workload) = (177 MFLOPs / 2) / 5.5 TOPS = ~0.016 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound in SRAM**. Proper tiling shrinks the working set to 884 KB, keeping data locally in SRAM and driving the latency down to 0.016 ms across the dual DLA cores.
 status: published
 provenance: imported
 requires_explanation: true

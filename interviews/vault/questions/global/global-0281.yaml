@@ -8,20 +8,23 @@ competency_area: latency
 bloom_level: create
 phase: both
 title: Multi-Model Serving Gateway Design
-scenario: Design a serving gateway for a company running 15 LLMs (7B to 70B) across 48 A100-80GB GPUs. Requirements are to auto-scale models based on traffic, cold start for any model < 60 seconds, overall GPU utilization > 70%, and graceful degradation when capacity is exhausted.
-question: "How would you design a serving gateway for a company running 15 LLMs (7B to 70B) across 48 A100-80GB GPUs?"
+scenario: Design a serving gateway for a company running 15 LLMs (7B to 70B) across 48 80GB GPUs. Requirements are to auto-scale models based on traffic, cold start for any model < 60 seconds, overall GPU utilization > 70%, and graceful degradation when capacity is exhausted.
+question: How would you design a serving gateway for a company running 15 LLMs (7B to 70B) across 48 80GB GPUs?
 details:
-  realistic_solution: "Design: (1) Model registry + weight cache: all 15 model weights stored on a shared NVMe tier (total ≈ 500 GB INT8). Each GPU has 80 GB VRAM; can hold one 70B model or multiple smaller models. Weights cached in GPU memory with LRU eviction. (2) Request router: incoming requests are classified by model, routed to a GPU that already has the model loaded (cache hit) or to the least-loaded GPU (cache miss triggers load). (3) Dynamic packing: small models (7B = 7 GB INT8) can co-locate on a single GPU. Pack up to 10× 7B models per GPU with separate CUDA streams, or 1× 70B model. The router tracks per-GPU memory utilization and co-locates compatible models. (4) Cold start budget: loading 70B INT8 (70 GB) from NVMe SSD at 7 GB/s = 10 seconds. From network storage at 3 GB/s = 23 seconds. Both under 60s. Pre-warm top-5 models on dedicated GPUs. (5) Graceful degradation: when all GPUs are saturated, queue requests with priority (paying tier first), return estimated wait time, and optionally route to a smaller model for approximate answers. (6) Autoscaler: monitors request queue depth per model, scales replicas up (load model on idle GPU) or down (evict cold model) every 30 seconds."
+  realistic_solution: Store all model weights on a shared NVMe tier. Route requests to a GPU that already has the model loaded or to the least-loaded GPU. Dynamically pack smaller models (10x 7B models per GPU) to maximize VRAM utilization.
   common_mistake: |
-    **The Pitfall:** Statically assigning GPUs to models and scaling by adding more replicas.
-    **The Rationale:** It mimics traditional microservice scaling and is simpler to implement.
-    **The Consequence:** This fragments the GPU pool and leads to utilization of 30-40% because each model's traffic pattern is different.
+    **The Pitfall:** Statically assigning GPUs to specific models and scaling by adding rigid replicas.
+    **The Rationale:** It mimics traditional microservice scaling and is infinitely simpler to implement.
+    **The Consequence:** This fragments the GPU pool and crushes utilization to 30-40% because each model's traffic pattern peaks differently.
   napkin_math: |
-    - 48 GPUs × 80 GB = 3.84 TB total VRAM.
-    - 15 models INT8 ≈ 500 GB.
-    - Average 2.5 model copies per GPU at 70% util.
-    - Cold start: 70 GB / 7 GB/s NVMe = 10s.
-    - **Co-locate: 80 GB fits 1×70B or 5×7B + KV cache.**
+    1. **Assumptions & Constraints:**
+       - 48 GPUs * 80GB = 3.84 TB VRAM. 15 models (INT8) = 500 GB.
+       - NVMe read bandwidth = 7 GB/s.
+    2. **Calculations:**
+       - Cold start (70B INT8) = 70 GB / 7 GB/s = 10s.
+       - Co-location capability: 80GB fits 1x 70B or 10x 7B models.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Capacity).** Dynamic packing of smaller models and localized NVMe caching guarantee sub-60s cold starts and >70% utilization across the fleet.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,18 +11,25 @@ title: Real-Time Inference Pipeline Specification for Autonomous Drone on Jetson
 scenario: 'Design a real-time inference pipeline for an autonomous delivery drone using Jetson Orin NX (60W MODE). The pipeline must: (1) detect obstacles at 60fps (depth camera, 640x480), (2) run semantic segmentation at 10fps (for path planning), (3) run localization network at 100Hz.'
 question: How would you allocate GPU, DLA, and other compute for the drone's 60fps detection, 10fps segmentation, and 100Hz localization within 60W?
 details:
-  realistic_solution: 'Jetson Orin NX resources: GPU (2 Ampere SMs), DLA (2x64 TOPS), PVA (vision accelerator). Obstacle detection 60fps: YOLOv8-n (4ms GPU) = 60x4ms = 24ms/s = 24% GPU. Use DLA instead: ~2ms/frame on DLA, freeing GPU. Semantic segmentation 10fps: DeepLabV3+ (20ms GPU) = 10x20ms = 200ms/s but only 200ms needed per second = 20% GPU time. Localization 100Hz: lightweight CNN (1ms GPU) = 100x1ms = 100ms/s = 10% GPU. Total GPU: 10+20=30% (detection on DLA). GPU budget: 60W x 0.3 = 18W. DLA for detection: 5W. System: 18+5+10(CPU+system) = 33W — well within 60W. Reserve 27W headroom for burst workloads.'
+  realistic_solution: Offload the high-frequency 60fps obstacle detection to the DLA, which frees up the general-purpose Ampere GPU. The DLA executes YOLOv8-n efficiently (~2ms/frame, 5W). Run the heavier semantic segmentation (DeepLabV3+) and localization CNN on the GPU. This prevents GPU saturation and leaves significant thermal headroom for burst workloads, keeping total power draw well under the 60W envelope.
   common_mistake: |
     **The Pitfall:** Allocating GPU to all tasks simultaneously without utilizing the DLA.
     **The Rationale:** Engineers default to scheduling purely on the general-purpose GPU, forgetting about domain-specific edge accelerators.
     **The Consequence:** The GPU saturates quickly, limiting burst capacity and increasing overall power draw compared to using the highly efficient DLA for the highest-frequency detection tasks.
   napkin_math: |
-    1. **Detection (DLA):** 2ms/frame * 60fps = 120ms/s active time. Power: ~5W.
-    2. **Segmentation (GPU):** 20ms * 10fps = 200ms/s active time. Utilization = 20%. Power: `20% * 25W = 5W`.
-    3. **Localization (GPU):** 1ms * 100Hz = 100ms/s active time. Utilization = 10%. Power: `10% * 25W = 2.5W`.
-    4. **System Baseline:** ~10W.
-    5. **Total Power:** `5W (DLA) + 5W (GPU) + 2.5W (GPU) + 10W (System) = 22.5W`.
-    **The pipeline fits well within the 60W TGP, leaving significant headroom.**
+    1. **Assumptions & Constraints:**
+       - Orin NX budget: 60W.
+       - Detection: 60fps on DLA (2ms/frame, 5W).
+       - Segmentation: 10fps on GPU (20ms/frame, 25W full load).
+       - Localization: 100Hz on GPU (1ms/frame).
+       - System baseline power: ~10W.
+    2. **Calculations:**
+       - Detection (DLA): 60 * 2ms = 120ms/s (12% active). Power = ~5W.
+       - Segmentation (GPU): 10 * 20ms = 200ms/s (20% active). Power = 20% * 25W = 5W.
+       - Localization (GPU): 100 * 1ms = 100ms/s (10% active). Power = 10% * 25W = 2.5W.
+       - Total Power = 5W + 5W + 2.5W + 10W = 22.5W.
+    3. **Conclusion & Interpretation:**
+       - **Result: Power-Bound (Safely Under Limit)**. The pipeline fits well within the 60W limit, drawing only 22.5W and leaving 37.5W headroom for dynamic burst scaling.
 status: published
 provenance: imported
 requires_explanation: true

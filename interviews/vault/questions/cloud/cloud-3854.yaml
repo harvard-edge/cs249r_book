@@ -8,20 +8,26 @@ competency_area: networking
 bloom_level: evaluate
 phase: inference
 title: KV-Cache Aware LLM Routing
-scenario: Architect a request routing layer for a multi-tenant LLM inference service backed by clusters of 8x H100 nodes connected via InfiniBand NDR (50 GB/s). Requests vary heavily from 100 to 50,000 tokens in prompt length. The current least-connections load balancer causes severe tail latency and frequent out-of-memory errors due to redundant KV cache allocations.
+scenario: Architect a request routing layer for a multi-tenant LLM inference service backed by clustered compute nodes connected via InfiniBand NDR (50 GB/s). Requests vary heavily from 100 to 50,000 tokens in prompt length. The current least-connections load balancer causes severe tail latency and frequent out-of-memory errors due to redundant KV cache allocations.
 question: How would you route variable-length LLM requests to maximize KV-cache hits and utilization while avoiding hot spots and OOMs?
 details:
-  realistic_solution: Implement a stateful routing layer that uses prefix-based consistent hashing to route requests sharing common system prompts or document contexts to the same 8x H100 node. The router maintains a lightweight view of each node's KV cache state and queue depth. If the primary node is overloaded, it can redirect to an idle node and trigger a fast KV cache transfer over the InfiniBand network rather than recomputing.
+  realistic_solution: 'Implement a stateful routing layer that uses prefix-based consistent hashing to route requests sharing common system prompts or document contexts to the same node. The router maintains a lightweight view of each node''s KV cache state and queue depth. If the primary node is overloaded, it can redirect to an idle node and trigger a fast KV cache transfer over the InfiniBand network rather than recomputing.'
   common_mistake: |
     **The Pitfall:** Applying traditional stateless load balancing (round-robin or least-connections).
     **The Rationale:** Candidates fail to recognize the stateful nature of LLM inference and the massive overhead of KV cache reconstruction.
     **The Consequence:** Redundant KV cache allocations across nodes, leading to poor memory utilization and OOM errors.
   napkin_math: |
-    - 1. Calculate KV cache size for 20,000 token prefix (70B model, 8 KV heads, 80 layers, 128 dim): 20,000 * 2 * 80 * 8 * 128 * 2 bytes = 6.55 GB.
-    - 2. Calculate compute required to recompute prefix: 20,000 * 70B * 2 = 2.8 PFLOPs.
-    - 3. Calculate recompute time on 8x H100s (7.9 PFLOPS effective): 2.8 / 7.9 = ~354 ms.
-    - 4. Calculate network transfer time (50 GB/s InfiniBand): 6.55 GB / 50 GB/s = 131 ms.
-    - 5. Conclusion: **Transferring the KV cache over InfiniBand (131ms) is significantly faster than recomputing it (354ms)**, validating stateful routing and cache migration.
+    1. **Assumptions & Constraints:**
+       - 70B model, 80 layers, 8 KV heads, 128 dim.
+       - 20,000 token prefix.
+       - Hardware node (7.9 PFLOPS effective compute).
+       - InfiniBand NDR (50 GB/s bandwidth).
+    2. **Calculations:**
+       - KV cache size: 20,000 tokens * 2 (K+V) * 80 layers * 8 heads * 128 dim * 2 bytes = 6.55 GiB.
+       - Compute required to recompute prefix: 20,000 * 70B * 2 = 2.8 PFLOPs.
+       - Recompute time on node: 2.8 PFLOPs / 7.9 PFLOPS = ~354 ms.
+       - Network transfer time: 6.55 GiB / 50 GB/s ≈ 131 ms.
+    3. **Conclusion & Interpretation:** **Transferring the KV cache (131ms) is significantly faster than recomputing (354ms)**. Result: **Network-Bound**.
 status: published
 provenance: imported
 requires_explanation: true

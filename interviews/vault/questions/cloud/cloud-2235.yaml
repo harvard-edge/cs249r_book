@@ -14,14 +14,20 @@ details:
   realistic_solution: 'This is a classic producer-consumer imbalance in the storage pipeline. Each checkpoint produces 200 MB per GPU on NVMe. With 8 GPUs per node, each checkpoint deposits 1.6 GB on the local NVMe. At 15-minute intervals, that is 6.4 GB/hour accumulating on NVMe. The background flush to Lustre must drain this at least as fast. The total cluster checkpoint size is 50,000 × 200 MB = 10 TB. At 1 TB/s Lustre write bandwidth, draining takes 10 seconds — easy. But the failure mode is subtle: Lustre bandwidth is shared. If any other I/O load (data loading, logging, other jobs'' checkpoints) consumes even 30% of Lustre bandwidth, the drain rate drops. Over 3 days (288 checkpoints), the NVMe accumulation grows: 288 × 1.6 GB = 461 GB produced per node. If the drain rate lags by even 5% per checkpoint (flushing 1.52 GB instead of 1.6 GB), the deficit is 288 × 0.08 = 23.04 GB, plus the unflushed checkpoints themselves. Once NVMe fills, the synchronous DRAM→NVMe phase blocks, training stalls, and the backpressure cascades. Prevention: monitor NVMe free space and checkpoint drain lag as a first-class metric, implement checkpoint garbage collection (keep only the 3 most recent on NVMe), and reserve dedicated Lustre bandwidth for checkpoint traffic.'
   common_mistake: |
     **The Pitfall:** Assuming a single checkpoint is the problem because it is small (200 MB).
-    **The Rationale:** Engineers look at the static size of a checkpoint shard and conclude it cannot fill a 3.84 TB drive.
-    **The Consequence:** They fail to account for the accumulation rate versus the drain rate over time. A slight drop in shared Lustre bandwidth causes unflushed shards to pile up silently over days until the drive is full and the job crashes.
+    **The Rationale:** Engineers look at the static size of a checkpoint shard and conclude it cannot fill a massive 3.84 TB drive.
+    **The Consequence:** They fail to account for the accumulation rate versus the drain rate over time, allowing unflushed shards to pile up silently and crash the job.
   napkin_math: |
-    - **Per-Node Accumulation Rate:** 8 GPUs × 200 MB = 1.6 GB per checkpoint. At 4 checkpoints/hr, this is 6.4 GB/hr.
-    - **Ideal Drain Rate:** 6.4 GB/hr.
-    - **Drain Deficit (e.g., 5% Lustre load):** If drain lags by 5%, the deficit is 0.05 × 6.4 GB/hr = 0.32 GB/hr.
-    - **Long-Term Buildup:** Over 72 hours, the deficit reaches 72 × 0.32 GB/hr = 23.04 GB. If 3 checkpoints are retained for safety (4.8 GB), total NVMe consumed is 27.84 GB.
-    - **Conclusion:** **If Lustre load spikes and drain lag reaches 20%, the deficit becomes 1.28 GB/hr. Old checkpoints never fully flush. Once the NVMe eventually fills, the synchronous DRAM-to-NVMe phase blocks, causing a non-linear cascade failure.**
+    1. **Assumptions & Constraints:**
+       - Node: 8 GPUs, NVMe Drive = 3.84 TB.
+       - Checkpoint Shard = 200 MB/GPU.
+       - Interval = 15 mins (4/hour).
+       - Storage Drain Lag = 5%.
+    2. **Calculations:**
+       - Per-Node Accumulation Rate: 8 * 200 MB = 1.6 GB / checkpoint = 6.4 GB/hour.
+       - Drain Deficit (5% lag): 0.05 * 6.4 GB/hour = 0.32 GB/hour.
+       - Buildup over 72 hours: 72 * 0.32 = 23.04 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Cascade Failure from Shared Storage Contention.** A slight drop in shared Lustre bandwidth causes an irreversible NVMe fill-up over days.
 status: published
 provenance: imported
 requires_explanation: false

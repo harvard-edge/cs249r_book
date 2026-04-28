@@ -8,8 +8,7 @@ competency_area: compute
 bloom_level: create
 phase: inference
 title: The 4D Radar Fusion Bottleneck
-scenario: >-
-  Your self-driving car's perception system runs on a Jetson AGX Orin (60W configuration), fusing cameras and 3D LiDAR within a 33ms latency budget. A new 4D Radar model (sparse point cloud network requiring 8 TOPS) is added to the Orin GPU. Power jumps to 58W (safe), but latency hits 55ms, causing missed frames. Profiling shows the new radar model's arithmetic intensity is only 200 Ops/Byte.
+scenario: Your self-driving car's perception system runs on a Jetson AGX Orin, fusing cameras and 3D LiDAR within a 33ms latency budget. A new 4D Radar model is added to the Orin GPU. Power remains safe, but latency hits 55ms, causing missed frames. Profiling shows the new radar model's arithmetic intensity is only 200 Ops/Byte.
 question: What heterogeneous compute architecture would meet the 33ms/60W constraints, and which workloads would you place on each unit?
 details:
   realistic_solution: 'The 4D Radar model is severely memory-bound on the Orin GPU because its arithmetic intensity is too low to saturate the GPU''s Tensor Cores. Adding a dedicated DSP or sparse-optimized accelerator with high internal SRAM bandwidth (e.g., 500 GB/s scratchpad) specifically for the sparse radar workload removes the memory bottleneck, preserving the GPU for dense camera/LiDAR fusion.'
@@ -18,11 +17,16 @@ details:
     **The Rationale:** Candidates see an 8 TOPS model missing deadlines and assume the system simply lacks raw compute power.
     **The Consequence:** This violates strict automotive power/thermal constraints (a 700W server GPU isn't viable) and fails to address the root cause: the workload is memory-bound, so adding more TFLOPS will not improve latency.
   napkin_math: |
-    1. **Radar AI:** 200 Ops/Byte.
-    2. **Orin Ridge Point:** `275 TOPS / 204.8 GB/s ≈ 1342 Ops/Byte`.
-    3. **Bottleneck:** Since `200 << 1342`, the radar model is deeply memory-bound.
-    4. **Effective Compute:** `204.8 GB/s * 200 Ops/Byte = 40.9 TOPS` max effective throughput for the entire GPU, which is actively shared with cameras/LiDAR.
-    5. **Result:** Offloading to a dedicated DSP with high SRAM bandwidth isolates the sparse workload and resolves the memory bandwidth collision.
+    1. **Assumptions & Constraints:**
+       - Goal Constraint: 33ms perception latency
+       - Radar Edge Workload: 8 TOPS, 200 Ops/Byte AI
+       - Hardware Platform Ridge Point: ~1342 Ops/Byte
+       - Target Interconnect: 204.8 GB/s
+    2. **Calculations:**
+       - Workload Density: 200 Ops/Byte << 1342 Ops/Byte (Sparse)
+       - Actual Compute Limit: 204.8 GB/s * 200 Ops/Byte = 40.9 TOPS maximum effective throughput
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory Bandwidth-Bound.** The sparse radar tensor graph fundamentally jams the shared 204.8 GB/s bus, actively preventing the 33ms deadline. Utilizing a specialized DSP perfectly offloads the mathematically incompatible low-AI workload.
 status: published
 provenance: imported
 requires_explanation: true

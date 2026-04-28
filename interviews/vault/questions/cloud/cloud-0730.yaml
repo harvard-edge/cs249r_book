@@ -8,20 +8,27 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: The InfiniBand vs RoCE Decision
-scenario: Your company is building a new 512-GPU training cluster. The vendor offers two options: InfiniBand NDR (400 Gbps per port, credit-based flow control, ~1 μs latency) for $2.8M, or RoCE v2 over standard Ethernet (400 GbE, PFC-based, ~2 μs latency) for $1.2M. Both claim 'lossless RDMA.' Your workload is fine-tuning 70B models with FSDP across all 512 GPUs.
+scenario: Your company is building a new 512-GPU training cluster. The vendor offers InfiniBand NDR for $2.8M or RoCE v2 over standard Ethernet for $1.2M. Both claim lossless RDMA. Your workload is fine-tuning 70B models with FSDP across all 512 GPUs.
 question: Which networking option do you choose, and when does the cheaper option break down?
 details:
   realistic_solution: For 512 GPUs doing FSDP, tail latency is critical. InfiniBand's credit-based flow control provides true lossless behavior. RoCE relies on PFC, which degrades across multi-hop topologies. At 512 GPUs, PFC storms become likely during AllReduce incast. Choose RoCE if your cluster fits in a single-tier switch; choose InfiniBand for larger or latency-sensitive distributed training.
   common_mistake: |
     **The Pitfall:** Assuming RoCE v2 is perfectly equivalent to InfiniBand because both support RDMA.
-    **The Rationale:** Engineers look at the spec sheet (400 Gbps, lossless claim) and choose the cheaper option without understanding how Priority Flow Control (PFC) behaves at scale.
+    **The Rationale:** Engineers look at the spec sheet (lossless claim) and choose the cheaper option without understanding how Priority Flow Control (PFC) behaves at scale.
     **The Consequence:** Experiencing severe tail latency spikes due to PFC pause frame cascades across multi-hop topologies, degrading cluster-wide throughput.
   napkin_math: |
-    - FSDP AllGather for 70B model: Each GPU holds 70B / 512 ≈ 137M parameters ≈ 274 MB (FP16).
-    - Total data moved per layer: 274 MB * 512 = 137 GB.
-    - At 400 Gbps (50 GB/s) per link, ring AllGather takes 137 GB / 50 GB/s ≈ 2.74 seconds at line rate.
-    - A 1% PFC-induced pause (1% of 2.74s) adds ~27.4 ms of delay.
-    - **Conclusion: If p99 RoCE latency spikes due to PFC storms, AllGather stalls accumulate rapidly, causing a compounding throughput tax over weeks of training.**
+    1. **Assumptions & Constraints:**
+       - Model: 70B parameters, FP16 (2 bytes/param).
+       - GPUs: 512.
+       - Network: 400 Gbps (50 GB/s) per link.
+    2. **Calculations:**
+       - Parameters per GPU: 70B / 512 = 136.7M parameters.
+       - Data per shard: 136.7M * 2 bytes = 273.4 MB.
+       - AllGather data moved per layer: 273.4 MB * 512 = 140 GB.
+       - Time at line rate: 140 GB / 50 GB/s = 2.8 seconds.
+       - 1% PFC-induced pause: 1% of 2.8s = 28 ms delay.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound**. If p99 RoCE latency spikes due to PFC storms, AllGather stalls accumulate rapidly, causing a compounding throughput tax over weeks of training.
 status: published
 provenance: imported
 requires_explanation: false

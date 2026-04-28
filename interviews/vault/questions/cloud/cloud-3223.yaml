@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: GQA vs MQA vs MHA KV-Cache Tradeoff
-scenario: You are choosing the attention variant for a 30B model (head_dim=128, 60 layers) targeting an 80GB GPU. Options: MHA (32 KV heads), GQA-8 (8 KV heads), GQA-4 (4 KV heads), or MQA (1 KV head).
+scenario: 'You are choosing the attention variant for a 30B model (head_dim=128, 60 layers) targeting an 80GB GPU. Options: MHA, GQA-8, GQA-4, or MQA.'
 question: Which attention variants are memory-feasible for batch=16 at 128K context on one GPU, and what changes if none fit?
 details:
   realistic_solution: 'Model: 30B params, head_dim=128, 60 layers. Weights: 30B × 2B = 60 GB. Available for KV-cache: 80 - 60 = 20 GB. KV-cache per token per layer: 2 × KV_heads × 128 × 2B. (1) MHA (32 KV heads): 2 × 32 × 128 × 2 = 16,384 B/token/layer. Total for batch=16, 128K context: 16 × 128K × 16,384 × 60 = 2.01 TB. Completely infeasible. (2) GQA-8 (8 KV heads): 2 × 8 × 128 × 2 = 4,096 B/token/layer. Total: 16 × 128K × 4,096 × 60 = 515 GB. Still infeasible on 1 GPU. (3) GQA-4 (4 KV heads): 2 × 4 × 128 × 2 = 2,048 B/token/layer. Total: 16 × 128K × 2,048 × 60 = 257 GB. Infeasible. (4) MQA (1 KV head): 2 × 1 × 128 × 2 = 512 B/token/layer. Total: 16 × 128K × 512 × 60 = 64.4 GB. Exceeds 20 GB budget. Conclusion: no variant fits batch=16 at 128K on a single H100. Must reduce batch to 4 (MQA: 16.1 GB, fits) or use 2 GPUs with GQA-4 (batch=16, 128.5 GB per GPU, fits with 80 GB per GPU = 160 GB total minus 60 GB weights = 100 GB for KV → need 3 GPUs minimum). GQA-4 with 4 GPUs is the practical choice balancing quality and cost.'
@@ -17,13 +17,17 @@ details:
     **The Rationale:** Optimizing solely for KV cache size to fit larger batches.
     **The Consequence:** MQA with 1 KV head significantly reduces model expressiveness for long-context tasks requiring diverse attention patterns.
   napkin_math: |
-    - 30B Weights: ~60 GB. Budget for KV cache: 80 - 60 = 20 GB.
-    - KV-cache per token per layer = $2 \times \text{KV\_heads} \times 128 \times 2\text{B}$.
-    - **MHA (32 heads):** 16 KB/tok/layer. Total (b=16, ctx=128K, 60L) = 2.01 TB.
-    - **GQA-8 (8 heads):** 4 KB/tok/layer. Total = 515 GB.
-    - **GQA-4 (4 heads):** 2 KB/tok/layer. Total = 257 GB.
-    - **MQA (1 head):** 512 B/tok/layer. Total = 64.4 GB.
-    - **None fit the 20 GB budget. Must reduce batch size or use tensor parallelism across multiple GPUs.**
+    1. **Assumptions & Constraints:**
+       - 30B model (60 GB weights). Available VRAM: 20 GB.
+       - Config: batch=16, 128K context, 60 layers, head_dim=128.
+    2. **Calculations:**
+       - KV-cache/tok/layer = 2 * KV_heads * 128 * 2B.
+       - MHA (32 heads): 16 KB/tok/layer. Total = 2.01 TB.
+       - GQA-8 (8 heads): 4 KB/tok/layer. Total = 515 GB.
+       - GQA-4 (4 heads): 2 KB/tok/layer. Total = 257 GB.
+       - MQA (1 head): 512 B/tok/layer. Total = 64.4 GB.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Capacity Bound.** None fit the 20 GB budget; you must reduce batch size or use tensor parallelism across multiple GPUs.
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,8 +40,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

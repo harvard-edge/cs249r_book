@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Hierarchical AllReduce Network
-scenario: You are training over 4 nodes, each with 8x H100 SXM GPUs connected via 900 GB/s NVLink. The 4 nodes are linked by a non-blocking 400 Gbps (50 GB/s) RoCEv2 network. You need to synchronize a 2 GB gradient payload.
+scenario: You are training over 4 nodes, each with 8x H100 SXM GPUs connected via NVLink. The 4 nodes are linked by a non-blocking 400 Gbps RoCEv2 network. You need to synchronize a 2 GB gradient payload.
 question: Estimate the communication time difference between a flat Ring AllReduce across all 32 GPUs versus a hierarchical AllReduce strategy.
 visual:
   kind: svg
@@ -24,15 +24,24 @@ details:
     **The Rationale:** A hierarchical approach leverages the high-speed intra-node NVLink to reduce the data volume that must be sent over the much slower inter-node Ethernet links.
     **The Consequence:** Inefficient network utilization and unnecessarily long communication phases that bottleneck training scaling.
   napkin_math: |
-    1. Flat Ring AllReduce (across 32 GPUs): Time is bottlenecked by Ethernet (50 GB/s).
-    2. Transferred data per node = 2 * (31/32) * 2 GB = 3.875 GB.
-    3. Time = 3.875 GB / 50 GB/s = 77.5 ms.
-    4. Hierarchical AllReduce Intra-node ReduceScatter: shrinks payload to 2 GB / 8 = 250 MB (0.25 GB) per GPU.
-    5. Inter-node AllReduce (over Ethernet): Ring AllReduce across 4 nodes = 2 * (3/4) * 0.25 GB = 0.375 GB.
-    6. Inter-node Time = 0.375 GB / 50 GB/s = 7.5 ms.
-    7. Intra-node steps (ReduceScatter + AllGather) over NVLink take ~4 ms total.
-    8. Total Hierarchical Time = 7.5 ms + 4 ms = 11.5 ms.
-    9. **Result: The hierarchical approach is ~66 ms faster (11.5 ms vs 77.5 ms).**
+    1. **Assumptions & Constraints:**
+       - 4 nodes, 8 GPUs per node (32 GPUs total).
+       - Ethernet bottleneck: 400 Gbps (50 GB/s).
+       - NVLink: ~900 GB/s.
+       - Payload: 2 GB.
+    2. **Calculations:**
+       - Flat Ring AllReduce (32 GPUs): Bottlenecked by Ethernet (50 GB/s).
+       - Transferred data per node = 2 * (31/32) * 2 GB = 3.875 GB.
+       - Time = 3.875 GB / 50 GB/s = 77.5 ms.
+       - Hierarchical AllReduce: Intra-node ReduceScatter shrinks payload to 2 GB / 8 = 250 MB (0.25 GB) per GPU.
+       - Inter-node AllReduce (Ethernet): Ring across 4 nodes = 2 * (3/4) * 0.25 GB = 0.375 GB.
+       - Inter-node Time = 0.375 GB / 50 GB/s = 7.5 ms.
+       - Intra-node steps (ReduceScatter + AllGather) over NVLink take ~4 ms total.
+       - Total Hierarchical Time = 7.5 ms + 4 ms = 11.5 ms.
+       - Speedup = 77.5 ms - 11.5 ms = 66 ms.
+    3. **Conclusion & Interpretation:**
+       - The hierarchical approach avoids bottlenecking the large payload on the slow inter-node Ethernet links.
+       - **Result: Hierarchical is ~66 ms faster**
 status: draft
 provenance: llm-draft
 expected_time_minutes: 12

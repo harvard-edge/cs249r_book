@@ -8,18 +8,23 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: The Janky Background App
-scenario: Your production mobile ML app experiences sporadic but significant latency spikes (e.g., from 20ms to 150ms) during inference, even on high-end devices with plenty of theoretical headroom. These spikes are not correlated with thermal throttling.
+scenario: Your production mobile ML app experiences sporadic but significant latency spikes (e.g., from 20ms to 150ms) during inference, even on high-end devices with enormous theoretical compute headroom. These spikes are strictly not correlated with thermal throttling.
 question: What common mobile systems issue is likely at play, and how would you try to identify the culprit?
 details:
-  realistic_solution: "The most common issue is **resource contention from other background applications or demanding OS services**. Even on powerful SoCs, mobile operating systems are designed to multitask. Other apps (e.g., social media refreshing, email sync, game updates, background location services), or even critical OS processes (e.g., garbage collection, system updates, logging, security scans), can suddenly demand significant CPU cycles, GPU time, or memory bandwidth. When this happens, your ML inference task, even if it has a relatively high priority, might be temporarily starved of resources, leading to unpredictable latency spikes. This is particularly true if the background task is CPU-intensive and your ML inference also has a significant CPU component (e.g., pre/post-processing, or a fallback path).\n  To identify the culprit:\n  1.  **System Tracing:** Use Android's Systrace or Perfetto (via `adb shell perfetto`) to capture detailed traces of CPU activity, GPU activity, memory usage, and thread scheduling across the entire system during the latency spikes. Look for other process IDs (PIDs) that become active or consume significant resources concurrently with your spikes.\n  2.  **Process Monitoring:** Use `adb shell top` or `adb shell dumpsys meminfo` to observe which processes are consuming CPU and memory when the spikes occur.\n  3.  **Controlled Environment Testing:** Test your app on a \"clean\" device with minimal other apps installed and background activity disabled. If the spikes disappear, it confirms external interference."
+  realistic_solution: "The dominant failure mode is OS-level resource contention from competing background services. Modern mobile architectures are aggressively multitasking environments. System daemons (garbage collection, memory compression, I/O burst downloads) frequently preempt thread execution. To diagnose, utilize system tracing utilities (`nsys`, Android's `Perfetto`, or `Systrace`) to capture thread scheduling states during the exact temporal window of the spike, actively correlating your inference thread's wait-state with concurrent OS process IDs."
   common_mistake: |
-    **The Pitfall:** Blaming the model or the TFLite runtime for the latency spikes.
-    **The Rationale:** Candidates focus solely on the ML components and ignore the broader mobile multitasking environment.
-    **The Consequence:** Time is wasted attempting to optimize the model when the root cause is external resource contention.
+    **The Pitfall:** Blaming the ML model weights, graph execution, or the TFLite runtime for the unpredictable latency spikes.
+    **The Rationale:** Candidates tunnel-vision entirely onto the ML components, pretending the inference engine operates in an isolated, dedicated hardware vacuum.
+    **The Consequence:** Months of engineering time are wasted attempting hyper-optimizations on the model graph when the root cause is external physical thread starvation.
   napkin_math: |
-    - A normal inference takes 20ms.
-    - If the main thread is preempted by a high-priority background service for 100ms, the apparent inference time jumps to 120ms+.
-    - **A sudden 100MB download by a background app can saturate I/O and CPU, easily explaining a latency jump from 20ms to 150ms.**
+    1. **Assumptions & Constraints:**
+       - Normal CPU/NPU inference latency: 20 ms.
+       - Unexplained Tail Latency Spike: 150 ms.
+    2. **Calculations:**
+       - Execution penalty delta: 150 ms - 20 ms = 130 ms.
+       - A high-priority OS scheduler preemption (e.g., a burst 100MB background app update) routinely stalls user-space threads for 100ms+ while saturating the memory bus.
+    3. **Conclusion & Interpretation:**
+       **Result: Scheduling-Bound (Contention). The unpredictable 130ms penalty is a classic signature of thread starvation caused by concurrent high-priority OS tasks monopolizing the SoC.**
 status: published
 provenance: imported
 requires_explanation: false

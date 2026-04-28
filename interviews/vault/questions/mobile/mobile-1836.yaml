@@ -8,19 +8,25 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Debugging gradient vanishing in a mobile RNN model on Snapdragon 8 Gen 3
-scenario: A team trains a 3M parameter GRU-based model for time-series anomaly detection on Snapdragon 8 Gen 3. The model processes 500-step sequences. After training for 200 epochs, the GRU's recurrent weights show near-zero gradient norms while output layer gradients are normal. Loss is decreasing but recurrent weights never update meaningfully.
-question: How would you diagnose and fix vanishing recurrent gradients in a 500-step GRU trained on Snapdragon 8 Gen 3?
+scenario: A team trains a 3M parameter GRU-based model for time-series anomaly detection. The model processes 500-step sequences. After training for 200 epochs, the GRU's recurrent weights show near-zero gradient norms while output layer gradients are normal. Loss is decreasing but recurrent weights never update meaningfully.
+question: How would you diagnose and fix vanishing recurrent gradients in a 500-step GRU trained natively on a mobile accelerator?
 details:
-  realistic_solution: 'Apply gradient clipping: torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0). Use truncated BPTT: process 500 steps as 10 chunks of 50 steps, detaching the hidden state between chunks (h.detach()). This keeps gradient backpropagation to 50 steps, preventing exponential vanishing. Verify with gradient norm logging per layer. Consider replacing GRU with a Transformer encoder (self-attention has constant gradient path length).'
+  realistic_solution: Apply gradient clipping (e.g., `clip_grad_norm_` with max_norm=1.0) and enforce Truncated Backpropagation Through Time (TBPTT). By processing the 500 steps as 10 chunks of 50 steps and detaching the hidden state between chunks (`h.detach()`), gradient backpropagation is limited to 50 steps, preventing exponential vanishing. Verify with gradient norm logging per layer. Alternatively, migrate from GRU to a Transformer encoder, as self-attention provides a constant O(1) gradient path length.
   common_mistake: |
-    **The Pitfall:** Training a GRU with Backpropagation Through Time (BPTT) over 500 steps without gradient clipping or truncation.
-    **The Rationale:** Candidates forget that even with GRU gating, gradients vanish exponentially over 500 steps, causing floating-point underflow in FP32.
-    **The Consequence:** Early-step gradients become effectively zero, preventing the recurrent weights from learning long-term dependencies.
+    **The Pitfall:** Training a GRU with Backpropagation Through Time (BPTT) over 500 steps without gradient clipping or temporal truncation.
+    **The Rationale:** Candidates forget that even with GRU gating mechanisms, gradients vanish exponentially over extremely long sequences, inevitably causing floating-point underflow in FP32.
+    **The Consequence:** Early-step gradients become effectively zero, completely preventing the recurrent weights from learning long-term dependencies.
   napkin_math: |
-    1. **Gradient Decay:** GRU recurrent gradient at step t (of 500) is proportional to the product of (500-t) Jacobian terms.
-    2. **Exponential Vanishing:** If each Jacobian eigenvalue is 0.95, the decay is 0.95^500 = 7.4 × 10^-12. For 0.98, it's 4.1 × 10^-5.
-    3. **Underflow Limit:** In FP32, values below 1.4 × 10^-45 underflow to 0, wiping out early-step gradients.
-    4. **Truncated BPTT (TBPTT):** With T=50 max decay, 0.95^50 = **0.077** (finite and usable).
+    1. **Assumptions & Constraints:**
+       - 500-step GRU model.
+       - FP32 underflow limit is 1.4e-45.
+       - Jacobian eigenvalue decay factor ≈ 0.95.
+    2. **Calculations:**
+       - Exponential Vanishing: 0.95^500 = 7.4e-12.
+       - FP32 Precision: Values rapidly approach the zero limit.
+       - Truncated BPTT (T=50): 0.95^50 = 0.077.
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound (TBPTT restores finite 0.077 gradient scale)**.
 status: published
 provenance: imported
 requires_explanation: false
@@ -33,8 +39,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

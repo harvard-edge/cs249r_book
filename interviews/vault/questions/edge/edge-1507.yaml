@@ -8,22 +8,26 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Diagnosing Throughput Collapse with Dynamic Batching on Cloud AI 100
-scenario: 'You are deploying an NLP inference service using dynamic batching on a Qualcomm Cloud AI 100 accelerator (400 TOPS INT8, 32 GB LPDDR4x, 75W) in an edge datacenter. The service is configured to wait up to 10ms to form a maximum batch size of 16. During peak traffic, you notice that while average request latency remains under the 50ms SLA, the overall system useful token throughput drops by 40% compared to static batching benchmarks of max-length sequences, and the accelerator''s useful compute utilization rarely exceeds 60%.'
+scenario: You are deploying an NLP inference service using dynamic batching on an accelerator in an edge datacenter. The service is configured to wait up to 10ms to form a maximum batch size of 16. During peak traffic, you notice that while average request latency remains under the 50ms SLA, the overall system useful token throughput drops by 40% compared to static batching benchmarks of max-length sequences, and the accelerator's useful compute utilization rarely exceeds 60%.
 question: What is causing this throughput collapse despite the high incoming request rate?
 details:
-  realistic_solution: The root cause is likely variable sequence lengths within the dynamic batch leading to excessive zero-padding, which wastes the 400 TOPS INT8 compute capacity on non-productive operations. Because the matrix dimensions are padded to match the longest sequence, the Cloud AI 100's compute units spend cycles multiplying zeros. To resolve this, you must profile the padding ratios of dispatched batches and switch to continuous batching (iteration-level scheduling) or sequence-length bucketing to maximize useful tensor utilization.
+  realistic_solution: The root cause is likely variable sequence lengths within the dynamic batch leading to excessive zero-padding, which wastes the INT8 compute capacity on non-productive operations. Because the matrix dimensions are padded to match the longest sequence, the compute units spend cycles multiplying zeros. To resolve this, you must profile the padding ratios of dispatched batches and switch to continuous batching (iteration-level scheduling) or sequence-length bucketing to maximize useful tensor utilization.
   common_mistake: |
     **The Pitfall:** Blaming the LPDDR4x memory bandwidth bottleneck or suspecting thermal throttling.
     **The Rationale:** Candidates fail to analyze the interaction between variable sequence lengths and the hardware's execution time for zero-padded batches.
     **The Consequence:** The true cause of the 40% throughput collapse is missed, leading to misguided hardware investigations instead of implementing continuous batching.
   napkin_math: |
-    1. **Baseline Compute:** Assume 1 TOP per max-length request. A max batch of 16 requires 16 TOPs.
-    2. **Execution Time:** On 400 TOPS hardware, execution takes `16 / 400 = 0.04s` (40ms).
-    3. **Optimal Throughput:** `16 requests / 0.04s = 400 req/s`.
-    4. **Padding Overhead:** If variable lengths cause 40% of the batch matrix to be zero-padding, the hardware still performs 16 TOPs (40ms).
-    5. **Effective Work:** Only 60% is useful, meaning `16 * 0.6 = 9.6 TOPs` of real work.
-    6. **Effective Throughput:** `9.6 TOPs / 0.04s = 240 max-length req/s` (a 40% drop).
-    **The throughput collapse is due to the 40% waste from zero-padding in dynamically batched variable-length sequences.**
+    1. **Assumptions & Constraints:**
+       - Hardware: 400 TOPS. Max batch: 16.
+       - Max-length computation requires 16 TOPs (40ms execution time).
+       - Variable-length sequences result in 40% zero-padding.
+    2. **Calculations:**
+       - Optimal Throughput: 16 requests / 0.04s = 400 req/s.
+       - Padding Overhead: 40% of the 400 TOPS capacity is spent multiplying zeros.
+       - Effective Work: 16 * 0.6 = 9.6 useful TOPs per batch.
+       - Effective Throughput: 9.6 / 0.04s = 240 useful req/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (Zero-Padding Waste)**. The 40% throughput collapse is entirely due to wasted cycles on zero-padding in dynamically batched variable-length sequences.
 status: published
 provenance: imported
 requires_explanation: false

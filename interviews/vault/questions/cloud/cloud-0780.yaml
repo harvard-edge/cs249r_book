@@ -8,28 +8,26 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Global Scale Real-Time Two-Tower Recommendation
-scenario: We are re-architecting the YouTube short-video recommendation retrieval system to support 50
-  billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower
-  model to improve relevance. How do you design the embedding table distribution and serving infrastructure
-  on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization
-  across global regions?
-question: "How would you serve 50B Shorts candidates with a 500B two-tower model on TPU v5e while meeting sub-50ms p99 globally?"
+scenario: We are re-architecting a recommendation retrieval system to support 50 billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower model to improve relevance.
+question: "How would you design the embedding table distribution and serving infrastructure on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization?"
 details:
-  realistic_solution: Completely decouple the item and user towers. The item tower's embeddings for the
-    50B candidates are pre-computed entirely offline during batch jobs and stored in a globally distributed,
-    sharded in-memory vector database (e.g., ScaNN / Vertex AI Vector Search) with aggressive regional
-    caching for trending shorts.
-  common_mistake: Attempting to deploy and serve both the user and item towers dynamically in real-time.
-    Candidates will try to fit the entire 500B parameter model across multiple TPUs using Pipeline Parallelism
-    for serving, which results in catastrophic HBM fragmentation, massive cross-node communication overhead,
-    and missed 50ms latency SLAs.
-  napkin_math: '- **Model Size:** 500B params. Assume the user tower is 100B params. | - **Memory:** 100B
-    params * 1 byte (INT8) = 100GB of weights. | - **Hardware:** A single TPU v5e has 16GB HBM. We need
-    at least `ceil(100/16) = 7` chips just for weights. Using 8-way TP fits the model with ~28GB left
-    across the 8 chips for KV-cache/activation memory. | - **Vector DB:** 50B items * 256 dimensions *
-    4 bytes (FP32) = 51.2 TB. Sharded across 100 in-memory nodes (512GB RAM each) per region. | - **Latency:**
-    TPU User Embedding (~15ms) + Network Hop (~5ms) + ScaNN Top-K ANN Retrieval (~10ms) = ~30ms, safely
-    within the 50ms p99 SLA.'
+  realistic_solution: Completely decouple the user and item towers for inference. The item tower's embeddings for the 50B candidates must be pre-computed strictly offline via batch jobs and loaded into a globally distributed, sharded in-memory vector database (e.g., ScaNN / Vertex Vector Search). The TPUs are reserved exclusively for executing the user tower in real-time, utilizing Tensor Parallelism to fit the user weights across multiple chips and broadcasting the resulting query vector to the fast ANN retrieval tier.
+  common_mistake: |
+    **The Pitfall:** Attempting to serve both towers dynamically in real-time.
+    **The Rationale:** Candidates treat retrieval models like generative LLMs, assuming all 500B parameters must be loaded into device HBM and executed simultaneously per request.
+    **The Consequence:** Catastrophic HBM fragmentation, impossible real-time cross-node communication overhead, and missing the 50ms latency SLA by orders of magnitude.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 500B params. User tower: ~100B params.
+       - Items: 50B. Dimensions: 256.
+       - TPU v5e: 16 GB HBM per chip. SLA: <50ms.
+    2. **Calculations:**
+       - User tower weights (INT8): 100B * 1 byte = 100 GB.
+       - TPUs needed for weights: ceil(100 GB / 16 GB) = 7. (Use 8-way TP).
+       - Item vector DB footprint: 50B * 256 * 4 bytes (FP32) = 51.2 TB RAM required (sharded offline).
+       - Latency budget: 15ms (TPU User Embedding) + 5ms (Network) + 10ms (ScaNN Top-K) = 30ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 30ms latency, Offline Item Compute.** The system is **Memory-Capacity-Bound**; attempting to store 51.2TB of item vectors in TPU HBM is physically impossible and must be offloaded to RAM.
 status: published
 provenance: imported
 requires_explanation: true

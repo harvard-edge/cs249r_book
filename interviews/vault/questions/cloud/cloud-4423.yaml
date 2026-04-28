@@ -8,19 +8,26 @@ competency_area: compute
 bloom_level: apply
 phase: inference
 title: 'Heterogeneous Chiplet Integration: DSP + AI Core on Same Package'
-scenario: A cloud inference service needs to combine dense DNN inference with heavy signal processing (FFT, filtering). The proposal is to integrate a DSP die and an AI inference die on the same chiplet package.
+scenario: A cloud inference service combines dense DNN inference with heavy signal processing. The proposed architecture integrates a DSP die and an AI inference die on the same package.
 question: How would you design the data path and memory sharing between the DSP die and AI inference die for FFT-heavy DNN inference?
 details:
-  realistic_solution: 'Use a producer-consumer pipeline with explicit DMA: DSP outputs signal processing results to a shared SRAM buffer on the interposer; AI die reads via DMA with coherency disabled (streaming mode). Interpose a small (4-16 MB) low-latency SRAM on the active interposer as a staging buffer. DSP signals AI die via lightweight interrupt through a mailbox register. This avoids coherency overhead while achieving <1us data handoff latency. For large tensors (>16MB), use HBM partition assignment — DSP writes to HBM partition A, AI die reads from partition A directly after DSP signals completion.'
+  realistic_solution: 'Use a producer-consumer pipeline with explicit DMA: DSP outputs signal processing results to a shared SRAM buffer on the interposer; AI die reads via DMA with coherency disabled (streaming mode). Interpose a small low-latency SRAM on the active interposer as a staging buffer.'
   common_mistake: |
-    **The Pitfall:** Designing a shared memory pool with coherent access from both dies.
-    **The Rationale:** Coherent shared memory between heterogeneous dies (different ISAs, different memory models) requires a complex coherency protocol that seems elegant on paper.
-    **The Consequence:** It adds 3-5x latency compared to explicit message passing for large data transfers, bottlenecking the system.
+    **The Pitfall:** Designing a shared memory pool with coherent access across heterogeneous dies.
+    **The Rationale:** Coherent shared memory seems elegant on paper and simplifies software abstractions.
+    **The Consequence:** Cross-ISA coherency protocols add massive latency for large block transfers, bottlenecking the critical data handoff between the DSP and the AI die.
   napkin_math: |
-    1. **Data Requirements:** Signal processing output is 100MB/s continuous, with 16K FFT per batch = 128KB per call at 780 calls/sec. The AI die needs 128KB every 1.28ms.
-    2. **DMA Transfer Time:** Die-to-die DMA at 500 GB/s for a 128KB transfer takes 0.26μs.
-    3. **Coherent Shared Access Time:** 128KB at cache-line granularity (64B) equals 2048 coherency transactions. At 200ns each, this is 409μs.
-    4. **Conclusion:** Coherent access is 1573x slower than DMA. **DMA is the correct architecture.**
+    1. **Assumptions & Constraints:**
+       - DSP output: 16K FFT = 128KB per batch (780 calls/sec).
+       - Transfer interval: 128KB every 1.28ms.
+       - DMA speed: 500 GB/s. Coherency transaction: 200ns per 64B cache line.
+    2. **Calculations:**
+       - Explicit DMA transfer time = 128 KB / 500 GB/s = 0.26 μs.
+       - Coherent access transactions = 128 KB / 64 Bytes = 2048 transactions.
+       - Coherent access time = 2048 * 200ns = 409 μs.
+       - Ratio = 409 μs / 0.26 μs ≈ 1573x slower.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound.** Coherent shared memory is orders of magnitude slower than explicit DMA; a producer-consumer pipeline via SRAM buffer must be used.
 status: published
 provenance: imported
 requires_explanation: true

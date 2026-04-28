@@ -8,19 +8,26 @@ competency_area: data
 bloom_level: apply
 phase: both
 title: Unified Memory Contention in High-Frequency Edge Ingestion
-scenario: You have a real-time sensor ingestion pipeline running on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP, Ampere GPU + DLA accelerator). The system ingests uncompressed LiDAR point clouds at 20Hz. When you increase the ingestion rate to 60Hz, the pipeline experiences unpredictable latency spikes and frame drops. However, telemetry shows the Ampere GPU and DLA are at only 30% utilization, and the system is drawing 40W (well below the 60W TDP limit).
+scenario: You have a real-time sensor ingestion pipeline running on an edge SoC. The system ingests uncompressed LiDAR point clouds at 20Hz. When you increase the ingestion rate to 60Hz, the pipeline experiences unpredictable latency spikes and frame drops. However, telemetry shows the GPU and DLA are at only 30% utilization, and the system is drawing 40W (well below the 60W TDP limit).
 question: Why do latency spikes and frame drops appear at 60Hz LiDAR ingestion despite 30% accelerator utilization and 40W power draw?
 details:
-  realistic_solution: The bottleneck is memory bandwidth contention on the unified 32 GB LPDDR5 memory. The Jetson Orin shares a single memory pool across the CPU, GPU, DLA, and I/O controllers. High-frequency uncompressed data ingestion forces the memory controller to constantly service I/O writes and CPU preprocessing reads, which competes directly with the GPU/DLA trying to fetch weights and activations. This contention causes memory queuing delays, leading to latency spikes even when the 275 TOPS compute capacity is mostly idle.
+  realistic_solution: The bottleneck is memory bandwidth contention on the unified LPDDR5 memory. The SoC shares a single memory pool across the CPU, GPU, DLA, and I/O controllers. High-frequency uncompressed data ingestion forces the memory controller to constantly service I/O writes and CPU preprocessing reads, which competes directly with the GPU/DLA trying to fetch weights and activations. This contention causes memory queuing delays, leading to latency spikes even when the 275 TOPS compute capacity is mostly idle.
   common_mistake: |
     **The Pitfall:** Assuming the compute units are thermal throttling.
-    **The Rationale:** Candidates ignore the explicitly stated 40W power draw and low 30% utilization, failing to realize the Jetson Orin has a Unified Memory Architecture where CPU, GPU, and I/O share the same memory pool.
+    **The Rationale:** Candidates ignore the explicitly stated 40W power draw and low 30% utilization, failing to realize the SoC uses a Unified Memory Architecture (UMA) where CPU, GPU, and I/O share the same memory pool.
     **The Consequence:** Attempting to optimize the model to use INT8 on the DLA, which does absolutely nothing to fix the memory bandwidth contention caused by uncompressed point clouds.
   napkin_math: |
-    *   Assume one uncompressed LiDAR frame is 30 MB.
-    *   At 60Hz, raw ingestion writes 30 MB * 60 = 1.8 GB/s.
-    *   If CPU normalizes data (1.8 GB/s read + 1.8 GB/s write) and GPU reads for inference (1.8 GB/s read), that is 7.2 GB/s of continuous payload traffic.
-    *   **This bursty 7.2 GB/s I/O traffic, combined with constant weight/activation fetching, saturates the LPDDR5 memory controller queues, causing stalls regardless of idle compute capacity.**
+    1. **Assumptions & Constraints:**
+       * Uncompressed LiDAR frame = 30 MB.
+       * 60Hz ingestion rate.
+       * SoC uses Unified Memory Architecture (UMA).
+    2. **Calculations:**
+       * Raw payload write = 30 MB * 60 = 1.8 GB/s.
+       * CPU preprocess (read + write) = 3.6 GB/s.
+       * GPU fetch = 1.8 GB/s.
+       * Total continuous payload memory traffic = 7.2 GB/s burst.
+    3. **Conclusion & Interpretation:**
+       * **This continuous 7.2 GB/s I/O traffic saturates the UMA memory controller queues, causing starvation independent of compute utilization. Result: Memory Contention-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

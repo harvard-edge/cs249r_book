@@ -8,27 +8,26 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: Optimize KV Cache Quantization for Jetson Orin Memory Budget
-scenario: 'A 7B model on Jetson Orin NX (8GB LPDDR5) uses 3.5GB for INT4 weights,
-  leaving 4.5GB for KV cache. At FP16 KV precision, the cache requires 2(KV) × 32L × 8KV_heads
-  × 128D × 2B = 131,072 bytes/token. Maximum context: 4.5GB / 131,072B ≈ 34K tokens.
-  The team wants to support 5 concurrent requests at 16K context each: requires 5 × 16K × 131,072B
-  ≈ 10.5GB > 4.5GB budget. Optimize KV cache quantization to fit 5 concurrent × 16K context.'
-question: Which KV quantization lets 5 concurrent 16K-context requests fit in the
-  4.5GB KV budget, and what memory does it use?
+scenario: A 7B model on Jetson Orin NX uses 3.5GB for INT4 weights, leaving 4.5GB for KV cache. The team wants to support 5 concurrent requests at 16K context each.
+question: Which KV quantization lets 5 concurrent 16K-context requests fit in the 4.5GB KV budget, and what memory does it use?
 details:
-  realistic_solution: 'FP16 KV per request: 16K × 131,072B ≈ 2.1GB. 5 requests: 10.5GB
-    > 4.5GB budget. Need at least 2.33× compression. Options: (A) INT8 KV (2× compression):
-    5×1.05GB=5.25GB (Still over budget). (B) K-INT8/V-INT4 (1 byte K, 0.5 byte V -> 1.5 bytes total per element,
-    2.66× compression): 5 × 16K × 49,152B = 3.93GB ✓. (C) INT4 KV (4× compression): 5×0.525GB=2.625GB ✓.
-    Accuracy order: FP16 > INT8 > K-INT8/V-INT4 > INT4. Recommendation: K-INT8/V-INT4 for
-    maximum quality within budget, saving memory while maintaining attention quality better than uniform INT4.'
-  common_mistake: Quantizing both K and V to INT4 uniformly; research shows K quantization
-    is more sensitive than V quantization for maintaining attention quality, so asymmetric
-    K-INT8/V-INT4 is often the best Pareto point.
-  napkin_math: 'FP16 KV/token: 2(KV)×32(L)×8(KVH)×128(D)×2B=131,072B/token.
-    16K tokens: 16K×131,072B=2.1GB per request. 5 requests: 10.5GB >> 4.5GB. INT8: 5.25GB (over).
-    K-INT8/V-INT4: (1+0.5) bytes per element -> 49,152 B/token -> 5 × 16K × 49,152 = 3.93GB ✓.
-    INT4: 5×0.525GB=2.625GB ✓. K-INT8/V-INT4 is the optimal Pareto point.'
+  realistic_solution: 'Implement an asymmetric K-INT8/V-INT4 quantization scheme. Research shows Attention Key (K) resolution is highly sensitive, while Values (V) can be aggressively compressed. This hybrid strategy maintains top-tier accuracy while satisfying the strict 4.5GB memory constraint.'
+  common_mistake: |
+    **The Pitfall:** Quantizing both K and V to INT4 uniformly.
+    **The Rationale:** Candidates assume uniform compression is the only approach, ignoring the disparate impact of Key vs Value precision on self-attention collapse.
+    **The Consequence:** The model fits in memory but exhibits catastrophic perplexity degradation and hallucination at long contexts.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - KV Budget: 4.5 GB.
+       - FP16 KV size/token = 131,072 bytes.
+       - Workload: 5 requests * 16K tokens = 80K tokens total.
+    2. **Calculations:**
+       - FP16 Total = 80K * 131,072 = 10.48 GB (OOM).
+       - INT8 KV (2x compress) = 10.48 / 2 = 5.24 GB (OOM).
+       - K-INT8/V-INT4 (1.5 bytes total per element, 2.66x compress) = 80K * 49,152 = 3.93 GB (Fits).
+       - INT4 KV (4x compress) = 10.48 / 4 = 2.62 GB (Fits, poor accuracy).
+    3. **Conclusion & Interpretation:**
+       - **Result: K-INT8/V-INT4 Optimal**. The asymmetric 3.93 GB footprint clears the 4.5GB budget while preserving Key distribution integrity, acting as the perfect Pareto optimization.
 status: published
 provenance: imported
 requires_explanation: false

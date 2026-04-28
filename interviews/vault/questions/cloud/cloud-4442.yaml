@@ -11,18 +11,22 @@ title: Fault Tolerance for In-Flight Requests During Decode Node Failure
 scenario: A decode node fails mid-generation with 200 active requests, each at different token positions (50-1500 tokens generated). The KV cache for these requests is in the failed node's GPU memory.
 question: How would you recover the 200 active generations after a decode node failure without restarting them from scratch?
 details:
-  realistic_solution: 'Recovery hierarchy: (1) KV cache replication: if KV caches are replicated to a secondary decode node or a KV cache store (e.g., vLLM''s distributed KV store or DistServe''s KV migration), failover is instant. Cost: 2× KV cache memory across cluster. (2) Checkpoint-based recovery: periodically checkpoint KV caches to NVMe or DRAM (every 100 tokens). On failure: restore from last checkpoint, replay only since last checkpoint. At 100-token checkpoint granularity: worst case replay = 100 tokens per request. For 200 requests: 200 × 100 × decode_time = manageable. (3) Prefix cache reuse: for requests with unique KV caches (no prefix sharing), re-prefill is unavoidable. Minimize cost: batch re-prefill of all 200 requests on available prefill nodes, using their already-generated tokens as context. (4) Client-side retry: include generated tokens so far in retry request header; model continues from exact position. Requires streaming token delivery to client so partial output is already sent.'
+  realistic_solution: 'Implement asynchronous KV cache checkpoints directly into HBM/DRAM or distributed KV stores. Re-prefill is computationally ruinous for long sequences; continuous state replication guarantees millisecond-scale failover.'
   common_mistake: |
     **The Pitfall:** Restarting all 200 requests from scratch (re-prefill).
     **The Rationale:** Candidates opt for the simplest software retry mechanism without considering the accumulated state.
     **The Consequence:** For requests that have already generated 1000+ tokens, re-prefill adds 5-10 seconds of latency and wastes significant GPU-hours, breaking user SLAs.
   napkin_math: |
-    - 200 requests, average position 500 tokens.
-    - KV cache per request at 500 tokens (70B model): 2 * 80 * 64 * 128 * 500 * 2B = 1,310,720,000 bytes = 1.31 GB.
-    - Total KV for 200 requests: 200 * 1.31 GB = 262 GB.
-    - Checkpoint to NVMe (7 GB/s): 262 GB / 7 = 37.4 seconds (too slow for real-time).
-    - DRAM checkpoint: 262 GB to 3.35TB/s HBM copy = 0.078s (Feasible).
-    - PCIe 32 GB/s: 262GB / 32 = 8.2 seconds per checkpoint (Too slow if synchronous — must use async checkpoint every 100 tokens).
+    1. **Assumptions & Constraints:**
+       - 200 active requests. Average position: 500 tokens. 70B model.
+       - NVMe checkpoint throughput: 7 GB/s. HBM bandwidth: 3.35 TB/s.
+    2. **Calculations:**
+       - KV cache size at 500 tokens: 2 (K,V) * 80 layers * 64 heads * 128 dim * 500 * 2 bytes = 1.31 GB per request.
+       - Total KV cache for 200 requests: 200 * 1.31 GB = 262 GB.
+       - Synchronous NVMe checkpoint time: 262 GB / 7 GB/s = 37.4 seconds (SLA violation).
+       - DRAM/HBM checkpoint time: 262 GB / 3.35 TB/s = 0.078 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: Re-prefill is computationally ruinous; HBM/DRAM checkpointing takes <100ms. The system prevents a Compute-Bound failover cascade via rapid state restoration.**
 status: published
 provenance: imported
 requires_explanation: true
@@ -35,8 +39,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 2*80*64*128*500*2B is 1.31GB, not 1.64GB
 human_reviewed:
   status: not-reviewed
   by: null

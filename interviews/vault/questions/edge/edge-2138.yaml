@@ -8,28 +8,25 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: LPDDR5 vs On-Chip SRAM Trade-offs on Jetson Orin for Real-Time Inference
-scenario: Jetson Orin NX has 32GB LPDDR5 at 68 GB/s and ~4MB L2 cache on the Ampere
-  GPU. A real-time object detection model (YOLOv8-m, 25M params, 79 FLOPs/image) needs
-  to process 30fps at 1280×1280. Analyze the memory access pattern and identify the
-  binding constraint.
-question: For YOLOv8-m at 30fps on Orin NX, what memory access pattern matters and
-  what is the binding constraint?
+scenario: Jetson Orin NX has 32GB LPDDR5 at 68 GB/s and ~4MB L2 cache on the Ampere GPU. A real-time object detection model (YOLOv8-m, 25M params, 79 FLOPs/image) needs to process 30fps at 1280x1280.
+question: For YOLOv8-m at 30fps on Orin NX, what memory access pattern matters and what is the binding constraint?
 details:
-  realistic_solution: 'Total compute: 79 GFLOP/image × 30fps = 2.37 TFLOPS. Jetson
-    Orin INT8: 275 TOPS — compute is fine. Memory: model weights INT8 = 25MB, fits
-    in 32GB easily. Per-frame bandwidth: input 1280×1280×3×1B = 4.9MB. Early conv
-    layers: stride-1, high activation volume → bandwidth intensive. L2 cache 4MB:
-    fits ~1 intermediate feature map. Critical path: early layers generate 1280×1280×32
-    = 52MB activations — must spill to LPDDR5. Bandwidth budget: 52MB × 30fps = 1.56
-    GB/s used. Peak: 68 GB/s. Model weights loaded once per frame: 25MB × 30fps =
-    750 MB/s. Total: ~2.3 GB/s << 68 GB/s. Not bandwidth-bound — compute-bound for
-    later layers.'
-  common_mistake: Calculating peak bandwidth utilization without accounting for the
-    memory access pattern across layers; early layers of YOLO are bandwidth-bound
-    while later layers are compute-bound.
-  napkin_math: 'Compute: 79 GFLOP × 30fps = 2.37 TFLOPS << 275 TOPS. Bandwidth: activations
-    52MB + weights 25MB = 77MB/frame × 30fps = 2.3 GB/s << 68 GB/s. Both within budget
-    — model fits comfortably on Jetson Orin NX.'
+  realistic_solution: 'Analyze early vs late layers. High-resolution input passes through early stride-1 layers generating huge activation volumes that cannot fit in the 4MB L2 cache, forcing LPDDR5 spills. Calculate if this activation spill exceeds the 68 GB/s bandwidth. Conclude that despite spills, the system easily absorbs the bandwidth, remaining solidly compute-bound in the later layers.'
+  common_mistake: |
+    **The Pitfall:** Only calculating peak bandwidth without isolating early layer activation spills.
+    **The Rationale:** Candidates assume parameters dictate bandwidth, ignoring that early-layer high-res feature maps heavily overflow small L2 caches.
+    **The Consequence:** Misidentifying the bottleneck as memory bandwidth when it's actually compute in the dense later layers.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Compute required: 79 GFLOPs/frame * 30 FPS = 2.37 TFLOPS.
+       - Early layer max activations: 1280*1280*32 = 52 MB.
+       - Bandwidth ceiling: 68 GB/s.
+    2. **Calculations:**
+       - Weight bandwidth = 25 MB * 30 FPS = 0.75 GB/s.
+       - Worst-case activation spill bandwidth = 52 MB * 30 FPS = 1.56 GB/s.
+       - Total dynamic bandwidth = 0.75 + 1.56 = 2.31 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound**. The 2.31 GB/s requirement is a tiny fraction of the 68 GB/s LPDDR5 limit, confirming the model comfortably hits 30fps without memory starvation.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,17 +11,20 @@ title: The Memory Swiss Cheese
 scenario: Your LLM serving system reports 'Out of Memory' after serving only 8 concurrent users, even though each user has only generated a few dozen tokens.
 question: Based on the memory map, why is your VRAM already exhausted?
 details:
-  realistic_solution: 'The system uses contiguous pre-allocation, reserving 8192 tokens worth of VRAM per request regardless of usage. Request 1 uses only 47 tokens but holds memory for 8192, **wasting 99.4% of its allocation**. This is internal fragmentation. The fix is **PagedAttention**: map virtual KV-cache blocks to non-contiguous physical blocks on demand, exactly like OS virtual memory paging.'
+  realistic_solution: 'The system uses contiguous pre-allocation, reserving 8192 tokens worth of VRAM per request. Request 1 uses only 47 tokens but holds memory for 8192. This internal fragmentation wastes memory. The fix is PagedAttention: map virtual KV-cache blocks on demand.'
   common_mistake: |
     **The Pitfall:** Assuming there must be a memory leak in the serving framework.
-    **The Rationale:** The system OOMs under very light actual token generation load, which feels like a leak.
-    **The Consequence:** Wasting time debugging framework code when the memory allocation design itself (contiguous max-length pre-allocation) is the structural flaw.
+    **The Rationale:** The system OOMs under light token generation load, feeling like a leak.
+    **The Consequence:** Wasting time debugging framework code when the memory allocation design itself is flawed.
   napkin_math: |
-    1. **Model Weights:** An A100 80GB running a 13B model uses 26 GiB for weights.
-    2. **KV Cache per User:** If max context is 8192 tokens, an FP16 KV-cache needs 2 bytes $\times$ 2 (K+V) $\times$ 40 layers $\times$ 5120 hidden_size $\times$ 8192 = 6,710,886,400 bytes (~6.25 GiB) per user.
-    3. **Memory Allocation:** If the system pre-allocates contiguous memory for the max length, 8 concurrent users reserve $8 \times 6.25$ GiB = 50 GiB.
-    4. **Total VRAM Used:** 26 GiB + 50 GiB = 76 GiB.
-    5. **Result:** **The GPU OOMs at user 9 (76 + 6.25 = 82.25 GiB), even if they only generate 50 tokens each!**
+    1. **Assumptions & Constraints:**
+       - Model weights: 26 GiB.
+       - Max context 8192 = 6.25 GiB per user cache.
+    2. **Calculations:**
+       - 8 users pre-allocate: 8 * 6.25 = 50 GiB.
+       - Total VRAM: 26 + 50 = 76 GiB.
+    3. **Conclusion & Interpretation:**
+       - **Result: The GPU OOMs at user 9 (82.25 GiB), regardless of tokens actually generated.**
 status: published
 provenance: imported
 requires_explanation: false

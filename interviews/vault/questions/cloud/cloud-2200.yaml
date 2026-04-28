@@ -11,22 +11,29 @@ title: The Power Measurement Trap
 scenario: Your team measures inference power consumption by reading nvidia-smi power draw during a 60-second benchmark run. They report 350W average for an H100 running Llama-70B inference. The data center team uses this to plan cooling capacity for a 1,000-GPU deployment. Three months after deployment, the cooling system is overwhelmed during peak load.
 question: What went wrong with the power measurement methodology?
 details:
-  realistic_solution: 'Three methodological failures: (1) nvidia-smi reports GPU board power at ~1 Hz sampling rate, missing sub-second power spikes during prefill bursts. The H100''s TDP is 700W, and compute-heavy prefill operations can briefly draw 650W+ before DVFS throttles. The 350W average blends low-power decode phases (200W) with high-power prefill phases (600W+). (2) Average power is the wrong metric for cooling. You need sustained peak power (the P95 or P99 of rolling 10-second windows) because thermal mass has a time constant of ~30 seconds — the cooling system must handle sustained peaks, not averages. (3) The measurement excluded system-level power: CPU, DRAM, NVLink, PCIe, fans, and power supply inefficiency (PSU at 94% efficiency adds 6% overhead). Total system power is typically 1.3-1.5x GPU-only power. MLPerf Power requires external power analyzers (Yokogawa WT310E) measuring at the wall with >=1 kHz sampling, specifically to avoid these errors.'
+  realistic_solution: 'Diagnose that nvidia-smi averages mask sub-second prefill bursts and ignore system-level overheads. Employ external power analyzers (e.g., Yokogawa WT310E) at the wall with high-frequency sampling (>=1 kHz) to capture sustained peak power over rolling 10-second windows.'
   common_mistake: |
     **The Pitfall:** Trusting `nvidia-smi` as an accurate power measurement tool and using average power for capacity planning.
     **The Rationale:** Candidates assume software-reported average GPU power represents the true thermal load of the system.
     **The Consequence:** They miss sub-second power spikes, ignore system-level overhead, and under-provision cooling for sustained peak loads.
   napkin_math: |
-    - Measured: 350W avg GPU power x 1,000 GPUs = 350 kW.
-    - Reality: System power = 350W x 1.4 (system overhead) = 490W avg.
-    - Peak sustained (P95 over 10s windows) = 490W x 1.5 (prefill bursts) = 735W per system.
-    - Total peak = 735 kW (2.1x the planned 350 kW).
-    - Cooling deficit = 385 kW, equivalent to ~110 tons of cooling capacity.
+    1. **Assumptions & Constraints:**
+       - Measured GPU power: 350W average. 1,000 GPUs.
+       - System overhead multiplier is ~1.4x (CPU, networking, fans).
+       - Peak sustained multiplier (due to prefill bursts) is ~1.5x over rolling 10s windows.
+    2. **Calculations:**
+       - Planned cooling: 350W * 1,000 = 350 kW.
+       - Actual average system power: 350W * 1.4 = 490W.
+       - Actual sustained peak power: 490W * 1.5 = 735W.
+       - Total actual peak load: 735W * 1,000 = 735 kW (2.1x the planned capacity).
+       - Deficit: 735 kW - 350 kW = 385 kW.
+    3. **Conclusion & Interpretation:**
+       - **Result: 385 kW cooling deficit. The system is Thermal-Bound due to unmeasured sustained peak loads and system overheads.**
   options:
-  - The measurement used peak power instead of average power, leading to an overestimation of cooling requirements because the thermal mass of the data center absorbs short power spikes.
-  - The measurement was taken over a 60-second window which is too short to capture the long-term steady-state average power required for capacity planning.
-  - The measurement only captured GPU board power at a low sampling rate, missing high-power prefill spikes, and completely ignored system-level power overheads like CPU and networking.
-  - The measurement incorrectly included the PUE (Power Usage Effectiveness) overhead of the data center, which should be calculated separately by the facilities team.
+  - The measurement estimated 350 kW, but thermal mass smoothing reduces the actual required cooling to 200 kW.
+  - The measurement accurately captured 350 kW of GPU power, requiring 350 kW of cooling.
+  - The measurement missed sustained prefill bursts and system overheads, severely underestimating the true peak load of 735 kW.
+  - The measurement incorrectly included PUE, meaning the actual required capacity is only 250 kW.
   correct_index: 2
 status: published
 provenance: imported

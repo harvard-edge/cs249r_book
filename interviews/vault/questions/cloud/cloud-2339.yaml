@@ -8,7 +8,7 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: HBM Thermal Throttling on Zipfian Embeddings
-scenario: Serving a trillion-parameter DLRM on TPU v4. The system starts at 150,000 QPS. After 10 minutes, throughput steadily drops to 60,000 QPS. Hardware metrics show the TPU core clock is throttling down to 700MHz. Curiously, HBM stack 0 is reporting 95°C, while HBM stacks 1, 2, and 3 are at 45°C. Total HBM bandwidth utilization is only 18%.
+scenario: Serving a trillion-parameter DLRM on an accelerator. The system starts at 150,000 QPS. After 10 minutes, throughput steadily drops to 60,000 QPS. Hardware metrics show the core clock is throttling down. Curiously, HBM stack 0 is reporting 95°C, while HBM stacks 1, 2, and 3 are at 45°C. Total HBM bandwidth utilization is only 18%.
 question: Why does throughput fall as HBM stack 0 reaches 95°C while total HBM bandwidth is only 18%, and how would you distribute the load?
 details:
   realistic_solution: |
@@ -18,10 +18,14 @@ details:
     **The Rationale:** Candidates miss the localized, physical nature of memory accesses and assume 18% bandwidth means the memory cannot possibly be stressed.
     **The Consequence:** Treating a software-to-physical-layout problem as a hardware defect, failing to resolve the throttling.
   napkin_math: |
-    - **Bandwidth Check:** 150,000 QPS * 100 lookups * 128 bytes = 1.9 GB/s total read bandwidth (< 1% of 1200 GB/s peak).
-    - **Zipfian Skew:** 90% of lookups hit 10 specific vectors (1280 bytes).
-    - **Physical Hotspot:** If these vectors are physically mapped to HBM Stack 0, the constant polling generates localized joule heating, reaching 95°C.
-    - **Conclusion: Replicating the hottest embeddings across all 4 HBM stacks drops localized heat by 75%.**
+    1. **Assumptions & Constraints:**
+       - 150,000 QPS × 100 lookups × 128 bytes = 1.9 GB/s total read bandwidth.
+       - Zipfian skew means 90% of traffic hits a tiny subset of vectors.
+       - Peak HBM bandwidth is ~1200 GB/s (so 1.9 GB/s is <1%).
+    2. **Calculations:**
+       - Bandwidth check confirms system is not bandwidth-bound globally.
+       - Localized Hotspot: Constant polling of the few hot vectors mapped exclusively to Stack 0 causes extreme joule heating, reaching 95°C.
+    3. **Conclusion & Interpretation:** **Replicating the hottest embeddings across all 4 HBM stacks eliminates the physical hotspot and stops thermal throttling. Result: Thermal-Bound.**
   options:
   - The total memory bandwidth is saturated by cache evictions, causing the entire HBM to overheat. The load should be distributed by increasing the TPU core clock.
   - Highly skewed Zipfian accesses to a few popular embeddings located on Stack 0 cause a localized physical thermal hotspot, triggering hardware throttling despite low overall bandwidth. The load should be distributed by replicating these hot embeddings across all 4 HBM stacks.

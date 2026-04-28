@@ -7,49 +7,32 @@ topic: model-serving-infrastructure
 competency_area: deployment
 bloom_level: apply
 phase: inference
-title: The Translation API Latency Spike
-scenario: "You are an ML Systems Engineer for a new LLM-powered translation API running on H100 GPUs. A major client reports that while overall translation speed (TPOT) is good, the Time To First Token (TTFT) is unacceptably slow, with P99 TTFT spiking over 1.5 seconds and violating your 500ms SLA."
-question: "What batching behavior most likely causes the 1.5s P99 TTFT despite good TPOT in the H100 translation API?"
+title: 'The Translation API Latency Spike'
+scenario: 'You are an ML Systems Engineer for a new LLM-powered translation API running on H100 GPUs. A major client reports that while overall translation speed (TPOT) is good, the Time To First Token (TTFT) is unacceptably slow, with P99 TTFT spiking over 1.5 seconds and violating your 500ms SLA.'
+question: 'What batching behavior most likely causes the 1.5s P99 TTFT despite good TPOT in the H100 translation API?'
 details:
-  realistic_solution: The primary cause is the 1000ms batching timeout. With an arrival rate of 10 requests/sec, the system never gathers enough requests to fill a batch of 32 within the timeout window. Instead, every batch is formed only after the 1-second timeout is hit. A request arriving at the beginning of a batching window must wait the full second for the timeout, plus a small processing time, before its first token is generated. This queuing delay is the direct cause of the high P99 TTFT.
+  realistic_solution: 'The primary cause is the 1000ms batching timeout. With an arrival rate of 10 requests/sec, the system never gathers enough requests to fill a batch of 32 within the timeout window. Instead, every batch fires only after the 1-second timeout is hit. A request arriving early must wait the full second plus compute time.'
   common_mistake: |
     **The Pitfall:** Blaming the model architecture or the hardware itself for high latency.
     **The Rationale:** Engineers often see low GPU utilization and assume the model is too small or the GPU is oversized, focusing on processing time instead of queueing delays.
     **The Consequence:** The team wastes time optimizing hardware or model size while the underlying batching policy remains broken.
   napkin_math: |
-    - **Analyze arrival rate:** At 10 requests/sec, an arrival occurs every 100ms.
-    - **Calculate time to fill batch:** To reach a batch size of 32, it takes 32 * 100ms = 3.2 seconds.
-    - **Evaluate timeout impact:** Since the batching timeout is 1000ms, the batch fires at 1000ms with only 10 requests.
-    - **Calculate TTFT:** The first request waits the full 1000ms in the queue. Add ~500ms for prefill compute.
-    - **Result:** **The resulting TTFT is 1.5s, missing the SLA by a full second.**
+    1. **Assumptions & Constraints:**
+       - Arrival rate: 10 requests/sec (1 every 100ms).
+       - Target batch size: 32.
+       - Batch timeout: 1000ms.
+       - Prefill compute: ~500ms.
+    2. **Calculations:**
+       - Time to naturally fill batch: 32 × 100ms = 3.2 seconds.
+       - Actual batch trigger: 1000ms timeout fires first, containing only 10 requests.
+       - Queue wait time for first request: 1000ms.
+       - Total TTFT: 1000ms queue + 500ms compute = 1.5s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1.5s TTFT violates the 500ms SLA. The system is Queue-Bound due to an overly aggressive timeout for the given arrival rate.**
   options:
   - The H100's compute is underutilized; switching to a smaller, cheaper GPU would be more efficient.
-  - The network latency between the load balancer and the inference servers must be spiking to over 1
-    second.
-  - The 1000ms batching timeout is too high for the low arrival rate, causing requests to wait too long
-    in the queue before processing.
-  - The model is too large, causing slow 'cold starts' during token generation, which increases the time
-    to the first token.
+  - The network latency between the load balancer and the inference servers must be spiking to over 1 second.
+  - The 1000ms batching timeout is too high for the low arrival rate, causing requests to wait too long in the queue before processing.
+  - The model is too large, causing slow 'cold starts' during token generation, which increases the time to the first token.
   correct_index: 2
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 6
-validated: true
-validation_status: WARN
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-validation_issues:
-- The napkin math is cut off, not explicitly calculating the impact of the 1000ms batching timeout on
-  TTFT.
-math_verified: true
-math_status: WARN
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-math_issues:
-- Incomplete napkin_math explanation.
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

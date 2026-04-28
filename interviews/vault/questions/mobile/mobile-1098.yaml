@@ -8,37 +8,27 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Analyzing TTFT vs TPOT Bottlenecks
-scenario: You are analyzing the end-to-end latency of a 3-billion parameter on-device LLM (Gemini Nano) running on a Google Tensor G3. The hardware features an on-device TPU with 7.5 TOPS and 12 GB of LPDDR5X memory. You observe that while the Time To First Token (TTFT) for a 50-token prompt is relatively fast, the Time Per Output Token (TPOT) is surprisingly slow, causing the total generation time for a 100-token response to be the major bottleneck.
+scenario: You are analyzing the end-to-end latency of a 3-billion parameter on-device LLM running on an NPU. You observe that while the Time To First Token (TTFT) for a 50-token prompt is relatively fast, the Time Per Output Token (TPOT) is surprisingly slow, causing the total generation time to be the major bottleneck.
 question: Why does the end-to-end latency of an on-device LLM become heavily bottlenecked during the decode phase (TPOT) rather than the prefill phase (TTFT)?
 details:
-  realistic_solution: End-to-end latency breaks down into TTFT (prefill) and TPOT (decode). During prefill, the TPU processes multiple input tokens in parallel, achieving high utilization of its 7.5 TOPS compute capacity. However, during the decode phase (TPOT), the system processes only one token at a time. This requires loading the entire model from the 12 GB LPDDR5X memory into the TPU for each token, making it memory-bandwidth bound. Consequently, the TPU is severely underutilized during decode, explaining why the per-token generation latency dictates the overall slowness.
+  realistic_solution: End-to-end latency breaks down into TTFT (prefill) and TPOT (decode). During prefill, the NPU processes multiple input tokens in parallel, achieving high utilization of its matrix multiplication units. However, during the decode phase (TPOT), the system processes only one token at a time. This requires streaming the entire model's weights from DRAM into the NPU for every single generated token, making it entirely memory-bandwidth bound. Consequently, the NPU compute is severely underutilized during decode.
   common_mistake: |
-    **The Pitfall:** Assuming the 7.5 TOPS TPU dictates the speed of all generation phases equally.
-    **The Rationale:** Candidates fail to decompose latency and realize that while prefill can saturate compute, decode is bottlenecked by memory bandwidth because weights must be loaded for every single generated token.
-    **The Consequence:** They focus on compute optimizations (like pruning) instead of memory-bound optimizations (like quantization or KV cache) for the decode phase.
+    **The Pitfall:** Assuming the NPU's peak TOPS dictates the speed of all generative phases equally.
+    **The Rationale:** Candidates fail to decompose latency and realize that while prefill can saturate compute, decode is intrinsically memory-bandwidth bound.
+    **The Consequence:** They focus on compute optimizations (like pruning) instead of memory-bound optimizations (like quantization or KV cache tuning) for the decode phase.
   napkin_math: |
-    - Gemini Nano: 3B parameters at 8-bit = 3 GB footprint.
-    - TTFT compute for 50 tokens = 2 * 3B * 50 = 300 GigaOps.
-    - TTFT time at 7.5 TOPS = 300 / 7500 = 0.04s (40ms).
-    - TPOT compute for 1 token = 2 * 3B * 1 = 6 GigaOps (<1ms at 7.5 TOPS).
-    - TPOT memory load = 3 GB weights.
-    - TPOT time at 50 GB/s bandwidth = 3 GB / 50 GB/s = 60ms per token.
-    - Total decode for 100 tokens = 100 * 60ms = 6.0s.
-    - **Memory-bound TPOT (60ms) heavily dominates the compute-bound TTFT (40ms).**
+    1. **Assumptions & Constraints:**
+       - Model: 3B parameters at 8-bit = 3 GB footprint.
+       - NPU Compute: 7.5 TOPS.
+       - Memory Bandwidth: 50 GB/s.
+    2. **Calculations:**
+       - TTFT compute (50 tokens) = 2 * 3B * 50 = 300 GigaOps.
+       - TTFT time = 300 / 7500 = 0.04s (40ms).
+       - TPOT compute (1 token) = 2 * 3B * 1 = 6 GigaOps (<1ms compute time).
+       - TPOT memory load time = 3 GB / 50 GB/s = 60ms per token.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Bandwidth).** The memory-bound TPOT (60ms) heavily dominates the compute-bound TTFT (40ms).
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 5
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

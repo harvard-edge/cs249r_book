@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Debugging Online KD Bottlenecks
-scenario: Your team is performing online knowledge distillation from a 70B parameter teacher LLM to a 7B student LLM on an 8xH100 node. The teacher is partitioned across 4 GPUs, while the student uses Data Parallelism on the remaining 4 GPUs. You observe the student's GPU utilization is under 20%.
+scenario: Your team is performing online knowledge distillation from a 70B parameter teacher LLM to a 7B student LLM on an 8-GPU node. The teacher is partitioned across 4 GPUs, while the student uses Data Parallelism on the remaining 4 GPUs. You observe the student's GPU utilization is under 20%.
 question: What is the root cause of this inefficiency, and how should the distillation system be redesigned?
 details:
   realistic_solution: 'The root cause is the synchronous online forward pass of the 70B teacher starving the 7B student. Redesign the system to use offline distillation: pre-compute the teacher''s top-K logits (e.g., K=10) and store them to fast NVMe storage. Decoupling the slow teacher inference from the fast student training loop perfectly resolves the bottleneck.'
@@ -17,11 +17,15 @@ details:
     **The Rationale:** Engineers assume the low GPU utilization implies the student's training loop is poorly configured.
     **The Consequence:** Wasting time tuning the fast component of the system while the 70B teacher inference continues to act as a catastrophic synchronous bottleneck.
   napkin_math: |
-    - **Teacher forward compute:** $\sim 140\text{ GFLOPs/token}$ ($2 \times 70\text{B}$). 
-    - **Student forward+backward compute:** $\sim 42\text{ GFLOPs/token}$ ($6 \times 7\text{B}$). 
-    - Synchronous execution forces the fast student to idle waiting for the massive teacher.
-    - **Storing Top-10 FP32 logits** takes only $40\text{ bytes/token}$ ($10 \times 4\text{B}$). 
-    - **Result: Streaming from NVMe easily outpaces the teacher's compute-bound generation.**
+    1. **Assumptions & Constraints:**
+       - Teacher (70B) forward compute: ~140 GFLOPs/token.
+       - Student (7B) forward+backward compute: ~42 GFLOPs/token.
+       - Online execution forces the student to wait for the teacher synchronously.
+    2. **Calculations:**
+       - Teacher computes 140 GFLOPs vs Student's 42 GFLOPs. Student is idle waiting.
+       - Storing Top-10 FP32 logits offline takes only 40 bytes/token (10 * 4B).
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound (Synchronous).** Streaming from NVMe easily outpaces the teacher's compute-bound generation, eliminating the idle bottleneck.
 status: published
 provenance: imported
 requires_explanation: false

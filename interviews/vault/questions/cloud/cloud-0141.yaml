@@ -8,19 +8,23 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The P99 Latency Anomaly
-scenario: 'You are analyzing the performance of a new LLM serving system for a 70B parameter model on H100s using a basic static batching strategy. As request volume increases, the average latency per output token (TPOT) remains stable, but the P99 time-to-first-token (TTFT) has exploded, violating your SLO.'
+scenario: 'You are analyzing a new LLM serving system for a 70B parameter model using a static batching strategy. As request volume increases, average latency per output token (TPOT) remains stable, but P99 time-to-first-token (TTFT) explodes, violating SLOs.'
 question: 'Why can TPOT stay stable while P99 TTFT explodes under static batching, and what is the root cause of the TTFT explosion?'
 details:
-  realistic_solution: 'The root cause is head-of-line blocking inherent to static batching. TPOT is stable because once a batch starts generating, it''s an efficient, parallel operation limited by the H100''s memory bandwidth, and this throughput is consistent batch-over-batch. However, P99 TTFT represents the worst-case user experience. This user likely arrives just after a large batch has begun processing. They must first wait in the queue for that *entire* batch (prefill and all subsequent token generation) to complete. Then, they must wait for their *own* batch to fill and for its expensive, compute-heavy prefill operation to finish. This double-waiting period (waiting for the previous batch + waiting for your own prefill) is what causes the P99 TTFT to explode, even while the per-token generation speed (TPOT) of a running batch looks good. The system isn''t necessarily overloaded; its scheduling is just inefficient for latency-sensitive users.'
+  realistic_solution: 'The root cause is head-of-line blocking inherent to static batching. TPOT is stable because generation is an efficient, parallel operation limited by memory bandwidth. However, P99 TTFT reflects the worst-case user waiting in queue for the entire preceding batch to complete, followed by their own prefill phase. This queueing delay causes TTFT to explode. Migrating to continuous batching with paged attention resolves this.'
   common_mistake: |
     **The Pitfall:** Attributing high P99 TTFT to a hardware bottleneck like being compute-bound or memory-bound.
-    **The Rationale:** Candidates assume that if latency is high, the hardware is saturated, rather than recognizing head-of-line blocking inherent to the static batching scheduler.
-    **The Consequence:** Wasting money on unnecessary hardware upgrades instead of implementing continuous batching.
+    **The Rationale:** Candidates assume high latency implies saturated hardware, missing the head-of-line blocking inherent to the static batching scheduler.
+    **The Consequence:** Wasting capital on hardware upgrades instead of migrating to continuous batching.
   napkin_math: |
-    * Assume batch processing time T_batch = 200ms prefill + 600ms generation = 800ms.
-    * A user arriving after a batch starts waits 800ms + 200ms (their prefill) = 1000ms TTFT.
-    * TPOT remains 600ms / 100 tokens = 6ms per token.
-    * **P99 TTFT spikes to 1000ms due to queueing delays, while TPOT remains perfectly stable at 6ms.**
+    1. **Assumptions & Constraints:**
+       - Batch processing time: 200ms prefill + 600ms generation = 800ms.
+       - User generation request: 100 tokens.
+    2. **Calculations:**
+       - User arriving after a batch starts waits 800ms + 200ms prefill = 1000ms TTFT.
+       - TPOT remains 600ms / 100 tokens = 6ms per token.
+    3. **Conclusion & Interpretation:**
+       - **Result: P99 TTFT spikes to 1000ms due to queueing delays, while TPOT is perfectly stable at 6ms (Scheduling-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,19 +8,25 @@ competency_area: optimization
 bloom_level: apply
 phase: both
 title: Calculating Communication Hiding Feasibility on PCIe Edge
-scenario: A smart camera using a Hailo-8 accelerator streams feature embeddings to a host processor over a PCIe Gen3 x2 link (approx 2 GB/s practical). The accelerator computes feature maps of 16 MB in 5 ms.
+scenario: A smart camera using a Hailo-8 accelerator streams feature embeddings to a host processor over a PCIe Gen3 x2 link. The accelerator computes 16 MB of feature maps in 5 ms.
 question: Calculate the minimum network transfer time per feature map and determine if the communication can be perfectly hidden behind the computation.
 details:
-  realistic_solution: Transferring 16 MB over a 2 GB/s link takes 16 MB / 2000 MB/s = 0.008 seconds, or 8 ms. Since the transfer time (8 ms) is longer than the compute time (5 ms), communication cannot be perfectly hidden and the PCIe bus will bottleneck the pipeline.
+  realistic_solution: A PCIe Gen3 x2 link provides approximately 2 GB/s (1.97 GB/s effective) of bandwidth. Transferring 16 MB of activations takes 8 ms. Because the DMA transfer duration (8 ms) exceeds the NPU execution time (5 ms), the system is strictly limited by interconnect bandwidth. Communication-computation overlap (e.g., using double-buffered asynchronous CUDA/Hailo streams) can hide the 5 ms compute, but the pipeline will still stall waiting on the 8 ms PCIe transfer.
   common_mistake: |
-    **The Pitfall:** Failing to convert between MB and GB/s properly, or assuming overlap automatically hides the longer duration.
-    **The Rationale:** Basic unit conversion errors or a misunderstanding of how asynchronous execution bounds work (the max of the two is the bottleneck).
-    **The Consequence:** Designing a pipelined system that stalls on the PCIe bus, failing to meet throughput expectations.
+    **The Pitfall:** Failing to properly align units (MB to GB/s) or fundamentally misunderstanding asynchronous pipelining.
+    **The Rationale:** Candidates incorrectly assume that invoking asynchronous streams magically eliminates all transfer latency, forgetting that the max duration strictly bounds the pipeline throughput.
+    **The Consequence:** The engineered pipeline stalls on the PCIe bus, missing real-time throughput expectations due to silent I/O starvation.
   napkin_math: |
-    - Bandwidth: 2 GB/s = 2000 MB/s.
-    - Transfer time: 16 MB / 2000 MB/s = 0.008s = 8 ms.
-    - Compute time: 5 ms.
-    - **Result: 8 ms > 5 ms. Communication takes longer and cannot be perfectly hidden.**
+    1. **Assumptions & Constraints:**
+       - Feature map size: 16 MB.
+       - NPU Compute time: 5 ms.
+       - PCIe Gen3 x2 effective bandwidth: ~2 GB/s.
+    2. **Calculations:**
+       - Bandwidth in MB/s = 2000 MB/s.
+       - DMA Transfer time = 16 MB / 2000 MB/s = 0.008 s = 8 ms.
+       - Pipeline bottleneck = max(Compute, Transfer) = max(5 ms, 8 ms) = 8 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 8 ms > 5 ms. The pipeline is I/O-bound (PCIe bandwidth). Communication cannot be perfectly hidden, capping theoretical throughput.**
 status: published
 provenance: llm-draft
 expected_time_minutes: 8

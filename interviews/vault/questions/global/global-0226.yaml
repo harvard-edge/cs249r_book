@@ -8,21 +8,24 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: GPU Shows 40% Utilization Despite Full Batch
-scenario: Your training job runs a fully-packed batch but nvidia-smi reports only 40% GPU utilization. The model is a Transformer with standard attention. GPU memory is 70% used.
+scenario: Your training job runs a fully-packed batch but nvidia-smi reports only 40% GPU utilization. GPU memory is 70% used.
 question: Why might GPU utilization be only 40% despite a fully packed batch, and how would you fix it?
 details:
-  realistic_solution: "The most likely cause is CPU-bound data loading or preprocessing creating pipeline bubbles. While the GPU waits for the next batch, utilization drops to 0%. Other possibilities: (1) Excessive CPU-GPU synchronization points (e.g., .item() calls in the training loop). (2) Small kernels with high launch overhead — many tiny ops instead of fused kernels. (3) Data transfer bottleneck on PCIe. Diagnosis: profile with nsys/Nsight to see the timeline. Fix: use multi-worker data loading (num_workers=4-8), pin_memory=True, prefetch_factor=2, and ensure no synchronization points in the hot loop."
+  realistic_solution: "The primary suspect is CPU-bound data loading or synchronization points creating pipeline bubbles. Diagnosis mandates `nsys profiling` to map the CUDA execution timeline. Fixes include multi-worker dataloaders, pinned memory, prefetching, and eliminating synchronous host-to-device transfers (e.g., stray `.item()` calls)."
   common_mistake: |
     **The Pitfall:** Assuming low utilization strictly means you need to increase the batch size.
     **The Rationale:** `nvidia-smi` utilization is frequently misunderstood as a measure of compute intensity, rather than just the fraction of time a kernel is active.
     **The Consequence:** OOMing the GPU by artificially inflating the batch size while completely ignoring the actual CPU bottleneck.
   napkin_math: |
-    * Data loading time: 100 ms/batch.
-    * GPU compute time: 150 ms/batch.
-    * Total cycle time: 250 ms.
-    * GPU active fraction = 150 ms / 250 ms = 60%.
-    * Add 40 ms of kernel launch overhead: 150 ms / 290 ms = 51.7%.
-    * **Additional synchronization or preprocessing stalls easily drop this to the observed 40%.**
+    1. **Assumptions & Constraints:**
+       - Data loading time: 100 ms/batch
+       - GPU compute time: 150 ms/batch
+       - Kernel launch overhead: 40 ms
+    2. **Calculations:**
+       - Total cycle time = 100 ms + 150 ms + 40 ms = 290 ms
+       - GPU active fraction = 150 ms / 290 ms = ~51.7%
+    3. **Conclusion & Interpretation:**
+       - **Result: CPU-Bound (Pipeline Starvation)**
 status: published
 provenance: imported
 requires_explanation: false

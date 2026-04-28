@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: PFC Deadlock in Lossless Ethernet Fabrics
-scenario: 'A 512-MI300X cluster running RoCE v2 over a Clos network with Priority Flow Control (PFC) enabled experiences a full fabric stall during a large-scale training job. Monitoring shows PFC pause frames propagating backward from ToR switches all the way to the spine. The job hangs for 30+ seconds before partial recovery.'
+scenario: 'A cluster running RoCE v2 over a Clos network with Priority Flow Control (PFC) enabled experiences a full fabric stall during a large-scale training job. Monitoring shows PFC pause frames propagating backward from ToR switches all the way to the spine. The job hangs for 30+ seconds before partial recovery.'
 question: "How does PFC deadlock form in this Clos network, and how would you prevent full-fabric stalls?"
 details:
   realistic_solution: 'PFC deadlock occurs when a circular dependency forms: Switch A pauses Switch B, B pauses C, and C pauses A, creating a cycle where no switch can drain. In Clos networks, this happens when uphill and downhill traffic share the same PFC priority class. The fix is to use separate virtual lanes (VLs) for different traffic directions, implement DCBX with proper PFC watchdog timers (typically 100ms), or use DSCP-based ECN marking with DCQCN to reduce reliance on PFC entirely. On MI300X clusters with 400G links, a single PFC storm can freeze 5.3 TB/s of HBM bandwidth per GPU waiting on the network.'
@@ -17,10 +17,15 @@ details:
     **The Rationale:** Misunderstanding that PFC can create circular buffer dependencies when pause frames propagate across tiers.
     **The Consequence:** Full fabric stalls that freeze training jobs, wasting massive compute resources.
   napkin_math: |
-    1. A PFC pause quanta of 65535 at 400Gbps: 1 quanta = 512 bit times = `512 * (1/400Gbps)` = 1.28 ns.
-    2. Max pause per frame: `65535 * 1.28 ns` ≈ **83.9 µs**.
-    3. Each 400G link can generate ~600M pause frames/sec in the worst case.
-    4. **Result:** If pause propagation crosses 3 switch tiers at ~500ns per hop, a full fabric stall happens within **~5 µs** of the first circular dependency forming.
+    1. **Assumptions & Constraints:**
+       - PFC pause quanta = 65535 at 400Gbps.
+       - 1 quantum = 512 bit times = 1.28 ns.
+       - ~500ns delay per hop, 3 tiers.
+    2. **Calculations:**
+       - Max pause per frame: 65535 * 1.28 ns = 83.88 µs.
+       - Switch propagation delay: 3 hops * 500 ns = 1.5 µs.
+    3. **Conclusion & Interpretation:**
+       - **Result: Full fabric stall occurs within ~5 µs of circular dependency forming (Network-Congestion-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

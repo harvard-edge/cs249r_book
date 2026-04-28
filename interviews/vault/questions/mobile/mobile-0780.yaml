@@ -8,23 +8,29 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: TFLite Delegate Subgraph Partitioning Overhead
-scenario: You are deploying a custom object detection model using TFLite on an Android phone. The model runs entirely on the CPU in 20ms. You enable the GPU delegate, which accelerates 90% of the model's operations (by original CPU time) by a factor of 6x. However, 4 interspersed custom operations are not supported by the GPU delegate, causing TFLite to partition the graph into 9 subgraphs (5 GPU, 4 CPU).
-question: If each CPU-GPU context switch (tensor copy and synchronization) takes 2ms, what is the expected new end-to-end latency?
+scenario: "You are deploying a custom object detection model using TFLite on an Android phone. The model runs entirely on the CPU in 20ms. You enable the GPU delegate, which accelerates 90% of the model's operations (by original CPU time) by a factor of 6x. However, 4 interspersed custom operations are not supported by the GPU delegate, causing TFLite to partition the graph into 9 subgraphs (5 GPU, 4 CPU)."
+question: "If each CPU-GPU context switch (tensor copy and synchronization) takes 2ms, what is the expected new end-to-end latency?"
 details:
   realistic_solution: |
-    The new end-to-end latency is 21ms, which is actually slower than the CPU-only baseline. To fix this, you must either replace the unsupported custom ops with standard GPU-supported ops, or move them to the very end of the model to reduce the number of subgraphs to exactly 2.
+    Graph partitioning destroys delegate acceleration due to massive context-switching overhead. The interspersed unsupported CPU operators force expensive DMA transfers and synchronization barriers between CPU and GPU memory spaces. To optimize, either replace custom ops with GPU-supported standard ops, or cluster them at the graph boundaries to reduce total subgraphs to 2, minimizing DMA transitions.
   common_mistake: |
     **The Pitfall:** Failing to account for memory synchronization overhead.
-    **The Rationale:** Candidates correctly calculate the raw compute time reduction but forget context switching at each subgraph boundary.
+    **The Rationale:** Candidates correctly calculate the raw compute time reduction but forget the cost of context switching at each subgraph boundary.
     **The Consequence:** The calculated latency is significantly lower than the actual observed latency, leading to incorrect deployment decisions.
   napkin_math: |
-    - **Original CPU compute:** 20ms
-    - **GPU compute portion:** 18ms / 6x speedup = 3ms
-    - **CPU fallback compute portion:** 2ms
-    - **Transitions between 9 subgraphs:** 8 context switches
-    - **Context switch overhead:** 8 * 2ms = 16ms
-    - **Total Latency:** 3ms (GPU) + 2ms (CPU) + 16ms (Overhead)
-    - **Result:** **21ms**
+    1. **Assumptions & Constraints:**
+       - Baseline CPU compute: 20ms.
+       - GPU portion: 90% of 20ms = 18ms. GPU speedup: 6x.
+       - CPU portion: 10% of 20ms = 2ms.
+       - Subgraphs: 9 (8 transitions between them).
+       - Transition overhead: 2ms each.
+    2. **Calculations:**
+       - GPU compute time: 18ms / 6 = 3ms.
+       - Total compute time: 3ms (GPU) + 2ms (CPU) = 5ms.
+       - Total transition overhead: 8 context switches * 2ms = 16ms.
+       - End-to-end latency: 5ms + 16ms = 21ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 21ms total latency.** The hardware acceleration is entirely negated by the 16ms DMA overhead, creating a severe **memory-synchronization bottleneck**.
 status: published
 provenance: imported
 requires_explanation: false

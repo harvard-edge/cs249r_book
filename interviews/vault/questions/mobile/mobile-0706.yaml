@@ -8,19 +8,26 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: The Quantization Fragmentation Trap
-scenario: Your team ships a TFLite INT8 food recognition model. QA passes on Pixel 8 (Tensor G3) and Samsung Galaxy S24 (Snapdragon 8 Gen 3). A user on a Samsung Galaxy A54 (Exynos 1380) reports the model identifies a banana as 'hot dog' with 94% confidence. You test the same image on Pixel 8 — correctly identifies 'banana' at 97%. The model binary is byte-for-byte identical.
+scenario: Your team ships a TFLite INT8 food recognition model. QA passes on Pixel 8 and Samsung Galaxy S24. A user on a Samsung Galaxy A54 reports the model identifies a banana as 'hot dog' with 94% confidence. You test the same image on Pixel 8 and it correctly identifies 'banana' at 97%. The model binary is byte-for-byte identical.
 question: How can the same INT8 model produce different results on different SoCs?
 details:
-  realistic_solution: 'INT8 execution differs across SoCs in three ways: (1) Accumulator overflow — 512-channel convolutions can exceed INT16 range on SoCs using 16-bit accumulators (Exynos), while others use INT32. (2) Rounding modes differ (round-to-nearest-even vs truncation). (3) Operator fusion boundaries change quantization error propagation. Over 30 layers, ±1 LSB per-layer drift compounds to ±45 LSB, enough to flip banana vs hot dog when logits are close (gap of only 15 LSB). Fix: use per-channel quantization (reduces per-channel range by 4x, eliminating overflow) and validate on target SoC families before shipping.'
+  realistic_solution: 'INT8 execution differs across SoCs in three ways: (1) Accumulator overflow — 512-channel convolutions can exceed INT16 range on SoCs using 16-bit accumulators (Exynos), while others use INT32. (2) Rounding modes differ. (3) Operator fusion boundaries change quantization error propagation. Over 30 layers, ±1 LSB per-layer drift compounds to ±45 LSB, enough to flip banana vs hot dog when logits are close. Fix: use per-channel quantization and validate on target SoC families before shipping.'
   common_mistake: |
     **The Pitfall:** Assuming INT8 execution is deterministically bitwise identical across different hardware.
     **The Rationale:** Engineers believe "INT8 is INT8" and assume fixed quantization parameters guarantee identical outputs.
     **The Consequence:** Models that pass QA on one device quietly fail or hallucinate on another due to differing hardware accumulator limits and rounding modes.
   napkin_math: |
-    - **INT16 Accumulator Limit:** 32,767.
-    - **Safe Convolution:** 512 channels × 40 average activation = 20,480.
-    - **Overflow Condition:** 512 channels × 80 max activation = 40,960 (Overflows INT16 limit of 32,767).
-    - **Hardware Differences:** Exynos uses INT16 accumulators, causing overflow. Apple ANE uses INT32 accumulators (up to 2.1B), eliminating overflow but altering the final logits relative to Exynos.
+    1. **Assumptions & Constraints:**
+       - INT16 Accumulator Limit: 32,767.
+       - Convolution: 512 channels.
+       - Average Activation: 40.
+       - Max Activation: 80.
+    2. **Calculations:**
+       - Safe Convolution: 512 x 40 = 20,480.
+       - Overflow Condition: 512 x 80 = 40,960.
+       - 40,960 > 32,767 (INT16 Limit).
+    3. **Conclusion & Interpretation:**
+       - **Result: Exynos INT16 Overflow** (Precision-Bound).
 status: published
 provenance: imported
 requires_explanation: false

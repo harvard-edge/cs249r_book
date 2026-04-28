@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: PFC Deadlock Prevention in RoCE Cluster
-scenario: Your 128-GPU H100 training cluster uses RoCEv2 over a 3-tier fat-tree. Priority Flow Control (PFC) is enabled to prevent packet drops. After a topology change (one spine switch failure), you observe a training stall lasting 45 seconds before recovery. Analysis shows PFC pause frames propagated back 6 hops, freezing unrelated flows.
+scenario: Your 128-GPU training cluster uses RoCEv2 over a 3-tier fat-tree. Priority Flow Control (PFC) is enabled to prevent packet drops. After a topology change (one spine switch failure), you observe a training stall lasting 45 seconds before recovery. Analysis shows PFC pause frames propagated back 6 hops, freezing unrelated flows.
 question: How would you redesign the RoCEv2/PFC configuration to prevent 45-second PFC-induced training stalls after topology changes?
 details:
   realistic_solution: 'Isolate RDMA traffic to a single PFC-enabled priority (e.g., priority 3) using DSCP marking. Enable DCQCN on all RDMA flows to react to ECN marks before PFC is needed. Set PFC headroom buffers correctly: PFC_threshold = RTT × link_rate / 8 = 4µs × 400 Gbps / 8 = 200 KB per port. Use watchdog timers to detect PFC deadlock and force-flush stuck ports.'
@@ -17,11 +17,14 @@ details:
     **The Rationale:** When PFC pause propagates upstream, it can head-of-line block non-RDMA control traffic, preventing heartbeat messages and routing updates from being delivered.
     **The Consequence:** Control-plane timeouts that appear as training failures and cause massive cluster-wide stalls.
   napkin_math: |
-    - RTT in fat-tree: ~4 µs (2 µs propagation + 2 µs queuing).
-    - PFC headroom per port = RTT × 400 Gbps / 8 = 4e-6 × 50e9 = 200 KB.
-    - With 32 ports/switch: total PFC headroom = 6.4 MB.
-    - Arista 7800R3 has 48 MB shared buffer — adequate.
-    - **DCQCN reaction time: ~1 ms; reduces PFC trigger rate by 10-100× in practice.**
+    1. **Assumptions & Constraints:**
+       - Network: 400 Gbps (50 GB/s) fat-tree topology.
+       - RTT: ~4 µs (2 µs propagation + 2 µs queuing).
+       - Typical switch port count: 32 ports.
+    2. **Calculations:**
+       - PFC headroom per port = RTT × Link Rate = 4 µs × 50 GB/s = 200 KB.
+       - Total PFC headroom for 32 ports = 32 × 200 KB = 6.4 MB.
+    3. **Conclusion & Interpretation:** **Buffer comfortably fits in ASIC, but unisolated PFC triggers Head-of-Line blocking. Network-Control-Plane-Bound.**
 status: published
 provenance: imported
 requires_explanation: true

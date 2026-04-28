@@ -8,8 +8,8 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Graph capture stability for streaming inference on Jetson Orin
-scenario: You are running a streaming audio classification model on Jetson Orin for always-on keyword detection. The model processes 100ms audio chunks with LSTM state. After capturing a CUDA graph for the model step, you occasionally get incorrect results (wrong classifications) despite the graph replay succeeding without errors.
-question: How should you manage LSTM input and hidden-state buffers when replaying a CUDA graph for streaming audio on Orin?
+scenario: You are running a streaming audio classification model on an edge SoC for always-on keyword detection. The model processes 100ms audio chunks with LSTM state. After capturing a CUDA graph for the model step, you occasionally get incorrect results (wrong classifications) despite the graph replay succeeding without errors.
+question: How should you manage LSTM input and hidden-state buffers when replaying a CUDA graph for streaming audio?
 details:
   realistic_solution: 'Pre-allocate static input and output buffers for the CUDA graph: one fixed tensor for audio input, one for hidden state (h, c), one for output logits. Before each replay, copy new audio data into the static input buffer and ensure hidden state is explicitly initialized (or carried forward from previous step with an explicit copy). Use torch.cuda.graph.replay() with a warmup phase that establishes correct initial state. Validate with unit tests that manually set hidden state to zeros.'
   common_mistake: |
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Candidates forget that CUDA graphs capture absolute memory addresses, so failing to explicitly manage and re-initialize the hidden state in those exact addresses causes the graph to read stale data.
     **The Consequence:** The model replays without crashing but produces completely incorrect predictions due to garbage recurrent state.
   napkin_math: |
-    *   LSTM hidden state size: hidden=256, layers=2. h+c = 2 * 2 * 256 * 4 bytes = 4 KB.
-    *   Input audio: 100ms * 16kHz * 1 channel * 4 bytes (FP32) = 6.4 KB.
-    *   Total static buffers: ~10.4 KB.
-    *   Pre-replay copy cost: 10.4 KB at 204.8 GB/s Orin bandwidth = ~0.05 microseconds.
-    *   **The explicit copy cost is negligible, so explicitly copying initialized state into the static graph buffers is optimal and guarantees correctness.**
+    1. **Assumptions & Constraints:**
+       * LSTM hidden state size: hidden=256, layers=2.
+       * Input audio: 100ms * 16kHz * 1 channel * FP32.
+       * SoC memory bandwidth: 204.8 GB/s.
+    2. **Calculations:**
+       * h+c state = 2 * 2 * 256 * 4 bytes = 4 KB.
+       * Input audio = 0.1 * 16000 * 1 * 4 bytes = 6.4 KB.
+       * Total static buffers = 4 KB + 6.4 KB = 10.4 KB.
+       * Pre-replay explicit copy time = 10.4 KB / 204.8 GB/s ≈ 0.05 microseconds.
+    3. **Conclusion & Interpretation:**
+       * **The explicit copy cost is utterly negligible (0.05 us), so explicitly copying initialized state into the static graph buffers is optimal and guarantees correctness. Result: Memory Contention-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

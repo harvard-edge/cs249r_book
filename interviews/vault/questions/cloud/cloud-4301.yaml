@@ -8,35 +8,29 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Decode Preemption and KV Swap
-scenario: Under heavy load, your decode scheduler preempts low-priority in-flight sequences by swapping their KV-cache to CPU DRAM to free HBM for new high-priority requests. Users report that preempted requests, when resumed, have TPOT 8× higher than normal for the first 20 tokens before recovering.
-question: Why do resumed preempted sequences have 8× TPOT for the first 20 tokens, and how would you fix it?
+scenario: Under heavy load, your decode scheduler preempts low-priority in-flight sequences by swapping their KV-cache to CPU DRAM to free HBM for new high-priority requests. Users report that preempted requests, when resumed, have TPOT 8x higher than normal for the first 20 tokens before recovering.
+question: Why do resumed preempted sequences have 8x TPOT for the first 20 tokens, and how would you fix it?
 details:
-  realistic_solution: 'When a preempted sequence resumes, its KV-cache must be swapped back from CPU DRAM to GPU HBM over PCIe. During the swap, the decode kernel is also reading model weights from HBM. The PCIe bus saturates during the KV swap-in, stalling the HBM DMA engine. However, the true 8x slowdown is due to page-fault stalls if using demand paging. Fix: (1) Use asynchronous KV swap with double-buffering. (2) Reduce swap frequency by increasing HBM KV pool. (3) Use NVLink-attached CPU memory pools.'
+  realistic_solution: 'When a preempted sequence resumes, its KV-cache must be swapped back from CPU DRAM to GPU HBM over PCIe. The true 8x slowdown is due to page-fault stalls if using demand paging. Fix: (1) Use asynchronous KV swap with double-buffering. (2) Reduce swap frequency by increasing HBM KV pool. (3) Use NVLink-attached CPU memory pools.'
   common_mistake: |
     **The Pitfall:** Attributing the slowdown to CPU-GPU synchronization overhead or Python scheduler latency.
     **The Rationale:** Candidates often jump to software overheads when seeing latency spikes upon resuming a task, forgetting hardware data movement.
     **The Consequence:** The real cause (PCIe bandwidth saturation or page faults) is ignored, leading to ineffective software-only fixes.
   napkin_math: |
-    - **Normal Step Time:** `model_size / HBM_bw` = 140 GB / 3.35 TB/s = 41.8 ms.
-    - **PCIe Contention:** During swap-in (64 GB/s), effective HBM bandwidth for weights drops to ~2 TB/s. Step time becomes 140/2000 = 70 ms. Ratio: 70/41.8 = 1.67x.
-    - **Total Swap Penalty Window:** 192 MB KV for 2048-token sequence takes 3 ms to swap in.
-    - **First Token Overhead:** 3 ms + 41.8 ms vs normal 41.8 ms = 1.07x overhead.
-    - **The Real Mechanism:** Doesn't match 8x. The real cause is page-fault stalls if using demand paging. Full KV is not pre-fetched; each token decode triggers page faults for its own KV pages.
-    - **Stall per fault:** Stall per fault * 20 pages = **~8x overhead.**
+    1. **Assumptions & Constraints:**
+       - Preempted sequence resumes, swapping KV-cache over PCIe.
+       - HBM bandwidth is 3.35 TB/s. PCIe bandwidth is ~64 GB/s.
+       - Model size 140 GB.
+    2. **Calculations:**
+       - Normal Step Time: 140 GB / 3.35 TB/s = 41.8 ms.
+       - PCIe Contention: Effective HBM bandwidth drops to ~2 TB/s during swap-in.
+       - Step time becomes 140 / 2.0 = 70 ms. Ratio: 70 / 41.8 = 1.67x.
+       - True Slowdown: Demand paging causes page-fault stalls. Stall per fault * 20 pages ≈ 8x overhead.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (Page Faults).** The real cause is page-fault stalls from demand paging, leading to an ~8x overhead that cannot be explained by PCIe bandwidth saturation alone.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 8
 validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

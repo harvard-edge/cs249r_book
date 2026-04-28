@@ -8,21 +8,25 @@ competency_area: power
 bloom_level: apply
 phase: both
 title: Energy Cost Analysis of Memory vs Compute on Jetson Orin
-scenario: You are optimizing a transformer model for an NVIDIA Jetson Orin, which features an Ampere GPU + DLA accelerator capable of 275 TOPS INT8 at a 60W TDP. Profiling reveals that Layer A (a dense compute layer) achieves 80% utilization of the TOPS but consumes only 20W. Layer B (a memory-bound attention layer) achieves only 10% TOPS utilization but spikes system power consumption to 45W, due to constant off-chip data movement from the 32 GB LPDDR5 memory.
+scenario: You are optimizing a transformer model for an NVIDIA Jetson Orin. Profiling reveals that Layer A (a dense compute layer) achieves 80% utilization of the INT8 TOPS but consumes only 20W. Layer B (a memory-bound attention layer) achieves only 10% TOPS utilization but spikes system power consumption to 45W, due to constant off-chip data movement from the LPDDR5 memory.
 question: Given the Horowitz energy table principles, why does memory-bound Layer B draw 45W at only 10% TOPS utilization while dense Layer A draws 20W at 80% utilization?
 details:
-  realistic_solution: The candidate should apply the principle that off-chip memory access (LPDDR5) is significantly more energy-expensive than ALUs performing INT8 compute. Layer A keeps data on-chip (SRAM/registers) and runs efficiently. Layer B starves the compute units while thrashing the memory bus. The massive energy spike in Layer B is driven by the PHY and controller overhead of constantly moving data on and off the 32 GB LPDDR5.
+  realistic_solution: 'The candidate must apply the Horowitz energy model: off-chip LPDDR5 memory access costs orders of magnitude more energy (~100 pJ/byte) than ALUs performing INT8 compute (~0.1 pJ/op). Layer A uses SRAM tiling to keep data on-chip, running efficiently. Layer B starves the compute units while thrashing the LPDDR5 PHY controllers. The massive energy spike is driven by off-chip memory PHY overhead. Resolving this requires fusing operations or using FlashAttention-2 to optimize SRAM utilization.'
   common_mistake: |
     **The Pitfall:** Assuming high compute utilization (TOPS) directly correlates with maximum power draw.
     **The Rationale:** Candidates focus on ALUs and neglect the fact that the physical data movement over the memory bus and PHY controllers typically costs orders of magnitude more energy than mathematical operations.
     **The Consequence:** Failing to optimize the memory access patterns of the model, leaving the system heavily power-constrained despite low apparent compute usage.
   napkin_math: |
-    * Energy of 1 INT8 MAC (compute): ~0.1 pJ.
-    * Energy of 32-bit LPDDR5 memory access: ~100 pJ.
-    * Compute energy for 10^9 operations: 10^9 * 0.1 pJ = 0.1 mJ.
-    * Memory energy for 1 GB data transfer (2.5 * 10^8 accesses): (10^9 bytes / 4 bytes) * 100 pJ = 25 mJ.
-    * The energy cost of memory access is **250x** the cost of the compute.
-    * Thrashing the LPDDR5 memory bus causes the massive 45W spike despite the ALU units being mostly idle.
+    1. **Assumptions & Constraints:**
+       - INT8 MAC compute energy: ~0.1 pJ/op.
+       - 32-bit LPDDR5 off-chip memory access energy: ~100 pJ/word (or ~25 pJ/byte).
+       - Operations: 10^9 ops; Data: 1 GB (10^9 bytes).
+    2. **Calculations:**
+       - Compute energy for 10^9 ops: 10^9 * 0.1 pJ = 0.1 mJ.
+       - Memory energy for 1 GB transfer: (10^9 bytes) * 25 pJ/byte = 25 mJ.
+       - Ratio: Memory energy (25 mJ) / Compute energy (0.1 mJ) = 250x.
+    3. **Conclusion & Interpretation:**
+       - **Result: Off-chip memory access consumes 250x more energy than INT8 compute.** Thrashing the LPDDR5 PHY in Layer B dominates the power budget (45W spike) despite ALUs sitting idle.
 status: published
 provenance: imported
 requires_explanation: false

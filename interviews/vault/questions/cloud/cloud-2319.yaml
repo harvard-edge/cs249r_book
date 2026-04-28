@@ -8,25 +8,22 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Mixed Precision Optimizer State Underflow
-scenario: You are pre-training a 10B parameter model. To fit the training job onto 8x 40GB A100 GPUs,
-  you aggressively cast the Adam optimizer states (momentum, variance) and the master weights from FP32
-  to FP16, saving ~80GB of memory. After 5,000 steps, the training loss plateaus completely.
+scenario: You are pre-training a 10B parameter model. To fit the training job onto your GPUs, you aggressively cast the Adam optimizer states and the master weights from FP32 to FP16, saving ~80GB of memory. After 5,000 steps, the training loss plateaus completely.
 question: "Why does casting Adam states and master weights to FP16 cause the 10B model's loss to plateau after 5,000 steps?"
 details:
-  realistic_solution: The training has stalled due to weight update underflow, sometimes called 'swamping'.
-    In deep networks, the optimizer weight updates (learning rate * gradient / sqrt(variance)) become
-    extremely small as training progresses. FP16 has only 10 bits of mantissa precision. When adding a
-    tiny update to a relatively large weight, the update falls below the precision gap (machine epsilon)
-    of the weight's current FP16 value, resulting in an effective update of exactly zero. The architecture
-    must maintain the master weights in FP32 so that these tiny high-precision updates can be accumulated
-    over many steps until they are large enough to be reflected when cast down to FP16 for the forward
-    pass.
-  common_mistake: Believing that the learning rate is too high and causing FP16 overflow in the gradients.
-  napkin_math: In FP16, there are 10 mantissa bits. For a weight W around 1.0, the distance to the next
-    representable number is 2^-10 ~ 0.000976. If the Adam learning rate is low, a typical weight update
-    might be 1e-4 (0.0001). Adding 1.0 + 0.0001 in FP16 results in exactly 1.0, because the update is
-    smaller than the precision gap. This 'weight stagnation' stalls loss. Keeping master weights in FP32
-    fixes this.
+  realistic_solution: The training has stalled due to weight update underflow (swamping). Optimizer weight updates become extremely small as training progresses. When adding a tiny update to a relatively large weight in FP16, the update falls below the precision gap (machine epsilon), resulting in an effective update of zero. Master weights must be FP32 to accumulate tiny updates.
+  common_mistake: |
+    **The Pitfall:** Believing the learning rate is too high.
+    **The Rationale:** Misdiagnosing the plateau as an FP16 gradient overflow or explosion.
+    **The Consequence:** Unnecessary hyperparameter tuning that fails to resolve the underlying precision loss.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - FP16 has 10 explicit mantissa bits.
+    2. **Calculations:**
+       - For a weight W ≈ 1.0, precision gap is 2^-10 ≈ 0.000976.
+       - A typical late-stage update of 0.0001 is smaller than this gap.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1.0 + 0.0001 in FP16 evaluates to exactly 1.0, stalling training completely.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,8 +34,7 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: WARN
 validation_issues_pro:
-- The FP16 machine epsilon is stated as 2^-11, but the standard definition for a format with 10 explicit
-  mantissa bits is 2^-10.
+- The FP16 machine epsilon is stated as 2^-11, but the standard definition for a format with 10 explicit mantissa bits is 2^-10.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

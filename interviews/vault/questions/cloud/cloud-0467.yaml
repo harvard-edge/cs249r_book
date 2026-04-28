@@ -11,16 +11,21 @@ title: The Two-Node Scaling Trap
 scenario: You are training a 70B parameter model using 8-way tensor parallelism on a single server node with 8 H100 GPUs connected with NVLink 4.0. To accelerate training, you scale up to 16 H100s across two identical nodes connected via InfiniBand NDR. You run the same 8-way tensor parallelism, but now with 2-way data parallelism. You observe that your training time-per-step barely improves.
 question: What hardware bottleneck explains the poor scaling when moving from 8 H100s on one node to 16 H100s across two nodes?
 details:
-  realistic_solution: "The primary bottleneck is the inter-node InfiniBand connection. While intra-node communication uses the extremely fast 900 GB/s NVLink, the 2-way data parallelism requires synchronizing the gradients for the entire 70B model across the much slower InfiniBand fabric. This massive data transfer throttles the step time, negating most of the performance gains from the additional GPUs."
+  realistic_solution: 'The primary bottleneck is the inter-node InfiniBand connection. While intra-node communication uses the extremely fast 900 GB/s NVLink, the 2-way data parallelism requires synchronizing the gradients for the entire 70B model across the much slower InfiniBand fabric. This massive data transfer throttles the step time, negating most of the performance gains from the additional GPUs.'
   common_mistake: |
     **The Pitfall:** Misdiagnosing scaling problems by blaming GPU compute or intra-node interconnects.
     **The Rationale:** Engineers often focus on the PCIe bus or incorrectly assume the model is too small for 16 GPUs, failing to recognize the bandwidth disparity between NVLink and InfiniBand.
     **The Consequence:** They attempt to optimize the wrong components, leaving the true inter-node communication bottleneck unresolved.
   napkin_math: |
-    - **Analyze Data Parallelism overhead:** In 2-way DP, the entire model's gradients must be all-reduced across the nodes.
-    - **Calculate gradient size:** 70B parameters * 2 bytes (FP16/BF16) = 140 GB.
-    - **Calculate transfer time:** Over a 50 GB/s InfiniBand NDR link, transferring 140 GB takes at least `140 / 50 = 2.8 seconds` per step.
-    - **Conclusion:** This massive 2.8-second communication overhead negates the compute time saved by doubling the GPUs.
+    1. **Assumptions & Constraints:**
+       - Model: 70B parameters.
+       - Parallelism: 8-way TP, 2-way DP across 2 nodes.
+       - Precision: FP16/BF16 (2 bytes per parameter).
+       - Inter-node interconnect: InfiniBand NDR (50 GB/s).
+    2. **Calculations:**
+       - Gradient size for Data Parallel All-Reduce: 70B * 2 bytes = 140 GB.
+       - Transfer time over InfiniBand: 140 GB / 50 GB/s = 2.8 seconds per step.
+    3. **Conclusion & Interpretation:** **The 2.8-second communication overhead negates compute gains, causing a severe Network Bandwidth Bottleneck.**
   options:
   - The GPU compute is saturated; the model is too small for 16 GPUs.
   - The PCIe Gen5 bus connecting the GPUs to the CPU is saturated by the increased data parallelism.

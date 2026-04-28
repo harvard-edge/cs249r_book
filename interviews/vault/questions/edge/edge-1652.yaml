@@ -8,19 +8,24 @@ competency_area: precision
 bloom_level: create
 phase: both
 title: Sub-INT8 Quantization on Dataflow Accelerators
-scenario: You are architecting a high-throughput video analytics pipeline targeting the Hailo-8 accelerator. The platform provides 26 TOPS of INT8 compute at 2.5W but lacks local DRAM, meaning all data must stream from host memory.
+scenario: You are architecting a high-throughput video analytics pipeline targeting the Hailo-8 accelerator. The platform lacks local DRAM, meaning all data must stream from host memory via PCIe.
 question: How would you design a mixed 4-bit/INT8 Hailo-8 quantization scheme to cut host bandwidth for a larger transformer and recover accuracy?
 details:
-  realistic_solution: Design a static architecture where weights are quantized to 4-bit and packed two per INT8 word on the host. The Hailo-8 ingests the INT8 stream and uses a custom compiled dataflow graph that first splits the INT8 values into two 4-bit operands before feeding them into the standard INT8 MAC units. Accuracy is recovered by keeping activations in INT8 and using Quantization-Aware Training (QAT) with learned step sizes, avoiding dynamic scaling overhead during inference.
+  realistic_solution: Design a mixed-precision architecture where weights are quantized to INT4 and packed two-per-byte on the host. The dataflow graph compiled for Hailo-8 ingests this INT8 stream, unpacking the INT4 operands directly on-chip before feeding the MAC units. To preserve accuracy, activations remain in INT8, utilizing Quantization-Aware Training (QAT) to learn static step sizes and bypass dynamic activation scaling overhead.
   common_mistake: |
     **The Pitfall:** Proposing dynamic activation quantization or AWQ-style decompression.
     **The Rationale:** Candidates recommend standard GPU LLM quantization strategies that rely heavily on dynamic scaling arithmetic.
     **The Consequence:** Dataflow compilers reject dynamic scaling logic, or it introduces so much custom logic overhead it stalls the static pipeline.
   napkin_math: |
-    1. **Compute Budget:** 26e12 / 60 FPS = 433 GOPS/frame.
-    2. **INT8 Bandwidth:** A 50M parameter model at INT8 requires 50MB. Streaming continuously requires 50MB * 60 = 3.0 GB/s bandwidth, risking PCIe saturation.
-    3. **4-Bit Packing:** Packing 4-bit weights drops payload to 25MB.
-    4. **Reduced Bandwidth:** 25MB * 60 = **1.5 GB/s**. This 50% reduction prevents bottlenecking and leaves room for high-res inputs.
+    1. **Assumptions & Constraints:**
+       - Frame rate: 60 FPS.
+       - INT8 payload size: 50 MB.
+       - 4-bit packed payload size: 25 MB.
+    2. **Calculations:**
+       - INT8 streaming bandwidth: 50 MB * 60 FPS = 3.0 GB/s.
+       - 4-bit packed bandwidth: 25 MB * 60 FPS = 1.5 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1.5 GB/s bus traffic.** Packing 4-bit weights into INT8 vectors halves the PCIe bandwidth requirement, preventing host memory access from bottlenecking the dataflow pipeline.
 status: published
 provenance: imported
 requires_explanation: true

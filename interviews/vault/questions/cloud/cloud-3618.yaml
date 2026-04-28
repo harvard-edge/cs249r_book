@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Gradient Synchronization Overlap with Computation on H100
-scenario: A DDP training job on 8 H100s has backward pass taking 800ms and gradient AllReduce taking 400ms (sequential). A senior engineer proposes overlapping AllReduce with backward computation using gradient bucketing.
-question: How does gradient bucketing overlap the 400 ms AllReduce with the 800 ms backward pass, and what speedup is possible?
+scenario: 'A DDP training job on 8 GPUs has a backward pass taking 800ms and gradient AllReduce taking 400ms (sequential). A senior engineer proposes overlapping AllReduce with backward computation using gradient bucketing.'
+question: 'How does gradient bucketing overlap the 400 ms AllReduce with the 800 ms backward pass, and what speedup is possible?'
 details:
   realistic_solution: 'Gradient bucketing groups gradients into buckets (e.g., 25MB each). When a bucket fills (computed in backward pass), AllReduce starts immediately on that bucket while backward continues computing remaining layers. Overlap fraction ≈ (N-1)/N where N = number of buckets. With 28GB gradients / 25MB bucket = 1120 buckets, overlap ≈ 99.9%. Theoretical: backward=800ms, AllReduce=400ms, overlapped total ≈ max(800,400)+1 bucket latency ≈ 805ms vs 1200ms sequential. Speedup: 1200/805=1.49×. Real-world achieves 30-40% improvement due to CUDA stream contention.'
   common_mistake: |
@@ -17,14 +17,17 @@ details:
     **The Rationale:** Candidates often forget bucket synchronization overhead, CUDA stream contention, and the fact that the last gradient bucket cannot be overlapped with the backward pass.
     **The Consequence:** Overestimating the performance gains of gradient bucketing in real-world scenarios.
   napkin_math: |
-    1. Sequential step time: 800ms (backward) + 400ms (AllReduce) = 1200ms.
-    2. With overlap, critical path is max(backward, AllReduce) = 800ms.
-    3. Add 1 bucket tail latency: ~5ms.
-    4. Total overlapped time: ~805ms.
-    5. Theoretical speedup: 1200 / 805 = **1.49x**.
-    6. With 30% CUDA stream overhead: effective overlap is 70%.
-    7. Actual step time: 800ms + 400ms * 0.3 = 920ms.
-    8. **Actual speedup: 1200 / 920 = 1.30x.**
+    1. **Assumptions & Constraints:**
+       - Sequential step time: 800ms (backward) + 400ms (AllReduce) = 1200ms.
+       - 1 bucket tail latency: ~5ms.
+       - CUDA stream overhead: 30%.
+    2. **Calculations:**
+       - Overlapped critical path: max(800ms, 400ms) = 800ms.
+       - Total ideal overlapped time: 800ms + 5ms = 805ms.
+       - Effective overlap with 30% overhead: 800ms + (400ms * 0.3) = 920ms.
+       - Actual speedup: 1200 / 920 = 1.30x.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1.30x Speedup** (Overhead prevents theoretical 1.49x speedup; compute-bound).
 status: published
 provenance: imported
 requires_explanation: false

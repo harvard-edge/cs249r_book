@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Evaluating PagedAttention for LLM Serving
-scenario: You are leading the deployment of a Llama-2-70B model on an 8x A100 (80GB) cluster. The current serving engine pre-allocates contiguous KV cache memory for the maximum sequence length (4096 tokens) per request. Because average requests only use 1500 tokens (1000 prompt + 500 generation), actual memory utilization is around 36% due to severe internal and external fragmentation, limiting your maximum batch size to 16 before hitting OOM.
+scenario: You are leading the deployment of a Llama-2-70B model. The current serving engine pre-allocates contiguous KV cache memory for the maximum sequence length (4096 tokens) per request. Because average requests only use 1500 tokens (1000 prompt + 500 generation), actual memory utilization is around 36% due to severe internal and external fragmentation, limiting your maximum batch size to 16 before hitting OOM.
 question: What impact will migrating to 16-token PagedAttention blocks have on memory utilization and maximum batch size?
 details:
   realistic_solution: PagedAttention dynamically allocates non-contiguous memory pages (blocks of 16 tokens) as needed, instead of pre-allocating contiguous memory for the theoretical maximum sequence length. This virtually eliminates external fragmentation and restricts internal fragmentation to the final, partially filled block (at most 15 wasted tokens). This drives memory utilization up from ~36% to >99%, freeing up enough KV cache capacity to safely increase the batch size by a factor of ~2.7x.
@@ -17,29 +17,18 @@ details:
     **The Rationale:** Candidates hear "memory optimization" and assume it alters the precision or mathematical footprint of the tensors.
     **The Consequence:** They fail to identify that it's an OS-level paging solution addressing memory fragmentation, and may incorrectly assume throughput scales infinitely without hitting compute bounds.
   napkin_math: |
-    1. **Contiguous Allocation:** 4096 tokens per request pre-allocated. Actual usage: 1500 tokens (36.6% utilization).
-    2. **PagedAttention Allocation:** With block size=16, ⌈1500 / 16⌉ = 94 blocks allocated. Total allocated memory per request = 94 × 16 = 1504 tokens.
-    3. **New Utilization:** 1500 / 1504 = 99.7%.
-    4. **Capacity Multiplier:** 4096 / 1504 = 2.72x.
-    5. **Conclusion:** **New max batch size = 16 * 2.72 ≈ 43.**
+    1. **Assumptions & Constraints:**
+       - Contiguous Allocation: 4096 tokens pre-allocated per request.
+       - Actual usage: 1500 tokens per request.
+       - PagedAttention block size = 16 tokens.
+    2. **Calculations:**
+       - Contiguous Utilization: 1500 / 4096 = 36.6% utilization.
+       - Paged Allocation: ceil(1500 / 16) = 94 blocks. 94 * 16 = 1504 tokens allocated.
+       - New Utilization: 1500 / 1504 = 99.7%.
+       - Capacity Multiplier: 4096 / 1504 = 2.72x.
+    3. **Conclusion & Interpretation:**
+       - **Result: New max batch size = 16 * 2.72 = ~43. Memory-Fragmentation-Bound**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 14
-chains:
-- id: cloud-chain-294
-  position: 2
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-created_at: '2026-03-24T00:12:45.370716'

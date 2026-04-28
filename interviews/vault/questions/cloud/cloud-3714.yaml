@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: AllReduce Bandwidth Requirement for Ring All-Reduce on 8×H100
-scenario: 8 H100 GPUs are connected via NVLink 4.0 in a DGX H100. During data-parallel training of a 13B model, gradients (52GB in FP32) must be all-reduced after each backward pass.
+scenario: During data-parallel training of a 13B model on an 8x H100 node, gradients (52GB in FP32) must be all-reduced after each backward pass.
 question: How long does ring all-reduce take for 52GB FP32 gradients across 8 H100s on NVLink, and can it overlap with backward compute?
 details:
   realistic_solution: 'Ring all-reduce formula: time = 2 × (N-1)/N × data_size / bandwidth_per_link. N=8 GPUs, data=52GB, NVLink per-link: 450 GB/s / 2 (full duplex) = 225 GB/s per direction. Time = 2 × 7/8 × 52GB / 225 GB/s = 2 × 0.875 × 52/225 = 0.404s = 404ms. Typical backward pass: 13B model, batch=8, seq=2048 at BF16: ~200ms. All-reduce takes 2× longer than backward — communication is the bottleneck. Solution: gradient bucketing + overlap, or use tensor parallelism to reduce gradient volume.'
@@ -17,10 +17,16 @@ details:
     **The Rationale:** The headline spec is 450 GB/s, so candidates plug it in without splitting it for full-duplex directional ring limits.
     **The Consequence:** Underestimating communication time by 2x, incorrectly concluding that communication is fully hidden behind compute.
   napkin_math: |
-    - **Ring All-Reduce Formula**: Time = 2 × (N-1)/N × data_size / bandwidth_per_link.
-    - **Link Bandwidth**: 450 GB/s bidirectional / 2 = 225 GB/s per direction.
-    - **Communication Time**: 2 × (7/8) × 52 GB / 225 GB/s = 1.75 × 0.231s = **~404 ms**.
-    - **Compute Overlap**: A typical 13B backward pass takes ~200ms. Since 404ms > 200ms, communication is the bottleneck.
+    1. **Assumptions & Constraints:**
+       - GPUs (N): 8 H100s.
+       - NVLink bidirectional bandwidth: 450 GB/s.
+       - Data size: 52 GB FP32 gradients.
+       - Typical backward pass compute time: ~200 ms.
+    2. **Calculations:**
+       - Per-direction bandwidth: 450 GB/s / 2 = 225 GB/s.
+       - Ring All-Reduce Time = 2 * (N-1)/N * data_size / bandwidth_per_link.
+       - Time = 2 * (7/8) * 52 GB / 225 GB/s = 1.75 * 0.2311s = 0.404s = 404 ms.
+    3. **Conclusion & Interpretation:** **~404 ms (Communication-Bound, no full overlap).**
 status: published
 provenance: imported
 requires_explanation: false

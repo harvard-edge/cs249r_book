@@ -8,29 +8,25 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: The LLM Canary Trap
-scenario: 'You''re deploying a fine-tuned 70B LLM to replace your production 13B model. You set up a standard
-  canary: route 5% of traffic to the new model, monitor error rate and latency for 30 minutes, then promote.
-  After full rollout, users report the new model occasionally hallucinates wildly long, repetitive outputs.
-  Your canary detected no latency or error spikes. Why do standard infra metrics miss LLM quality regressions,
-  and how could you have used the GPU''s KV-cache memory profile as a hardware-level canary signal?'
-question: "Why do standard infra metrics miss LLM quality regressions, and how could you have used the GPU's KV-cache memory profile as a hardware-level canary signal?"
+scenario: You are deploying a fine-tuned 70B LLM to replace your production 13B model. A 5% canary rollout shows no latency or error spikes. After full rollout, users report the new model hallucinates wildly long, repetitive outputs.
+question: Why do standard infra metrics miss LLM quality regressions, and how could you use the GPU's KV-cache memory profile as a hardware-level canary signal?
 details:
-  realistic_solution: Traditional canary metrics (latency, error rate, throughput) measure *infrastructure
-    health*, not *output quality*. A model that suddenly starts outputting repetitive garbage ("I am an
-    AI, I am an AI...") will still return HTTP 200s and keep the GPU busy. However, LLM quality regressions
-    often manifest as changes in generation length (verbosity or truncation). You can use the GPU's KV-cache
-    memory allocation as a proxy metric for output behavior. If the new model is hallucinating longer
-    responses, the average KV-cache blocks allocated per request will spike. If it's failing to reason
-    and returning short "I don't know" answers, the KV-cache allocation will drop. Monitoring the physical
-    memory footprint provides a real-time, hardware-level signal of behavioral changes before users complain.
-  common_mistake: '"The canary window was too short — extend it to 24 hours." More time helps, but the
-    fundamental problem is that LLM failures are not captured by traditional canary metrics.'
-  napkin_math: 'Baseline model generates 200 tokens/request average. Canary model has a repetition bug
-    and generates 800 tokens/request. Latency might look okay if the batch scheduler just drops throughput
-    to compensate. But KV-cache memory tells the truth: Baseline uses 200 tokens × 1MB/token (for a large
-    batch) = 200MB per request. Canary uses 800MB per request. By monitoring `vllm:gpu_cache_usage_perc`,
-    you would see the canary instances hitting 90% KV-cache saturation 4× faster than the baseline instances,
-    instantly flagging a behavioral shift.'
+  realistic_solution: Traditional canary metrics (latency, error rate, throughput) measure infrastructure health, not output quality. A model that suddenly starts outputting repetitive garbage will still return HTTP 200s and keep the GPU busy. However, LLM quality regressions often manifest as changes in generation length. You can use the GPU's KV-cache memory allocation as a proxy metric for output behavior. If the new model is hallucinating longer responses, the average KV-cache blocks allocated per request will spike. Monitoring the physical memory footprint provides a real-time, hardware-level signal of behavioral changes before users complain.
+  common_mistake: |
+    **The Pitfall:** Relying exclusively on HTTP status codes and API latency for LLM canaries.
+    **The Rationale:** Engineers apply traditional microservice monitoring principles to generative AI.
+    **The Consequence:** Promoting functionally broken models that generate garbage text while maintaining perfect infrastructure health scores.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Baseline model generation: 200 tokens/request.
+       - Canary model generation (bugged): 800 tokens/request.
+       - KV-cache footprint: ~1 MB per token.
+    2. **Calculations:**
+       - Baseline KV usage: 200 tokens * 1 MB = 200 MB per request.
+       - Canary KV usage: 800 tokens * 1 MB = 800 MB per request.
+       - Saturation velocity: Canary instances consume HBM 4x faster per request.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound**. A 4x spike in per-request KV-cache allocation provides a direct, low-latency hardware signal that the model's behavioral length distribution has catastrophically degraded.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,7 +8,7 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Chatbot Timeout Crisis
-scenario: You are an MLE on a Generative AI platform team, responsible for a real-time chatbot service built on a 13B parameter LLM. Your service has a strict P99 Time-To-First-Token (TTFT) SLO of 750ms. You observe that while median TTFT is around 550ms, the P99 latency is hitting 800ms, causing user-facing timeouts. The service currently uses a static batching policy on H100 GPUs, where the server waits to collect a full batch of 32 requests before running inference. Monitoring shows a single forward pass for this full batch takes about 450ms, and GPU utilization is high.
+scenario: You are an MLE on a Generative AI platform team, responsible for a real-time chatbot service built on a 13B parameter LLM. Your service has a strict P99 Time-To-First-Token (TTFT) SLO of 750ms. You observe that while median TTFT is around 550ms, the P99 latency is hitting 800ms, causing user-facing timeouts. The service currently uses a static batching policy, where the server waits to collect a full batch of 32 requests before running inference. Monitoring shows a single forward pass for this full batch takes about 450ms, and GPU utilization is high.
 question: What is the primary cause of the 800ms P99 TTFT with static batching of 32 and 450ms full-batch forward passes?
 details:
   realistic_solution: The root cause is **head-of-line blocking** from the static batching policy. Requests that arrive just after a 450ms batch-processing cycle has begun are forced to wait in a queue for that entire cycle to complete before their own batch can even start forming. This waiting time is the direct cause of the high P99 latency. The correct solution is to replace static batching with **continuous batching** (or dynamic batching). This approach allows the server to iterate on all currently active sequences in a single step, immediately adding new requests to the batch as they arrive. This eliminates the queue, drastically reducing the wait time for all users and bringing the P99 TTFT much closer to the average TTFT.
@@ -17,12 +17,16 @@ details:
     **The Rationale:** Engineers see high latency and instinctively think "the GPU is too slow" or "the model is too big."
     **The Consequence:** They propose expensive hardware upgrades or model changes (like quantization) when the root cause is actually an inefficient scheduling algorithm causing head-of-line blocking.
   napkin_math: |
-    1. **Worst-Case Wait:** With static batching, a request arriving just as a batch starts must wait for the entire 450ms execution.
-    2. **Worst-Case TTFT:** 450ms wait + 450ms its own execution = 900ms worst-case TTFT.
-    3. **Impact:** This explains why P99 is ~800ms while the median is much lower.
-    4. **Conclusion:** **Continuous batching processes iteration-by-iteration**, dropping the wait time to just a single token generation step (~15ms), easily fixing the P99 SLA.
+    1. **Assumptions & Constraints:**
+       - Static batching policy enforces waiting.
+       - Full batch execution takes 450ms.
+    2. **Calculations:**
+       - Worst-case wait: A request arriving as a batch starts waits 450ms.
+       - Worst-case TTFT: 450ms wait + 450ms execution = 900ms worst-case TTFT.
+    3. **Conclusion & Interpretation:**
+       - **Result: Static batching causes up to 900ms worst-case TTFT, breaking the SLA. Scheduling-Bound**
   options:
-  - The H100 GPU is not powerful enough. We should upgrade to B200s to reduce the batch processing time from 450ms.
+  - The GPU is not powerful enough. We should upgrade to reduce the batch processing time from 450ms.
   - The static batching policy is causing head-of-line blocking. We should implement continuous batching to eliminate queuing delay.
   - The 13B model is too large. We should quantize the model to INT8 to decrease the per-batch inference time.
   - The issue is inefficient token generation. We should implement speculative decoding to improve Time Per Output Token (TPOT).
@@ -31,16 +35,3 @@ status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 6
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

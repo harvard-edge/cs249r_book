@@ -8,19 +8,23 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Diagnosing Pipeline Calibration Failures
-scenario: 'You own a 3-stage cloud ads pipeline serving 50k QPS: Candidate Retrieval (ANN) -> CTR Prediction (DLRM on 8x A100s) -> Bid Pricing (XGBoost). After updating the Retrieval model to increase recall from 200 to 500 items, the DLRM''s logloss degraded due to the new candidate distribution. To fix the alerts, a data scientist deployed a Platt scaling layer to the DLRM outputs to correct the calibration. Within 24 hours, overall ad revenue drops by 15%, despite the CTR metrics dashboard showing ''normal'' calibrated values.'
-question: "Why did Platt scaling make CTR calibration look normal while overall ad revenue fell 15% after retrieval recall increased from 200 to 500 items?"
+scenario: 'You own a 3-stage cloud ads pipeline: Candidate Retrieval -> CTR Prediction -> Bid Pricing. After increasing retrieval recall, DLRM logloss degraded. A Platt scaling layer was deployed to the DLRM to correct calibration. Within 24 hours, overall ad revenue drops 15%, despite CTR metrics showing normal calibration.'
+question: 'Why did Platt scaling make CTR calibration look normal while overall ad revenue fell 15% after retrieval recall increased?'
 details:
-  realistic_solution: 'Identify the correction cascade: the Platt scaling patched the CTR mean but squashed the variance of the pCTR distribution. The downstream Bid Model relies on the full logit distribution (including tail behavior) to price items. When the variance is compressed, the pricing model systematically underbids on high-value tail items, directly driving the 15% revenue drop. The correct fix is to rollback the Platt scaling patch and co-train both the DLRM and Bid Model on the updated retrieval distribution.'
+  realistic_solution: 'Platt scaling perfectly patched the CTR mean but fundamentally squashed the variance of the pCTR distribution. The downstream Bid Model strictly relies on the full logit distribution (especially tail behavior) to accurately price items. When variance is compressed, the pricing model systematically underbids on high-value tail items. The correct fix is rollback and co-training both models on the new distribution.'
   common_mistake: |
     **The Pitfall:** Suspecting hardware bottlenecks or generic concept drift.
-    **The Rationale:** Focusing on the upstream retrieval change while ignoring the downstream statistical impact of the calibration fix.
-    **The Consequence:** Missing the variance compression issue entirely, leading to wasted debugging time while revenue continues to drop.
+    **The Rationale:** Candidates narrowly focus on the upstream retrieval change while ignoring the downstream statistical impact of the calibration fix.
+    **The Consequence:** Missing the variance compression entirely, leading to wasted debugging while revenue continues to bleed.
   napkin_math: |
-    1. If old DLRM pCTR avg was 0.05 and the new uncalibrated pCTR is 0.03, the scaling layer shifts it back to ~0.05.
-    2. Bid Model expectation: `Bid = pCTR * Conversion_Rate`.
-    3. If variance is squashed (e.g., stddev dropping from 0.02 to 0.005), tail items lose their high bids.
-    4. **Result:** The pricing model systematically underbids on high-value tail items, directly driving the **15% revenue drop**.
+    1. **Assumptions & Constraints:**
+       - Bid Model: Bid = pCTR * Conversion_Rate.
+       - Platt scaling corrects mean (e.g., 0.03 back to 0.05) but reduces stddev.
+    2. **Calculations:**
+       - Tail items depend on high variance (e.g., stddev 0.02).
+       - Platt scaling compresses stddev to 0.005.
+    3. **Conclusion & Interpretation:**
+       - **Result: The pricing model systematically underbids on high-value tail items, directly driving the 15% revenue drop (Variance-Bound).**
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,4 +45,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-created_at: '2026-03-23T21:31:35.401613'

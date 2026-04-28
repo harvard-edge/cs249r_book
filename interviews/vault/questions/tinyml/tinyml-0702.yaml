@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: SRAM Needed for MobileNet Activations
-scenario: You're deploying MobileNetV2 (image classification, 128x128 input, INT8) on a Cortex-M7 with 512 KB SRAM. The model has 3.4M parameters (3.4 MB flash) and you're using TFLite Micro.
+scenario: You're deploying MobileNetV2 (image classification, 128x128 input, INT8) on an MCU with 512 KB SRAM. The model has 3.4M parameters and you're using TFLite Micro.
 question: How would you estimate the peak SRAM required for the activation tensors and determine if the model fits?
 details:
   realistic_solution: 'Peak SRAM = the largest input+output tensor pair alive simultaneously. For MobileNetV2 at 128x128 INT8, the bottleneck is an expansion layer (16 to 96 channels): input is 64x64x16 (64KB) and output is 64x64x96 (384KB), totaling 448KB. With 512KB SRAM minus 80KB firmware overhead = 432KB available — it doesn''t fit (deficit: 16KB). Fix: use width multiplier 0.75x, reducing peak input+output to 64x64x12 (48KB) + 64x64x72 (288KB) = 336KB. This fits with 96KB headroom at only 2% accuracy loss (69.8% vs 71.8% top-1). Parameters (3.4MB) live in flash, not SRAM. The binding constraint is activation memory, not model size.'
@@ -17,14 +17,23 @@ details:
     **The Rationale:** Candidates see "3.4 MB parameters" and "512 KB SRAM" and immediately declare the model won't fit, forgetting that read-only weights live in Flash.
     **The Consequence:** Highly capable MCUs are rejected for tasks they could easily perform.
   napkin_math: |
-    1. Peak Activation (1.0x MobileNetV2 128x128): Expansion layer 16→96 channels. Input (64x64x16 = 64 KB) + Output (64x64x96 = 384 KB) = 448 KB.
-    2. Available SRAM: 512 KB - 80 KB firmware overhead = 432 KB.
-    3. Check 1.0x: 448 KB > 432 KB (Deficit: 16 KB. Does not fit).
-    4. Optimization (0.75x Width): Peak becomes 64x64x12 (48 KB) + 64x64x72 (288 KB) = 336 KB.
-    5. Check 0.75x: 336 KB < 432 KB. **Fits with 96 KB margin**, at only ~2% accuracy loss.
+    1. **Assumptions & Constraints:**
+       - Total SRAM: 512 KB. Firmware overhead: 80 KB.
+       - 1.0x MobileNetV2 peak layer (16 to 96 channels): Input 64x64x16, Output 64x64x96.
+       - 0.75x MobileNetV2 peak layer: Input 64x64x12, Output 64x64x72.
+    2. **Calculations:**
+       - Available SRAM: 512 KB - 80 KB = 432 KB.
+       - 1.0x Input buffer: 64 × 64 × 16 = 65,536 bytes (64 KB).
+       - 1.0x Output buffer: 64 × 64 × 96 = 393,216 bytes (384 KB).
+       - 1.0x Peak Arena: 64 KB + 384 KB = 448 KB. (448 > 432: Deficit 16 KB).
+       - 0.75x Input buffer: 64 × 64 × 12 = 49,152 bytes (48 KB).
+       - 0.75x Output buffer: 64 × 64 × 72 = 294,912 bytes (288 KB).
+       - 0.75x Peak Arena: 48 KB + 288 KB = 336 KB. (336 < 432: 96 KB margin).
+    3. **Conclusion & Interpretation:**
+       - **Result: 336 KB Peak Arena. Memory-Bound.** Shrinking the width multiplier to 0.75x safely fits the activations into SRAM while the 3.4 MB parameter weights remain in Flash.
   options:
   - The model's 3.4 MB of parameters don't fit in 512 KB SRAM, so the model cannot run on this hardware without significant compression.
-  - Parameters (3.4 MB) live in flash, not SRAM. SRAM holds activations only. Peak activation at 128x128 INT8 MobileNetV2 is 448 KB (expansion layer input 64 KB + output 384 KB). With 80 KB firmware overhead, available SRAM is 432 KB — deficit of 16 KB. Fix: use width multiplier 0.75x, reducing peak to 336 KB (fits with 96 KB headroom) at only 2% accuracy loss (69.8% vs 71.8%).
+  - "Parameters (3.4 MB) live in flash, not SRAM. SRAM holds activations only. Peak activation at 128x128 INT8 MobileNetV2 is 448 KB (expansion layer input 64 KB + output 384 KB). With 80 KB firmware overhead, available SRAM is 432 KB — deficit of 16 KB. Fix: use width multiplier 0.75x, reducing peak to 336 KB (fits with 96 KB headroom) at only 2% accuracy loss (69.8% vs 71.8%)."
   - MobileNetV2 fits easily because INT8 quantization reduces activation memory by 4x compared to FP32, bringing peak SRAM to ~108 KB.
   - The model fits if you use in-place operations for all depthwise convolution layers, which eliminates the need for separate input and output activation buffers.
   correct_index: 1

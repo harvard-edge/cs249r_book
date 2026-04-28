@@ -8,37 +8,26 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: The NFS Checkpoint Corruption
-scenario: You're training a 70B model on 256 GPUs. At step 80,000 a node fails. You restart from the step-79,000
-  checkpoint on NFS. The model loads without errors, but training loss immediately jumps to 11.0 (vs 2.1
-  before the crash) and never recovers. The step-78,000 checkpoint works fine. What happened to the step-79,000
-  checkpoint?
+scenario: 'You are training a 70B model on 256 GPUs. At step 80,000, a node fails. You restart from the step-79,000 checkpoint on NFS. The model loads without errors, but training loss immediately jumps to 11.0 and never recovers. The step-78,000 checkpoint works fine.'
 question: "What happened to the step-79,000 checkpoint?"
 details:
-  realistic_solution: 'NFS has weak consistency guarantees under concurrent writes. During checkpointing,
-    all 256 GPUs (32 nodes × 8 GPUs) write their shards to NFS simultaneously. If two nodes'' writes target
-    overlapping NFS blocks (common with ZeRO-3 where optimizer states are gathered and written by the
-    coordinator), NFS''s close-to-open consistency model means a reader may see a partially written file
-    — some blocks from the new checkpoint, some from the previous one, or some filled with zeros. The
-    step-79,000 checkpoint is a Frankenstein: the first 60% of the optimizer state is from step 79,000,
-    but the last 40% is stale data from step 78,000 (or zeros from an incomplete write). The model loads
-    because the tensor shapes are correct, but the optimizer state is inconsistent — Adam''s momentum
-    and variance estimates are from two different points in training, causing the first update to produce
-    a catastrophically wrong step. Fix: (1) write checkpoints to a temporary path, then atomically rename
-    (`os.rename` is atomic on POSIX); (2) compute and verify SHA-256 checksums of each shard; (3) use
-    a two-phase commit: all ranks write, all ranks verify checksums, then the coordinator writes a `.complete`
-    sentinel file — only checkpoints with the sentinel are valid for restart.'
-  common_mistake: '"The checkpoint file is corrupted on disk — use a different storage backend." This
-    is half right (the checkpoint is corrupted) but misses *why* and *how* to prevent it.'
-  napkin_math: '70B model checkpoint with ZeRO-3: total state = 70B × 16 bytes = **1.12 TB**. 32 nodes
-    writing simultaneously to NFS at ~2 GB/s per node aggregate: write time = $1120 / (32 \times 2) =
-    $ **17.5 seconds**. NFS block size = 1 MB. Total blocks = $1.12 \times 10^{12} / 10^6 = $ **1.12 million
-    blocks**. If the coordinator node crashes at second 14 (80% complete): ~224,000 blocks are missing
-    or stale. The corrupted optimizer state means Adam''s $m_t$ and $v_t$ are mismatched: $m_t$ from step
-    79,000 but $v_t$ from step 78,000 for 40% of parameters. The first update computes $\theta_{t+1} =
-    \theta_t - \text{lr} \times m_t / (\sqrt{v_{t-1000}} + \epsilon)$ — the denominator is wrong by up
-    to 1000 steps of variance accumulation, producing updates that are 2–10× too large or too small. Checksum
-    verification adds <1% overhead: SHA-256 of 1.12 TB at 2 GB/s = **560 seconds** across 32 nodes in
-    parallel = **17.5 s** — doubling checkpoint time but preventing a $500K training run from being wasted.'
+  realistic_solution: 'NFS has weak consistency guarantees under concurrent writes. During checkpointing, all 256 GPUs write their shards to NFS simultaneously. If two nodes'' writes target overlapping NFS blocks, NFS''s close-to-open consistency model means a reader may see a partially written file — some blocks from the new checkpoint, some from the previous one. The step-79,000 checkpoint is a Frankenstein: the first 60% of the optimizer state is from step 79,000, but the rest is stale data from step 78,000. The model loads because tensor shapes are correct, but Adam''s momentum and variance estimates are mismatched, causing catastrophically wrong steps. Fix: (1) write checkpoints to a temporary path, then atomically rename; (2) compute and verify SHA-256 checksums of each shard; (3) use a two-phase commit with a `.complete` sentinel file.'
+  common_mistake: |
+    **The Pitfall:** Dismissing the failure simply as a corrupted disk file and switching to a different backend without addressing the write semantics.
+    **The Rationale:** Engineers assume standard POSIX file writes provide strong multi-writer consistency across distributed nodes, completely missing NFS's close-to-open consistency model vulnerabilities.
+    **The Consequence:** Distributed checkpointing remains fundamentally unsafe; future failures will continue to silently corrupt optimizer states, wasting millions of dollars in compute on ruined training runs.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 70B params. Optimizer: ZeRO-3 (16 bytes/param).
+       - Total Checkpoint Size: 1.12 TB.
+       - NFS Aggregate Write Speed: ~64 GB/s (across 32 nodes).
+    2. **Calculations:**
+       - Total write time = 1,120 GB / 64 GB/s ≈ 17.5 seconds.
+       - If a crash occurs at 14 seconds (80% complete), 20% of the state retains stale step-78,000 data.
+       - Adam optimizer state mismatched: m_t from step 79,000, v_t from step 78,000.
+       - Denominator in parameter update is wrong by 1,000 steps of variance.
+    3. **Conclusion & Interpretation:**
+       - **Result: Silent State Corruption**. The non-atomic write allowed partial state overwrites. Implementing a two-phase commit with SHA-256 verification (which adds only ~17.5s overhead) is mandatory for distributed reliability.
 status: published
 provenance: imported
 requires_explanation: false

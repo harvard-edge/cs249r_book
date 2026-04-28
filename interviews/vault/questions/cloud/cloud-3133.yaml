@@ -14,18 +14,21 @@ details:
   realistic_solution: Each tile of Q is B_r x 128 x 2B, K is B_c x 128 x 2B, V is B_c x 128 x 2B, output O is B_r x 128 x 2B, plus softmax row-max and row-sum vectors (B_r x 4B each). Total SRAM = 256 * (B_r + 2*B_c) + 256*B_r + 8*B_r bytes. With 256KB = 262,144 bytes, typical tile sizes are B_r = B_c = 128, consuming ~128KB for Q+O tiles and ~128KB for K+V tiles, fitting snugly. Exceeding this forces HBM round-trips for partial results, destroying the IO advantage.
   common_mistake: |
     **The Pitfall:** Calculating memory footprint for a single tile at a time, failing to respect the holistic fusion bounds.
-    
     **The Rationale:** Engineers who haven't written custom CUDA kernels fail to recognize that FlashAttention achieves its speed strictly because Q, K, V, the accumulator output, and softmax reduction statistics must all organically co-reside in SRAM simultaneously.
-    
     **The Consequence:** Selecting overly aggressive tile sizes forces the compiler to spill intermediate matrices to extremely slow device HBM, instantly negating the IO-awareness that gives FlashAttention its performance.
   napkin_math: |
-    - **Q Tile**: 128 x 128 x 2B = 32 KB.
-    - **K Tile**: 32 KB.
-    - **V Tile**: 32 KB.
-    - **O Tile**: 32 KB.
-    - **Softmax Stats**: 128 x 8B = 1 KB.
-    - **Total Burden**: 32 + 32 + 32 + 32 + 1 = **~129 KB**.
-    - **Result**: Fits perfectly within the 256KB SM limit, leaving ample headroom for CUDA compiler local scratch space.
+    1. **Assumptions & Constraints:**
+       - 256KB SRAM per SM limit.
+       - FP16 (2 bytes per element), head_dim=128. Tile size 128x128.
+    2. **Calculations:**
+       - Q Tile: 128 x 128 x 2B = 32 KB.
+       - K Tile: 32 KB.
+       - V Tile: 32 KB.
+       - O Tile: 32 KB.
+       - Softmax Stats: 128 x 8B = 1 KB.
+       - Total Burden: 32 + 32 + 32 + 32 + 1 = 129 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Fits perfectly within 256KB SRAM, remaining Compute-Bound rather than Memory-Bound by avoiding HBM spills.**
 status: published
 provenance: imported
 requires_explanation: false

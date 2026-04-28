@@ -8,19 +8,25 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Mitigating Memory Fragmentation in Dynamic LLM Serving
-scenario: You are optimizing a production inference service for a 13B parameter LLM on a single A100 80GB GPU. The service handles highly variable sequence lengths (128 to 2048 tokens). Despite the theoretical peak memory usage for weights and KV cache being around 55GB, the system periodically crashes with 'CUDA out of memory' when a 2048-token request arrives after a burst of 128-token requests. Profiling shows heavy external fragmentation. Team A proposes disabling the caching allocator to manage memory manually via direct `cudaMalloc` calls. Team B proposes padding all requests to 2048 tokens to standardize allocation sizes.
+scenario: You are optimizing a production inference service for a 13B parameter LLM on a single A100 80GB GPU. The service handles highly variable sequence lengths. Despite the theoretical peak memory usage for weights and KV cache being around 55GB, the system periodically crashes with 'CUDA out of memory' when a 2048-token request arrives after a burst of 128-token requests. Profiling shows heavy external fragmentation. Team A proposes disabling the caching allocator to manage memory manually via direct cudaMalloc calls. Team B proposes padding all requests to 2048 tokens to standardize allocation sizes.
 question: How would you evaluate disabling the allocator versus padding to 2048 tokens, and what memory strategy should replace them?
 details:
-  realistic_solution: Reject both proposals. Direct `cudaMalloc` (Team A) adds ~10-50us of CPU-GPU sync latency per allocation, severely bottlenecking the CPU. Padding to 2048 (Team B) causes extreme compute waste. The optimal solution is to tune the caching allocator to reduce block splitting (e.g., `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`) to prevent tiny fragments, and implement PagedAttention to allocate the KV cache in fixed-size, non-contiguous blocks (e.g., 16 tokens per block), structurally eliminating external fragmentation without padding compute.
+  realistic_solution: 'Reject both proposals. Direct cudaMalloc adds ~10-50us of CPU-GPU sync latency per allocation. Padding to 2048 causes extreme compute waste. The optimal solution is to implement PagedAttention to allocate the KV cache in fixed-size, non-contiguous blocks (e.g., 16 tokens per block), structurally eliminating external fragmentation without padding compute.'
   common_mistake: |
-    **The Pitfall:** Accepting Team B's padding strategy or Team A's manual `cudaMalloc` approach.
+    **The Pitfall:** Accepting Team B's padding strategy or Team A's manual cudaMalloc approach.
     **The Rationale:** Candidates fail to calculate the quadratic compute penalty of padding or the severe CPU-GPU synchronization latency introduced by direct memory allocation.
     **The Consequence:** Padding results in massive compute waste, while manual allocation destroys throughput.
   napkin_math: |
-    1. Analyze Team A latency: Direct `cudaMalloc` adds overhead. 1,000 allocations/step * 20 µs = 20 ms sync overhead per step.
-    2. Analyze Team B compute waste: Padding an average 512-token sequence to 2048 increases attention FLOPs by `(2048/512)^2 = 16x`.
-    3. Calculate PagedAttention efficiency: Using 16-token blocks: 16 tokens * 40 heads * 128 head dim * 2 bytes = 163,840 bytes (160 KiB) per block.
-    4. **Conclusion: PagedAttention structurally limits external fragmentation to <4% with zero compute padding overhead.**
+    1. **Assumptions & Constraints:**
+       - Dynamic seq length: 128 to 2048 tokens (average 512).
+       - Team A: cudaMalloc latency = 20 µs. Allocations per step = 1,000.
+       - Team B: Pad all to 2048 tokens.
+       - PagedAttention block size: 16 tokens. Heads = 40, Head dim = 128, Precision = FP16 (2 bytes).
+    2. **Calculations:**
+       - Team A CPU sync overhead: 1,000 * 20 µs = 20 ms per step.
+       - Team B compute waste multiplier: (2048 / 512)^2 = 16x extra attention FLOPs.
+       - PagedAttention block size in memory: 16 tokens * 40 heads * 128 dim * 2 bytes = 163,840 bytes (160 KiB).
+    3. **Conclusion & Interpretation:** **PagedAttention eliminates external fragmentation with zero padding waste, resolving the Memory-Bound bottleneck.**
 status: published
 provenance: imported
 requires_explanation: false

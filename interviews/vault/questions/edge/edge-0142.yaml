@@ -11,20 +11,22 @@ title: The SRAM Tensor Arena Squeeze
 scenario: You are deploying a simple CNN on a microcontroller with 256 KB of SRAM available for the model's tensor arena. The model has two convolutional layers. The input tensor is `[1, 128, 128, 3]`. The output of the first layer is `[1, 64, 64, 16]`. The output of the second layer is `[1, 32, 32, 32]`. All tensors use FP16 precision. To minimize memory, the runtime will reuse memory buffers.
 question: What is the peak tensor arena memory usage with buffer reuse, and will it fit in 256 KB of SRAM?
 details:
-  realistic_solution: The correct approach is to calculate the memory required for the input and output of *each* operation, and the peak is the maximum of those sums. The runtime needs to hold the input to a layer and the output of that layer in memory at the same time. The peak is therefore the largest sum of `input_tensor_size + output_tensor_size` across all layers.
+  realistic_solution: Calculate the sum of `input_tensor_size + output_tensor_size` for each layer individually, because both must co-exist in SRAM during execution. The global maximum of these sums is the peak arena required.
   common_mistake: |
     **The Pitfall:** Summing all activation tensors or only accounting for the single largest tensor.
     **The Rationale:** Candidates forget that during an operation, both the input and output tensors must exist in memory simultaneously, or they incorrectly assume memory cannot be freed between layers.
     **The Consequence:** Drastically overestimating or underestimating memory requirements, leading to OOM crashes or wasted hardware capacity.
   napkin_math: |
-    - **Tensor sizes (FP16 = 2 bytes):**
-      - Input = 128*128*3*2 = 98,304 bytes (~96KB).
-      - Out1 = 64*64*16*2 = 131,072 bytes (128KB).
-      - Out2 = 32*32*32*2 = 65,536 bytes (64KB).
-    - **Peaks per layer:**
-      - Layer 1 = Input + Out1 = 98,304 + 131,072 = 229,376 bytes.
-      - Layer 2 = Out1 + Out2 = 131,072 + 65,536 = 196,608 bytes.
-    - **Max Peak:** 229,376 bytes (~224KB). **This fits within the 256KB available.**
+    1. **Assumptions & Constraints:**
+       - FP16 format = 2 bytes/element
+       - Tensor 1 (Input): 128*128*3*2 = 98,304 bytes (~96KB)
+       - Tensor 2 (Out1): 64*64*16*2 = 131,072 bytes (128KB)
+       - Tensor 3 (Out2): 32*32*32*2 = 65,536 bytes (64KB)
+    2. **Calculations:**
+       - Layer 1 Peak = Input + Out1 = 98,304 + 131,072 = 229,376 bytes
+       - Layer 2 Peak = Out1 + Out2 = 131,072 + 65,536 = 196,608 bytes
+    3. **Conclusion & Interpretation:**
+       - **Result: 224KB Max Peak.** Fits within the 256KB SRAM budget safely.
   options:
   - 288 KB, because you sum all the tensors (96+128+64). It will not fit.
   - 128 KB, because that is the size of the largest tensor. It will fit.

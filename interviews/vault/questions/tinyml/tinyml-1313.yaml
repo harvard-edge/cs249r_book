@@ -8,23 +8,24 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: Roofline Analysis for TinyML on ESP32-S3
-scenario: >
-  You are deploying a tinyML model to an ESP32-S3 microcontroller. The device features a 240 MHz dual-core processor, 512 KB of fast SRAM, and 8 MB of slower PSRAM. You observe that your model's inference time is longer than expected.
-question: >
-  How should roofline analysis account for ESP32-S3 SRAM, PSRAM, and accelerator utilization when diagnosing slow TinyML inference?
+scenario: You are deploying a tinyML model to an ESP32-S3 microcontroller featuring a 240 MHz dual-core processor, 512 KB of fast SRAM, and 8 MB of slower PSRAM. You observe that your model's inference time is longer than expected.
+question: How should roofline analysis account for ESP32-S3 SRAM, PSRAM, and accelerator utilization when diagnosing slow TinyML inference?
 details:
-  realistic_solution: >
-    To diagnose the bottleneck, first profile the model to measure its total floating-point/integer operations (e.g., MACs) and the total data transferred between memory and compute units. Calculate the operational intensity (Ops/Byte). Construct a simplified Roofline plot for the ESP32-S3 by establishing the peak compute performance (based on the 240 MHz dual-core CPU and estimated IPC/MACs per cycle) and the peak memory bandwidths for both SRAM and PSRAM. Plot the model's operational intensity on this graph. If the model's point hits the compute ceiling, it's compute-bound; if it hits a memory bandwidth ceiling (either SRAM or PSRAM), it's memory-bound. For an on-chip accelerator, a similar approach is taken, but the Roofline would be adapted to its specific peak compute and dedicated memory interface bandwidth. Optimization would involve strategic data placement (e.g., critical layers in SRAM, larger weights in PSRAM) and optimizing memory access patterns.
+  realistic_solution: To rigorously diagnose the execution bottleneck, map the model's operational intensity (Ops/Byte) against a dual-ceiling Roofline plot representing the discrete bandwidths of SRAM and PSRAM. If the model relies heavily on off-chip PSRAM for weight streaming, it will hit the lower PSRAM bandwidth ceiling and become entirely memory-bound. Optimization demands strategic placement, pulling critical, frequently-accessed layers directly into internal SRAM.
   common_mistake: |
-    **The Pitfall:** Failing to account for the distinct performance characteristics and bandwidths of different memory tiers.
-    **The Rationale:** Candidates treat all memory as having a single flat bandwidth.
-    **The Consequence:** They miscalculate the memory-bound performance ceilings, leading to incorrect bottleneck diagnoses.
+    **The Pitfall:** Failing to stratify the distinct bandwidth performance ceilings of different memory tiers in edge SoCs.
+    **The Rationale:** Candidates treat all advertised RAM as having a single flat throughput profile, ignoring external bus limits.
+    **The Consequence:** They incorrectly classify the model as compute-bound and pursue useless quantization tactics instead of optimizing data locality.
   napkin_math: |
-    - **Peak Compute:** 2 cores × 240 MHz × 2 MACs/cycle = 960 MMACs/s.
-    - **Model Specs:** 50 MMACs inference, requiring 2 MB data transfer. Operational Intensity = 50M / 2M = 25 MACs/Byte.
-    - **SRAM Case:** 25 MACs/Byte × 100 MB/s = 2,500 MMACs/s. (2500 > 960, so **compute-bound**).
-    - **PSRAM Case:** 25 MACs/Byte × 10 MB/s = 250 MMACs/s. (250 < 960, so **memory-bound**).
-    - **Conclusion:** If the model relies heavily on PSRAM, it hits the memory bandwidth ceiling and becomes memory-bound.
+    1. **Assumptions & Constraints:**
+       - Compute: Dual-core 240 MHz * 2 MACs/cycle = 960 MMACs/s.
+       - Model Specs: 50 MMACs, 2 MB transfer (AI = 25 MACs/Byte).
+       - SRAM Bandwidth: 100 MB/s; PSRAM Bandwidth: 10 MB/s.
+    2. **Calculations:**
+       - SRAM Roof: 25 MACs/Byte * 100 MB/s = 2,500 MMACs/s (exceeds 960 peak).
+       - PSRAM Roof: 25 MACs/Byte * 10 MB/s = 250 MMACs/s (bottlenecks below 960 peak).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound in PSRAM**. The slow 10 MB/s PSRAM bus throttles throughput to 250 MMACs/s, starving the 960 MMACs/s capability of the core.
 status: published
 provenance: imported
 requires_explanation: false

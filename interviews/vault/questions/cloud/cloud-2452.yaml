@@ -8,21 +8,25 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Prefill and Decode Cluster Disaggregation
-scenario: 'Your high-traffic chatbot service uses Llama-3-70B. Average input is 2000 tokens; average output is 50 tokens. Prefill takes 400ms, which starves continuous batching decode requests, causing TPOT spikes up to 100ms. You propose disaggregating the architecture into dedicated Prefill and Decode GPU nodes. The nodes are connected via a 100 Gbps RoCE network.'
-question: 'Should you disaggregate prefill and decode over 100Gbps RoCE, and what latency tradeoff must you evaluate?'
+scenario: Your high-traffic chatbot service uses Llama-3-70B. Average input is 2000 tokens; average output is 50 tokens. Prefill takes 400ms, which starves continuous batching decode requests, causing TPOT spikes up to 100ms. You propose disaggregating the architecture into dedicated Prefill and Decode GPU nodes connected via a 100 Gbps RoCE network.
+question: Should you disaggregate prefill and decode over 100Gbps RoCE, and what latency tradeoff must you evaluate?
 details:
-  realistic_solution: 'Disaggregation solves the compute-bound (prefill) vs. memory-bandwidth-bound (decode) interference, eliminating decode TPOT spikes. However, the strict tradeoff is the network transfer latency of the KV cache from the prefill node to the decode node. You must evaluate if the added TTFT is acceptable to the user in exchange for stable, low-variance TPOT.'
+  realistic_solution: Disaggregation solves the compute-bound (prefill) vs. memory-bandwidth-bound (decode) interference, completely eliminating decode TPOT spikes. However, the strict architectural tradeoff is the network transfer latency of the KV cache from the prefill node to the decode node. You must calculate if the added Time To First Token (TTFT) overhead is acceptable to the user in exchange for stable, low-variance TPOT.
   common_mistake: |
-    **The Pitfall:** Assuming disaggregation always improves latency without calculating KV cache IO.
-    **The Rationale:** Candidates focus entirely on the compute isolation benefits without quantifying the network IO tax.
-    **The Consequence:** Implementing disaggregation on slow networks where the KV cache transfer overhead drastically degrades Time To First Token (TTFT).
+    **The Pitfall:** Assuming disaggregation always improves latency without calculating KV cache network IO.
+    **The Rationale:** Focusing entirely on compute isolation benefits while neglecting the data movement costs.
+    **The Consequence:** Implementing disaggregation on slow networks where KV cache transfer overhead drastically degrades Time To First Token (TTFT) and defeats the purpose of the architecture.
   napkin_math: |
-    1. **Model Specs (Llama-3-70B):** 80 layers, 8 KV heads, 128 dim, FP16 (2 bytes).
-    2. **KV Cache per Token:** 2 bytes × 80 × 8 × 128 × 2 (K+V) = 327,680 bytes = ~320 KB/token.
-    3. **Total KV Cache (2000 tokens):** 2000 × 327,680 = 655,360,000 bytes = ~655 MB.
-    4. **Network Bandwidth:** 100 Gbps = 12.5 GB/s.
-    5. **Transfer Time:** 655 MB / 12.5 GB/s = 0.0524 s = 52.4 ms.
-    6. **Conclusion:** **TTFT increases by ~52ms, but TPOT stabilizes at the baseline (e.g., 30ms) instead of spiking to 100ms.**
+    1. **Assumptions & Constraints:**
+       - Model: Llama-3-70B (80 layers, 8 KV heads, 128 dim, FP16).
+       - Network: 100 Gbps RoCE (12.5 GB/s).
+       - Context Length: 2000 tokens.
+    2. **Calculations:**
+       - KV Cache per Token: 2 bytes * 80 * 8 * 128 * 2 (K+V) = ~320 KB/token.
+       - Total KV Cache: 2000 * 320 KB = ~655 MB.
+       - Transfer Time: 655 MB / 12.5 GB/s = 52.4 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: TTFT increases by ~52ms.** Disaggregation prevents 100ms TPOT spikes, but the strict tradeoff is an unavoidable 52ms network transfer latency added directly to TTFT.
 status: published
 provenance: imported
 requires_explanation: true

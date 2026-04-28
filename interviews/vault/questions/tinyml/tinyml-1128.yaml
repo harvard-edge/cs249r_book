@@ -8,22 +8,27 @@ competency_area: precision
 bloom_level: evaluate
 phase: inference
 title: Evaluating 4-bit vs INT8 on ESP32-S3
-scenario: >
-  You are deploying a 3 million parameter anomaly detection model on an ESP32-S3 for industrial vibration monitoring. The ESP32-S3 features a 240 MHz dual-core Xtensa processor, 512 KB of internal SRAM, 8 MB of PSRAM, and vector extensions specifically optimized for INT8 operations. You must choose between standard INT8 quantization or an extreme 4-bit weight-only quantization (like AWQ) to reduce the memory footprint in PSRAM.
-question: >
-  How would you evaluate INT8 versus 4-bit weight-only quantization for latency and power, and which approach is superior for this specific architecture?
+scenario: You are deploying a 3 million parameter anomaly detection model on an ESP32-S3 for industrial vibration monitoring. You must choose between standard INT8 quantization or an extreme 4-bit weight-only quantization to reduce the memory footprint in PSRAM.
+question: How would you evaluate INT8 versus 4-bit weight-only quantization for latency and power, and which approach is superior for this specific architecture?
 details:
-  realistic_solution: >
-    The best approach is to evaluate if the workload is memory-bandwidth bound or compute bound. Because PSRAM access is slow, 4-bit weights drastically reduce fetch time. However, to utilize the ESP32-S3's INT8 vector extensions, the 4-bit weights must be unpacked on the fly. The optimal system design pipelines the DMA fetch from PSRAM with an optimized bit-shifting unpacking routine on one core, while the other core performs the INT8 MAC operations, yielding a net latency improvement over standard INT8.
+  realistic_solution: Evaluate whether the workload is memory-bandwidth bound or compute-bound. Because PSRAM access is slow, 4-bit weights drastically reduce fetch time. However, to utilize the ESP32-S3's INT8 vector extensions, the 4-bit weights must be unpacked on-the-fly. The optimal system pipelines the DMA fetch from PSRAM with an optimized bit-shifting unpacking routine on one core, leaving the other core to execute the INT8 MAC operations, yielding a net latency win.
   common_mistake: |
-    **The Pitfall:** Blindly choosing 4-bit quantization assuming a smaller memory footprint automatically translates to lower latency.
-    **The Rationale:** Candidates fail to account for the ESP32-S3 lacking native 4-bit MAC instructions, ignoring the severe CPU cycle overhead required to unpack 4-bit weights into 8-bit registers.
-    **The Consequence:** The unpacking compute overhead exceeds the memory fetch savings, resulting in slower inference overall unless pipelined properly.
+    **The Pitfall:** Blindly choosing 4-bit quantization assuming a smaller memory footprint automatically equals lower latency.
+    **The Rationale:** Candidates fail to realize the ESP32-S3 lacks native 4-bit MAC instructions, ignoring the severe CPU cycle overhead to unpack 4-bit values to 8-bit registers.
+    **The Consequence:** The software unpacking overhead exceeds the memory fetch savings, resulting in slower inference unless explicitly pipelined.
   napkin_math: |
-    - **Memory Fetches:** INT8 footprint = 3MB. 4-bit footprint = 1.5MB. At ~40 MB/s PSRAM bandwidth, INT8 fetch takes 75ms, 4-bit fetch takes 37.5ms (saves 37.5ms).
-    - **Unpacking Overhead:** Unpacking 1.5M bytes (3M 4-bit weights) takes roughly 2 operations (shift/mask) per weight.
-    - **Compute Cost:** 3M weights × 2 cycles = 6M cycles. At 240 MHz, unpacking takes 6M / 240M = 25ms.
-    - **Conclusion:** Net latency delta: 37.5ms saved in IO - 25ms spent in compute = **12.5ms overall speedup** using 4-bit.
+    1. **Assumptions & Constraints:**
+       - Parameters: 3M. Target: ESP32-S3 @ 240 MHz. PSRAM Bandwidth: ~40 MB/s.
+       - INT8 footprint = 3 MB. 4-bit footprint = 1.5 MB.
+       - Unpacking cost: 2 cycles per weight.
+    2. **Calculations:**
+       - INT8 Fetch: 3 MB / 40 MB/s = 75 ms.
+       - 4-bit Fetch: 1.5 MB / 40 MB/s = 37.5 ms (Saves 37.5 ms).
+       - 4-bit Compute Penalty: 3M weights * 2 cycles = 6M cycles.
+       - Unpack Latency: 6M / 240 MHz = 25 ms.
+       - Net Delta: 37.5 ms (saved IO) - 25 ms (spent compute) = 12.5 ms speedup.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-IO Optimization**. The 12.5ms net speedup confirms 4-bit weight-only is superior because the PSRAM bottleneck dominates the compute unpacking cost.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,18 +11,23 @@ title: Communication Overlap in Context-Parallel Long-Sequence Training
 scenario: You train a model with 128K context length using context parallelism (splitting the sequence across 8 GPUs). Each GPU holds 16K tokens. During attention, each GPU needs KV from all other GPUs. The KV exchange via AllGather takes 25ms per layer, while local attention compute takes 15ms. Communication dominates.
 question: How would you overlap KV exchange with attention compute for 128K-context training using context parallelism across 8 GPUs?
 details:
-  realistic_solution: Use a ring-based P2P pattern. As soon as GPU i receives KV from GPU j, it computes the attention between its local queries and GPU j's keys/values, overlapping transfer with computation.
+  realistic_solution: 'Use a ring-based P2P pattern. As soon as GPU i receives KV from GPU j, it computes the attention between its local queries and GPU j''s keys/values, overlapping transfer with computation.'
   common_mistake: |
     **The Pitfall:** Treating context parallelism KV exchange as a monolithic AllGather.
     **The Rationale:** Engineers assume all GPUs must simultaneously exchange data before any compute can begin, ignoring the causal nature of attention.
     **The Consequence:** Severe communication bottlenecks that stall compute and drastically increase step time.
   napkin_math: |
-    1. **Calculate Ring Steps:** 7 ring steps × max(transfer_step, compute_step).
-    2. **Calculate Step Times:** Transfer per step = 25ms / 7 = 3.6ms. Compute per step = 2ms.
-    3. **Calculate Overlap Time:** max(3.6, 2) × 7 = 25.2ms.
-    4. **Calculate Savings:** Without overlap: 25 + 15 = 40ms. Savings = 40 - 25.2 = 14.8ms per layer.
-    5. **Calculate Total Speedup:** Over 96 layers, saves 1420ms. At a 5-second step time, this is a 28% speedup.
-    **Final Result: Ring attention overlap reduces layer time from 40ms to 25.2ms, yielding a 28% overall speedup.**
+    1. **Assumptions & Constraints:**
+       - 8 GPUs, 7 ring transfer steps.
+       - Total AllGather KV exchange: 25 ms (3.6 ms/step).
+       - Total attention compute: 15 ms (2.1 ms/step).
+    2. **Calculations:**
+       - Without overlap: 25 ms + 15 ms = 40 ms per layer.
+       - With overlap: 7 steps * max(3.6 ms, 2.1 ms) = 7 * 3.6 ms = 25.2 ms per layer.
+       - Time saved per layer: 40 ms - 25.2 ms = 14.8 ms.
+       - Over 96 layers: 96 * 14.8 ms = ~1.42 seconds saved.
+    3. **Conclusion & Interpretation:**
+       **Result: 28% Speedup (Network-Bound Mitigated).** Implementing ring-based asynchronous P2P transfer overlaps compute and communication, cutting layer time by nearly half.
 status: published
 provenance: imported
 requires_explanation: true

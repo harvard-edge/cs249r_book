@@ -8,18 +8,25 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Register Pressure on Jetson Orin Ampere SMs
-scenario: Your custom CUDA kernel on Jetson Orin (Ampere architecture, 16 SMs, 65536 registers per SM) uses 96 registers per thread with 256 threads per block.
+scenario: Your custom CUDA kernel on Jetson Orin uses 96 registers per thread with 256 threads per block.
 question: Why might reducing register usage to 64 registers per thread (causing register spilling) decrease performance despite increasing occupancy?
 details:
-  realistic_solution: Register spilling moves data to local memory (which is actually global memory backed by L1 cache), adding significant latency per spilled access. The occupancy gain from fitting more blocks per SM rarely compensates for the massive spill overhead.
+  realistic_solution: Register spilling moves data to local memory (which is actually global VRAM backed by L1 cache), adding significant latency per spilled access. The occupancy gain from fitting more blocks per SM rarely compensates for the massive spill overhead. Nsight Compute profiling would show severe local memory dependency stalls.
   common_mistake: |
     **The Pitfall:** Always reducing register usage to blindly increase occupancy.
     **The Rationale:** Candidates assume higher occupancy strictly equals better performance, ignoring the severe latency penalty of spilling registers to local/global memory.
     **The Consequence:** Severely degraded kernel performance due to memory access latency far exceeding the latency-hiding benefits of higher occupancy.
   napkin_math: |
-    - **Current Occupancy:** 96 regs/thread * 256 threads/block = 24,576 regs/block. 65536 / 24576 = 2 blocks/SM (512 threads/SM).
-    - **Reduced Occupancy:** 64 regs/thread * 256 threads/block = 16,384 regs/block. 65536 / 16384 = 4 blocks/SM (1024 threads/SM).
-    - **Performance Impact:** Occupancy doubles, but local memory access latency is **20-100x higher** than register access, completely destroying throughput.
+    1. **Assumptions & Constraints:**
+       - Architecture: Ampere (65,536 registers per SM)
+       - Current: 96 regs/thread * 256 threads/block = 24,576 regs/block
+       - Target: 64 regs/thread * 256 threads/block = 16,384 regs/block
+    2. **Calculations:**
+       - Current Occupancy: floor(65536 / 24576) = 2 blocks/SM (512 threads/SM)
+       - Target Occupancy: floor(65536 / 16384) = 4 blocks/SM (1024 threads/SM)
+       - Access Latency Delta: Local memory is 20-100x slower than registers
+    3. **Conclusion & Interpretation:**
+       - **Result: Performance Degrades.** The latency penalty of register spills to VRAM destroys any theoretical gains from doubled occupancy.
 status: published
 provenance: imported
 requires_explanation: false

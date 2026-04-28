@@ -11,16 +11,20 @@ title: Attention GPU Utilization Drop at Long Sequences
 scenario: Your LLM serving system shows 55% GPU compute utilization during prefill for short prompts (256 tokens) but drops to 25% for long prompts (16K tokens), even though long prompts have MORE total FLOPs. The batch size is the same in both cases.
 question: Why does prefill GPU utilization drop from 55% on 256-token prompts to 25% on 16K-token prompts despite more FLOPs?
 details:
-  realistic_solution: 'At short sequences, the FFN layers (large GEMMs) dominate the FLOP mix, and these are compute-bound with high utilization. At 16K tokens, the quadratic attention score matrix ($S^2$) grows quadratically ($16K^2 / 256^2 = 4096\times$) while FFN only grows linearly. The attention computation must materialize and read back a massive score matrix from HBM, becoming memory-bandwidth-bound. The overall workload shifts from compute-dominated (high utilization) to bandwidth-dominated (low utilization). Solution: use Flash Attention to keep attention tiled in SRAM, or disaggregate prefill to specialized hardware.'
+  realistic_solution: 'At short sequences, the FFN layers (large GEMMs) dominate the FLOP mix, and these are compute-bound with high utilization. At 16K tokens, the quadratic attention score matrix grows quadratically ($16K^2 / 256^2 = 4096\times$) while FFN only grows linearly. The attention computation must materialize and read back a massive score matrix from HBM, becoming memory-bandwidth-bound. The overall workload shifts from compute-dominated (high utilization) to bandwidth-dominated (low utilization). Solution: use Flash Attention to keep attention tiled in SRAM, or disaggregate prefill to specialized hardware.'
   common_mistake: |
     **The Pitfall:** Thinking that more FLOPs should always linearly correlate with higher compute utilization.
     **The Rationale:** Candidates ignore that attention grows quadratically while FFN grows linearly, shifting the system bottleneck from compute-bound (FFN dominating) to memory-bound (Attention dominating) at long contexts.
     **The Consequence:** Failing to diagnose memory-bound workloads, or trying to tune compute kernels when I/O tiling (like FlashAttention) is required.
   napkin_math: |
-    *   **256 Tokens (Attention Matrix):** 256^2 * 32 heads * 2 bytes = 4.19 MB. Fits easily in SRAM.
-    *   **16K Tokens (Attention Matrix):** 16384^2 * 32 heads * 2 bytes = 17.18 GB.
-    *   **Memory Growth:** Quadratic (16K^2 / 256^2 = 4,096x growth).
-    *   **Final Result:** **The massive 17.2 GB attention matrix spills to HBM, bottlenecking the GPU on 2.0 TB/s memory bandwidth instead of compute.**
+    1. **Assumptions & Constraints:**
+       * 256 Tokens (Attention Matrix): 256^2 * 32 heads * 2 bytes = 4.19 MB (fits in SRAM).
+       * 16K Tokens (Attention Matrix): 16384^2 * 32 heads * 2 bytes.
+    2. **Calculations:**
+       * 16K Tokens Matrix Size: 17,179,869,184 bytes = 17.18 GB.
+       * Memory Growth: Quadratic (16K^2 / 256^2 = 4,096x growth).
+    3. **Conclusion & Interpretation:**
+       * **Result: Memory-Bandwidth Bound.** The massive 17.2 GB attention matrix spills to HBM, bottlenecking the GPU on memory bandwidth instead of compute.
 status: published
 provenance: imported
 requires_explanation: false

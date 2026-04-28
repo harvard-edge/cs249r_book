@@ -8,18 +8,18 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The CMSIS-NN Alignment Fault
-scenario: You define a global `int8_t tensor_arena[20000]` for your TFLite Micro model. You are using the highly optimized ARM CMSIS-NN library. The model compiles, but the moment you call `invoke()`, the microcontroller instantly crashes with a Hard Fault (Unaligned Memory Access). The array is large enough.
+scenario: You define a global `int8_t tensor_arena[20000]` for a TFLite Micro model using the ARM CMSIS-NN library. The model compiles, but calling `invoke()` instantly crashes the MCU with a Hard Fault (Unaligned Memory Access), despite having enough memory.
 question: Why does an unaligned `int8_t tensor_arena[20000]` crash CMSIS-NN with a Hard Fault?
 details:
   realistic_solution: 'CMSIS-NN''s optimized kernels use ARM SIMD instructions (LDR, LDRD) that require 4-byte or 8-byte aligned addresses. An unaligned int8_t array may start at any address. When CMSIS-NN tries to load 4 bytes at once from an unaligned address, the Cortex-M4 triggers a UsageFault (hard fault). Fix: declare the arena with alignment: __attribute__((aligned(16))) int8_t tensor_arena[20000]; or use alignas(16) in C11/C++11. The 16-byte alignment ensures all SIMD loads within the arena are naturally aligned. This is a compile-time fix — zero runtime cost, zero memory overhead.'
   common_mistake: |
-    **The Pitfall:** Assuming the model weights are too large.
-    **The Rationale:** Candidates confuse hardware execution faults with memory allocation errors.
-    **The Consequence:** They spend time reducing model size instead of fixing the trivial memory alignment bug.
+    **The Pitfall:** Assuming the neural network model weights are too large and overflowing the stack/heap.
+    **The Rationale:** Candidates confuse hardware execution pipeline faults with simple memory capacity exhaustion errors.
+    **The Consequence:** They waste days unnecessarily quantizing or pruning the model instead of applying a trivial 1-line C++ memory alignment compiler directive.
   napkin_math: |
-    - Identify SIMD instruction requirement: ARM SIMD instructions (LDR, LDRD) require 4-byte or 8-byte aligned addresses.
-    - Analyze unaligned access: If an array starts at `0x20000001`, loading 4 bytes spans across two physical 32-bit memory boundaries.
-    - **The M-class core refuses to execute this across boundaries in a single cycle, resulting in a UsageFault.**
+    1. **Assumptions & Constraints:** Standard C/C++ `int8_t` array has 1-byte natural alignment. ARM CMSIS-NN utilizes SIMD instructions (LDRD) requiring 4-byte or 8-byte aligned addresses.
+    2. **Calculations:** If `tensor_arena` is placed by the linker at an arbitrary address like `0x20000001`, a 32-bit or 64-bit SIMD load from that address spans across physical 32-bit SRAM boundaries.
+    3. **Conclusion & Interpretation:** **Result: UsageFault via Unaligned Access.** The ARM Cortex-M hardware refuses to execute SIMD loads across misaligned boundaries, triggering an instant fault. The fix requires explicitly declaring `alignas(16) int8_t tensor_arena[20000]`.
 status: published
 provenance: imported
 requires_explanation: false
@@ -31,9 +31,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly set to `None` for
-  a question that clearly tests Memory Alignment, Low-Level Programming, and CMSIS-NN.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

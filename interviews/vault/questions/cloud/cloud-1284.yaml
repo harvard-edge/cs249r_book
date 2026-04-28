@@ -11,17 +11,22 @@ title: Calculating HBM Traffic in Flash Attention
 scenario: You are optimizing a Transformer model for an Nvidia A100 GPU (2.0 TB/s HBM bandwidth, 192KB SRAM per SM). The model uses a sequence length of N = 8192, a head dimension of d = 128, and FP16 precision.
 question: How much HBM traffic per attention head is saved by FlashAttention for N=8192, d=128 FP16 attention?
 details:
-  realistic_solution: Standard attention materializes the S (QK^T) and P (softmax(S)) matrices to HBM. Each N x N matrix in FP16 is ~134MB for N=8192. Standard PyTorch attention performs 4 HBM transfers of this matrix (write S, read S for softmax, write P, read P for V multiply), totaling 536MB per head per layer. Flash Attention keeps S and P entirely in SRAM using tiled computation, saving exactly 536MB of HBM traffic per head — a purely IO-driven speedup with identical mathematical results.
+  realistic_solution: Standard attention materializes the S (QK^T) and P (softmax(S)) matrices to HBM. Each N x N matrix in FP16 is ~134MB for N=8192. Standard PyTorch attention performs 4 HBM transfers of this matrix (write S, read S for softmax, write P, read P for V multiply), totaling 536MB per head per layer. FlashAttention-2 keeps S and P entirely in SRAM using tiled computation and hardware-accelerated memory access, saving exactly 536MB of HBM traffic per head — a purely IO-driven speedup with identical mathematical results.
   common_mistake: |
     **The Pitfall:** Assuming the speedup of Flash Attention comes from reducing FLOPs.
     **The Rationale:** Candidates think optimization always means less compute, ignoring memory bandwidth bottlenecks.
     **The Consequence:** They fail to realize it slightly increases FLOPs (due to recomputation) but is an exact IO-aware algorithm that eliminates O(N^2) intermediate HBM transfers.
   napkin_math: |
-    - Matrix size: N x N = 8192 x 8192 = 67.1M elements.
-    - At FP16 (2 bytes/element), one N x N matrix is ~134.2 MB.
-    - Standard PyTorch attention writes S to HBM (134 MB), reads S to compute softmax (134 MB), writes P to HBM (134 MB), and reads P to multiply with V (134 MB).
-    - Total intermediate HBM traffic = 4 x 134.2 MB = **536.8 MB** per head.
-    - Flash Attention keeps S and P in SRAM, saving exactly 536.8 MB of HBM traffic per head per layer.
+    1. **Assumptions & Constraints:**
+       - Sequence length (N): 8192.
+       - Precision: FP16 (2 bytes).
+       - Standard attention materializes S and P matrices to HBM.
+    2. **Calculations:**
+       - Matrix Size (Elements): 8192 * 8192 = 67,108,864.
+       - Matrix Size (Bytes): 67,108,864 * 2 = 134,217,728 bytes = ~134.2 MB.
+       - HBM Operations: Write S, Read S, Write P, Read P (4 total ops).
+       - Total HBM Traffic Saved: 4 * 134.2 MB = 536.8 MB per head.
+    3. **Conclusion & Interpretation:** **~536.8 MB saved per head (Memory Bandwidth-Bound).**
 status: published
 provenance: imported
 requires_explanation: false

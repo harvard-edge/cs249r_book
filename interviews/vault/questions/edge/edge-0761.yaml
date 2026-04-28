@@ -8,20 +8,18 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: The Edge Fleet Dashboard Overload
-scenario: You're building a monitoring dashboard for 20,000 edge AI cameras (mix of Jetson Orin NX, Hailo-8 on RPi, and Ambarella CV25 devices). Your first prototype streams all inference metrics to Grafana via Prometheus. Within a week, your monitoring backend is consuming more cloud compute than the edge fleet itself.
+scenario: A monitoring dashboard for 20,000 edge AI cameras streams 50 metric series per device to Prometheus, overwhelming the backend.
 question: How do you redesign the monitoring architecture?
 details:
-  realistic_solution: The problem is a **cardinality explosion**. Each device emits ~50 metric series (latency histograms, confidence distributions, per-class counts, thermal readings, memory usage). 20,000 devices × 50 series × 1 sample/15s = 66,667 samples/second into Prometheus. Prometheus is designed for ~100K active series, but with histogram buckets you're at ~500K series — it's drowning.
+  realistic_solution: The problem is a cardinality explosion. The solution is edge-level pre-aggregation. Each device should compute 5-minute window aggregates (p50, p99, mean) and only upload the summarized metrics.
   common_mistake: |
     **The Pitfall:** Increasing the scrape interval from 15s to 60s to reduce load.
     **The Rationale:** Engineers often treat symptoms (high data volume) rather than the root cause (cardinality explosion and pulling raw metrics instead of aggregated data).
-    **The Consequence:** This only reduces volume by 4x but doesn't solve the fundamental architectural flaw of pulling per-inference metrics from 20,000 devices, which will still overwhelm Prometheus.
+    **The Consequence:** This only reduces volume slightly but doesn't solve the fundamental architectural flaw, which will still overwhelm Prometheus.
   napkin_math: |
-    1. **Naive Data Volume:** 20,000 devices * 50 metrics * 4 samples/min = 4,000,000 samples/min = 66,667 samples/sec.
-    2. **Naive Storage Cost:** 4,000,000 samples/min * 60 min * 24 hr * 16 bytes = 92.16 GB/day.
-    3. **Edge-Aggregated Volume:** Each device computes 5-min window aggregates (p50, p99, mean, count). 
-    4. **Aggregated Uploads:** 20,000 devices * 10 aggregate metrics * 12 uploads/hr * 24 hr * 100 bytes = 5.76 GB/day.
-    5. **Result:** Data volume drops from 92.16 GB/day to 5.76 GB/day, a **16x reduction**, eliminating the cardinality explosion.
+    1. **Assumptions & Constraints:** 20,000 devices. 50 series per device. 15s interval (4/min).
+    2. **Calculations:** Total samples/sec = (20,000 * 50 * 4) / 60 = 66,667 samples/sec. Daily size = 4M samples/min * 1440 * 16 bytes = 92 GB/day. Edge aggregation (5-min windows, 10 metrics) = 20,000 * 10 * 12/hr * 24hr * 100B = ~5.7 GB/day.
+    3. **Conclusion & Interpretation:** **Result: 16x Network/Storage Reduction.** Edge pre-aggregation prevents catastrophic cardinality explosions in cloud monitoring backends. **System Status: Telemetry-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

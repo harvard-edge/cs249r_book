@@ -8,30 +8,30 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: 'KV-Cache: Diagnose KV Cache Thrashing in Concurrent Mobile LLM Requests'
-scenario: 'Your A17 Pro (35 TOPS, 8GB) app runs two parallel LLM tasks: a background
-  summarization (1B model, 2048 tokens KV) and foreground chat (1B model, 512 tokens
-  KV). You observe 3× slowdown in chat when summarization runs simultaneously. Diagnose
-  the memory bandwidth contention.'
-question: Why does A17 Pro foreground chat slow 3x when a 1B background summarizer
-  holds a 2048-token KV cache?
+scenario: 'Your mobile app runs two parallel LLM tasks: a background summarization (1B model, 2048 tokens KV) and foreground chat (1B model, 512 tokens KV). You observe a 3x slowdown in chat when summarization runs simultaneously.'
+question: Why does A17 Pro foreground chat slow 3x when a 1B background summarizer holds a 2048-token KV cache?
 details:
   realistic_solution: Both tasks read KV cache from unified LPDDR5 memory. Combined
-    KV bandwidth = (2048 + 512) × 98.3KB per decode step from each task. Unified memory
+    KV bandwidth = (2048 + 512) x 98.3KB per decode step from each task. Unified memory
     bandwidth saturated.
-  common_mistake: Assuming GPU compute contention is the problem; not realizing that
-    two parallel LLM tasks both read large KV caches, saturating the unified memory
-    bandwidth.
-  napkin_math: 'A17 Pro unified memory: 68 GB/s (shared between all cores, GPU, NE).
-    Chat decode: 512 × 98.3KB = 50.4MB KV read per step + model weights 500MB = 550MB
-    total per step. At 68 GB/s: 8.1ms/step → 123 tok/sec theoretical → 37 tok/sec
-    at 30% efficiency. Summarization (background): 2048 × 98.3KB = 201MB KV + 500MB
-    weights = 701MB per step. At 68 GB/s: 10.3ms. Two simultaneous: combined 550 +
-    701 = 1.25GB per step. At 68 GB/s: 18.4ms (if sequential) or 18.4ms (bandwidth
-    shared → both slow down). Each gets 34 GB/s effective: chat step = 550MB / 34
-    = 16.2ms → 61 tok/sec × 30% eff = 18.3 tok/sec. Vs alone: 37 tok/sec. Slowdown:
-    37/18.3 = 2.02× — close to observed 3× (with additional interference). Fix: serialize
-    tasks (summarize in background between chat turns), or quantize KV to INT8 (halve
-    bandwidth).'
+  common_mistake: |
+    **The Pitfall:** Assuming GPU compute contention is the primary problem.
+    **The Rationale:** Candidates fail to realize that parallel LLM decoding tasks are extremely memory-bandwidth intensive rather than compute intensive.
+    **The Consequence:** Trying to optimize the model's compute graph when the actual solution requires managing shared memory bandwidth.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Shared Unified Memory Bandwidth: ~68 GB/s.
+       - Foreground Chat KV: 512 tokens * 98.3 KB = ~50 MB.
+       - Background Summarization KV: 2048 tokens * 98.3 KB = ~201 MB.
+       - Weights: 500 MB per model step.
+    2. **Calculations:**
+       - Chat isolated bandwidth demand = 550 MB per step. At 68 GB/s = ~8.1ms/step.
+       - Summarization bandwidth demand = 701 MB per step.
+       - Combined concurrent demand = 550 MB + 701 MB = 1.25 GB per step.
+       - Effective bandwidth drops by ~50% due to unified memory contention.
+       - Slowdown factor = Contention delays + baseline generation overhead = ~3x longer latency per token.
+    3. **Conclusion & Interpretation:**
+       **Result: Memory-Bandwidth Bound Contention. The concurrent tasks massively saturate the 68 GB/s unified memory bus with KV-cache fetching; serializing the tasks or quantizing the KV-cache to INT8 will alleviate this.**
 status: published
 provenance: imported
 requires_explanation: false

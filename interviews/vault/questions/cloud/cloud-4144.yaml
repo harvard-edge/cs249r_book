@@ -8,22 +8,25 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Persistent Volume Strategy for Training Checkpoints
-scenario: 'Your 32-GPU Kubernetes training job produces 26 GB checkpoints every 30 minutes. The job runs for 3 days.'
-question: How would you configure PersistentVolumes for 26 GB checkpoints every 30 minutes over a 3-day, 32-GPU job?
+scenario: Your 32-GPU Kubernetes training job produces 26 GB checkpoints every 30 minutes. The job runs for 3 days.
+question: "How would you configure PersistentVolumes for 26 GB checkpoints every 30 minutes over a 3-day, 32-GPU job?"
 details:
-  realistic_solution: 'Storage architecture: (1) Checkpoint volume: use ReadWriteMany (RWX) PersistentVolume backed by a parallel filesystem (CephFS, GlusterFS, or cloud equivalent like AWS EFS/FSx for Lustre). All 32 pods mount the same PVC and write their shards concurrently. Required throughput: 26 GB in <60 seconds = 433 MB/s aggregate. CephFS with 3 MDS nodes provides ~500 MB/s — sufficient. (2) Alternative — local NVMe + async sync: each pod writes its checkpoint shard to local NVMe (ephemeral storage, ~3 GB/s per node). A sidecar container async-copies checkpoints to S3/GCS in the background. Pros: near-zero training interruption. Cons: if node dies before sync, checkpoint is lost. (3) Capacity planning: 26 GB × (3 days × 24h × 2/hr) = 26 × 144 = 3.74 TB total. Keep only last 3 checkpoints (78 GB) and archive older ones to object storage. PVC size: 200 GB (3 checkpoints + headroom). (4) StorageClass: set reclaimPolicy=Retain (not Delete) so checkpoints survive pod deletion. Set volumeBindingMode=WaitForFirstConsumer to ensure the PV is provisioned in the same zone as the GPU nodes.'
+  realistic_solution: 'Storage architecture: (1) Checkpoint volume: use ReadWriteMany (RWX) PersistentVolume backed by a parallel filesystem (CephFS, GlusterFS, or cloud equivalent like AWS EFS/FSx for Lustre). All 32 pods mount the same PVC and write their shards concurrently. (2) Alternative: local NVMe + async sync to S3/GCS in the background. (3) Capacity planning: Keep only last 3 checkpoints and archive older ones. (4) StorageClass: set reclaimPolicy=Retain so checkpoints survive pod deletion.'
   common_mistake: |
     **The Pitfall:** Using a ReadWriteOnce (RWO) PVC or standard slow HDD storage.
-    
     **The Rationale:** Standard web application habits, forgetting that distributed training requires all pods to concurrently write their own shards simultaneously.
-    
     **The Consequence:** Only one pod can write at a time (or training completely stalls during slow disk writes), destroying iteration speed.
   napkin_math: |
-    * **Aggregate Write Speed Demand:** 26 GB in 60s = 443 MB/s
-    * **Total Capacity Required:** 26 GB × (2/hour × 24 hours × 3 days) = 3.74 TB total data
-    * **Transfer Time (CephFS):** 26 GB / 500 MB/s = ~52 seconds
-    * **Transfer Time (Slow EFS):** 26 GB / 100 MB/s = ~260 seconds
-    * **Result:** **Slow storage would block training for 4.3 minutes every half hour, heavily justifying the parallel filesystem.**
+    1. **Assumptions & Constraints:**
+       * 26 GB checkpoints every 30 minutes.
+       * 60 seconds max allowed blocking time.
+       * Duration: 3 days.
+    2. **Calculations:**
+       * Aggregate Write Speed Demand: 26 GB / 60s = 433 MB/s.
+       * Total Capacity Required: 26 GB * 2/hour * 24 hours * 3 days = 3.74 TB.
+       * Transfer Time (Parallel FS): 26 GB / 500 MB/s = ~52 seconds.
+       * Transfer Time (Slow Storage): 26 GB / 100 MB/s = ~260 seconds.
+    3. **Conclusion & Interpretation:** **Result: 433 MB/s Demand (I/O-Bound)**. Slow storage would block training for 4.3 minutes every half hour, heavily justifying the parallel filesystem.
 status: published
 provenance: imported
 requires_explanation: false

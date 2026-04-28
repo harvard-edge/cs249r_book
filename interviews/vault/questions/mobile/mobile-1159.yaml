@@ -8,8 +8,8 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: inference
 title: Diagnosing LLM Latency Bias on Tensor G3
-scenario: 'You are deploying an on-device text summarization feature using Gemini Nano on the Google Tensor G3. During subgroup evaluation, you notice a severe symptom: the generation latency spikes and battery drains excessively only when summarizing text in certain non-English languages, creating a stark demographic parity issue in user experience. The device features an on-device TPU delivering 7.5 TOPS and has 12 GB LPDDR5X memory.'
-question: "What is the root cause of this disparity, and how do the hardware specifications explain the symptom?"
+scenario: 'You are deploying an on-device text summarization feature using Gemini Nano on the Google Tensor G3. During subgroup evaluation, you notice a severe symptom: the generation latency spikes and battery drains excessively only when summarizing text in certain non-English languages, creating a stark demographic parity issue in user experience.'
+question: What is the root cause of this disparity, and how do the hardware specifications explain the symptom?
 details:
   realistic_solution: The root cause is a tokenization disparity interacting with hardware memory limits. Non-English languages often require significantly more tokens per word than English. This expanded sequence length causes the Key-Value (KV) cache to grow rapidly. While the Tensor G3 TPU handles the 7.5 TOPS compute easily for short sequences, the enlarged KV cache for these languages exceeds the TPU's fast memory allocation and spills over to the 12 GB LPDDR5X memory. The bandwidth bottleneck of fetching from LPDDR5X for every generation step destroys the effective TOPS, causing the latency spike and battery drain for specific linguistic subgroups.
   common_mistake: |
@@ -17,11 +17,17 @@ details:
     **The Rationale:** Engineers overlook the interaction between subword tokenization density and the physical limits of hardware memory hierarchies.
     **The Consequence:** Teams waste time retraining or fine-tuning the model instead of fixing the system-level memory allocation limit.
   napkin_math: |
-    - **Tokenization:** English 500 words = 600 tokens. Hindi 500 words = 1750 tokens.
-    - **English KV Cache:** 600 tokens * 1.5 MB = **900 MB** (Fits inside TPU fast memory).
-    - **Hindi KV Cache:** 1750 tokens * 1.5 MB = **2625 MB**.
-    - **Spillover:** 2625 MB - 1500 MB limit = **1125 MB** spills to LPDDR5X.
-    - **Latency Penalty:** Fetching 1.125 GB from LPDDR5X (at 50 GB/s) adds 1.125 / 50 = **22.5ms per generated token** of purely memory-bound overhead, destroying TOPS utilization.
+    1. **Assumptions & Constraints:**
+       - English: ~1.2 tokens/word. Hindi: ~3.5 tokens/word.
+       - TPU Fast Memory Limit: ~1.5 GB.
+       - LPDDR5X Bandwidth: 50 GB/s.
+    2. **Calculations:**
+       - English KV Cache (500 words -> 600 tokens): 600 * 1.5 MB = 900 MB (fits).
+       - Hindi KV Cache (500 words -> 1750 tokens): 1750 * 1.5 MB = 2625 MB.
+       - Spilled Cache: 2625 MB - 1500 MB = 1125 MB in LPDDR5X.
+       - Latency Penalty: 1.125 GB / 50 GB/s = +22.5ms per token.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Disparity. Subword tokenization density differences push non-English KV caches out of SRAM, bottlenecking entirely on external LPDDR5X bandwidth.**
 status: published
 provenance: imported
 requires_explanation: false

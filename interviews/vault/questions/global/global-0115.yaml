@@ -8,22 +8,27 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Kernel Fusion Roofline Shift
-scenario: Optimizing a real-time speech recognition model, profiling shows 40% of inference time is spent in a sequence of element-wise operations (LayerNorm -> ReLU -> Dropout -> Scale). A junior engineer argues that fusing these kernels won't improve performance because these operations account for less than 1% of the model's total FLOPs.
+scenario: Profiling shows 40% of time in a model is spent on sequential element-wise operations. A junior engineer argues against kernel fusion because these ops are less than 1% of total FLOPs.
 question: How would you quantitatively counter the claim that fusing 1%-FLOP element-wise ops cannot improve inference time?
 details:
-  realistic_solution: "Execution time is dictated by the Roofline model, not just total FLOPs. Element-wise operations have an Arithmetic Intensity of roughly 0.5 to 1 FLOPs/byte, placing them deep in the memory-bandwidth bound regime. Every individual kernel call (LayerNorm, ReLU, etc.) must read the activation tensor from HBM, perform a trivial calculation, and write it back to HBM. The hardware's ALUs sit idle waiting for memory. By fusing these four operations into a single kernel, the tensor is read from HBM once into SRAM, all four operations are computed in registers, and the result is written back to HBM once. This reduces HBM traffic by a factor of 4, directly reducing execution time for this block by up to 75%, while also eliminating three kernel launch overheads. The low FLOP count is exactly *why* they take so long relative to their math—they are entirely bandwidth-bound."
+  realistic_solution: "Appeal to the Roofline model. Element-wise ops possess an Arithmetic Intensity near 0.5 FLOPs/byte, placing them securely in the memory-bound regime. Fusing operations truncates HBM round-trips, slashing total I/O traffic and bypassing kernel launch overheads, radically accelerating execution despite the minimal FLOP count."
   common_mistake: |
     **The Pitfall:** Agreeing that low-FLOP operations don't significantly impact execution time.
     **The Rationale:** FLOP count is the most commonly cited metric for model complexity and performance.
     **The Consequence:** Ignoring severe memory bandwidth bottlenecks and leaving massive inference speedups on the table.
   napkin_math: |
-    * Tensor size: 10 MB (FP16).
-    * Unfused (4 ops): 4 reads + 4 writes = 80 MB HBM traffic. Time at 1 TB/s = 80 µs.
-    * Fused (1 op): 1 read + 1 write = 20 MB HBM traffic. Time at 1 TB/s = 20 µs.
-    * Kernel launch overhead: ~5 µs per launch.
-    * Total Unfused = 80 µs + (4 * 5 µs) = 100 µs.
-    * Total Fused = 20 µs + 5 µs = 25 µs.
-    * **Kernel fusion yields a 4x speedup on this memory-bound section despite the low FLOP count.**
+    1. **Assumptions & Constraints:**
+       - Tensor: 10 MB (FP16)
+       - Memory Bandwidth: 1 TB/s
+       - 4 Unfused Ops vs 1 Fused Op
+    2. **Calculations:**
+       - Unfused: 4 reads + 4 writes = 80 MB. Time = 80 µs
+       - Fused: 1 read + 1 write = 20 MB. Time = 20 µs
+       - Overhead: 5 µs per launch
+       - Unfused Total = 80 + 20 = 100 µs
+       - Fused Total = 20 + 5 = 25 µs
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bandwidth Bound (4x Speedup via Fusion)**
 status: published
 provenance: imported
 requires_explanation: false

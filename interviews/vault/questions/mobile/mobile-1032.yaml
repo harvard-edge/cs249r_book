@@ -8,23 +8,29 @@ competency_area: networking
 bloom_level: evaluate
 phase: inference
 title: 'Network Bandwidth Bottlenecks: Master Memory Bus Analysis for Multi-LLM Mobile App'
-scenario: 'A productivity mobile app (Snapdragon 8 Gen 3, 16GB, 77 GB/s) runs two simultaneous LLM tasks: (1) a 1B INT4 email summarizer (background, 500MB, running at 10 tokens/s to stay under thermal limits) and (2) a 3B INT4 assistant (foreground, 1.5GB, TPOT target < 25ms).'
-question: How would you analyze whether both can run simultaneously without bandwidth saturation, derive the scheduling constraint, and specify a token-interleaved execution schedule?
+scenario: 'A productivity mobile app runs two simultaneous LLM tasks: a 1B INT4 background email summarizer running at 10 tokens/s, and a 3B INT4 foreground assistant with a TPOT target of < 25ms.'
+question: How would you analyze whether both can run simultaneously without bandwidth saturation, and specify a token-interleaved schedule?
 details:
   realistic_solution: |
-    Summarizer: 10 tokens/s = 1 token per 100ms. Per token BW: 500MB in 100ms = 5MB/ms sustained = 5GB/s. Assistant: TPOT < 25ms → 1.5GB/25ms = 60GB/s peak during decode. Total peak: 5+60=65GB/s < 77GB/s ✓ (barely). But: assistant decode is bursty (60GB/s for 25ms, then idle for next token arrival). Summarizer: 100ms period, 5GB/s average. Interleaved schedule: Assistant token decode (25ms at 60GB/s) → Summarizer token decode (1.5ms at 333GB/s? No: both at same time average). Time-sliced: 25ms: assistant at 60GB/s. Remaining 75ms: summarizer catches up. 500MB/(75ms)=6.67GB/s. Total per 100ms: 25ms×60+75ms×6.67 = 1500+500.25 = 2000.25MB = 20GB avg << 77GB/s.
+    Conduct a micro-second level memory bandwidth analysis using `nsys profiling`. Both autoregressive LLM decoding phases are fiercely memory-bandwidth bound. While their *average* bandwidth fits within system limits, their instantaneous burst execution will collide, causing cache thrashing and violating the 25ms TPOT SLA. Implement an explicit time-sliced, token-interleaved scheduler. Block the background summarizer thread using a mutex or OS-level QOS priority while the foreground assistant decodes a token. Once the assistant completes its 25ms burst, context-switch the summarizer to compute its background token in the remaining 75ms of the 100ms window.
   common_mistake: |
     **The Pitfall:** Treating the two models as temporally independent.
     **The Rationale:** Candidates look at average throughput and assume it applies smoothly across time.
     **The Consequence:** They miss that the models compete for the exact same LPDDR5X bus in real-time bursts.
   napkin_math: |
-    - Assistant (peak): 1.5GB in 25ms = 60GB/s peak during decode.
-    - Summarizer (average): 500MB in 100ms = 5GB/s average.
-    - Total peak if overlapping: 65GB/s < 77GB/s (barely fits, but risky).
-    - Time-sliced schedule (per 100ms window): Assistant runs first (25ms) at 60GB/s.
-    - Summarizer runs remaining 75ms: 500MB / 75ms = 6.67GB/s.
-    - Average bandwidth per 100ms: (1.5GB + 0.5GB) / 0.1s = **20GB/s** << 77GB/s.
-    - Both tasks safely complete within the 100ms window without bus saturation.
+    1. **Assumptions & Constraints:**
+       - Max System Bandwidth: 77 GB/s.
+       - Foreground Assistant: 1.5 GB weights, TPOT target < 25ms.
+       - Background Summarizer: 500 MB weights, 10 tokens/s (1 token per 100ms window).
+    2. **Calculations:**
+       - Assistant burst bandwidth: 1.5 GB / 0.025 s = 60 GB/s peak.
+       - Summarizer burst bandwidth: 500 MB in ~1.5ms = >333 GB/s (physically impossible, requires throttling).
+       - Time-sliced scheduling within 100ms window:
+       - 0 to 25ms: Assistant runs, utilizing 60 GB/s.
+       - 25ms to 100ms (75ms): Summarizer runs, throttled bandwidth = 500 MB / 0.075 s = 6.67 GB/s.
+       - Average bandwidth over 100ms window = (1.5 GB + 0.5 GB) / 0.1 s = 20 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Scheduling/Bandwidth-Bound.** Unmanaged, simultaneous execution creates catastrophic bandwidth spikes. Time-slicing ensures peak bandwidth never exceeds 60 GB/s, comfortably fitting the 77 GB/s hardware limit and satisfying both SLAs.
 status: published
 provenance: imported
 requires_explanation: true

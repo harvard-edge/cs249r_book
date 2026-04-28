@@ -8,34 +8,29 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: KV-Cache Memory as Throughput Bottleneck
-scenario: Your Llama 3 8B serving instance on a single H100 shows only 40% GPU compute utilization despite a queue of 200+ pending requests. The GPU has 64 GB free after loading weights (16 GB). Nvidia-smi shows 79 GB/80 GB memory used.
-question: Why is the Llama 3 8B H100 instance limited to 40% compute utilization despite 200 queued requests and nearly full memory?
+scenario: 'Your Llama 3 8B serving instance on a single H100 shows only 40% GPU compute utilization despite a queue of 200+ pending requests. The GPU has 64 GB free after loading weights (16 GB). Nvidia-smi shows 79 GB/80 GB memory used.'
+question: 'Why is the Llama 3 8B H100 instance limited to 40% compute utilization despite 200 queued requests and nearly full memory?'
 details:
-  realistic_solution: 'The bottleneck is KV-cache memory, not compute. With 64 GB free and Llama 3 8B using 4 KV heads × 128 dim × 32 layers: KV per token = 2 × 4 × 128 × 2B × 32 = 65.5 KB. At average 2K context: 131 MB per request. Maximum batch: 64 GB / 131 MB ≈ 488 requests. But the system is already at 79/80 GB — only ~1 GB free for new KV-cache, so batch size is capped at current level. Despite 200+ queued requests, the system cannot increase batch size because every additional request needs KV-cache memory. At the current small batch size, the GPU''s Tensor Cores are underutilized (small matmuls during decode are memory-bandwidth-bound). Fixes: (1) Quantize KV-cache to INT8 (2× more concurrent requests). (2) Use PagedAttention to eliminate internal fragmentation. (3) Enable KV-cache swap to CPU memory for preempted requests. (4) Shorter max context length. The fundamental constraint: LLM decode throughput is limited by KV-cache memory capacity, not compute.'
+  realistic_solution: 'The bottleneck is KV-cache memory capacity, not compute. Every additional request needs KV-cache memory. Fixes: (1) Quantize KV-cache to INT8. (2) Use PagedAttention to eliminate internal fragmentation. (3) Enable KV-cache swap to CPU memory for preempted requests.'
   common_mistake: |
     **The Pitfall:** Assuming low GPU utilization means a compute scheduling or framework problem.
     **The Rationale:** Candidates see spare FLOPs and assume the scheduler is inefficient, failing to recognize that KV-cache memory capacity physically caps the batch size.
     **The Consequence:** Engineering effort is wasted optimizing the compute pipeline or rewriting kernels, when the system physically cannot admit more requests due to OOM limits.
   napkin_math: |
-    - **Model Weights:** 16 GB (BF16).
-    - **KV Cache per Token:** Llama 3 8B has 4 KV heads, 128 dim, 32 layers. 2 × 4 × 128 × 2 bytes × 32 = 65.5 KB.
-    - **KV Cache per Request (2K ctx):** 2,048 × 65.5 KB = 134 MB.
-    - **Max Theoretical Batch Size:** 64 GB free / 134 MB = **~488 requests**.
-    - **Memory Bottleneck:** With 79/80 GB used, ~480 active requests are consuming all KV space. No new requests can be admitted, locking the batch size and keeping arithmetic intensity below the compute ridge point.
+    1. **Assumptions & Constraints:**
+       - Hardware: H100 (80 GB).
+       - Weights: 16 GB. Free memory: 64 GB.
+       - Context size: 2K tokens.
+       - Llama 3 8B: 4 KV heads, 128 dim, 32 layers.
+    2. **Calculations:**
+       - KV Cache per Token = 2 * 4 * 128 * 2 bytes * 32 = 65.5 KB.
+       - KV Cache per Request (2K ctx) = 2,048 * 65.5 KB = 134 MB.
+       - Max Theoretical Batch Size = 64 GB / 134 MB = ~488 requests.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity-Bound. With 79/80 GB used, active requests consume all KV space, preventing new requests and locking arithmetic intensity.**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
 validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: claude-opus-4-6
 math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

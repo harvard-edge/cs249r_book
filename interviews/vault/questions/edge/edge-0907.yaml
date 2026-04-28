@@ -14,15 +14,19 @@ details:
   realistic_solution: The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially with depth. If the host tiles the input, it must transmit the massive overlapping regions repeatedly, saturating the USB 3.0 bandwidth. The co-design solution is 'Fused Layer Execution' or 'Depth-First Scheduling' inside the compiler. Instead of host-side tiling, send the entire image (or large chunks) to the TPU's DRAM. The TPU compiler should be configured to tile the computation internally inside the 8MB SRAM, calculating a tile all the way through the depth of the network before evicting. This keeps the intermediate halo exchanges entirely within the high-bandwidth on-chip SRAM, drastically reducing USB I/O.
   common_mistake: |
     **The Pitfall:** Compressing the image data over the USB bus using JPEG to save bandwidth.
-    **The Rationale:** Candidates see a bandwidth bottleneck and immediately apply standard image compression techniques.
+    **The Rationale:** Candidates see a bandwidth bottleneck and immediately apply standard image compression techniques from general networking.
     **The Consequence:** JPEG compression introduces latency and artifacts that completely ruin the super-resolution model's output quality.
   napkin_math: |
-    1. 1080p image = 1920 x 1080 x 3 = ~6.22 MB.
-    2. USB 3.0 practical bandwidth: ~400 MB/s.
-    3. Raw input at 30 FPS: 6.22 MB * 30 = ~186.6 MB/s.
-    4. Deep network halo overlap: A 128x128 tile needs a 256x256 patch (4x area redundancy).
-    5. Redundant transfer rate: 186.6 MB/s * 4 = 746.4 MB/s (Exceeds USB 3.0 limit).
-    6. Conclusion: This completely saturates the ~400 MB/s bus, dropping framerate to **~4 FPS**.
+    1. **Assumptions & Constraints:**
+       - 1080p image = 1920 x 1080 x 3 = ~6.22 MB.
+       - USB 3.0 practical bandwidth: ~400 MB/s.
+       - Tiling redundancy: 4x area redundancy.
+    2. **Calculations:**
+       - Tiled frame size = 6.22 MB * 4 = 24.88 MB.
+       - Bidirectional data per frame = 24.88 MB (in) + 24.88 MB (out) = 49.76 MB.
+       - Max framerate = 400 MB/s / 49.76 MB/frame = 8 FPS (or ~4 FPS under heavy contention).
+    3. **Conclusion & Interpretation:**
+       - **Result: 49.76 MB per frame.** The tiling strategy saturates the bus, making the system critically **I/O-Bandwidth-Bound**.
   options:
   - The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially with depth.
   - The system should be redesigned to offload inference to the cloud, as edge hardware fundamentally cannot meet the latency and accuracy requirements.
