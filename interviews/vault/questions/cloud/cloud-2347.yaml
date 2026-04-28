@@ -8,20 +8,21 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: RoCEv2 Incast in 3D Parallelism
-scenario: 'A 1024-GPU cluster uses an oversubscribed spine-leaf network with 400Gbps RoCEv2. During the pipeline flush phase of 3D parallel training, 64 GPUs simultaneously send 50 MB of activation data to a single target GPU (a classic incast pattern). Network tail latency spikes from 10us to 5ms, causing massive pipeline bubbles and dropping cluster utilization to 35%.'
-question: "What causes the 5ms tail-latency spikes when 64 GPUs send 50MB to one target, and how would you mitigate this RoCEv2 incast?"
+scenario: A 1024-GPU cluster uses an oversubscribed spine-leaf network with 400Gbps RoCEv2. During the pipeline flush phase of 3D parallel training, 64 GPUs simultaneously send 50 MB of activation data to a single target GPU (a classic incast pattern). Network tail latency spikes from 10us to >60ms, causing massive pipeline bubbles and dropping cluster utilization to 35%.
+question: What causes the >60ms tail-latency spikes when 64 GPUs send 50MB to one target, and how would you mitigate this RoCEv2 incast?
 details:
-  realistic_solution: 'The architectural requirement is to handle microbursts and incast traffic inherent in many-to-one communication patterns. RoCEv2 is lossless and relies on Priority Flow Control (PFC). During incast, the ToR switch buffers overflow, triggering PFC pause frames that spread upstream through the network, causing severe Head-of-Line blocking (congestion spreading) that halts even unrelated traffic. The solution is to architect application-level traffic pacing, tune DCQCN (Data Center Quantized Congestion Notification) for faster rate reduction at the NIC level before PFC triggers, and ensure QoS classes isolate this collective traffic.'
+  realistic_solution: |
+    The architectural requirement is to handle microbursts and incast traffic inherent in many-to-one communication patterns. RoCEv2 is lossless and relies on Priority Flow Control (PFC). During incast, the ToR switch buffers overflow, triggering PFC pause frames that spread upstream through the network, causing severe Head-of-Line blocking (congestion spreading) that halts even unrelated traffic. The solution is to architect application-level traffic pacing, tune DCQCN (Data Center Quantized Congestion Notification) for faster rate reduction at the NIC level before PFC triggers, and ensure QoS classes isolate this collective traffic.
   common_mistake: |
     **The Pitfall:** Attempting to solve the issue by increasing TCP window size or adding more physical links to the spine.
     **The Rationale:** Failing to address the lossless, priority-flow-control (PFC) nature of RoCEv2 networks.
     **The Consequence:** The network continues to suffer from Head-of-Line blocking and congestion spreading.
   napkin_math: |
-    1. **Incast volume:** 64 senders * 50 MB = **3.2 GB**.
-    2. **Target port bandwidth:** 400 Gbps = **50 GB/s**.
-    3. Time to drain to target: `3.2 GB / 50 GB/s` = **64 ms**.
-    4. **Switch Buffer:** Typically only ~32-64 MB per port.
-    5. **Result:** 3.2 GB is 50x larger than the switch buffer, triggering immediate PFC pause frames across the fabric.
+    - **Incast volume:** 64 senders * 50 MB = 3.2 GB.
+    - **Target port bandwidth:** 400 Gbps = 50 GB/s.
+    - **Time to drain to target:** 3.2 GB / 50 GB/s = 64 ms.
+    - **Switch Buffer:** Typically only ~32-64 MB per port.
+    - **Conclusion: 3.2 GB is 50x larger than the switch buffer, triggering immediate PFC pause frames across the fabric and causing a minimum 64ms queue delay.**
 status: published
 provenance: imported
 requires_explanation: false

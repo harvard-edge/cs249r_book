@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: training
 title: The Auto-Tuning Transfer Problem
 scenario: Your team auto-tuned a set of transformer kernels for batch_size=32, seq_len=2048 on H100. When serving traffic arrives with variable sequence lengths (128-8192) and batch sizes (1-64), the auto-tuned kernels perform 40% worse than the default configurations for many input shapes.
-question: Why does tuning for batch_size=32, seq_len=2048 fail on dynamic shapes, and how would you cover the shape space without exhaustive tuning?
+question: "Why does tuning for batch_size=32, seq_len=2048 fail on dynamic shapes, and how would you cover the shape space without exhaustive tuning?"
 details:
   realistic_solution: 'The auto-tuned configuration fails to generalize because the optimal tiling parameters are a function of the problem shape. For batch_size=32, seq_len=2048, the matmuls are large and compute-bound — the auto-tuner picks large tiles (128×128) to maximize Tensor Core utilization. For batch_size=1, seq_len=128, the same matmul is small and memory-bound — large tiles waste shared memory and leave most Tensor Cores idle, while small tiles (32×32) better match the problem size. The solution is a multi-configuration dispatch table: (1) Partition the shape space into ~8-12 buckets based on arithmetic intensity boundaries (memory-bound, transitional, compute-bound). (2) Auto-tune one representative shape per bucket. (3) At runtime, compute the arithmetic intensity of the incoming shape and dispatch to the nearest tuned configuration. (4) For Triton kernels, use `torch.compile`''s `dynamic=True` mode with specialized re-compilation for frequently-seen shapes (the JIT will cache compiled versions). This gives near-optimal performance across the full shape range with 8-12× less tuning effort than per-shape tuning.'
   common_mistake: |
@@ -17,10 +17,10 @@ details:
     **The Rationale:** Candidates fail to recognize that arithmetic intensity (compute vs. memory traffic ratio) shifts dramatically with shape changes, requiring fundamentally different tile sizes.
     **The Consequence:** Severe sub-optimal serving performance (up to 40% slower) on dynamic inference traffic.
   napkin_math: |
-    *   **Shape Space:** 6 batch sizes × 8 seq lengths = 48 combinations.
-    *   **Exhaustive Tuning Cost:** 48 shapes × 4,096 configs × 5ms = 983s ≈ 16 min.
-    *   **Bucketed Approach Cost:** 10 buckets × 4,096 configs × 5ms = 205s ≈ 3.4 min.
-    *   **Final Result:** **Bucketing reduces tuning time by ~5x while maintaining <3% performance gap for 97% of shapes.**
+    - **Shape Space:** 6 batch sizes × 8 seq lengths = 48 combinations.
+    - **Exhaustive Tuning Cost:** 48 shapes × 4,096 configs × 5ms = 983s ≈ 16 min.
+    - **Bucketed Approach Cost:** 10 buckets × 4,096 configs × 5ms = 205s ≈ 3.4 min.
+    - **Conclusion:** **Bucketing reduces tuning time by ~5x while maintaining <3% performance gap for 97% of shapes.**
   options:
   - A) Auto-tuning fails because it overfits to the weight distribution of the model. To cover the shape space, you should apply regularization during the tuning phase.
   - B) Auto-tuning fails because the learning rate is statically compiled. To cover the shape space, dynamically schedule learning rates based on batch size.

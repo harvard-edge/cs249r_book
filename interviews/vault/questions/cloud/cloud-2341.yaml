@@ -11,17 +11,18 @@ title: XLA Compiler Host OOM on Long Sequence Attention
 scenario: You are compiling a Transformer model with a 128k sequence length for a TPU v5p using JAX/XLA. The TPU has 95GB of HBM. The theoretical memory requirement for FlashAttention at 128k is <2GB. However, the compilation process runs for 4 hours and then crashes with an Out-Of-Memory (OOM) error on the Host CPU machine (512GB RAM).
 question: Why does compiling 128k FlashAttention on TPU v5p OOM the 512GB host CPU despite <2GB device memory, and how would you avoid it?
 details:
-  realistic_solution: 'The symptom (Host CPU OOMing during compilation, not device OOM during execution) points to an XLA compiler optimization gone wrong. To maximize the utilization of the static systolic array, XLA aggressively unrolls loops (like the chunks in FlashAttention or standard attention) to create a static, deterministic High Level Optimizer (HLO) graph. With a sequence length of 128k, if the compiler attempts to fully unroll the attention computation or materialize intermediate broadcasting rules statically, it creates millions of individual nodes in the compiler''s Abstract Syntax Tree (AST). Each node consumes hundreds of bytes in host RAM during compilation passes (like liveness analysis and CSE). The host CPU''s 512GB RAM is exhausted by the massive HLO graph representation. Co-design solution: Use `jax.lax.scan` or `jax.lax.while_loop` to force the compiler to keep the loop folded at the HLO level, preventing graph explosion while sacrificing a tiny bit of instruction scheduling optimization.'
+  realistic_solution: |
+    The symptom (Host CPU OOMing during compilation, not device OOM during execution) points to an XLA compiler optimization gone wrong. To maximize the utilization of the static systolic array, XLA aggressively unrolls loops (like the chunks in FlashAttention or standard attention) to create a static, deterministic High Level Optimizer (HLO) graph. With a sequence length of 128k, if the compiler attempts to fully unroll the attention computation or materialize intermediate broadcasting rules statically, it creates millions of individual nodes in the compiler's Abstract Syntax Tree (AST). Each node consumes hundreds of bytes in host RAM during compilation passes (like liveness analysis and CSE). The host CPU's 512GB RAM is exhausted by the massive HLO graph representation. Co-design solution: Use `jax.lax.scan` or `jax.lax.while_loop` to force the compiler to keep the loop folded at the HLO level, preventing graph explosion while sacrificing a tiny bit of instruction scheduling optimization.
   common_mistake: |
     **The Pitfall:** Assuming the TPU HBM is OOMing due to materialized attention matrices, and trying to implement gradient checkpointing.
     **The Rationale:** The symptom explicitly points to Host CPU OOMing during compilation, not device OOM during execution. The compiler is exhausting host RAM due to massive HLO graph representation from loop unrolling.
     **The Consequence:** Wasting time optimizing model memory usage while the compiler remains fundamentally broken.
   napkin_math: |
-    - 128k sequence unrolled in blocks of 128. Number of blocks = 1000.
-    - For an N^2 attention map, unrolling creates 1000 x 1000 = 1,000,000 block-level operations.
-    - If the compiler expands this into element-wise HLO instructions, it creates billions of nodes.
-    - A 1 billion node graph, at 500 bytes per node structure in C++, requires 500GB of host RAM.
-    - **The compiler exhausts the 512GB host RAM and crashes before ever sending an instruction to the TPU.**
+    - **Unrolling Blocks:** 128k sequence unrolled in blocks of 128. Number of blocks = 1000.
+    - **Operation Count:** For an N^2 attention map, unrolling creates 1000 x 1000 = 1,000,000 block-level operations.
+    - **Graph Expansion:** If the compiler expands this into element-wise HLO instructions, it creates billions of nodes.
+    - **Host RAM Cost:** A 1 billion node graph, at 500 bytes per node structure in C++, requires 500GB of host RAM.
+    - **Conclusion: The compiler exhausts the 512GB host RAM and crashes before ever sending an instruction to the TPU.**
 status: published
 provenance: imported
 requires_explanation: false

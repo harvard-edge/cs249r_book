@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: inference
 title: The Continuous Batching Paradox (cloud-0175)
 scenario: Your team is responsible for a real-time translation service for a major international conference. The SLA is strict: translations for a speaker's sentence (avg. 50 tokens) must appear on screen in under 500ms (P99). The service runs on H100s using a continuous batching server. To maximize GPU utilization and overall system throughput, a junior engineer tunes the server's `max_batched_tokens` setting to 8192. `nvidia-smi` now shows a beautiful, sustained 95% utilization. However, user complaints flood in about the translation lagging far behind the speaker. You receive an alert: P99 latency has spiked to over 1.5 seconds. The junior engineer is confused, 'But the GPU is more efficient than ever!'
-question: "Why did increasing batch size and GPU utilization lead to a catastrophic failure to meet the real-time deadline?"
+question: Why did increasing batch size and GPU utilization lead to a catastrophic failure to meet the real-time deadline?
 details:
   realistic_solution: This is a classic queueing theory failure. By setting `max_batched_tokens` too high for a low-latency workload, the continuous batching engine waits too long to accumulate a 'full' batch from incoming requests before launching a forward pass. This is Head-of-Line Blocking within the dynamic batch. While this is great for amortizing kernel launch overhead and maximizing the arithmetic intensity of the computation (high throughput), it introduces a fatal queueing delay for the individual requests. For a real-time service with a strict P99 deadline, per-request latency is the primary metric, not aggregate system throughput. The system was correctly optimized for the given metric (throughput), but that metric was wrong for the user-facing SLA. The fix is to reduce `max_batched_tokens` to a level where the queueing delay is a small fraction of the overall latency budget.
   common_mistake: |
@@ -17,11 +17,11 @@ details:
     **The Rationale:** Engineers assume high GPU utilization means the code is efficient, so the bottleneck must be elsewhere.
     **The Consequence:** Failing to recognize the trade-off between aggregate throughput and per-request latency.
   napkin_math: |
-    - SLA requires 50 tokens in <500ms, so max Time-Per-Token (TPOT) = 500ms / 50 = 10ms.
-    - Assuming 70B FP16 (140GB) on 2xH100 (6.7TB/s).
-    - Time to read weights once for a batch: 140GB / 6.7TB/s = 21ms.
-    - Since 21ms > 10ms SLA, the target is physically impossible for a 70B model on 2xH100 without more GPUs to increase bandwidth, regardless of queueing delays.
-    - Adding large batching (`max_batched_tokens=8192`) further increases the time per step, exacerbating the latency violation.
+    1. SLA requires 50 tokens in <500ms, so max Time-Per-Token (TPOT) = 500ms / 50 = 10ms.
+    2. Assuming 70B FP16 (140GB) on 2xH100 (6.7TB/s).
+    3. Time to read weights once for a batch: 140GB / 6.7TB/s = 21ms.
+    4. Since 21ms > 10ms SLA, the target is physically impossible for a 70B model on 2xH100 without more GPUs to increase bandwidth, regardless of queueing delays.
+    5. **Conclusion: Adding large batching (`max_batched_tokens=8192`) further increases the time per step, exacerbating the latency violation.**
 status: deleted
 provenance: imported
 requires_explanation: false

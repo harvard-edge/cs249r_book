@@ -9,7 +9,7 @@ bloom_level: create
 phase: training
 title: The Deterministic Global Shuffle at Trillion-Token Scale
 scenario: Your LLM pre-training uses 2,048 GPUs with data parallelism. Each GPU must see a unique, non-overlapping subset of the 2 trillion token corpus per epoch, and the global ordering must be deterministically shuffled.
-question: How do you implement a deterministic, coordinator-free global shuffle for 2M shards and 2,048 GPUs, and handle elastic GPU-count changes?
+question: "How do you implement a deterministic, coordinator-free global shuffle for 2M shards and 2,048 GPUs, and handle elastic GPU-count changes?"
 details:
   realistic_solution: 'Use a pseudorandom permutation function (PRP) that maps (epoch, global_index) → shard_index without materializing the full permutation. Implementation: a Feistel cipher with the epoch as the key. Each GPU computes its own shard assignments locally: for GPU rank r in epoch e, it reads shards at indices PRP(e, r × shards_per_gpu + 0), PRP(e, r × shards_per_gpu + 1), ..., PRP(e, r × shards_per_gpu + k-1). This is coordinator-free (every GPU computes independently), deterministic (same seed + epoch → same permutation), and produces a true global shuffle (the Feistel PRP is a bijection over the shard index space). For elastic scaling (GPU count changes from N₁ to N₂ at step S): record the consumed_shard_set up to step S (which is deterministically computable from the PRP). Recompute assignments for N₂ GPUs over the remaining shards. The key invariant: no shard is seen twice within an epoch, and every shard is seen exactly once. This requires maintaining a global ''cursor'' that tracks how far through the permutation training has progressed, but the cursor is a single integer (the global step count), not a 2M-element list.'
   common_mistake: |
@@ -17,16 +17,10 @@ details:
     **The Rationale:** Candidates assume local shuffling is sufficient, missing the need for a global permutation.
     **The Consequence:** Documents assigned to GPU 0 in epoch 1 stay on GPU 0 in epoch 2, creating data ordering correlations that harm convergence.
   napkin_math: |
-    - 1. Analyze Naive Coordinator Approach: 2M shards * 8 bytes = 16 MB. Broadcast to 2,048 GPUs = 32.7 GB network traffic per epoch.
-    - 2. Analyze PRP (Pseudorandom Permutation) Approach: GPU evaluates a Feistel cipher mapping (epoch, index) -> physical_shard.
-    - 3. Calculate compute overhead: 2M shards / 2048 GPUs = 977 evaluations per GPU. 977 * 100ns = ~97.7 µs.
-    - 4. Conclusion: The PRP approach requires **0 bytes of network coordination** and costs less than 100 µs of compute per GPU.
-  options:
-  - Use a centralized Redis cluster to generate and store the 2M-element permutation, then have each GPU query its assigned shards via RPC at the start of each epoch.
-  - Have each GPU independently shuffle the list of its assigned shards using a shared random seed.
-  - Use a pseudorandom permutation function (like a Feistel cipher) keyed by the epoch number to map logical indices to physical shard indices deterministically on each GPU.
-  - Broadcast the 16MB array to all 2,048 GPUs at the start of each step to ensure every GPU has the latest permutation state.
-  correct_index: 2
+    - Analyze Naive Coordinator Approach: 2M shards * 8 bytes = 16 MB. Broadcast to 2,048 GPUs = 32.7 GB network traffic per epoch.
+    - Analyze PRP (Pseudorandom Permutation) Approach: GPU evaluates a Feistel cipher mapping (epoch, index) -> physical_shard.
+    - Calculate compute overhead: 2M shards / 2048 GPUs = 977 evaluations per GPU. 977 * 100ns = ~97.7 μs.
+    - **Conclusion:** **The PRP approach requires 0 bytes of network coordination and costs less than 100 μs of compute per GPU.**
 status: published
 provenance: imported
 requires_explanation: true

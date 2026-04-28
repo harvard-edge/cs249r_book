@@ -11,16 +11,17 @@ title: Root Causing NVSwitch MoE Contention
 scenario: On a single 8x H100 node with a 900 GB/s bidirectional NVSwitch, an MoE model with 8 experts processes a batch. The intra-node All-to-All dispatch phase takes 8ms instead of the theoretical 1.1ms. `nvidia-smi nvlink` shows GPU 0 hitting 100% Rx utilization, while GPUs 1-7 show only 15% Tx utilization.
 question: Why does intra-node MoE All-to-All take 8ms with GPU 0 at 100% Rx and GPUs 1-7 at 15% Tx, and how would you fix the imbalance?
 details:
-  realistic_solution: The root cause is severe load imbalance in expert assignment, leading to NVSwitch port contention. In this MoE configuration, the gating network routes an overwhelmingly large percentage of the batch's tokens to the expert residing on GPU 0. While the NVSwitch has massive aggregate bandwidth, each individual GPU is limited to its physical ingress link (450 GB/s unidirectional for H100). GPUs 1-7 are all trying to send data to GPU 0 simultaneously, bottlenecking on GPU 0's Rx port. The solution is to implement an auxiliary load-balancing loss function in the model training to penalize unbalanced expert assignment, or enforce strict expert capacity limits (token dropping) to guarantee uniform traffic distribution.
+  realistic_solution: |
+    The root cause is severe load imbalance in expert assignment, leading to NVSwitch port contention. In this MoE configuration, the gating network routes an overwhelmingly large percentage of the batch's tokens to the expert residing on GPU 0. While the NVSwitch has massive aggregate bandwidth, each individual GPU is limited to its physical ingress link (450 GB/s unidirectional for H100). GPUs 1-7 are all trying to send data to GPU 0 simultaneously, bottlenecking on GPU 0's Rx port. The solution is to implement an auxiliary load-balancing loss function in the model training to penalize unbalanced expert assignment, or enforce strict expert capacity limits (token dropping) to guarantee uniform traffic distribution.
   common_mistake: |
     **The Pitfall:** Assuming the hardware is faulty or that NCCL is routing over PCIe.
     **The Rationale:** Engineers look at high latency and poor utilization on GPUs 1-7 and conclude the network switch must be failing or thermally throttling.
     **The Consequence:** Submitting spurious hardware tickets while entirely missing the software-driven MoE routing skew that is completely destroying their scaling efficiency.
   napkin_math: |
-    1. Total batch size = 4GB (0.5GB per GPU). Unidirectional bandwidth = 450 GB/s.
-    2. Perfectly balanced: GPU 0 receives 1/8th from 7 GPUs ≈ 0.43GB. Time = 0.43GB / 450 GB/s = 0.95ms.
-    3. Highly unbalanced (e.g., 85% of tokens to GPU 0): GPU 0 receives 3.4GB.
-    4. **Result: Time = 3.4GB / 450 GB/s = 7.5ms. This perfectly matches the observed ~8ms latency.**
+    - **Bandwidth:** Total batch size = 4GB (0.5GB per GPU). Unidirectional bandwidth = 450 GB/s.
+    - **Perfectly balanced:** GPU 0 receives 1/8th from 7 GPUs ≈ 0.43GB. Time = 0.43GB / 450 GB/s = 0.95ms.
+    - **Highly unbalanced:** (e.g., 85% of tokens to GPU 0): GPU 0 receives 3.4GB.
+    - **Conclusion: Time = 3.4GB / 450 GB/s = 7.5ms. This perfectly matches the observed ~8ms latency.**
 status: archived
 provenance: imported
 requires_explanation: false

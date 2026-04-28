@@ -14,16 +14,14 @@ details:
   realistic_solution: Construct a topology-aware error propagation model. First, intercept gradient norms across the DP=32 ranks *before* the DP AllReduce sync; the isolated DP group with exploding gradients holds the fault. Within that DP group, examine the PP=8 pipeline stages; the earliest stage outputting NaNs restricts the search space to its specific TP=8 group. Finally, within those 8 GPUs, run targeted deterministic fault-injection diagnostics (e.g., multiplying large known matrices) to identify the specific H100 producing the SDC.
   common_mistake: |
     **The Pitfall:** Assuming standard hardware telemetry will trivially flag the bit-flip, or deciding to randomly run diagnostics across all 2048 nodes.
-    
     **The Rationale:** System administrators often overestimate the scope of hardware ECC and blindly trust dashboards, failing to leverage the strict mathematical boundaries of the 3D-parallel topology to narrow the search space.
-    
     **The Consequence:** The team wastes days running exhaustive diagnostics across thousands of GPUs, hemorrhaging millions of dollars in idle cluster time while searching for a needle in a haystack.
   napkin_math: |
-    - **Instant SDC**: A bit-flip on one H100 ALU turns a value to NaN.
-    - **TP Spread**: A Tensor Parallel (TP=8) All-Reduce instantly corrupts 8 local GPUs.
-    - **PP Spread**: The Pipeline Parallel (PP=8) forward/backward pass poisons the remaining 7 downstream stages (56 GPUs total).
-    - **DP Spread**: The Data Parallel (DP=32) collective broadcasts the NaN to 56 * 32 = 1792 GPUs.
-    - **Result**: Within a single <5s iteration, a single faulty ALU successfully brings down **1792 GPUs**, making topology-based traceback the only viable diagnostic.
+    - Instant SDC: A bit-flip on one H100 ALU turns a value to NaN.
+    - TP Spread: A Tensor Parallel (TP=8) All-Reduce instantly corrupts the 8 GPUs in that pipeline stage.
+    - PP Spread: The Pipeline Parallel (PP=8) forward/backward pass propagates the NaN to the remaining 7 stages (56 GPUs), poisoning the entire 64-GPU pipeline.
+    - DP Spread: The Data Parallel (DP=32) gradient All-Reduce broadcasts these NaNs to the other 31 pipeline replicas (64 * 31 = 1984 GPUs).
+    - **Result: Within a single iteration, a single faulty ALU brings down all 2048 GPUs, making topology-based traceback the only viable diagnostic.**
 status: published
 provenance: imported
 requires_explanation: false

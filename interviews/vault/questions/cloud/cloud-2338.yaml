@@ -11,21 +11,22 @@ title: Die-to-Die Interconnect Bottleneck in Chiplet ASICs
 scenario: Evaluating a next-gen cloud accelerator composed of 4 identical compute chiplets integrated via a 2.5D silicon interposer. Workload A (a massive element-wise GeLU) achieves 800 TFLOPS. Workload B (a large Matrix Multiply requiring global reductions across the M dimension) only achieves 120 TFLOPS, despite having identical theoretical FLOP counts. The package power draw spikes near the chip edges.
 question: Why does the chiplet accelerator run GeLU at 800 TFLOPS but the reduction-heavy GEMM at 120 TFLOPS, and how should GEMM be partitioned?
 details:
-  realistic_solution: 'Workload A (element-wise GeLU) requires zero inter-chiplet communication — each chiplet processes its local partition independently at full throughput. Workload B (GEMM partitioned along the reduction dimension K) requires partial-sum reduction across all 4 chiplets via the D2D interposer. Each partial sum is 512 MB, and the ring AllReduce across 4 chiplets takes 15-30 ms depending on effective D2D bandwidth (50 GB/s nominal, but reduced by protocol overhead, contention, and synchronization). Combined with compute time (~11 ms), the total time reaches ~50-73 ms, yielding only 120-170 TFLOPS effective — far below the 800 TFLOPS peak. The edge power spikes from D2D PHY drivers at the chiplet boundaries. Fix: repartition the GEMM along M or N dimensions so each chiplet computes complete output rows/columns without cross-chiplet reduction.'
+  realistic_solution: |
+    Workload A (element-wise GeLU) requires zero inter-chiplet communication — each chiplet processes its local partition independently at full throughput. Workload B (GEMM partitioned along the reduction dimension K) requires partial-sum reduction across all 4 chiplets via the D2D interposer. Each partial sum is 512 MB, and the ring AllReduce across 4 chiplets takes 15-30 ms depending on effective D2D bandwidth (50 GB/s nominal, but reduced by protocol overhead, contention, and synchronization). Combined with compute time (~11 ms), the total time reaches ~50-73 ms, yielding only 120-170 TFLOPS effective — far below the 800 TFLOPS peak. The edge power spikes from D2D PHY drivers at the chiplet boundaries. Fix: repartition the GEMM along M or N dimensions so each chiplet computes complete output rows/columns without cross-chiplet reduction.
   common_mistake: |
     **The Pitfall:** Assuming Workload B is bound by external HBM bandwidth or lacks compute parallelization.
     **The Rationale:** Engineers usually look to DRAM bandwidth or core utilization as the primary bottlenecks for GEMMs.
     **The Consequence:** Misdiagnosing the D2D interconnect as sufficient and failing to repartition the matrix along non-reducing dimensions (M or N) to avoid inter-chiplet traffic entirely.
   napkin_math: |
     - **Workload B Setup (GEMM):** 16K x 16K x 16K FP16.
-    - **Total FLOPs:** $2 \times 16384^3 \approx 8.8$ TFLOPs.
+    - **Total FLOPs:** 2 * 16384^3 ≈ 8.8 TFLOPs.
     - **Per-Chiplet Compute:** Partitioned across 4 chiplets -> 2.2 TFLOPs per chiplet.
-    - **Compute Time:** 2.2 TFLOPs / 200 TFLOPS = **11.0 ms**.
+    - **Compute Time:** 2.2 TFLOPs / 200 TFLOPS = 11.0 ms.
     - **Reduction Requirement:** 16K x 16K x 2 bytes = 512 MB partial sums.
-    - **Ring AllReduce Time:** $2 \times (3/4) \times 512$ MB / 50 GB/s = **15.4 ms**.
-    - **Effective Throughput:** (Compute 11ms + Comm 15.4ms) = 26.4 ms -> 8.8 TFLOPs / 0.0264s = **~333 TFLOPS**.
+    - **Ring AllReduce Time:** 2 * (3/4) * 512 MB / 50 GB/s = 15.4 ms.
+    - **Effective Throughput:** (Compute 11ms + Comm 15.4ms) = 26.4 ms -> 8.8 TFLOPs / 0.0264s = ~333 TFLOPS.
     - **Real-World Overhead:** With sync overheads and lower effective D2D bandwidth (~20 GB/s), total time stretches to ~73 ms.
-    - **Final Throughput:** 8.8 TFLOPs / 0.073s = **~120 TFLOPS**.
+    - **Conclusion: 8.8 TFLOPs / 0.073s = ~120 TFLOPS, verifying the massive performance collapse caused by the D2D interconnect.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -34,12 +35,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The compute time calculation is off by 1000x (10.6 milliseconds, not microseconds), which invalidates
-  the conclusion that D2D is the bottleneck.
-- The final TFLOPS calculation is also incorrect; 8.5e12 FLOPs in 500us would be 17,000 TFLOPS, not 17
-  TFLOPS.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

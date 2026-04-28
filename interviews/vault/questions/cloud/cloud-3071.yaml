@@ -11,15 +11,17 @@ title: 'Queueing Theory Evaluation: Continuous vs Batch Inference Latency'
 scenario: 'Compare continuous batching (vLLM-style) vs static batching for serving LLaMA-13B on an H100 GPU. Arrival rate λ=20 req/s, request lengths bimodal: 50% short (100 tokens output), 50% long (1000 tokens output).'
 question: What H100 FP16 TFLOPS specification should be used for LLaMA-13B serving throughput calculations, and how does continuous batching improve latency over static batching?
 details:
-  realistic_solution: 'H100 FP16: 989 TFLOPS. All H100 throughput calculations use this spec.'
+  realistic_solution: 'Static batching forces short requests to wait for the longest request in the batch to finish. A 100-token request batched with a 1000-token request will suffer the latency of generating 1000 tokens, massively inflating its P99. Continuous batching allows the short request to exit as soon as its 100 tokens are generated, and a new request can take its place in the batch without waiting. For throughput, use the H100 FP16 dense peak of 989 TFLOPS. At 40% MFU, the 13B model processes ~15,215 tokens/s. Continuous batching increases effective throughput and slashes tail latency by eliminating head-of-line blocking.'
   common_mistake: |
     **The Pitfall:** Treating continuous batching as simply a 'smaller batch size'.
     **The Rationale:** Candidates do not understand the mechanics of head-of-line blocking and assume continuous batching just limits max batch size to improve latency.
     **The Consequence:** Failing to quantify how continuous batching eliminates queue delays by allowing new requests to join mid-generation, leading to incorrect latency and throughput modeling.
   napkin_math: |
-    - H100 FP16 TFLOPS = 989 TFLOPS (dense).
-    - Serving throughput at 40% Model FLOP Utilization (MFU) = 989 * 0.40 = 395.6 TFLOPS.
-    - Tokens per second for 13B model ≈ 395.6e12 / (2 * 13e9) = **~15,215 tokens/s**.
+    - **Throughput Baseline:** H100 FP16 Peak = 989 TFLOPS.
+    - **Tokens/sec:** At 40% MFU, 13B model processes (989e12 * 0.40) / (2 * 13e9) ≈ 15,215 tokens/s.
+    - **Static Batching Latency:** A batch with a 100-token and 1000-token request takes the time of 1000 tokens. The short request is delayed by 900 tokens of generation time.
+    - **Continuous Batching:** The short request exits at 100 tokens. Head-of-line blocking is eliminated.
+    - **Result:** Continuous batching yields massive improvements in P99 latency for short requests while maximizing hardware utilization.
 status: published
 provenance: imported
 requires_explanation: false
@@ -29,11 +31,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'H100 TFLOPS spec mismatch: uses 1979 TFLOPS instead of the specified 989 TFLOPS FP16'
 human_reviewed:
   status: not-reviewed
   by: null

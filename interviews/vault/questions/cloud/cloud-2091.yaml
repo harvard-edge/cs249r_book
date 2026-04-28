@@ -11,16 +11,22 @@ title: Prefill vs Decode Compute Profile
 scenario: During LLM inference, the prefill phase processes the entire prompt and the decode phase generates tokens one at a time.
 question: Why is LLM prefill compute-bound while decode is memory-bandwidth-bound when viewed through arithmetic intensity?
 details:
-  realistic_solution: 'Prefill: processes all $S$ prompt tokens in one batched matrix multiply. For a weight matrix $W$ of size $d \times d$, it computes $X_{S \times d} \cdot W_{d \times d}$ — each weight is reused $S$ times. Arithmetic intensity: $2Sd^2 / (S \cdot d + d^2) \cdot$ bytes $\approx 2d / (1 + d/S)$ FLOPs/byte — very high for large $S$, compute-bound. Decode: processes 1 token, computing $x_{1 \times d} \cdot W_{d \times d}$ — a matrix-vector product. Each weight is used exactly once. AI: $2d^2$ FLOPs / $2d^2$ bytes (in FP16) = $1$ FLOP/byte — deeply memory-bound.'
+  realistic_solution: 'Prefill: processes all $S$ prompt tokens in one batched matrix multiply. For a weight matrix $W$ of size $d \times d$, it computes $X_{S \times d} \cdot W_{d \times d}$. Arithmetic intensity: $\approx 2Sd^2 / 2d^2 = S$ FLOPs/byte for large $d$ — very high for large $S$, compute-bound. Decode: processes 1 token, computing $x_{1 \times d} \cdot W_{d \times d}$ — a matrix-vector product. Each weight is used exactly once. AI: $2d^2$ FLOPs / $2d^2$ bytes (in FP16) = $1$ FLOP/byte — deeply memory-bound.'
   common_mistake: |
     **The Pitfall:** Thinking both phases share the same bottleneck because they execute the same neural network architecture.
     **The Rationale:** Engineers assume that if the weights and operations are identical, the system profiling must be identical.
     **The Consequence:** Applying the wrong optimization strategies (like trying to improve GPU FLOPS for a decoding pipeline that desperately needs memory bandwidth).
   napkin_math: |
-    1. Prefill (S=2048): Arithmetic Intensity (AI) ≈ 2*S*d^2 / (d^2*2 bytes) ≈ S = 2048 FLOPs/byte.
-    2. Since 2048 > typical ridge point (e.g., A100 is 156 FLOPs/byte), prefill is strictly compute-bound.
-    3. Decode (S=1): AI ≈ 2*1*d^2 / (d^2*2 bytes) = 1 FLOP/byte.
-    4. **Result: 1 < 156 FLOPs/byte, leaving decode entirely bottlenecked by HBM bandwidth.**
+    - **Prefill (S=2048):**
+      - FLOPs: `2 * S * d^2`.
+      - Memory Bytes (FP16): Weights `2 * d^2`, Input/Output `4 * S * d`. Total $\approx$ `2d^2` for large $d$.
+      - Arithmetic Intensity (AI) $\approx \frac{2Sd^2}{2d^2} = S$. For $S=2048$, AI is ~2048 FLOPs/byte.
+      - Since 2048 > typical ridge point (e.g., A100 is 156 FLOPs/byte), prefill is strictly compute-bound.
+    - **Decode (S=1):**
+      - FLOPs: `2 * 1 * d^2`.
+      - Memory Bytes: Weights `2 * d^2`.
+      - AI $\approx \frac{2d^2}{2d^2} = 1$ FLOP/byte.
+    - **Result:** **1 < 156 FLOPs/byte, leaving decode entirely bottlenecked by HBM bandwidth.**
 status: published
 provenance: imported
 requires_explanation: false

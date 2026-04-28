@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The Leaking Inference Server
-scenario: Your team runs a 13B model on GPUs for long-running inference sessions. After ~6 hours of continuous serving, `nvidia-smi` shows VRAM usage has crept from 32 GB to 74 GB, and the next request triggers an OOM kill. Restarting the process fixes it for another 6 hours. The model weights haven't changed.
+scenario: Your team runs a 13B model on GPUs for long-running inference sessions. After ~6 hours of continuous serving, `nvidia-smi` shows VRAM usage has crept from 32 GB to ~80 GB, and the next request triggers an OOM kill. Restarting the process fixes it for another 6 hours. The model weights haven't changed.
 question: What is leaking and how do you find it?
 details:
   realistic_solution: 'The leak is almost certainly in the KV-cache allocator. Most serving frameworks pre-allocate a KV-cache pool, but when requests are cancelled mid-generation (client disconnects, timeouts), the allocated KV-cache blocks may not be returned to the free pool. Each orphaned block holds memory proportional to the sequence length and number of layers. Over thousands of cancelled requests, these orphaned blocks accumulate. A secondary source is CUDA graph capture: if the framework re-captures CUDA graphs for new input shapes (dynamic batching with varying sequence lengths), each captured graph allocates a private workspace that is never freed. Diagnosis: use `torch.cuda.memory_stats()` to track `allocated_bytes.all.current` vs `reserved_bytes.all.current` — a growing gap between reserved and allocated indicates fragmentation or leaks in the caching allocator. For the KV-cache specifically, instrument the block manager to log allocations and frees, then diff them.'

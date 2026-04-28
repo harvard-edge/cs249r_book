@@ -11,15 +11,16 @@ title: Diagnosing I/O Bottlenecks in Stochastic Data Loading
 scenario: You are training a large vision model on an 8xA100 node with a 128-core AMD EPYC CPU. The training data consists of 50 million high-resolution images stored on a local NVMe RAID array. Despite the storage array being capable of 25 GB/s sequential reads, your data loading pipeline is only achieving 2 GB/s, starving the GPUs (utilization at 45%). System profiling shows high CPU I/O wait times and near-zero page cache hit rates. You are using standard PyTorch Datasets reading individual files with `shuffle=True`.
 question: What is causing the 2 GB/s data-loader throughput despite 25 GB/s NVMe reads, and how would you fix it?
 details:
-  realistic_solution: The bottleneck is the fundamental violation of spatial locality caused by stochastic data sampling, which renders OS readahead and page caching completely ineffective. The solution is to pre-shuffle data into contiguous coarse-grained chunks (e.g., using WebDataset or TFRecords format) to convert highly random, small I/O requests into massive sequential reads.
+  realistic_solution: |
+    The bottleneck is the fundamental violation of spatial locality caused by stochastic data sampling, which renders OS readahead and page caching completely ineffective. The solution is to pre-shuffle data into contiguous coarse-grained chunks (e.g., using WebDataset or TFRecords format) to convert highly random, small I/O requests into massive sequential reads.
   common_mistake: |
     **The Pitfall:** Assuming the storage hardware is failing or adding more data loader workers will fix the issue.
     **The Rationale:** Engineers often try to scale read throughput arbitrarily without addressing the underlying disk access pattern.
     **The Consequence:** The GPUs remain starved, and I/O latency stays high.
   napkin_math: |
-    - 1. **Random Reads:** An NVMe array doing random 4KB reads hits a wall at ~1M IOPS (theoretical 4GB/s, practical ~2GB/s due to OS overhead).
-    - 2. **Sequential Reads:** Chunking 1000 images into 100MB shards changes the access pattern.
-    - 3. **Throughput:** Sequential reading of 100MB chunks hits the **25GB/s sequential limit**, satisfying the 10GB/s total consumption rate required by the 8xA100s.
+    - 1. **Random Reads:** Reading individual small files stochastically incurs massive OS metadata overhead and read-ahead cache misses, capping practical throughput around ~2 GB/s regardless of raw SSD speed.
+    - 2. **Sequential Reads:** Chunking images into 100MB shards (e.g., WebDataset) changes the access pattern from stochastic IOPS to bandwidth-bound sequential reads.
+    - 3. **Throughput:** Sequential reading of large chunks bypasses the IOPS bottleneck, easily hitting the **25 GB/s sequential limit** and satisfying the 10 GB/s total consumption rate required by the 8xA100s.
 status: published
 provenance: imported
 requires_explanation: false

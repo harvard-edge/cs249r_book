@@ -11,16 +11,16 @@ title: Memory Capacity Planning for Concurrent RAG Agents on H100
 scenario: You are deploying a compound AI system on a single H100 node (8x H100 80GB, NVLink) where 16 concurrent agent sessions each run a 13B LLM plus a shared 7B reranker. Each agent session holds 8192-token KV cache. The 13B model in bf16 requires 26GB weights, the 7B reranker requires 14GB weights.
 question: Do the 16 concurrent 13B agent sessions plus shared 7B reranker fit on one 8xH100 node, and how would you allocate memory with tensor parallelism?
 details:
-  realistic_solution: 'Per 13B model shard across 4 GPUs: 26GB/4=6.5GB weights per GPU. Per 7B reranker shard across 2 GPUs: 14GB/2=7GB per GPU. KV cache per session for 13B (40 layers, 128 head_dim, bf16): 2*40*128*2*8192=167MB per session. 16 sessions: 16*167MB=2.67GB. Total per GPU on 13B shards: 6.5+0.67+activation=~9GB. Feasible on 80GB. Reranker GPUs: 7GB weights + batch KV for concurrent reranks. NVLink enables all-reduce across shards at 600GB/s.'
+  realistic_solution: 'Per 13B model shard across 4 GPUs: 26GB/4=6.5GB weights per GPU. Per 7B reranker shard across 2 GPUs: 14GB/2=7GB per GPU. KV cache per session for 13B (40 layers, 1 KV head, 128 head_dim, bf16): 2*40*1*128*2*8192=167MB per session. 16 sessions: 16*167MB=2.67GB. Total per GPU on 13B shards: 6.5+0.67+activation=~9GB. Feasible on 80GB. Reranker GPUs: 7GB weights + batch KV for concurrent reranks. NVLink enables all-reduce across shards at 600GB/s.'
   common_mistake: |
     **The Pitfall:** Forgetting to account for KV cache memory when planning model parallelism.
     **The Rationale:** Teams focus exclusively on allocating GPU memory for model weights and activation memory.
     **The Consequence:** Overloading the node by failing to realize that many concurrent sessions with large KV caches can consume more memory than the model weights themselves.
   napkin_math: |
     - 13B model weights (bf16): 13B * 2 bytes = 26GB. Tensor parallel across 4 GPUs = 6.5GB/GPU.
-    - KV per session: 2(K+V) * 40 layers * 128 dim * 2 bytes * 8192 tokens ≈ 160MB.
-    - 16 concurrent sessions: 2.56GB KV total, distributed across 4 GPUs = 640MB/GPU.
-    - Total per GPU for 13B shard: 6.5GB (weights) + 0.64GB (KV) + 2GB (activations) = ~9.14GB.
+    - KV per session: 2(K+V) * 40 layers * 1 KV head * 128 dim * 2 bytes * 8192 tokens \approx 167MB.
+    - 16 concurrent sessions: 2.67GB KV total, distributed across 4 GPUs = ~667MB/GPU.
+    - Total per GPU for 13B shard: 6.5GB (weights) + 0.67GB (KV) + 2GB (activations) = ~9.17GB.
     - **With 70GB headroom remaining per GPU, and the 7B reranker needing only 7GB/GPU, the entire compound system easily fits on the node.**
 status: published
 provenance: imported

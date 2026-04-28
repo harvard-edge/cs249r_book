@@ -8,19 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing DLRM Embedding Lookup Bottlenecks
-scenario: Your team deploys a Deep Learning Recommendation Model (DLRM) to a single A100 (80GB HBM2e, 2 TB/s bandwidth) instance. The model contains a 40GB embedding table in FP16. Each inference request requires 250 sparse embedding lookups. Despite batching aggressively (batch size 2048), the GPU SM compute utilization stays below 5%, and end-to-end throughput is severely capped.
-question: "What is the fundamental root cause of this performance ceiling, and why doesn't increasing the batch size fix the SM utilization?"
+scenario: Your team deploys a Deep Learning Recommendation Model (DLRM) to a single A100 (80GB HBM2e, 2 TB/s bandwidth) instance. The model contains a 40GB embedding table of 128-dimensional FP16 vectors. Each inference request requires 250 sparse embedding lookups. Despite batching aggressively (batch size 2048), the GPU SM compute utilization stays below 5%, and end-to-end throughput is severely capped.
+question: Why doesn't increasing the batch size fix the SM utilization, and what is the fundamental root cause of this performance ceiling?
 details:
-  realistic_solution: The root cause is that sparse embedding lookups have an arithmetic intensity of zero and utilize random memory accesses. The workload is entirely bottlenecked by HBM latency and effective memory bandwidth, not compute. You must diagnose this via the Roofline model and solve it by implementing fused embedding kernels (e.g., FBGEMM or HugeCTR) to coalesce memory reads, or by shrinking the table via feature hashing/quantization to improve L2 cache hit rates.
+  realistic_solution: |
+    The root cause is that sparse embedding lookups have an arithmetic intensity of zero and utilize random memory accesses. The workload is entirely bottlenecked by HBM latency and effective memory bandwidth, not compute. You must diagnose this via the Roofline model and solve it by implementing fused embedding kernels (e.g., FBGEMM or HugeCTR) to coalesce memory reads, or by shrinking the table via feature hashing/quantization to improve L2 cache hit rates.
   common_mistake: |
     **The Pitfall:** Assuming low SM utilization is caused by CPU-GPU transfer overhead or insufficient batch size.
     **The Rationale:** Engineers are accustomed to scaling batch sizes to saturate matrix multiplication units for dense models.
     **The Consequence:** Efforts are wasted on increasing batch sizes, which does not solve the underlying random memory access bottleneck of embeddings.
   napkin_math: |
-    *   **Memory per Lookup:** 128 dims $\times$ 2 bytes (FP16) = 256 bytes. FLOPs = 0.
-    *   **Arithmetic Intensity:** 0 FLOPs / 256 bytes = 0 FLOPs/Byte.
-    *   **A100 Roofline:** Ridge point is ~150 FLOPs/Byte.
-    *   **Result:** **With an AI of 0, the workload is completely memory-bound. Uncoalesced random reads drop effective HBM bandwidth well below the 2 TB/s peak, keeping SMs starved.**
+    - **Memory per Lookup:** 128 dims × 2 bytes (FP16) = 256 bytes. FLOPs = 0.
+    - **Arithmetic Intensity:** 0 FLOPs / 256 bytes = 0 FLOPs/Byte.
+    - **A100 Roofline:** Ridge point is ~150 FLOPs/Byte.
+    - **Result:** **With an AI of 0, the workload is completely memory-bound. Uncoalesced random reads drop effective HBM bandwidth well below the 2 TB/s peak, keeping SMs starved.**
 status: published
 provenance: imported
 requires_explanation: false

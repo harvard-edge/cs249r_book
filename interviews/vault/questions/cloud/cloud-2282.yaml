@@ -11,7 +11,8 @@ title: The Activation Sparsity Mirage in MoE
 scenario: A Mixture-of-Experts (MoE) model with 8 experts (top-2 routing) has extremely high per-token activation sparsity, with 75% of expert parameters inactive per token. A systems engineer proposes only loading the 2 active experts' weights into GPU memory per token, keeping the other 6 experts in CPU DRAM. In production serving with continuous batching at 200 QPS, this approach causes P99 latency to spike to 5x the baseline.
 question: Why does offloading inactive MoE experts to CPU DRAM cause 5x P99 latency in continuous batching at 200 QPS?
 details:
-  realistic_solution: 'The sparsity is per-token, not per-batch. With continuous batching at 200 QPS and batch sizes of 32-64 tokens, every batch contains tokens routed to different experts. With top-2 routing across 8 experts, the probability that all 8 experts are needed in a batch of just 20 tokens is already >99% (birthday problem: each token independently picks 2 of 8 experts). So the ''sparse'' MoE is effectively dense at the batch level. The CPU-offloading scheme must load all 8 experts from DRAM for nearly every batch, incurring PCIe transfer latency (~12 GB/s on PCIe Gen4) per batch. For a model where each expert is 10B parameters (20 GB in FP16), loading 6 experts from CPU DRAM = 120 GB / 12 GB/s = 10 seconds per batch — catastrophic. The correct approach is to keep all expert weights resident in GPU HBM (or shard across multiple GPUs using expert parallelism) and exploit the activation sparsity purely for compute savings (only running 2 expert forward passes per token), not memory savings.'
+  realistic_solution: |
+    The sparsity is per-token, not per-batch. With continuous batching at 200 QPS and batch sizes of 32-64 tokens, every batch contains tokens routed to different experts. With top-2 routing across 8 experts, the probability that all 8 experts are needed in a batch of just 20 tokens is already >99% (birthday problem: each token independently picks 2 of 8 experts). So the 'sparse' MoE is effectively dense at the batch level. The CPU-offloading scheme must load all 8 experts from DRAM for nearly every batch, incurring PCIe transfer latency (~12 GB/s on PCIe Gen4) per batch. For a model where each expert is 10B parameters (20 GB in FP16), loading 6 experts from CPU DRAM = 120 GB / 12 GB/s = 10 seconds per batch — catastrophic. The correct approach is to keep all expert weights resident in GPU HBM (or shard across multiple GPUs using expert parallelism) and exploit the activation sparsity purely for compute savings (only running 2 expert forward passes per token), not memory savings.
   common_mistake: |
     **The Pitfall:** Conflating per-token sparsity with per-batch sparsity.
     **The Rationale:** Candidates think "if each token only uses 2 of 8 experts, we only need to load 2 experts at a time," completely ignoring what happens when hundreds of tokens are batched together.
@@ -23,7 +24,7 @@ details:
     4. Probability an expert is NOT picked by ANY token in the batch = (0.75)^32 ≈ 0.0001.
     5. Probability ALL 8 experts are needed = (1 - 0.0001)^8 ≈ 99.9%.
     6. Loading 6 experts (e.g., 20GB each in FP16) from CPU DRAM over PCIe Gen4 (12 GB/s): 120 GB / 12 GB/s = 10 seconds per batch.
-    7. **Activation sparsity is effectively 0% at the batch level, causing a massive 10-second PCIe bottleneck per step.**
+    7. **Result: Activation sparsity is effectively 0% at the batch level, causing a massive 10-second PCIe bottleneck per step.**
 status: published
 provenance: imported
 requires_explanation: false

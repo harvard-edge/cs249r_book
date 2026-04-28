@@ -11,7 +11,8 @@ title: INT4 KV Cache Group Size Architecture
 scenario: To serve a 70B model with a massive batch size, you implement INT4 KV cache, shrinking the cache from 80GB to 20GB. Per-channel quantization (quantizing across the sequence dimension for each head) yields terrible perplexity. Changing to 'group size 128' quantization fixes the perplexity but increases memory overhead by 5%.
 question: Why does per-channel quantization fail for KV caches, and how does grouped quantization fix it?
 details:
-  realistic_solution: In KV caching, the sequence dimension grows dynamically, and attention involves comparing tokens across time. Outliers do not just occur in specific feature channels; they also occur at specific token positions (e.g., punctuation or start-of-sequence tokens). If you quantize an entire channel across a long sequence length (e.g., 4096 tokens) using a single scale factor, one temporal outlier in that channel will force a massive scale factor, crushing the precision of the other 4095 tokens in that channel into the tiny 16-value INT4 space. Grouped quantization (e.g., group size 128) breaks the sequence into smaller chunks, calculating a new scale factor every 128 tokens, localizing the destructive impact of temporal outliers.
+  realistic_solution: |
+    In KV caching, the sequence dimension grows dynamically, and attention involves comparing tokens across time. Outliers do not just occur in specific feature channels; they also occur at specific token positions (e.g., punctuation or start-of-sequence tokens). If you quantize an entire channel across a long sequence length (e.g., 4096 tokens) using a single scale factor, one temporal outlier in that channel will force a massive scale factor, crushing the precision of the other 4095 tokens in that channel into the tiny 16-value INT4 space. Grouped quantization (e.g., group size 128) breaks the sequence into smaller chunks, calculating a new scale factor every 128 tokens, localizing the destructive impact of temporal outliers.
   common_mistake: |
     **The Pitfall:** Treating KV cache quantization exactly like weight quantization.
     **The Rationale:** Engineers assume that because per-channel quantization works well for static weights, it will work for activations, ignoring the dynamic, temporal nature of outliers in sequences.
@@ -20,7 +21,7 @@ details:
     1. **INT4 Range:** 16 bins, typically [-8, 7].
     2. **Per-Channel Outlier Impact:** If the max value in 4096 tokens is 40.0, scale = 40/7 = 5.7. A normal token value of 2.0 quantizes to round(2.0/5.7) = 0, destroying information.
     3. **Grouped Quantization:** Breaking into groups of 128 isolates the outlier. A normal group max might be 3.5. Scale = 3.5/7 = 0.5.
-    4. **Result:** The 2.0 token quantizes to 4, preserving the signal. The 5% memory overhead comes from storing **separate scale factors for every 128 tokens**.
+    4. **Result:** **The 2.0 token quantizes to 4, preserving the signal. The 5% memory overhead comes from storing separate scale factors for every 128 tokens.**
 status: published
 provenance: imported
 requires_explanation: false

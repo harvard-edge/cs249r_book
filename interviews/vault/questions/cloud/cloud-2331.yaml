@@ -8,10 +8,11 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: 'MoE Interconnect Bottleneck on TPU Pods'
-scenario: 'You are training a 1.2T parameter Mixture of Experts (MoE) model (64 experts) on a TPU v5e Pod (256 chips). Symptom: Model Flop Utilization (MFU) is stuck at 15%. Profiling shows 65% of step time is spent in `all-to-all` communication. The batch size per chip is 16, sequence length is 2048, and hidden dimension is 8192.'
-question: 'Why is MFU stuck at 15% for the 1.2T MoE on TPU v5e, and how would you redesign MoE routing and parallelism?'
+scenario: You are training a 1.2T parameter Mixture of Experts (MoE) model (64 experts) on a TPU v5e Pod (256 chips). Symptom: Model Flop Utilization (MFU) is stuck at 15%. Profiling shows 65% of step time is spent in `all-to-all` communication. The batch size per chip is 16, sequence length is 2048, and hidden dimension is 8192.
+question: Why is MFU stuck at 15% for the 1.2T MoE on TPU v5e, and how would you redesign MoE routing and parallelism?
 details:
-  realistic_solution: 'The cause is a severe hardware-algorithm mismatch: the all-to-all communication required for MoE token routing is bottlenecked by the TPU''s Inter-Core Interconnect (ICI) bandwidth and the small batch size per expert. With 64 experts and a global batch size of 4096 (256*16), each expert only receives ~64 sequences per step. The small payload size fails to saturate the ICI bandwidth, dominated instead by latency and packet headers. The solution is co-design: 1) Increase the global batch size using gradient accumulation or sequence parallelism to increase tokens-per-expert. 2) Implement Expert Parallelism combined with Tensor Parallelism to keep expert routing localized within high-bandwidth torus links (e.g., 4-way TP, 16-way EP). 3) Introduce capacity factors to drop tokens and cap the maximum all-to-all payload size, making communication time deterministic.'
+  realistic_solution: |
+    The cause is a severe hardware-algorithm mismatch: the all-to-all communication required for MoE token routing is bottlenecked by the TPU's Inter-Core Interconnect (ICI) bandwidth and the small batch size per expert. With 64 experts and a global batch size of 4096 (256*16), each expert only receives ~64 sequences per step. The small payload size fails to saturate the ICI bandwidth, dominated instead by latency and packet headers. The solution is co-design: 1) Increase the global batch size using gradient accumulation or sequence parallelism to increase tokens-per-expert. 2) Implement Expert Parallelism combined with Tensor Parallelism to keep expert routing localized within high-bandwidth torus links (e.g., 4-way TP, 16-way EP). 3) Introduce capacity factors to drop tokens and cap the maximum all-to-all payload size, making communication time deterministic.
   common_mistake: |
     **The Pitfall:** Assuming the issue is memory bandwidth and trying to implement FlashAttention or ZeRO-3.
     **The Rationale:** Candidates jump to standard dense LLM optimization techniques without analyzing the specific networking pattern of sparse MoE models.
@@ -20,9 +21,9 @@ details:
     - **Tokens per chip**: 16 × 2048 = 32,768.
     - **Tokens per expert**: Assuming uniform routing, 32,768 / 64 = 512.
     - **Payload per connection**: 512 × 8192 (dim) × 2 bytes (BF16) = ~8.38 MB.
-    - **Total sent per chip**: 64 peer-to-peer connections of 8.38 MB = **536 MB**.
-    - **Theoretical transfer time**: 536 MB / 400 GB/s (TPU v5e ICI bandwidth) = **1.34 ms**.
-    - **Actual time**: Contention and multi-hop routing spike time to **>3ms per layer**, dominating the ~0.5ms compute time.
+    - **Total sent per chip**: 64 peer-to-peer connections of 8.38 MB = 536 MB.
+    - **Theoretical transfer time**: 536 MB / 400 GB/s (TPU v5e ICI bandwidth) = 1.34 ms.
+    - **Result**: **Actual time: Contention and multi-hop routing spike time to >3ms per layer, dominating the ~0.5ms compute time.**
 status: published
 provenance: imported
 requires_explanation: false

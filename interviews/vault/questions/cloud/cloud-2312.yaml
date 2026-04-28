@@ -8,19 +8,20 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Periodic Latency Spikes in Feature Store
-scenario: "In our real-time fraud detection pipeline, features flow via Kafka -> Flink -> Redis. Base ingestion latency is 15ms. However, exactly every 5 minutes, P99 latency spikes to 3000ms, causing fraud prediction timeouts (SLA: 100ms) at our peak load of 100,000 events/sec."
+scenario: In our real-time fraud detection pipeline, features flow via Kafka -> Flink -> Redis. Base ingestion latency is 15ms. However, exactly every 5 minutes, P99 latency spikes to 3000ms, causing fraud prediction timeouts (SLA: 100ms) at our peak load of 100,000 events/sec.
 question: "What is causing the 5-minute 3000ms latency spikes in the Kafka-Flink-Redis pipeline, and how would you eliminate them?"
 details:
-  realistic_solution: "The symptom of highly periodic, massive latency spikes in a streaming system almost always points to background maintenance tasks blocking the main execution thread. Given the Kafka->Flink->Redis architecture, the 5-minute interval strongly correlates with Redis BGSAVE (RDB snapshotting) or Flink checkpointing. At 100,000 writes/sec, a Redis BGSAVE triggers a fork. The heavy write volume causes massive copy-on-write page faults, saturating memory bandwidth and blocking Redis's single-threaded event loop. To resolve this, we must disable BGSAVE on the master node handling ingestion. Persistence should be delegated to a read-replica, or shifted to Append-Only File (AOF) with incremental fsync. Additionally, modifying Flink to write to Redis in micro-batches (pipelines) rather than row-by-row reduces network round-trips and CPU interrupts."
+  realistic_solution: |
+    The symptom of highly periodic, massive latency spikes in a streaming system almost always points to background maintenance tasks blocking the main execution thread. Given the Kafka->Flink->Redis architecture, the 5-minute interval strongly correlates with Redis BGSAVE (RDB snapshotting) or Flink checkpointing. At 100,000 writes/sec, a Redis BGSAVE triggers a fork. The heavy write volume causes massive copy-on-write page faults, saturating memory bandwidth and blocking Redis's single-threaded event loop. To resolve this, we must disable BGSAVE on the master node handling ingestion. Persistence should be delegated to a read-replica, or shifted to Append-Only File (AOF) with incremental fsync. Additionally, modifying Flink to write to Redis in micro-batches (pipelines) rather than row-by-row reduces network round-trips and CPU interrupts.
   common_mistake: |
     **The Pitfall:** Scaling out the Flink cluster by adding more TaskManagers.
     **The Rationale:** Assuming the compute layer is falling behind the Kafka stream because latency is high.
     **The Consequence:** Wasting money on Flink nodes while the true bottleneck (the single-threaded Redis instance blocking on background snapshotting) remains unfixed.
   napkin_math: |
-    *   **Ingestion Rate:** 100,000 events/sec × 1KB/event = 100 MB/s.
-    *   **BGSAVE Memory Modified:** Over a 60-second BGSAVE, 6GB of RAM is written.
-    *   **Copy-On-Write Overhead:** The OS fork forces Redis to duplicate 6GB of RAM pages.
-    *   **Result:** **This heavy memory allocation stalls the single-threaded Redis event loop, causing P99 to spike to 3000ms.**
+    - **Ingestion Rate:** 100,000 events/sec × 1KB/event = 100 MB/s.
+    - **BGSAVE Memory Modified:** Over a 60-second BGSAVE, 6GB of RAM is written.
+    - **Copy-On-Write Overhead:** The OS fork forces Redis to duplicate 6GB of RAM pages.
+    - **Result:** **This heavy memory allocation stalls the single-threaded Redis event loop, causing P99 to spike to 3000ms.**
 status: published
 provenance: imported
 requires_explanation: false

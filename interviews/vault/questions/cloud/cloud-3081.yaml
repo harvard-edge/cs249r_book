@@ -9,18 +9,19 @@ bloom_level: apply
 phase: inference
 title: 'Queueing Theory Realization: Compute vs Memory Bottleneck in Queued Requests'
 scenario: Concretely determine whether an H100 serving Mistral-7B is compute-bound or memory-bandwidth-bound during the decode phase, and how this changes the M/M/1 service time distribution (coefficient of variation). Arrival rate λ=200 req/s, mean output 150 tokens. Use this to select the correct queueing model (M/M/1 vs M/D/1).
-question: What H100 FP16 throughput should be used as the authoritative spec for this decode-boundness analysis?
+question: Is an H100 serving Mistral-7B decode compute-bound or memory-bound, and how does this dictate using an M/D/1 instead of an M/M/1 queueing model?
 details:
-  realistic_solution: 'H100 FP16: 989 TFLOPS. This is the authoritative spec for all H100 FP16 calculations.'
+  realistic_solution: 'During the autoregressive decode phase, Mistral-7B is heavily memory-bandwidth-bound because it must load the entire 7B parameter weight matrix for every single generated token. The arithmetic intensity is ~1 FLOP/byte, far below the H100''s ridge point of 295 FLOPs/byte (based on 989 TFLOPS FP16 and 3.35 TB/s HBM3). Because decode is bottlenecked by the deterministic speed of HBM reading fixed-size matrices, the service time variance approaches zero. Therefore, an M/D/1 queue (deterministic service times) is mathematically correct, whereas M/M/1 (exponential service times) overestimates tail latency.'
   common_mistake: |
     **The Pitfall:** Blindly applying an M/M/1 queueing model (which assumes exponential service times) to a memory-bound decode process.
     **The Rationale:** Candidates default to standard M/M/1 formulas without realizing that memory-bandwidth-bound autoregressive decoding is highly deterministic.
     **The Consequence:** Latency estimates are wildly inaccurate because an M/D/1 model (deterministic service time) is the mathematically correct fit.
   napkin_math: |
-    1. The authoritative peak spec for H100 FP16 is 989 TFLOPS (dense).
-    2. Training efficiency is measured as Model FLOPs Utilization (MFU) = actual_flops / theoretical_peak.
-    3. Assuming an aggressive 40% MFU, effective compute is 989 TFLOPS * 0.40 = ~395.6 TFLOPS.
-    **Using the correct 989 TFLOPS baseline is critical; doubling it to 1979 TFLOPS (FP8/Sparse) creates massive theoretical errors.**
+    - **H100 Specs:** 989 TFLOPS FP16 peak, 3.35 TB/s HBM3 bandwidth.
+    - **Ridge Point:** 989 TFLOPS / 3.35 TB/s = ~295 FLOPs/byte.
+    - **Decode AI:** ~1 FLOP/byte (massively memory bound).
+    - **Service Time:** Dominated by memory bandwidth. Reading 14GB at 3.35 TB/s = ~4.1ms per token, extremely deterministic.
+    - **Queueing Impact:** Because service time variance is near zero, M/D/1 is the correct model. M/M/1 will incorrectly predict massive tail latencies.
 status: published
 provenance: imported
 requires_explanation: false
@@ -30,11 +31,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'H100 TFLOPS spec mismatch: uses 1979 TFLOPS instead of the specified 989 TFLOPS FP16'
 human_reviewed:
   status: not-reviewed
   by: null

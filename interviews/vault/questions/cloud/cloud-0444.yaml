@@ -9,7 +9,7 @@ bloom_level: apply
 phase: both
 title: The Scaling Cliff
 scenario: You are training a 175B LLM across multiple H100 nodes connected by InfiniBand NDR. You observe that scaling from a single node (8 GPUs) to 4 nodes (32 GPUs) gives you a ~2.5x speedup, but scaling further to 8 nodes (64 GPUs) only provides a ~3.2x total speedup over a single node. Your GPU utilization remains high (>90%) across all experiments.
-question: "What is the most likely cause for these diminishing returns?"
+question: What is the most likely cause for these diminishing returns?
 details:
   realistic_solution: The bottleneck is the inter-node communication over InfiniBand. Within a node, the 8 H100s communicate over the ultra-fast 900 GB/s NVLink. When scaling across nodes, the gradients and activations must be synchronized using collective operations (like All-Reduce) over the much slower 50 GB/s InfiniBand network. As more nodes are added, the communication overhead from this network-bound All-Reduce operation starts to dominate the total step time, leading to a sharp drop in scaling efficiency, even though the GPUs are 'busy' participating in the communication.
   common_mistake: |
@@ -17,11 +17,11 @@ details:
     **The Rationale:** Engineers fail to recognize that 'high utilization' can also mean 'busy waiting' during collective communication over a slow network.
     **The Consequence:** Misidentifying the bottleneck and failing to upgrade the network interconnect.
   napkin_math: |
-    1. Calculate intra-node All-Reduce (900 GB/s NVLink): Takes < 1 second for 350 GB gradients.
-    2. Calculate inter-node All-Reduce (200 GB/s InfiniBand): An 8-node transfer of ~612 GB takes > 3 seconds.
-    3. Compare step times: Compute scales linearly, but 3s communication is constant.
-    4. Evaluate 8-node speedup: Time drops from 12.7s to 4.5s, giving only ~2.8x speedup for 8x the hardware.
-    **Final Result: Inter-node InfiniBand communication overhead dominates step time.**
+    1. **Gradient Size:** 175B params × 2 bytes = 350 GB.
+    2. **Intra-node All-Reduce:** With NVLink (900 GB/s), transfer takes < 1 second.
+    3. **Inter-node All-Reduce:** Ring All-Reduce transfers 2 × (N-1)/N × Size per link. For N=8 nodes, 2 × (7/8) × 350 GB = 612.5 GB.
+    4. **Inter-node Time:** At 50 GB/s (InfiniBand NDR), 612.5 GB / 50 GB/s = 12.25 seconds.
+    5. **Conclusion:** **Inter-node InfiniBand communication overhead (~12.25s) dominates step time, leading to severe diminishing returns.**
   options:
   - The model is too large, causing PCIe bus saturation as data is swapped to system RAM.
   - The All-Reduce collective operation is saturating the inter-node InfiniBand network.

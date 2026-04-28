@@ -11,18 +11,19 @@ title: ZeRO-3 Host Offload PCIe Contention
 scenario: You are training a 200B parameter model on a single node with 8x H100s (900 GB/s NVLink) using DeepSpeed ZeRO-3 with CPU NVMe offload. System utilization is 12%, NVLink is 95% idle, and the training step takes 4500ms.
 question: Why are the 8 H100s only 12% utilized with ZeRO-3 CPU offload despite idle NVLink, and what architecture changes would fix it?
 details:
-  realistic_solution: 'The symptom (GPUs idle, NVLink unused, waiting on memory copies) reveals a severe PCIe bottleneck caused by CPU offloading. ZeRO-3 offload stores model parameters in Host CPU RAM (or NVMe). During the forward/backward pass, parameters must be fetched to the GPU immediately before computation. While H100s communicate over ultra-fast NVLink (900 GB/s), fetching from Host RAM traverses the PCIe Gen5 x16 bus, which has a unidirectional theoretical limit of 64 GB/s (often ~50 GB/s effectively). The algorithm is bottlenecked by the host-to-device PCIe bandwidth. Because the prefetching buffer size is likely too small or synchronous, the compute units stall waiting for weights. Co-design solution: Increase the parameter prefetch buffer size to aggressively overlap PCIe transfers with compute, upgrade to an architecture with CXL or Grace-Hopper (NVLink-C2C at 900 GB/s to host memory), or disable CPU offload and distribute the model purely across GPU HBM.'
+  realistic_solution: |
+    The symptom (GPUs idle, NVLink unused, waiting on memory copies) reveals a severe PCIe bottleneck caused by CPU offloading. ZeRO-3 offload stores model parameters in Host CPU RAM (or NVMe). During the forward/backward pass, parameters must be fetched to the GPU immediately before computation. While H100s communicate over ultra-fast NVLink (900 GB/s), fetching from Host RAM traverses the PCIe Gen5 x16 bus, which has a unidirectional theoretical limit of 64 GB/s (often ~50 GB/s effectively). The algorithm is bottlenecked by the host-to-device PCIe bandwidth. Because the prefetching buffer size is likely too small or synchronous, the compute units stall waiting for weights. Co-design solution: Increase the parameter prefetch buffer size to aggressively overlap PCIe transfers with compute, upgrade to an architecture with CXL or Grace-Hopper (NVLink-C2C at 900 GB/s to host memory), or disable CPU offload and distribute the model purely across GPU HBM.
   common_mistake: |
     **The Pitfall:** Assuming NVLink is broken or the CPU lacks compute power.
     **The Rationale:** Misdiagnosing idle GPUs as a software bug rather than a fundamental hardware interconnect bottleneck.
     **The Consequence:** Wasting time tuning optimizer hyperparameters when the only solution is increasing prefetch buffers or migrating to a Grace-Hopper architecture (NVLink-C2C).
   napkin_math: |
-    - **Model Size**: 200B in BF16 = 400 GB.
-    - **Offload Shard**: Each GPU fetches its 50 GB shard from CPU over PCIe.
-    - **PCIe Transfer**: Forward + backward requires 100 GB transfer over a ~50 GB/s PCIe Gen5 bus = **2.0 seconds**.
-    - **Compute Time**: ~1.25 seconds.
-    - **Total Step**: 2.0s + 1.25s = ~3.25s (plus overhead, leading to the observed 4.5s).
-    - **Result**: The system is heavily PCIe-bound. NVLink is idle because the bottleneck is CPU→GPU, not GPU↔GPU.
+    - **Model Size:** 200B in BF16 = 400 GB.
+    - **Offload Shard:** Each GPU fetches its 50 GB shard from CPU over PCIe.
+    - **PCIe Transfer:** Forward + backward requires 100 GB transfer over a ~50 GB/s PCIe Gen5 bus = 2.0 seconds.
+    - **Compute Time:** ~1.25 seconds.
+    - **Total Step:** 2.0s + 1.25s = ~3.25s (plus overhead, leading to the observed 4.5s).
+    - **Conclusion: The system is heavily PCIe-bound. NVLink is idle because the bottleneck is CPU→GPU, not GPU↔GPU.**
 status: published
 provenance: imported
 requires_explanation: false

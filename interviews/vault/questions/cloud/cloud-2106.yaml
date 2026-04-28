@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Multi-Architecture Serving Fleet Design
-scenario: 'You are the Staff ML Systems engineer responsible for a serving fleet that must run three model types simultaneously: (1) a 175B dense transformer for chat, (2) a 500B MoE model for code generation, and (3) a DLRM with 2 TB embeddings for ads ranking. You have a budget of 256 H100 GPUs.'
-question: "How would you allocate 256 H100s and choose parallelism strategies to serve the 175B dense transformer, 500B MoE, and 2 TB DLRM?"
+scenario: You are the Staff ML Systems engineer responsible for a serving fleet that must run three model types simultaneously: (1) a 175B dense transformer for chat, (2) a 500B MoE model for code generation, and (3) a DLRM with 2 TB embeddings for ads ranking. You have a budget of 256 H100 GPUs.
+question: How would you allocate 256 H100s and choose parallelism strategies to serve the 175B dense transformer, 500B MoE, and 2 TB DLRM?
 details:
   realistic_solution: 'Model 1 — Dense 175B Transformer (chat): Needs 350 GB (BF16) → 8-way TP across 8 H100s per replica. KV cache is the batch-size limiter (~2 GB per request at 4K context). Focus: maximize batch size for decode throughput. Allocate 64 GPUs (8 replicas of 8-GPU TP groups). Model 2 — 500B MoE (code gen): ~1 TB total weights but only ~60B active per token. Use 128-way EP (1 GPU per expert) within each replica. Each GPU holds ~8 GB of expert weights, leaving ~70 GB for KV cache → massive batch sizes. Focus: AllToAll latency between experts. Requires NVLink/NVSwitch within each EP group. Allocate 128 GPUs (1 replica of 128 GPUs, or 2 × 64). Model 3 — DLRM (2 TB embeddings): Model-parallel embeddings across ~32 GPUs. MLP is tiny — data-parallel is free. Focus: embedding lookup bandwidth and AllToAll for feature interaction. Latency SLA is tight (~10ms P99). Allocate 64 GPUs (2 replicas of 32 GPUs). Key insight: the transformer fleet is KV-cache-limited, the MoE fleet is AllToAll-latency-limited, and the DLRM fleet is embedding-bandwidth-limited. Each drives a different hardware and topology requirement.'
   common_mistake: |
@@ -17,10 +17,10 @@ details:
     **The Rationale:** Engineers copy-paste standard dense transformer setups, failing to analyze the unique mathematical bottlenecks of MoEs or Embedding tables.
     **The Consequence:** The MoE suffers massive AllToAll latency, the DLRM starves for embedding bandwidth, and the dense model wastes memory on fragmented KV caches.
   napkin_math: |
-    1. Dense 175B: 175B * 2B = 350 GB. Requires ceil(350/80) = 5 GPUs minimum; use 8 for optimal Tensor Parallelism. Total = 8 * 8 replicas = 64 GPUs.
-    2. MoE 500B: ~1TB total weights. Requires ceil(1024/80) = 13 GPUs minimum; use 128 for 1-GPU-per-expert Expert Parallelism. Total = 128 GPUs.
-    3. DLRM 2TB: 2000 GB / 80 GB = 25 GPUs minimum. Round to 32 for power-of-two Model Parallel embeddings. Total = 32 * 2 replicas = 64 GPUs.
-    **Total allocated GPUs: 64 (Dense) + 128 (MoE) + 64 (DLRM) = exactly 256 H100s.**
+    - Dense 175B: 175B * 2B = 350 GB. Requires ceil(350/80) = 5 GPUs minimum; use 8 for optimal Tensor Parallelism. Total = 8 * 8 replicas = 64 GPUs.
+    - MoE 500B: ~1TB total weights. Requires ceil(1024/80) = 13 GPUs minimum; use 128 for 1-GPU-per-expert Expert Parallelism. Total = 128 GPUs.
+    - DLRM 2TB: 2000 GB / 80 GB = 25 GPUs minimum. Round to 32 for power-of-two Model Parallel embeddings. Total = 32 * 2 replicas = 64 GPUs.
+    - **Result:** **Total allocated GPUs: 64 (Dense) + 128 (MoE) + 64 (DLRM) = exactly 256 H100s.**
 status: published
 provenance: imported
 requires_explanation: true

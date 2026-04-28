@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: training
 title: Diagnosing DDP Network Bottlenecks
 scenario: You are training a 2-billion parameter model using PyTorch Distributed Data Parallel (DDP) across 4 nodes (8x A100 80GB GPUs per node), connected via 100 Gbps Ethernet inter-node and NVLink intra-node. The framework uses hierarchical AllReduce — intra-node reduce-scatter on NVLink, then inter-node AllReduce of the per-node-reduced tensor across the 4 nodes, then intra-node AllGather. Single-node GPU utilization is 98%, but drops to 42% when scaling to 4 nodes. Profiling shows GPUs are stalling during the inter-node step of the backward-pass synchronization.
-question: "Under hierarchical AllReduce, why does utilization drop from 98% to 42% across 4 nodes, and what software-only fix improves scaling?"
+question: Under hierarchical AllReduce, why does utilization drop from 98% to 42% across 4 nodes, and what software-only fix improves scaling?
 details:
   realistic_solution: The inter-node step of hierarchical AllReduce is the binding constraint. Intra-node reduce-scatter on NVLink shrinks the 4 GB FP16 gradient down to a 4 GB / 8 = 0.5 GB per-rank shard, but each node must then AllReduce a 4 GB tensor across the 4 nodes over 100 Gbps Ethernet. Inter-node AllReduce moves 2*(N-1)/N * 4 GB = 2*(3/4)*4 = 6 GB at 12.5 GB/s, taking 0.48 s versus 0.2 s of compute — yielding utilization of 0.2 / (0.2 + 0.48) = 29.4%. Use gradient accumulation (e.g., 4 micro-steps via `no_sync()`) so compute per AllReduce climbs to 0.8 s, lifting serial utilization to 62.5%. Combined with bucketed AllReduce that overlaps the inter-node step with later parts of backward, achievable utilization climbs into the 80-90% range.
   common_mistake: |
@@ -17,13 +17,13 @@ details:
     **The Rationale:** Candidates often forget that hierarchical AllReduce's bottleneck is the inter-node reduction over 100 Gbps, not a flat 32-way ring on the slowest link. They may also misdiagnose as a dataloader bottleneck or jump to Tensor Parallelism without measuring the comm-to-compute ratio.
     **The Consequence:** Proposing hardware changes or completely incorrect optimization strategies.
   napkin_math: |
-    - **Gradient Size:** 2B FP16 parameters = 4 GB gradients per rank.
-    - **Intra-node:** Hierarchical AllReduce intra-node step on NVLink is far below 1 ms and is not the bottleneck.
-    - **Inter-node Comm Time:** Inter-node AllReduce across N=4 nodes transfers 2*(N-1)/N * 4 GB = 6 GB on the 100 Gbps (12.5 GB/s) Ethernet ring. This takes 6 GB / 12.5 GB/s = 0.48 s.
-    - **Current Utilization:** Step time = 0.2 s compute + 0.48 s comm. Utilization = 0.2 / 0.68 = 29.4%.
-    - **Accumulate 4 micro-steps:** Compute = 0.8 s. Serial utilization = 0.8 / (0.8 + 0.48) = 62.5%.
-    - **With Overlap:** With bucketed AllReduce overlapping inter-node comm against later backward kernels, exposed comm drops to roughly 0.05-0.1 s.
-    - **Final Utilization:** **Utilization approaches 80-90% (e.g., 0.8 / (0.8 + 0.1) = 88%).**
+    1. **Gradient Size:** 2B FP16 parameters = 4 GB gradients per rank.
+    2. **Intra-node:** Hierarchical AllReduce intra-node step on NVLink is far below 1 ms and is not the bottleneck.
+    3. **Inter-node Comm Time:** Inter-node AllReduce across N=4 nodes transfers 2*(N-1)/N * 4 GB = 6 GB on the 100 Gbps (12.5 GB/s) Ethernet ring. This takes 6 GB / 12.5 GB/s = 0.48 s.
+    4. **Current Utilization:** Step time = 0.2 s compute + 0.48 s comm. Utilization = 0.2 / 0.68 = 29.4%.
+    5. **Accumulate 4 micro-steps:** Compute = 0.8 s. Serial utilization = 0.8 / (0.8 + 0.48) = 62.5%.
+    6. **With Overlap:** With bucketed AllReduce overlapping inter-node comm against later backward kernels, exposed comm drops to roughly 0.05-0.1 s.
+    7. **Conclusion:** **Utilization approaches 80-90% (e.g., 0.8 / (0.8 + 0.1) = 88%).**
 status: published
 provenance: imported
 requires_explanation: false

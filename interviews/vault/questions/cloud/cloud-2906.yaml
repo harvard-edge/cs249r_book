@@ -8,21 +8,21 @@ competency_area: architecture
 bloom_level: apply
 phase: both
 title: Implement custom depthwise conv CUDA kernel with shared memory optimization
-scenario: The standard cuDNN depthwise conv achieves only 18% SM utilization on H100 for a 3×3 depthwise layer with C=512 channels, 14×14 spatial resolution, batch=32. You need to write or configure a higher-performance implementation.
-question: How would you optimize the C=512, 14×14, batch-32 depthwise 3×3 layer on H100 beyond cuDNN's 18% SM utilization?
+scenario: The standard cuDNN depthwise conv achieves only 18% SM utilization on H100 for a 3x3 depthwise layer with C=512 channels, 14x14 spatial resolution, batch=32. You need to write or configure a higher-performance implementation.
+question: How would you optimize the C=512, 14x14, batch-32 depthwise 3x3 layer on H100 beyond cuDNN's 18% SM utilization?
 details:
-  realistic_solution: 'H100 SM has 228KB shared memory per SM. Key optimizations: (1) load input halo into shared memory, coalesced global → shared memory load; (2) use warp-level parallelism across the spatial dimension; (3) fuse BN + ReLU6 into the depthwise kernel; (4) use __half2 or __nv_bfloat162 vectorized loads for 2× memory bandwidth; (5) tile along channel dimension so each thread block handles 32 channels. Alternatively, use torch.compile with triton which auto-generates fused depthwise+BN+activation kernels. PyTorch 2.x with inductor backend achieves ~2× over cuDNN for these small depthwise shapes.'
+  realistic_solution: 'H100 SM has 228KB shared memory per SM. Key optimizations: (1) load input halo into shared memory, coalesced global \u2192 shared memory load; (2) use warp-level parallelism across the spatial dimension; (3) fuse BN + ReLU6 into the depthwise kernel; (4) use __half2 or __nv_bfloat162 vectorized loads for 2\u00d7 memory bandwidth; (5) tile along channel dimension so each thread block handles 32 channels. Alternatively, use torch.compile with triton which auto-generates fused depthwise+BN+activation kernels. PyTorch 2.x with inductor backend achieves ~2\u00d7 over cuDNN for these small depthwise shapes.'
   common_mistake: |
     **The Pitfall:** Trying to use Tensor Cores for depthwise convolutions.
     **The Rationale:** Tensor Cores require dense matmul patterns (MMA instructions) and cannot be natively used for depthwise ops where each output channel depends only on one input channel.
     **The Consequence:** Wasting time trying to map a fundamentally incompatible operation to matrix hardware.
   napkin_math: |
-    1. Input: 32×512×14×14 = 3.2M elements × 2B = 6.4MB. Output: same = 6.4MB.
-    2. Total HBM traffic: 12.8MB. At 3.35TB/s (H100): 3.8 μs minimum.
-    3. FLOPs: 2×32×512×9×196 = 57.8M FLOPs.
-    4. At 18% of 989 TFLOPS = 178 TFLOPS: 57.8M/178T = 0.32 μs compute.
-    5. Ratio: memory is 12× slower → severely memory-bound.
-    **Result:** Shared memory tiling reduces HBM traffic by 3×3=9× for spatial halo. Target: <0.5 μs per invocation at 70% HBM bandwidth utilization.
+    1. Input: 32x512x14x14 = 3.2M elements * 2B = 6.4MB. Output: same = 6.4MB.
+    2. Total HBM traffic: 12.8MB. At 3.35TB/s (H100): 3.8 \u00b5s minimum.
+    3. FLOPs: 2*32*512*9*196 = 57.8M FLOPs.
+    4. At 18% of 989 TFLOPS = 178 TFLOPS: 57.8M/178T = 0.32 \u00b5s compute.
+    5. Ratio: memory is 12x slower -> severely memory-bound.
+    6. **Result: Shared memory tiling reduces HBM traffic by 3x3=9x for spatial halo. Target: <0.5 \u00b5s per invocation at 70% HBM bandwidth utilization.**
 status: published
 provenance: imported
 requires_explanation: true

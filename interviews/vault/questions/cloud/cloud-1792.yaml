@@ -8,22 +8,21 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing OOM in Reverse Mode Differentiation
-scenario: Your team is fine-tuning a 7B parameter LLM on a single 80GB A100 GPU. The forward pass completes successfully, with `nvidia-smi` showing ~20GB of VRAM utilized. However, the system throws an Out-Of-Memory (OOM) error the exact moment `loss.backward()` is invoked.
-question: Why does VRAM spike and OOM at loss.backward() after a 20 GB forward pass, and how can training fit in 80 GB without reducing batch size?
+scenario: Your team is fine-tuning a 7B parameter LLM on a single 80GB A100 GPU. The forward pass completes successfully, with `nvidia-smi` showing ~68GB of VRAM utilized. However, the system throws an Out-Of-Memory (OOM) error the exact moment `loss.backward()` is invoked.
+question: Why does VRAM spike and OOM at loss.backward() after the forward pass, and how can training fit in 80 GB without reducing batch size?
 details:
-  realistic_solution: Identify that the OOM is caused by the activation memory footprint required for reverse-mode AD. Implement gradient checkpointing (activation recomputation) to trade compute for memory, selectively discarding activations during the forward pass and recomputing them during the backward pass.
+  realistic_solution: Identify that the OOM is caused by the activation memory footprint required for reverse-mode AD combined with gradient allocation. Implement gradient checkpointing (activation recomputation) to trade compute for memory, selectively discarding activations during the forward pass and recomputing them during the backward pass.
   common_mistake: |
-    **The Pitfall:** Assuming the OOM is solely due to gradient allocation or optimizer states.
-    **The Rationale:** Candidates know gradients and Adam states are large, but forget how reverse-mode automatic differentiation mathematically works.
-    **The Consequence:** They misdiagnose the problem and fail to realize that AD requires caching massive intermediate activation tensors from the forward pass to compute the chain rule.
+    **The Pitfall:** Assuming the OOM is solely due to optimizer states.
+    **The Rationale:** Candidates know Adam states are large, but forget how reverse-mode automatic differentiation mathematically works and allocates gradients.
+    **The Consequence:** They misdiagnose the problem and fail to realize that AD requires caching massive intermediate activation tensors from the forward pass, pushing VRAM right to the limit before gradients even allocate.
   napkin_math: |
     - **Weights (BF16):** 7B × 2 bytes = 14 GB.
+    - **Forward Pass Cache:** VRAM is 68 GB, so activations consume 68 GB - 14 GB = 54 GB.
+    - **Backward Pass Allocation:** `loss.backward()` allocates gradients for the 7B parameters.
     - **Gradients (BF16):** 7B × 2 bytes = 14 GB.
-    - **Optimizer States (Adam):** 3 × 7B × 4 bytes = 84 GB (allocated lazily).
-    - **Forward Pass Cache:** Activations easily exceed 40 GB for a typical batch.
-    - **Pre-optimizer Memory Peak:** Weights (14) + Gradients (14) + Activations (40+) = >68 GB (can easily exceed 80 GB with a larger batch).
-    - **Total Training Memory Needed:** 14 + 14 + 84 + 40 = **152 GB > 80 GB capacity.**
-    - **Conclusion:** Gradient checkpointing is required to drop activation memory to O(√N), along with optimizer state offloading.
+    - **Total Memory at Backward:** 68 GB (Forward) + 14 GB (Gradients) = 82 GB.
+    - **Conclusion:** **82 GB > 80 GB capacity, causing an OOM. Gradient checkpointing is required to drop activation memory.**
 status: published
 provenance: imported
 requires_explanation: false

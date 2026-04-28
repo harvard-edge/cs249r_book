@@ -11,7 +11,8 @@ title: The CUDA Graphs vs Dynamic Shapes Tradeoff
 scenario: Your team captures the entire LLM decode loop as a CUDA Graph to eliminate kernel launch overhead, achieving a 30% latency reduction for fixed-length generation. But when you deploy to production, you discover that real user requests have highly variable output lengths (10 to 4,000 tokens) and variable batch sizes (continuous batching adds/removes requests mid-generation). The CUDA Graph breaks because it was captured with a fixed batch size and fixed sequence length. The naive fix — capturing a separate CUDA Graph for every possible (batch_size, seq_len) combination — would require thousands of graphs consuming hundreds of GB of GPU memory.
 question: How would you preserve most CUDA Graph benefits while handling variable output lengths and continuous batching?
 details:
-  realistic_solution: 'Use a bucketed CUDA Graph strategy combined with padding. (1) Bucket batch sizes into powers of 2 (1, 2, 4, 8, 16, 32) and sequence lengths into fixed strides (e.g., multiples of 128). This yields ~6 × ~32 = ~192 graph variants instead of thousands. (2) Pad inputs to the next bucket boundary. Wasted compute from padding is bounded: worst case is 2× for batch and ~128 tokens for sequence — in practice ~15-25% overhead. (3) Pre-capture all graph variants at startup during warmup. Each graph consumes ~50-100MB (kernel parameters, not model weights), so 192 graphs ≈ 10-20GB — manageable on 80GB GPUs. (4) For continuous batching: capture graphs per decode step, not per entire generation. Each step has a fixed graph selected by current (padded_batch, padded_seq) bucket. This is exactly what TensorRT-LLM and vLLM implement internally. The tradeoff: you accept ~15-25% padding waste to eliminate ~30% dispatch overhead. Net improvement: ~10-20% over eager mode with full dynamic shape support.'
+  realistic_solution: |
+    Use a bucketed CUDA Graph strategy combined with padding. (1) Bucket batch sizes into powers of 2 (1, 2, 4, 8, 16, 32) and sequence lengths into fixed strides (e.g., multiples of 128). This yields ~6 × ~32 = ~192 graph variants instead of thousands. (2) Pad inputs to the next bucket boundary. Wasted compute from padding is bounded: worst case is 2× for batch and ~128 tokens for sequence — in practice ~15-25% overhead. (3) Pre-capture all graph variants at startup during warmup. Each graph consumes ~50-100MB (kernel parameters, not model weights), so 192 graphs ≈ 10-20GB — manageable on 80GB GPUs. (4) For continuous batching: capture graphs per decode step, not per entire generation. Each step has a fixed graph selected by current (padded_batch, padded_seq) bucket. This is exactly what TensorRT-LLM and vLLM implement internally. The tradeoff: you accept ~15-25% padding waste to eliminate ~30% dispatch overhead. Net improvement: ~10-20% over eager mode with full dynamic shape support.
   common_mistake: |
     **The Pitfall:** Abandoning CUDA Graphs entirely or trying to pad everything to maximum dimensions.
     **The Rationale:** The complexity of managing dynamic shapes with rigid graphs causes engineers to fall back to safe but slow eager mode.
@@ -22,7 +23,7 @@ details:
     - **Bucketed graph with padding overhead:** ~20% wasted compute = 0.7ms.
     - **Net speedup over eager:** 1.5ms / 0.7ms = 2.1x per decode step.
     - **For 500 tokens:** Eager = 750ms, Bucketed = 350ms.
-    - **Memory cost of buckets:** ~6 batch sizes × ~32 seq lengths = 192 graphs. 192 × 80MB = **~15 GB of VRAM.**
+    - **Result:** **Memory cost of buckets: ~6 batch sizes × ~32 seq lengths = 192 graphs. 192 × 80MB = ~15 GB of VRAM.**
 status: published
 provenance: imported
 requires_explanation: true

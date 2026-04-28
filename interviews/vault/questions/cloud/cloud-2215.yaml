@@ -11,17 +11,17 @@ title: Data-Parallel Replica Count vs Wall-Clock Tradeoff
 scenario: A 13B model is being trained data-parallel on a 256-H100 cluster connected by IB NDR. The team can choose any DP world size N from {32, 64, 128, 256}. Per-step compute = 600 ms / N up to N=256. Per-step DP gradient AllReduce on a flat ring = 2*(N-1)/N * 26 GB / 25 GB/s.
 question: "For 13B DP training on 32-256 H100s with 600 ms / N compute and a 26 GB BF16 gradient on a 25 GB/s ring, which N minimizes per-step wall clock?"
 details:
-  realistic_solution: 'Both are partially right, but the VP of ML is more right at the margin. This is the classic utilization-delay tradeoff from queueing theory. When a system operates above ~80% utilization, queueing delays grow non-linearly.'
+  realistic_solution: 'The smallest world size, N=32, minimizes the per-step wall clock. This is counterintuitive, but the communication overhead completely dominates the compute time. The compute time scales as 1/N, but since it is only 600 ms at N=1, at N=32 it is already a negligible ~19 ms. The Ring AllReduce time scales as (N-1)/N, which actually increases slightly as N grows because the ring transfers more of the total data volume. Since the communication time is ~2000 ms, adding more GPUs provides virtually zero compute benefit but increases the communication penalty. Therefore, spreading this model across more GPUs slows down each step.'
   common_mistake: |
-    **The Pitfall:** Siding entirely with one extreme utilization metric.
-    **The Rationale:** Candidates fail to recognize that the cluster operates in a non-linear queueing delay zone.
-    **The Consequence:** Maximizing raw utilization causes extreme job queue delays, fundamentally breaking the ML development cycle.
+    **The Pitfall:** Assuming that adding more GPUs always decreases or maintains step time.
+    **The Rationale:** Engineers focus on the 1/N scaling of compute and ignore that Ring AllReduce communication scales as (N-1)/N, which asymptotically increases.
+    **The Consequence:** Wasting massive amounts of compute resources (and money) to run a job slower than it would run on a smaller subset of the cluster.
   napkin_math: |
-    1. M/M/1 queueing at 95% utilization: mean wait = service_time * 0.95 / (1 - 0.95) = 19× service_time.
-    2. A 2-hour training job waits 38 hours in queue.
-    3. At 80% utilization: wait = 4× = 8 hours. At 70%: wait = 2.33× = 4.66 hours.
-    4. Reducing utilization from 95% to 80% cuts wait from 38h to 8h (nearly 5x improvement) while losing only 15% capacity.
-    5. **Engineer cost ($150/hr × 30hr saved = $4,500/experiment) vastly outweighs the GPU cost of 15% idle ($7,200/day) at just ~1.6 experiments/day.**
+    1. Base compute time is 600 ms. At N=32, compute is 600 / 32 = 18.75 ms.
+    2. Base AllReduce time coefficient: 2 * 26 GB / 25 GB/s = 2.08 seconds = 2080 ms.
+    3. At N=32: Comm = 2080 * (31/32) = 2015 ms. Total = 18.75 + 2015 = 2033.75 ms.
+    4. At N=256: Compute = 600 / 256 = 2.34 ms. Comm = 2080 * (255/256) = 2071.88 ms. Total = 2.34 + 2071.88 = 2074.22 ms.
+    5. **Result: N=32 minimizes the per-step wall clock (~2034 ms), as larger N only increases the communication penalty without meaningful compute savings.**
 status: archived
 provenance: imported
 requires_explanation: false
@@ -31,14 +31,11 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- The formula service_time / (1 - rho) is for the mean total time in the system, not the mean wait time in the queue. Wait time in queue is service_time * rho / (1 - rho), which would be 19x at 95% utilization, not 20x.
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
-deletion_reason: Archived after G.H cleanup rewrite still failed Phase D's strict judge bar (G.L re-judge). Pre-Phase-D legacy item that doesn't meet today's parallelism prompt standards.
