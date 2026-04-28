@@ -49,9 +49,11 @@ jobs:
     if: (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/tinytorch-build-pdfs.yml
 
-  # Build and deploy (after PDFs complete - deploys even if PDFs fail)
-  build-and-deploy:
-    name: '🔥 Build & Deploy TinyTorch Dev'
+  # Build the site (after PDFs complete — site builds even if PDFs fail).
+  # Split out from deploy so the artifact gates the visual-smoke job before
+  # any dev preview goes live; deploy only runs if smoke is green.
+  build-site:
+    name: '🔥 Build TinyTorch Dev Site'
     runs-on: ubuntu-latest
     needs: [build-pdfs]
     if: |
@@ -147,6 +149,43 @@ jobs:
             --commit-hash "${{ github.sha }}" \
             --commit-short "$COMMIT_SHORT"
 
+      - name: 📤 Upload built site as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tinytorch-dev-build
+          path: ${{ vars.TINYTORCH_SITE }}/_build
+          retention-days: 1
+          include-hidden-files: true
+
+  # Visual smoke gate — fails before deploy if Bootstrap/CSS regressed,
+  # the navbar collapse breakpoint shifted, or pages render blank. Runs
+  # the shared .github/scripts/visual_smoke.py against the artifact above.
+  smoke:
+    name: '👁️ Visual Smoke'
+    needs: [build-site]
+    if: needs.build-site.result == 'success'
+    uses: ./.github/workflows/infra-visual-smoke.yml
+    with:
+      site: tinytorch
+      artifact: tinytorch-dev-build
+      pages: '/index.html /preface.html'
+
+  # Deploy is gated on smoke passing. Re-fetches the artifact rather than
+  # the raw repo so we deploy the exact bytes that smoke validated.
+  deploy:
+    name: '🚀 Deploy TinyTorch Dev'
+    runs-on: ubuntu-latest
+    needs: [smoke]
+    if: needs.smoke.result == 'success'
+    permissions:
+      contents: read
+    steps:
+      - name: 📦 Download built site
+        uses: actions/download-artifact@v8
+        with:
+          name: tinytorch-dev-build
+          path: _build
+
       - name: 🚀 Deploy to Dev Site via SSH
         env:
           SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
@@ -171,7 +210,7 @@ jobs:
           mkdir -p ${{ vars.DEV_TINYTORCH_PATH }}
 
           echo "🚚 Copying TinyTorch site content..."
-          cp -r "${{ github.workspace }}/${{ vars.TINYTORCH_SITE }}/_build/." ${{ vars.DEV_TINYTORCH_PATH }}/
+          cp -r "${{ github.workspace }}/_build/." ${{ vars.DEV_TINYTORCH_PATH }}/
 
           echo "🔍 Validating deployment content..."
           if [ ! -f "${{ vars.DEV_TINYTORCH_PATH }}/index.html" ]; then
