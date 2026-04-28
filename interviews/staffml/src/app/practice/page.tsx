@@ -184,7 +184,8 @@ function PracticePage() {
   // (no scenario/details). `current` is hydrated from the worker via
   // useFullQuestion — same shape, but scenario + details populated.
   const [currentSummary, setCurrentSummary] = useState<Question | null>(null);
-  const current = useFullQuestion(currentSummary) ?? currentSummary;
+  const { question: hydrated, status: hydrationStatus } = useFullQuestion(currentSummary);
+  const current = hydrated ?? currentSummary;
   const setCurrent = setCurrentSummary;
   const skipFilterCount = useRef(0);
   const questionShownAt = useRef(Date.now());
@@ -1057,6 +1058,14 @@ function PracticePage() {
                         {current.title}
                       </h2>
 
+                      {hydrationStatus === "error" && (
+                        <div className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                          Could not load the full question details. The
+                          question prompt is shown, but scenario and answer
+                          notes are unavailable. Reload to retry.
+                        </div>
+                      )}
+
                       {/* Scenario prose */}
                       <div className="prose max-w-none mt-6">
                         {current.scenario ? (
@@ -1101,7 +1110,7 @@ function PracticePage() {
                           /* Scenario ends with ?; no callout needed but reserve minimal spacing */
                           <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
                             <Target className="w-3.5 h-3.5" />
-                            Your task — see scenario below
+                            Your task — see scenario above
                           </div>
                         )}
                       </div>

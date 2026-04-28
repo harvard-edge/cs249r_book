@@ -88,13 +88,6 @@ jobs:
       - name: 🛠️ Install vault-cli
         run: pip install -e interviews/vault-cli/
 
-      - name: 🔄 Regenerate corpus from YAMLs (vault build --legacy-json)
-        # Ships interviews/staffml/src/data/corpus.json (full) +
-        # corpus-summary.json (bundled by the site) straight from the
-        # committed YAMLs. The site always deploys with current YAML state,
-        # even if the committed JSON artifacts drifted on the last commit.
-        run: vault build --vault-dir interviews/vault --release-id publish-live --legacy-json
-
       - name: 🔍 Type check
         working-directory: interviews/staffml
         run: npx tsc --noEmit
@@ -115,9 +108,9 @@ jobs:
           # required on /ask calls from the AskInterviewer panel.
           NEXT_PUBLIC_INTERVIEWER_ENDPOINT: https://mlsysbook.ai/api/staffml-interviewer
           # Vault cutover (PRs #1433, #1434): site reads live data from the
-          # Cloudflare Worker in production; bundled corpus.json is the
-          # offline fallback. NEXT_PUBLIC_VAULT_FALLBACK is intentionally
-          # unset so vault-fallback.ts defaults to 'vault-api'.
+          # Cloudflare Worker in production. There is no static rollback in
+          # prod — corpus.json is neither emitted nor bundled. If the Worker
+          # is unreachable, the UI surfaces a "details unavailable" banner.
           NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
           NEXT_PUBLIC_VAULT_RELEASE: "1.0.2"
         run: npm run build
@@ -164,20 +157,25 @@ jobs:
         run: python3 interviews/staffml/scripts/validate-vault.py
 
       - name: 🧪 Smoke tests
+        # Reads the bundled corpus-summary.json (committed) — the prod build
+        # ships this as the synchronous catalog. Heavy fields (scenario,
+        # details prose) live on the Worker and are not re-validated here;
+        # `vault check --strict` covers per-question YAML validation in the
+        # validate-vault workflow.
         run: |
           python3 -c "
-          import json, sys, os
+          import json
 
-          with open('interviews/staffml/src/data/corpus.json') as f:
+          with open('interviews/staffml/src/data/corpus-summary.json') as f:
               corpus = json.load(f)
           assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)}'
           print(f'✅ Corpus: {len(corpus)} questions')
 
-          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'topic', 'zone', 'details']
+          required = ['id', 'title', 'level', 'track', 'competency_area', 'topic', 'zone']
           for q in corpus:
               for f in required:
                   assert q.get(f), f'{q.get(\"id\", \"???\")} missing {f}'
-          print('✅ All questions have required fields')
+          print('✅ All questions have required structural fields')
 
           valid_levels = {'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L6+'}
           for q in corpus:
