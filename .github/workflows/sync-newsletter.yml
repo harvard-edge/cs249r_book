@@ -1,69 +1,67 @@
-name: '📬 Newsletter · 🔄 Sync & Deploy'
+name: '📬 Newsletter · 🔄 Sync from Buttondown'
 
 # =============================================================================
-# Newsletter — Sync from Buttondown, Build & Deploy
+# Newsletter — Sync Buttondown content into dev + main
 # =============================================================================
 #
-# Fetches published emails from the Buttondown API, converts them to
-# Quarto-compatible markdown, and deploys the newsletter to both sites.
-# Posts are committed to dev only — main is never touched.
+# Daily content-only sync. Pulls published emails from Buttondown, commits
+# them to dev (so site-preview-dev picks them up), cherry-picks the same
+# commit onto main (the stable release branch), and dispatches
+# site-publish-live so the post lands on mlsysbook.ai.
 #
-# Flow:
-#   1. SYNC      — Fetch emails from Buttondown API → write .md posts
-#   2. COMMIT    — Stage new/updated posts → push to dev
-#   3. BUILD     — Quarto render (only if new posts found)
-#   4. DEPLOY    — Newsletter slice to dev preview + live gh-pages
+# Why both branches:
+#   - dev is the integration trunk; pushing there auto-triggers
+#     site-preview-dev.yml so the dev preview gets the new post.
+#   - main is the stable release branch from which gh-pages is published.
+#     Newsletter content auto-promotes to main because it's contained to
+#     site/newsletter/posts/ and can't conflict with anything else.
+#
+# Why we dispatch site-publish-live instead of building here:
+#   - Single deploy path. Only site-publish-live writes to gh-pages, so the
+#     hashed bootstrap CSS in site_libs/ stays in sync with the unified
+#     site's about/community HTML by construction.
+#   - Past bug: this workflow used to do its own partial deploy of
+#     newsletter + site_libs and corrupted /site_libs/ for the about and
+#     community pages, because their HTML still referenced the previously
+#     deployed bootstrap-{HASH}.css.
 #
 # Triggers:
 #   - Schedule: Daily at 6 AM UTC (1 AM ET)
-#   - Manual: Choose deploy target (both / dev / live)
+#   - Manual:   workflow_dispatch
 #
-# Deploys to:
-#   - Dev preview: SSH push to DEV_REPO_URL/newsletter/
-#   - Live site:   gh-pages branch /newsletter/ (no full publish needed)
-#
-# Secrets: BUTTONDOWN_API_KEY, SSH_DEPLOY_KEY, GITHUB_TOKEN
-# Vars:    DEV_REPO_URL
+# Secrets: BUTTONDOWN_API_KEY, GITHUB_TOKEN
 #
 # Related:
-#   - site/newsletter/cli/            — news CLI (pull subcommand powers this)
-#   - site-publish-live.yml           — Also syncs before full builds
-#   - site-preview-dev.yml            — Also syncs before dev builds
-#
+#   - site/newsletter/cli/  — news CLI (pull subcommand powers this)
+#   - site-publish-live.yml — full unified-site deploy from main
+#   - site-preview-dev.yml  — auto-triggered by our push to dev
 # =============================================================================
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Daily at 6am UTC (1am ET) — syncs before morning traffic
-  workflow_dispatch:
-    inputs:
-      deploy_target:
-        description: 'Where to deploy'
-        type: choice
-        options:
-          - both
-          - dev
-          - live
-        default: both
+    - cron: '0 6 * * *'  # Daily at 6am UTC (1am ET)
+  workflow_dispatch: {}
 
 permissions:
   contents: write
-  actions: read
+  actions: write  # required to dispatch site-publish-live via `gh workflow run`
 
 concurrency:
   group: newsletter-sync
   cancel-in-progress: true
 
 jobs:
-  sync-and-deploy:
-    name: '📬 Sync, Build & Deploy Newsletter'
+  sync:
+    name: '📬 Sync Buttondown → dev + main'
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout
+      - name: 📥 Checkout dev (full history for cherry-pick)
         uses: actions/checkout@v6
         with:
           ref: dev
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v6
@@ -73,138 +71,102 @@ jobs:
       - name: 📦 Install news CLI
         run: pip install -r site/newsletter/requirements.txt
 
-      - name: 📬 Sync newsletter from Buttondown
+      - name: 📬 Pull from Buttondown
         env:
           BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
         run: python3 site/newsletter/bin/news pull
 
       - name: 📦 Commit new posts to dev
-        id: commit
+        id: commit_dev
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add site/newsletter/posts/ site/newsletter/_stats.yml
+          # _stats.yml is gitignored — regenerated fresh on every render by
+          # publish-live's `news pull`. We only commit post markdown here.
+          git add site/newsletter/posts/
           if git diff --staged --quiet; then
             echo "ℹ️ No new newsletter posts"
             echo "has_new_posts=false" >> "$GITHUB_OUTPUT"
-          else
-            COUNT=$(git diff --staged --name-only | wc -l | tr -d ' ')
-            git commit -m "chore: sync $COUNT newsletter post(s) from Buttondown [automated]"
-            git push origin dev
-            echo "✅ Committed $COUNT new post(s) to dev"
-            echo "has_new_posts=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-      # ── Build ─────────────────────────────────────────────────────────────
+          COUNT=$(git diff --staged --name-only | wc -l | tr -d ' ')
+          git commit -m "chore: sync $COUNT newsletter post(s) from Buttondown [automated]"
 
-      - name: 🔧 Setup Quarto
-        if: steps.commit.outputs.has_new_posts == 'true'
-        uses: quarto-dev/quarto-actions/setup@v2
+          # Push with retry. Capture SHA *after* successful push because
+          # `git pull --rebase` during retry rewrites the local commit's SHA.
+          NEWSLETTER_SHA=""
+          for i in 1 2 3; do
+            if git push origin dev; then
+              NEWSLETTER_SHA=$(git rev-parse HEAD)
+              echo "✅ Pushed $COUNT post(s) to dev (SHA: $NEWSLETTER_SHA)"
+              break
+            fi
+            echo "⚠️ Push to dev failed (attempt $i/3), rebasing..."
+            git pull --rebase origin dev
+          done
 
-      - name: 🔨 Build newsletter
-        if: steps.commit.outputs.has_new_posts == 'true'
-        working-directory: site
-        run: |
-          quarto render
-          touch _build/.nojekyll
-          echo "✅ Built: $(find _build/newsletter -name '*.html' | wc -l) newsletter pages"
-
-      - name: 🔍 Validate build
-        if: steps.commit.outputs.has_new_posts == 'true'
-        run: |
-          if [ ! -f "site/_build/newsletter/index.html" ]; then
-            echo "❌ CRITICAL: newsletter/index.html missing. Aborting."
+          if [ -z "$NEWSLETTER_SHA" ]; then
+            echo "❌ Push to dev failed after 3 attempts"
             exit 1
           fi
 
-      # ── Deploy to Dev Preview ─────────────────────────────────────────────
+          echo "newsletter_sha=$NEWSLETTER_SHA" >> "$GITHUB_OUTPUT"
+          echo "has_new_posts=true" >> "$GITHUB_OUTPUT"
 
-      - name: 🚀 Deploy to Dev Site
-        if: >-
-          steps.commit.outputs.has_new_posts == 'true' &&
-          (inputs.deploy_target == 'dev' || inputs.deploy_target == 'both' || inputs.deploy_target == '')
+      - name: 🍒 Cherry-pick newsletter commit onto main
+        if: steps.commit_dev.outputs.has_new_posts == 'true'
         env:
-          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+          NEWSLETTER_SHA: ${{ steps.commit_dev.outputs.newsletter_sha }}
         run: |
-          # Rewrite URLs for dev site prefix
-          bash .github/scripts/rewrite-dev-urls.sh newsletter site/_build/newsletter
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
 
-          # Modify announcement banner for dev preview
-          COMMIT_HASH="${{ github.sha }}"
-          COMMIT_SHORT="${COMMIT_HASH:0:8}"
-          python3 ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
-            site/_build/newsletter \
-            --verbose \
-            --commit-hash "$COMMIT_HASH" \
-            --commit-short "$COMMIT_SHORT"
-
-          eval "$(ssh-agent -s)"
-          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
-          mkdir -p ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
-
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-
-          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
-          cd target-repo
-
-          rm -rf newsletter && mkdir -p newsletter
-          cp -r "${{ github.workspace }}/site/_build/newsletter/." newsletter/
-          cp -r "${{ github.workspace }}/site/_build/site_libs" . 2>/dev/null || true
-
-          [ -f "newsletter/index.html" ] || { echo "❌ newsletter/index.html missing"; exit 1; }
-
-          git add .
-          git commit -m "📬 Deploy Newsletter dev from ${{ github.sha }}" --allow-empty || true
+          if ! git cherry-pick "$NEWSLETTER_SHA"; then
+            echo "❌ Cherry-pick failed — main and dev have diverged in"
+            echo "   site/newsletter/posts/. The newsletter post is safely on"
+            echo "   dev (SHA: $NEWSLETTER_SHA). Resolve the divergence and"
+            echo "   re-run the workflow."
+            git cherry-pick --abort || true
+            exit 1
+          fi
 
           for i in 1 2 3; do
-            git push origin main 2>/dev/null && break
-            git pull --rebase origin main || true
+            if git push origin main; then
+              echo "✅ Cherry-picked newsletter commit onto main"
+              break
+            fi
+            echo "⚠️ Push to main failed (attempt $i/3), rebasing..."
+            if ! git pull --rebase origin main; then
+              echo "❌ Rebase failed during cherry-pick promotion"
+              exit 1
+            fi
           done
-          echo "✅ Newsletter deployed to dev preview"
 
-      # ── Deploy to Live Site ───────────────────────────────────────────────
-      # Only touches the newsletter/ directory on gh-pages.
-      # All other live content (book, kits, etc.) is untouched.
-
-      - name: 🔨 Rebuild for live (clean URLs)
-        if: >-
-          steps.commit.outputs.has_new_posts == 'true' &&
-          (inputs.deploy_target == 'live' || inputs.deploy_target == 'both' || inputs.deploy_target == '')
-        working-directory: site
+      - name: 🚀 Dispatch site-publish-live on main
+        if: steps.commit_dev.outputs.has_new_posts == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Dev deploy rewrites URLs in-place, so re-render for clean live URLs
-          quarto render
-          touch _build/.nojekyll
+          gh workflow run site-publish-live.yml --ref main
+          echo "✅ Dispatched site-publish-live on main"
+          echo ""
+          echo "Watch: https://github.com/${{ github.repository }}/actions/workflows/site-publish-live.yml"
 
-      - name: 🚀 Deploy to Live Site (gh-pages)
-        if: >-
-          steps.commit.outputs.has_new_posts == 'true' &&
-          (inputs.deploy_target == 'live' || inputs.deploy_target == 'both' || inputs.deploy_target == '')
+      - name: 📊 Summary
+        if: always()
         run: |
-          [ -f "site/_build/newsletter/index.html" ] || { echo "❌ newsletter/index.html missing"; exit 1; }
-
-          rm -rf gh-pages-repo
-          git clone --depth=1 --branch=gh-pages \
-            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
-            gh-pages-repo
-          cd gh-pages-repo
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Only replace the newsletter directory — leave everything else alone
-          rm -rf newsletter
-          cp -r "${{ github.workspace }}/site/_build/newsletter" newsletter
-          cp -r "${{ github.workspace }}/site/_build/site_libs" . 2>/dev/null || true
-          touch .nojekyll
-
-          git add .
-          git commit -m "📬 Auto-sync newsletter to live from ${{ github.sha }}" --allow-empty || true
-
-          for i in 1 2 3; do
-            git push origin gh-pages 2>/dev/null && break
-            git pull --rebase origin gh-pages || true
-          done
-          echo "✅ Newsletter deployed to mlsysbook.ai/newsletter/"
+          {
+            echo "## 📬 Newsletter Sync"
+            echo ""
+            if [ "${{ steps.commit_dev.outputs.has_new_posts }}" = "true" ]; then
+              echo "- ✅ Pulled new post(s) from Buttondown"
+              echo "- ✅ Committed to \`dev\` (\`${{ steps.commit_dev.outputs.newsletter_sha }}\`)"
+              echo "- ✅ Cherry-picked onto \`main\`"
+              echo "- 🚀 Dispatched \`site-publish-live\` on \`main\` — newsletter live in ~5 min"
+            else
+              echo "No new posts from Buttondown. Nothing to do."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
