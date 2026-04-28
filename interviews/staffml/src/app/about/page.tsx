@@ -9,18 +9,13 @@ import {
   TOPIC_COUNT,
   TRACK_COUNT,
   LEVEL_COUNT,
-  VERSION,
+  RELEASE_ID,
+  RELEASE_HASH,
   BUILD_DATE,
 } from "@/lib/stats";
 import PaperCitationCard from "@/components/PaperCitationCard";
 
 const PAPER_URL = "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf";
-
-// Release metadata is baked at build time. These are set by `vault publish`
-// via NEXT_PUBLIC_VAULT_RELEASE (ARCHITECTURE.md §7.1 cutover contract) and
-// are the citable identity of the corpus snapshot this bundle serves.
-const RELEASE_ID = process.env.NEXT_PUBLIC_VAULT_RELEASE ?? VERSION ?? "0.9.0";
-const RELEASE_HASH = process.env.NEXT_PUBLIC_VAULT_RELEASE_HASH;
 
 export default function AboutPage() {
   // Pick a sample question to show on the page. Prefer the hand-picked L2
@@ -63,6 +58,7 @@ export default function AboutPage() {
             paperUrl={PAPER_URL}
             releaseId={RELEASE_ID}
             releaseHash={RELEASE_HASH}
+            buildDate={BUILD_DATE}
           />
         </section>
 
@@ -307,7 +303,7 @@ export default function AboutPage() {
             <Github className="w-4 h-4" /> View on GitHub
           </a>
           <p className="text-[11px] text-textTertiary font-mono mt-4">
-            v{VERSION} &middot; built {BUILD_DATE.slice(0, 10)}
+            v{RELEASE_ID} &middot; built {BUILD_DATE.slice(0, 10)}
           </p>
         </section>
 
