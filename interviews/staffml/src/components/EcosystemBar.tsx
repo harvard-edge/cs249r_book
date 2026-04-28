@@ -45,6 +45,8 @@ const LEFT_MENUS: MenuGroup[] = [
       { divider: true },
       { icon: "bi-map", label: "Study Plans", href: "/plans" },
       { icon: "bi-diagram-3", label: "Framework", href: "/framework" },
+      { divider: true },
+      { icon: "bi-file-pdf", label: "Whitepaper (PDF)", href: "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf", external: true },
     ]
   },
   {
