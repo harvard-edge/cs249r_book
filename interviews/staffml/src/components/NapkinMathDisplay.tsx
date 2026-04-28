@@ -1,6 +1,7 @@
 "use client";
 
 import clsx from "clsx";
+import MarkdownText from "./MarkdownText";
 
 /**
  * Renders napkin math text with structured formatting.
@@ -20,7 +21,7 @@ export default function NapkinMathDisplay({ text }: { text: string }) {
     // Simple one-liner — render inline
     return (
       <div className="font-mono text-[13px] text-textSecondary leading-relaxed">
-        <FormattedText text={steps[0].text} />
+        <MarkdownText text={steps[0].text} />
       </div>
     );
   }
@@ -57,7 +58,7 @@ export default function NapkinMathDisplay({ text }: { text: string }) {
                 : "text-textSecondary"
             )}
           >
-            <FormattedText text={step.text} />
+            <MarkdownText text={step.text} />
           </div>
         </div>
       ))}
@@ -130,80 +131,4 @@ function cleanStepText(text: string): string {
     .replace(/^\d+\.\s*/, "") // strip leading number
     .replace(/^=>\s*/, "") // strip => for result lines (we show our own indicator)
     .trim();
-}
-
-// ─── Inline Formatting ───────────────────────────────────────
-
-function FormattedText({ text }: { text: string }) {
-  // Split on **bold** markers and inline code `backticks`
-  // Match **bold**, `code`, and ~~strikethrough~~ (double tilde only — single ~ means "approximately")
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`|~~[^~]+~~)/g);
-
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith("**") && part.endsWith("**")) {
-          return (
-            <span key={i} className="font-bold text-textPrimary">
-              {part.slice(2, -2)}
-            </span>
-          );
-        }
-        if (part.startsWith("`") && part.endsWith("`")) {
-          return (
-            <code
-              key={i}
-              className="text-accentBlue bg-accentBlue/10 px-1 py-0.5 rounded text-[12px]"
-            >
-              {part.slice(1, -1)}
-            </code>
-          );
-        }
-        if (part.startsWith("~~") && part.endsWith("~~")) {
-          return (
-            <span key={i} className="text-textTertiary line-through">
-              {part.slice(2, -2)}
-            </span>
-          );
-        }
-        // Highlight numbers and units inline
-        return <HighlightNumbers key={i} text={part} />;
-      })}
-    </>
-  );
-}
-
-function HighlightNumbers({ text }: { text: string }) {
-  // Highlight numbers with units (e.g., "5 ms", "3.35 TB/s", "989 TFLOPS")
-  const parts = text.split(
-    /([\d,]+(?:\.\d+)?(?:×\d+(?:\^\d+)?)?)\s*((?:TFLOPS|TOPS|GFLOPS|TB\/s|GB\/s|MB\/s|GB|MB|KB|ms|μs|ns|s|%|FLOPs\/byte|FLOPs|bytes?|FLOP)(?:\/s)?)/gi
-  );
-
-  if (parts.length === 1) return <>{text}</>;
-
-  return (
-    <>
-      {parts.map((part, i) => {
-        // Pattern: [before, number, unit, ...rest]
-        // Groups come in triples: text, number, unit
-        if (i % 3 === 1) {
-          // This is the number part
-          return (
-            <span key={i} className="font-semibold text-textPrimary">
-              {part}
-            </span>
-          );
-        }
-        if (i % 3 === 2) {
-          // This is the unit part
-          return (
-            <span key={i} className="text-textTertiary">
-              {" "}{part}
-            </span>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </>
-  );
 }
