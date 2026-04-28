@@ -148,17 +148,19 @@ jobs:
       - name: 🛠️ Install vault-cli
         run: pip install -e "$VAULT_CLI_DIR/"
 
-      - name: 🔄 Regenerate corpus from YAMLs (vault build --legacy-json)
-        # Ships $STAFFML_ROOT/src/data/corpus.json (full) +
+      - name: 🔄 Regenerate manifest + summary from YAMLs (vault build)
+        # Ships $STAFFML_ROOT/src/data/vault-manifest.json +
         # corpus-summary.json (bundled by the site) straight from the
         # committed YAMLs. The site always deploys with current YAML state,
         # even if the committed JSON artifacts drifted on the last commit.
+        # PR #1598 retired the legacy corpus.json static fallback in prod
+        # (no --legacy-json here); the Worker is the sole catalog source.
         # --release-id is the deliberately-bumped version from the prepare
         # job — the manifest emit_manifest() writes will carry it, and
         # everything downstream (footer pill, citation card, X-Vault-Release
         # header) inherits it from the manifest. Closes the long-running
         # "publish-live constant string overwrites releases/<id>" bug.
-        run: vault build --vault-dir "$VAULT_DIR" --release-id "${{ needs.prepare.outputs.new_release_id }}" --legacy-json
+        run: vault build --vault-dir "$VAULT_DIR" --release-id "${{ needs.prepare.outputs.new_release_id }}"
 
       - name: 🔍 Type check
         working-directory: ${{ env.STAFFML_ROOT }}
@@ -180,9 +182,10 @@ jobs:
           # AskInterviewer panel.
           NEXT_PUBLIC_INTERVIEWER_ENDPOINT: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}/api/staffml-interviewer
           # Vault cutover (PRs #1433, #1434): site reads live data from the
-          # Cloudflare Worker in production; bundled corpus.json is the
-          # offline fallback. NEXT_PUBLIC_VAULT_FALLBACK is intentionally
-          # unset so vault-fallback.ts defaults to 'vault-api'.
+          # Cloudflare Worker in production. PR #1598 retired the static
+          # rollback in prod — corpus.json is neither emitted nor bundled.
+          # If the Worker is unreachable, the UI surfaces a "details
+          # unavailable" banner.
           NEXT_PUBLIC_VAULT_API: ${{ vars.STAFFML_VAULT_WORKER_URL || 'https://staffml-vault.mlsysbook-ai-account.workers.dev' }}
           # NEXT_PUBLIC_VAULT_RELEASE is intentionally unset — the site reads
           # RELEASE_ID from src/lib/stats.ts (which derives from the manifest
@@ -275,22 +278,25 @@ jobs:
         run: python3 "$STAFFML_ROOT/scripts/validate-vault.py"
 
       - name: 🧪 Smoke tests
+        # Reads the bundled corpus-summary.json (committed) — the prod build
+        # ships this as the synchronous catalog. Heavy fields (scenario,
+        # details prose) live on the Worker and are not re-validated here;
+        # `vault check --strict` covers per-question YAML validation in the
+        # validate-vault workflow.
         run: |
-          STAFFML_ROOT="$STAFFML_ROOT" python3 - <<'PY'
-          import json, os, sys
+          python3 -c "
+          import json
 
-          root = os.environ["STAFFML_ROOT"]
-
-          with open(f"{root}/src/data/corpus.json") as f:
+          with open('interviews/staffml/src/data/corpus-summary.json') as f:
               corpus = json.load(f)
           assert len(corpus) >= 4000, f"Corpus too small: {len(corpus)}"
           print(f"✅ Corpus: {len(corpus)} questions")
 
-          required = ["id", "title", "level", "track", "scenario", "competency_area", "topic", "zone", "details"]
+          required = ['id', 'title', 'level', 'track', 'competency_area', 'topic', 'zone']
           for q in corpus:
-              for field in required:
-                  assert q.get(field), f"{q.get('id', '???')} missing {field}"
-          print("✅ All questions have required fields")
+              for f in required:
+                  assert q.get(f), f'{q.get(\"id\", \"???\")} missing {f}'
+          print('✅ All questions have required structural fields')
 
           valid_levels = {"L1", "L2", "L3", "L4", "L5", "L6", "L6+"}
           for q in corpus:
