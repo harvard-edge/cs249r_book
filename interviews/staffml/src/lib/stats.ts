@@ -42,11 +42,31 @@ export const QUESTION_COUNT_FORMATTED: string = intFormatter.format(QUESTION_COU
 /** "79" — for consistency with the formatter even though it fits in two digits. */
 export const TOPIC_COUNT_FORMATTED: string = intFormatter.format(TOPIC_COUNT);
 
-// ─── Build metadata (strings) ────────────────────────────────
-export const VERSION: string = manifest.version;
-export const TAXONOMY_VERSION: string = manifest.taxonomyVersion;
+// ─── Release identity (strings) ──────────────────────────────
+// vault-manifest.json is the single source of truth for "what release is
+// this bundle?". It is emitted by vault-cli's emit_manifest() at build
+// time from releases/<release_id>/release.json, so by construction the
+// values here match the corpus the bundle ships with. Do NOT add
+// fallbacks (?? "0.9.0", env-var defaults) — if the manifest is missing
+// or malformed the build SHOULD fail, not silently mislabel the corpus.
+
+/** Human-meaningful release tag, e.g. "0.1.0". Display this. */
+export const RELEASE_ID: string = manifest.releaseId;
+
+/** Full Merkle hash over the published YAML inputs (64 hex chars). */
+export const RELEASE_HASH: string = manifest.releaseHash;
+
+/** First 7 chars of RELEASE_HASH — display when room is tight. */
+export const RELEASE_HASH_SHORT: string = manifest.releaseHash.slice(0, 7);
+
+/** Schema spec version the YAML was validated against. Rarely changes. */
+export const SCHEMA_VERSION: string = manifest.schemaVersion;
+
+/** "What counts as published" policy version, bound into the release Merkle. */
+export const POLICY_VERSION: string = manifest.policyVersion;
+
+/** Build timestamp from vault-cli emit_manifest, ISO 8601. */
 export const BUILD_DATE: string = manifest.buildDate;
-export const CONTENT_HASH: string = manifest.contentHash;
 
 // ─── Distributions (for charts and the radar widget) ─────────
 export const TRACK_DISTRIBUTION = manifest.trackDistribution;

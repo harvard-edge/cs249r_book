@@ -83,9 +83,17 @@ def run_sparse_validation(taxonomy_path: Path, manifest_path: Path) -> int:
         else:
             ok("trackDistribution sums to questionCount")
 
-    ver = manifest.get("version", "?")
-    h = manifest.get("contentHash", "?")
-    ok(f"Vault v{ver} — hash {h}")
+    # Release identity is the single source of truth for the displayed
+    # version on the site. A missing or malformed value is a hard error
+    # — the bundle MUST not ship without a labeled release.
+    rid = manifest.get("releaseId")
+    rhash = manifest.get("releaseHash")
+    if not rid or not isinstance(rid, str):
+        error("manifest.releaseId missing or invalid")
+    if not rhash or not isinstance(rhash, str) or len(rhash) < 16:
+        error("manifest.releaseHash missing or not a full hex digest")
+    if rid and rhash:
+        ok(f"Vault v{rid} — hash {rhash[:7]}")
 
     print(f"\n{'=' * 50}")
     print(f"  Mode:     sparse (no corpus.json)")
@@ -271,7 +279,14 @@ if manifest:
             f"Manifest says {manifest['chainCount']} chains, found {len(chains)}"
         )
 
-    ok(f"Vault v{manifest.get('version', '?')} — hash {manifest.get('contentHash', '?')}")
+    rid = manifest.get("releaseId")
+    rhash = manifest.get("releaseHash")
+    if not rid or not isinstance(rid, str):
+        error("manifest.releaseId missing or invalid")
+    elif not rhash or not isinstance(rhash, str) or len(rhash) < 16:
+        error("manifest.releaseHash missing or not a full hex digest")
+    else:
+        ok(f"Vault v{rid} — hash {rhash[:7]}")
 else:
     warn("No vault-manifest.json found — run vault build --legacy-json")
 
