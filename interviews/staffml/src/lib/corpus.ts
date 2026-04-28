@@ -428,6 +428,7 @@ const VAULT_API = process.env.NEXT_PUBLIC_VAULT_API
 // In-memory cache for hydrated questions during one session.
 const _detailsCache = new Map<string, Question>();
 let _staticDetailsCache: Map<string, Question> | null = null;
+let _staticDetailsUnavailable = false;
 
 function shouldUseStaticDetails(): boolean {
   if (process.env.NEXT_PUBLIC_VAULT_FALLBACK?.toLowerCase() === "static") return true;
@@ -436,10 +437,18 @@ function shouldUseStaticDetails(): boolean {
 }
 
 async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
+  if (_staticDetailsUnavailable) return undefined;
   if (!_staticDetailsCache) {
-    const mod = await import("../data/corpus.json");
-    const fullQuestions = mod.default as unknown as Question[];
-    _staticDetailsCache = new Map(fullQuestions.map((q) => [q.id, q]));
+    try {
+      // Use a computed path so local-dev can run even when the optional
+      // legacy full-corpus artifact is not present in the checkout.
+      const mod = await import(`../data/${"corpus-summary"}.json`);
+      const fullQuestions = mod.default as unknown as Question[];
+      _staticDetailsCache = new Map(fullQuestions.map((q) => [q.id, q]));
+    } catch {
+      _staticDetailsUnavailable = true;
+      return undefined;
+    }
   }
   const full = _staticDetailsCache.get(id);
   if (!full) return undefined;
