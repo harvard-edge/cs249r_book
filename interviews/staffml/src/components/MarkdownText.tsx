@@ -19,7 +19,7 @@ export default function MarkdownText({ text, className }: { text: string; classN
       {parts.map((part, i) => {
         if (part.startsWith("**") && part.endsWith("**")) {
           return (
-            <span key={i} className="font-bold text-textPrimary">
+            <span key={i} className="font-bold">
               {part.slice(2, -2)}
             </span>
           );
