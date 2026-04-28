@@ -440,6 +440,7 @@ function HomePage() {
                         else next.add(area.id);
                         return next;
                       });
+                      setHeaderCollapsed(true);
                     }}
                   />
                 );
@@ -496,7 +497,10 @@ function HomePage() {
             {searchResults ? (
               <>
                 <SearchResults results={searchResults} query={query}
-                  selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+                  selectedId={selectedTopic?.id ?? null} onSelect={(topic) => {
+                    setSelectedTopic(topic);
+                    setHeaderCollapsed(true);
+                  }} />
                 {/* Full-text question matches */}
                 {questionSearchResults.length > 0 && (
                   <div className="mt-8">
@@ -528,10 +532,23 @@ function HomePage() {
               </>
             ) : singleExpandedArea ? (
               <ExpandedArea area={singleExpandedArea}
-                selectedId={selectedTopic?.id ?? null} onSelect={setSelectedTopic} />
+                selectedId={selectedTopic?.id ?? null} onSelect={(topic) => {
+                  setSelectedTopic(topic);
+                  setHeaderCollapsed(true);
+                }} />
             ) : (
-              <AreaOverview areas={displayAreas} onExpand={(id) => setSelectedAreas(new Set([id]))} onSelectTopic={setSelectedTopic}
-                selectedId={selectedTopic?.id ?? null} />
+              <AreaOverview 
+                areas={displayAreas} 
+                onExpand={(id) => {
+                  setSelectedAreas(new Set([id]));
+                  setHeaderCollapsed(true);
+                }} 
+                onSelectTopic={(topic) => {
+                  setSelectedTopic(topic);
+                  setHeaderCollapsed(true);
+                }}
+                selectedId={selectedTopic?.id ?? null} 
+              />
             )}
 
             {/* Footer */}
