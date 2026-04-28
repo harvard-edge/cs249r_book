@@ -29,6 +29,33 @@ name: '🎯 StaffML · 🚀 Publish (Live)'
 
 on:
   workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Content updates and improvements]'
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        description: 'Website-only deploy? (no version bump, no tag — reuses current release_id)'
+        required: false
+        type: boolean
+        default: false
+      release_type:
+        description: 'Release type (ignored if site_only OR explicit_version is set) [patch]'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z (skips bump math). Leave blank to auto-bump.'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
+        required: true
+        default: ''
 
 permissions:
   contents: write
@@ -47,19 +74,42 @@ jobs:
   # See .github/workflows/infra-publish-guard.yml for guard semantics.
   guard-dev:
     name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: staffml-validate-dev.yml
 
   guard-vault:
     name: '🛡️ Validate-Vault Green Gate'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: staffml-validate-vault.yml
 
+  # Compute the new release_id from previous tag + release_type. The shared
+  # workflow validates confirm == "PUBLISH" and refuses to re-tag an
+  # existing release. This is what closes the "manifest drifted to
+  # 0.1.2-dev while releases/0.1.0 said 0.1.0" gap that motivated the
+  # whole single-source-of-truth refactor — every publish now passes a
+  # real, deliberate release_id to `vault build` instead of the
+  # constant-string `--release-id publish-live`.
+  prepare:
+    name: '🏷️ Prepare release'
+    uses: ./.github/workflows/_release-prepare.yml
+    with:
+      project: staffml
+      tier: A
+      previous_tag_pattern: 'staffml-v*'
+      release_type: ${{ inputs.release_type }}
+      explicit_version: ${{ inputs.explicit_version }}
+      description: ${{ inputs.description }}
+      confirm: ${{ inputs.confirm }}
+      site_only: ${{ inputs.site_only }}
+
   build-and-deploy:
     name: '🔧 Build & Deploy StaffML'
-    needs: [guard-dev, guard-vault]
+    needs: [guard-dev, guard-vault, prepare]
+    if: inputs.confirm == 'PUBLISH'
     runs-on: ubuntu-latest
     concurrency:
       group: gh-pages-deploy
@@ -93,7 +143,12 @@ jobs:
         # corpus-summary.json (bundled by the site) straight from the
         # committed YAMLs. The site always deploys with current YAML state,
         # even if the committed JSON artifacts drifted on the last commit.
-        run: vault build --vault-dir interviews/vault --release-id publish-live --legacy-json
+        # --release-id is the deliberately-bumped version from the prepare
+        # job — the manifest emit_manifest() writes will carry it, and
+        # everything downstream (footer pill, citation card, X-Vault-Release
+        # header) inherits it from the manifest. Closes the long-running
+        # "publish-live constant string overwrites releases/<id>" bug.
+        run: vault build --vault-dir interviews/vault --release-id "${{ needs.prepare.outputs.new_release_id }}" --legacy-json
 
       - name: 🔍 Type check
         working-directory: interviews/staffml
@@ -119,8 +174,49 @@ jobs:
           # offline fallback. NEXT_PUBLIC_VAULT_FALLBACK is intentionally
           # unset so vault-fallback.ts defaults to 'vault-api'.
           NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
-          NEXT_PUBLIC_VAULT_RELEASE: "1.0.2"
+          # NEXT_PUBLIC_VAULT_RELEASE is intentionally unset — the site reads
+          # RELEASE_ID from src/lib/stats.ts (which derives from the manifest
+          # emit_manifest() just wrote in the previous step). See vault-api.ts.
         run: npm run build
+
+      - name: 📦 Emit canonical release-manifest.json into deploy dir
+        # The site bundles vault-manifest.json into the JS at build time
+        # (stats.ts imports it). A separate canonical-shape manifest at
+        # out/release-manifest.json gives external consumers (other tools,
+        # scrapers, monitoring) a uniform URL across all MLSysBook sites:
+        # https://mlsysbook.ai/<project>/release-manifest.json. Same
+        # releaseId + releaseHash as the bundled manifest — they come
+        # from the same emit_manifest() call that just wrote
+        # vault-manifest.json.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib
+          src = pathlib.Path("interviews/staffml/src/data/vault-manifest.json")
+          dst = pathlib.Path("interviews/staffml/out/release-manifest.json")
+          m = json.loads(src.read_text())
+          canonical = {
+              "releaseId":      m["releaseId"],
+              "releaseHash":    m["releaseHash"],
+              "schemaVersion":  m["schemaVersion"],
+              "tier":           "A",
+              "project":        "staffml",
+              "buildDate":      m["buildDate"],
+              "metadata": {
+                  "questionCount":     m.get("questionCount"),
+                  "chainCount":        m.get("chainCount"),
+                  "conceptCount":      m.get("conceptCount"),
+                  "areaCount":         m.get("areaCount"),
+                  "policyVersion":     m.get("policyVersion"),
+                  "taxonomyVersion":   m.get("taxonomyVersion"),
+                  "trackDistribution": m.get("trackDistribution"),
+                  "levelDistribution": m.get("levelDistribution"),
+              },
+          }
+          dst.parent.mkdir(parents=True, exist_ok=True)
+          dst.write_text(json.dumps(canonical, indent=2, sort_keys=True) + "\n")
+          print(f"📦 Wrote {dst}: v{canonical['releaseId']} (hash {canonical['releaseHash'][:7]})")
+          PY
 
       - name: 📁 Inject paper and figures into build
         run: |
@@ -270,3 +366,72 @@ jobs:
         run: |
           npm ci
           npx wrangler deploy
+
+  # Tag the release and create a draft GitHub Release. Skipped on
+  # site-only redeploys (which intentionally reuse the previous release_id
+  # — re-tagging would violate citation integrity).
+  create-tag:
+    name: '🏷️ Create Tag & Release'
+    needs: [build-and-deploy, prepare]
+    if: needs.build-and-deploy.result == 'success' && inputs.site_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create and push tag
+        env:
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "🏷️ Creating tag: $NEW_TAG on $(git rev-parse --short HEAD)"
+          git tag -a "$NEW_TAG" -m "StaffML $NEW_TAG: $DESCRIPTION"
+          git push origin "$NEW_TAG"
+
+      - name: 📦 Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          PREV_TAG: ${{ needs.prepare.outputs.previous_tag }}
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+
+          # Auto-generated notes from GitHub (includes contributor list).
+          if [ -n "$PREV_TAG" ]; then
+            AUTO_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$NEW_TAG" -f previous_tag_name="$PREV_TAG" \
+              --jq '.body' || echo "")
+          else
+            AUTO_NOTES=""
+          fi
+
+          cat > /tmp/release-notes.md <<NOTES_EOF
+          ## StaffML v${NEW_RELEASE_ID}
+
+          ${DESCRIPTION}
+
+          ${AUTO_NOTES}
+
+          ---
+
+          **Site**: https://mlsysbook.ai/staffml/
+          **Manifest**: https://mlsysbook.ai/staffml/release-manifest.json
+          NOTES_EOF
+
+          gh release create "$NEW_TAG" \
+            --title "StaffML v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes-file /tmp/release-notes.md \
+            --draft
+
+          echo "✅ Draft release created — review at https://github.com/${{ github.repository }}/releases"

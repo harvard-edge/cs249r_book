@@ -1129,7 +1129,7 @@ jobs:
     name: '📦 Download Artifacts & Deploy to GitHub Pages'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: call-production-build
+    needs: [validate-inputs, call-production-build]
     if: github.event.inputs.confirm == 'PUBLISH' && github.event.inputs.testing_mode != 'yes'
     concurrency:
       group: gh-pages-deploy
@@ -1295,6 +1295,70 @@ jobs:
           # Landing page is rendered separately (see next step)
           # =================================================================
           echo "ℹ️ Landing page will be rendered in next step"
+
+      - name: 🐍 Setup Python (for release manifests)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: 📦 Emit per-volume release manifests
+        # Drops release-manifest.json into vol1-site/ and vol2-site/ so
+        # https://mlsysbook.ai/{vol1,vol2}/release-manifest.json resolves.
+        # The footer pill (added to _quarto-html-vol{1,2}.yml in the same
+        # PR) fetches this URL at runtime to render "vX.Y.Z · date".
+        # Hash inputs are the per-volume content directories — what
+        # actually defines a release of that volume. Frontmatter is
+        # shared across volumes and intentionally NOT in the hash, so
+        # editing the dedication doesn't bump both volume hashes.
+        env:
+          NEW_VOL1: ${{ needs.validate-inputs.outputs.new_vol1_version }}
+          NEW_VOL2: ${{ needs.validate-inputs.outputs.new_vol2_version }}
+          PREV_VOL1: ${{ needs.validate-inputs.outputs.previous_vol1_version }}
+          PREV_VOL2: ${{ needs.validate-inputs.outputs.previous_vol2_version }}
+        run: |
+          set -euo pipefail
+
+          emit_manifest() {
+            local site_dir="$1"
+            local volume="$2"        # vol1 or vol2
+            local new_version="$3"   # e.g. "vol1-v0.6.0" — may be empty
+            if [ ! -d "$site_dir" ]; then
+              echo "⏭ $site_dir not present — skipping ${volume} manifest."
+              return 0
+            fi
+            if [ -z "$new_version" ]; then
+              echo "⚠️ ${volume} version unset; emitting manifest with previous tag."
+              new_version=$(git tag -l "${volume}-v*" | sort -V | tail -n1)
+              new_version="${new_version:-${volume}-v0.0.0}"
+            fi
+            local release_id
+            release_id=$(echo "$new_version" \
+              | sed -E "s/^${volume}-v//")
+
+            local content_dir="book/quarto/contents/${volume}"
+            if [ ! -d "$content_dir" ]; then
+              echo "❌ $content_dir does not exist — cannot hash ${volume} content."
+              return 1
+            fi
+
+            local release_hash
+            release_hash=$(python3 scripts/version/release.py compute-hash \
+              --paths "$content_dir" \
+              --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                       '.ipynb_checkpoints' '.quarto')
+
+            python3 scripts/version/release.py emit-manifest \
+              --output "${site_dir}/release-manifest.json" \
+              --project "book-${volume}" \
+              --tier A \
+              --release-id "$release_id" \
+              --release-hash "$release_hash"
+
+            echo "📦 ${volume}: v${release_id} (hash ${release_hash:0:12}) → ${site_dir}/release-manifest.json"
+          }
+
+          emit_manifest "vol1-site" "vol1" "$NEW_VOL1"
+          emit_manifest "vol2-site" "vol2" "$NEW_VOL2"
 
       - name: 🔧 Setup Quarto (for landing page)
         if: github.event.inputs.deploy_target == 'all'

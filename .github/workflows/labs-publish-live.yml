@@ -28,6 +28,33 @@ name: '🔮 Labs · 🚀 Publish (Live)'
 
 on:
   workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Content updates and improvements]'
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        description: 'Website-only deploy? (no version bump, no tag)'
+        required: false
+        type: boolean
+        default: false
+      release_type:
+        description: 'Release type [patch]'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z. Leave blank to auto-bump.'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check)'
+        required: true
+        default: ''
 
 permissions:
   contents: write
@@ -41,13 +68,28 @@ jobs:
   # See .github/workflows/infra-publish-guard.yml for guard semantics.
   guard:
     name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: labs-validate-dev.yml
 
+  prepare:
+    name: '🏷️ Prepare release'
+    uses: ./.github/workflows/_release-prepare.yml
+    with:
+      project: labs
+      tier: B
+      previous_tag_pattern: 'labs-v*'
+      release_type: ${{ inputs.release_type }}
+      explicit_version: ${{ inputs.explicit_version }}
+      description: ${{ inputs.description }}
+      confirm: ${{ inputs.confirm }}
+      site_only: ${{ inputs.site_only }}
+
   build-and-deploy:
     name: '🔮 Build & Deploy Labs'
-    needs: [guard]
+    needs: [guard, prepare]
+    if: inputs.confirm == 'PUBLISH'
     runs-on: ubuntu-latest
     concurrency:
       group: gh-pages-deploy
@@ -76,6 +118,23 @@ jobs:
           LABS_ROOT: ${{ vars.LABS_ROOT || 'labs' }}
         run: bash labs/tools/build_site.sh
 
+      - name: 📦 Emit release manifest
+        env:
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+        run: |
+          set -euo pipefail
+          RELEASE_HASH=$(python3 scripts/version/release.py compute-hash \
+            --paths ${{ vars.LABS_ROOT || 'labs' }} \
+            --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                      '.ipynb_checkpoints' '.quarto')
+          echo "📦 Release: labs v${NEW_RELEASE_ID} (hash ${RELEASE_HASH:0:12})"
+          python3 scripts/version/release.py emit-manifest \
+            --output ${{ vars.LABS_ROOT || 'labs' }}/_build/release-manifest.json \
+            --project labs \
+            --tier B \
+            --release-id "$NEW_RELEASE_ID" \
+            --release-hash "$RELEASE_HASH"
+
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -84,4 +143,37 @@ jobs:
           destination_dir: ${{ vars.DEV_LABS_PATH }}
           publish_branch: gh-pages
           keep_files: true
-          commit_message: '🔮 Deploy Labs live - ${{ github.sha }}'
+          commit_message: '🔮 Deploy Labs ${{ needs.prepare.outputs.new_tag }} - ${{ github.sha }}'
+
+  create-tag:
+    name: '🏷️ Create Tag & Release'
+    needs: [build-and-deploy, prepare]
+    if: needs.build-and-deploy.result == 'success' && inputs.site_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🏷️ Create and push tag
+        env:
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "Labs $NEW_TAG: $DESCRIPTION"
+          git push origin "$NEW_TAG"
+      - name: 📦 Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          gh release create "$NEW_TAG" \
+            --title "Labs v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}" \
+            --draft
