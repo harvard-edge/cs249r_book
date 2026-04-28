@@ -40,6 +40,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Workflow-wide single source for paths and versions. See docs/CI-VARIABLES.md.
+  # The `paths:` trigger filter is intentionally NOT vars-ified — GitHub Actions
+  # evaluates trigger filters at workflow-load time, before vars are resolved.
+  VAULT_DIR:     ${{ vars.VAULT_DIR     || 'interviews/vault' }}
+  VAULT_CLI_DIR: ${{ vars.VAULT_CLI_DIR || 'interviews/vault-cli' }}
+  NODE_VERSION:  ${{ vars.NODE_VERSION  || '20' }}
+  # Python is intentionally PINNED at the schema_fingerprint hash-stability
+  # version. Override `vars.PYTHON_VERSION` only if you also confirm the
+  # vault-cli Merkle hash output is unchanged on the new version.
+  PYTHON_VERSION: ${{ vars.PYTHON_VERSION || '3.12' }}
+
 jobs:
   python:
     name: vault-cli (python)
@@ -52,13 +64,13 @@ jobs:
       - name: Set up Python (PINNED for hash stability)
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
       - name: Install vault-cli with dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e 'interviews/vault-cli/[dev]'
+          pip install -e "$VAULT_CLI_DIR/[dev]"
 
       - name: Verify CLI entry point
         run: |
@@ -66,17 +78,17 @@ jobs:
           vault --help
 
       - name: Lint (ruff)
-        run: ruff check interviews/vault-cli/src interviews/vault-cli/tests
+        run: ruff check "$VAULT_CLI_DIR/src" "$VAULT_CLI_DIR/tests"
 
       - name: Type-check (mypy, non-blocking)
-        run: mypy interviews/vault-cli/src
+        run: mypy "$VAULT_CLI_DIR/src"
         continue-on-error: true   # strict enforcement is a Phase-2 gate
 
       - name: pytest (unit + integration + contract)
-        run: pytest interviews/vault-cli/tests/ -v
+        run: pytest "$VAULT_CLI_DIR/tests/" -v
 
       - name: vault check --strict (corpus invariants)
-        run: vault check --strict --vault-dir interviews/vault
+        run: vault check --strict --vault-dir "$VAULT_DIR"
 
       - name: vault build (reproducibility smoke test)
         # Historically this step also compared release_hash against a pinned
@@ -89,10 +101,10 @@ jobs:
         # bumped the hash. Dropped 2026-04-22. The real integrity comes
         # from vault check --strict + codegen drift check above.
         run: |
-          vault build --vault-dir interviews/vault --release-id regression-ci
+          vault build --vault-dir "$VAULT_DIR" --release-id regression-ci
           RELEASE_HASH=$(python3 -c "
           import sqlite3
-          conn = sqlite3.connect('interviews/vault/vault.db')
+          conn = sqlite3.connect('$VAULT_DIR/vault.db')
           print(conn.execute(\"SELECT value FROM release_metadata WHERE key='release_hash'\").fetchone()[0])
           ")
           echo "release_hash: $RELEASE_HASH"
@@ -110,15 +122,15 @@ jobs:
       # to drift away from.
 
       - name: id-registry append-only invariant
-        run: python3 interviews/vault-cli/scripts/check_registry_append_only.py
+        run: python3 "$VAULT_CLI_DIR/scripts/check_registry_append_only.py"
 
       - name: Reviewer-identity spoof check (Gemini R5-H-3)
-        run: python3 interviews/vault-cli/scripts/check_reviewer_identity.py
+        run: python3 "$VAULT_CLI_DIR/scripts/check_reviewer_identity.py"
 
       - name: Exemplar-coverage audit staleness
         run: |
-          python3 interviews/vault-cli/scripts/exemplar_coverage_audit.py
-          git diff --exit-code interviews/vault/exemplar-gaps.yaml \
+          python3 "$VAULT_CLI_DIR/scripts/exemplar_coverage_audit.py"
+          git diff --exit-code "$VAULT_DIR/exemplar-gaps.yaml" \
             || { echo "::error::exemplar-gaps.yaml is stale; re-run audit and commit"; exit 1; }
 
   worker:
@@ -134,7 +146,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: interviews/staffml-vault-worker/package-lock.json
 
