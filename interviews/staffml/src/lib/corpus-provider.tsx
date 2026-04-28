@@ -1,20 +1,23 @@
 "use client";
 
 /**
- * CorpusProvider — Phase-4 hybrid data layer.
+ * CorpusProvider — hybrid data layer.
  *
- * The bundled corpus.json remains the primary data source for synchronous
- * operations (getQuestions, getQuestionsByFilter, etc.). The Worker API
- * enhances two specific operations:
+ * The bundled `corpus-summary.json` is the primary data source for
+ * synchronous operations (getQuestions, getQuestionsByFilter, taxonomy,
+ * navigation). Heavy fields (scenario, details prose) come from the
+ * Cloudflare Worker via vault-api.ts.
+ *
+ * The Worker enhances two specific operations:
  *
  * 1. **Search** — FTS5 full-text search via /search endpoint replaces the
  *    client-side O(n) string matching.
  * 2. **Service worker registration** — enables offline caching of API
- *    responses for future full-API cutover.
+ *    responses for the per-question detail fetches.
  *
- * When NEXT_PUBLIC_VAULT_API is set and NEXT_PUBLIC_VAULT_FALLBACK is not
- * "static", the provider registers the service worker and exposes the
- * vault-enhanced search. Otherwise everything falls back silently.
+ * NEXT_PUBLIC_VAULT_FALLBACK=static is an OPT-IN local-dev affordance for
+ * working without a reachable Worker (requires `vault build --legacy-json`
+ * to materialize corpus.json). Production never sets it.
  */
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
