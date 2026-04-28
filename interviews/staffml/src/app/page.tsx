@@ -290,15 +290,13 @@ function HomePage() {
                 StaffML
               </h1>
               <p className="text-[13px] text-textSecondary mb-3">
-                Free, open-source interview prep for ML systems engineers.{" "}
-                {selectedTrack ? (
+                Free, open-source interview prep for ML systems engineers.
+                {selectedTrack && (
                   <>
+                    {" "}
                     <span className="font-semibold">{formatTrackLabel(selectedTrack)}</span> track:{" "}
-                    {filteredAreas.reduce((s, a) => s + a.questionCount, 0).toLocaleString()} of{" "}
-                    {stats.totalQuestions.toLocaleString()} questions.
+                    {filteredAreas.reduce((s, a) => s + a.questionCount, 0).toLocaleString()} questions.
                   </>
-                ) : (
-                  <>{stats.totalQuestions.toLocaleString()} questions across compute, memory, latency, and more.</>
                 )}
               </p>
 
