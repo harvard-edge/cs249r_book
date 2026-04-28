@@ -5,6 +5,7 @@ import EcosystemBar from "@/components/EcosystemBar";
 import AnnouncementBar from "@/components/AnnouncementBar";
 import MaybeFooter from "@/components/MaybeFooter";
 import Providers from "@/components/Providers";
+import VersionDriftToast from "@/components/VersionDriftToast";
 import { QUESTION_COUNT_DISPLAY } from "@/lib/corpus";
 
 export const metadata: Metadata = {
@@ -95,6 +96,7 @@ export default function RootLayout({
           <AnnouncementBar />
           <main className="flex-1 flex flex-col">{children}</main>
           <MaybeFooter />
+          <VersionDriftToast />
         </Providers>
       </body>
     </html>
