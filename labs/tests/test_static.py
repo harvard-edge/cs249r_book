@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def read_source(lab_path: str) -> str:
-    with open(lab_path) as f:
+    with open(lab_path, encoding="utf-8") as f:
         return f.read()
 
 
