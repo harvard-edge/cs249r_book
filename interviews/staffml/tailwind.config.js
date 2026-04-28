@@ -7,20 +7,30 @@ module.exports = {
   ],
   theme: {
     extend: {
-      // Bootstrap-aligned breakpoints for the ecosystem navbar so
-      // StaffML's collapse points match the Quarto sites exactly.
+      // Breakpoints for the ecosystem navbar (EcosystemBar.tsx).
       // Defaults (sm/md/lg/xl/2xl) remain untouched for app layouts.
+      //
+      // Aligned with Bootstrap (which the rest of the Quarto ecosystem
+      // uses): `nav-lg` = 992 matches Bootstrap's `lg` breakpoint and
+      // Quarto's `collapse-below: lg` setting, so StaffML collapses to
+      // hamburger at the same viewport as every other ecosystem subsite.
+      //
+      // The corollary at iPad landscape (1024–1194 px): the full desktop
+      // nav renders but the right-side icons get visually clipped past
+      // the viewport edge. That's the same trade-off Quarto makes — see
+      // EcosystemBar.tsx's `overflowX: 'clip'` comment for how we keep
+      // the page from horizontally scrolling despite the overflow.
       //
       // Note on `nav-xl`: Quarto's _navbar.scss hides right-side text
       // labels in the range `1200px <= width < 1400px` (the "icon-only"
-      // band where 6 dropdowns crowd 4 text labels). Setting `nav-xl` to
-      // 1400 px — not 1200 — makes StaffML match that exact behavior:
-      // labels appear only once the viewport is wide enough to fit them
-      // alongside the full dropdown row.
+      // band where dropdowns crowd text labels). Setting `nav-xl` to
+      // 1400 px keeps that label-reveal behavior: labels appear only
+      // once the viewport is wide enough to fit them alongside the full
+      // dropdown row.
       screens: {
-        'nav-sm': '576px',   // bs sm — brand title visible
-        'nav-lg': '992px',   // bs lg — desktop nav appears, hamburger hides
-        'nav-xl': '1400px',  // Quarto's label-reveal threshold (post-icon band)
+        'nav-sm': '576px',   // brand title visible
+        'nav-lg': '992px',   // desktop nav appears, hamburger hides (Bootstrap `lg`)
+        'nav-xl': '1400px',  // right-side label-reveal threshold (post-icon band)
       },
       colors: {
         background: "var(--background)",

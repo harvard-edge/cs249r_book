@@ -303,6 +303,23 @@ export default function EcosystemBar() {
       // dark page background.
       borderBottom: isDark ? `1px solid ${borderColor}` : 'none',
       transition: 'background-color 0.2s, border-color 0.2s',
+      // Why `overflow-x: clip` (not `hidden`):
+      // At iPad landscape (1024 px) and other narrow desktop widths, the 7
+      // left dropdowns + 6 right-side icons + brand exceed the viewport.
+      // Without containment, that overflow propagates to body.scrollWidth
+      // and the whole page scrolls horizontally. Quarto sites avoid the
+      // same scroll because their navbar lives inside `.fixed-top`
+      // (position:fixed), which is removed from normal flow — body width
+      // never sees the navbar's true content width. We achieve the same
+      // visual result without changing positioning by clipping the X axis
+      // on this wrapper.
+      // `clip` (not `hidden`) is critical: per CSS Overflow Module 3, when
+      // `overflow-x: clip` is paired with `overflow-y: visible`, the Y axis
+      // stays visible. `overflow-x: hidden` would force `overflow-y: auto`
+      // and clip the dropdown menus that extend below the bar. Browser
+      // support: Safari 16+, Chrome 90+, Firefox 81+; older browsers fall
+      // back to `visible` (no regression vs current behavior).
+      overflowX: 'clip' as const,
     }}>
       <div style={{ ...S.nav, position: 'relative' as const, borderBottom: 'none' }}>
         {/* Brand */}
