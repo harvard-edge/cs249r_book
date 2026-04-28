@@ -25,11 +25,15 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
     // Flush pending analytics on page unload
     const handleUnload = () => flushAnalytics();
-    window.addEventListener('visibilitychange', () => {
+    const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushAnalytics();
-    });
+    };
+    window.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pagehide', handleUnload);
-    return () => window.removeEventListener('pagehide', handleUnload);
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handleUnload);
+    };
   }, []);
 
   return (
