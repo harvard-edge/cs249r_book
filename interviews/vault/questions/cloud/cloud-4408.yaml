@@ -18,30 +18,9 @@ scenario: Your H100 training framework uses dynamic tensor allocation—gradient
 question: Why does dynamic tensor allocation add 310 ms of ibv_reg_mr overhead per
   training step, and how would you redesign RDMA memory management?
 details:
-  realistic_solution: 'RDMA memory registration cost: approximately 1-5 μs per page
-    (4KB) for HCA MTT updates, plus TLB shootdown across CPUs for page pinning. For
-    a 7B model gradient buffer: 7B params × 4 bytes (FP32) = 28GB. Registration: 28GB
-    / 4KB × 2 μs = 7,000,000 × 2 μs = 14,000,000 μs = 14 seconds per registration—impossible.
-    But if PyTorch uses per-tensor registration (not full gradient): a typical microbatch
-    gradient chunk = 100MB. 100MB / 4KB × 2 μs = 51,200 μs = 51ms per tensor × 6 pipeline
-    stages = 307ms. Close to observed 310ms. Fix: implement a RDMA buffer pool. Pre-register
-    a fixed memory region at startup (all gradient memory in one ibv_reg_mr call),
-    reuse across steps. Registration becomes a one-time cost at initialization.'
-  common_mistake: Assuming RDMA memory registration is free or negligible. RDMA requires
-    memory to be pinned (non-pageable) and registered with the HCA's memory translation
-    table (MTT). Dynamic allocation/deregistration forces the OS to pin/unpin pages
-    and the HCA to update its MTT on every step—this is the dominant overhead for
-    dynamic buffers.
-  napkin_math: 'ibv_reg_mr cost: kernel page pin + HCA MTT update. Empirical: ~2μs/4KB
-    page. Gradient buffer size (LLaMA-2 7B, FP32): 7B × 4 bytes = 28GB. Pages: 28GB
-    / 4096 = 7,340,032 pages. Full registration: 7.34M × 2μs = 14.68 seconds (absurd).
-    PyTorch actually registers per-tensor per allreduce: if gradient is split into
-    128 chunks for ring allreduce = 28GB/128 = 218MB per chunk. Pages: 218MB/4KB =
-    55,808. Registration: 55,808 × 2μs = 111.6ms per chunk. But only 2-3 chunks in
-    flight = 223-335ms. Matches observed 310ms! Fix: pre-register 28GB once: 14.7s
-    one-time vs 310ms × N steps. At 10,000 steps: dynamic = 310ms × 10,000 = 51.67
-    hours overhead. Pre-registered: 14.7s. Savings: 51.67h - 0.004h = 51.67h. ROI:
-    1 registration call saves 99.99% of RDMA overhead.'
+  realistic_solution: 'RDMA memory registration cost: approximately 1-5 µs per page (4KB) for HCA MTT updates, plus TLB shootdown across CPUs for page pinning. For a 7B model gradient buffer: 7B params × 4 bytes (FP32) = 28GB. Registration: 28GB / 4KB × 2 µs = 7,000,000 × 2 µs = 14,000,000 µs = 14 seconds per registration—impossible. But if PyTorch uses per-tensor registration (not full gradient): a typical microbatch gradient chunk = 100MB. 100MB / 4KB × 2 µs = 51,200 µs = 51ms per tensor × 6 pipeline stages = 307ms. Close to observed 310ms. Fix: implement a RDMA buffer pool. Pre-register a fixed memory region at startup (all gradient memory in one ibv_reg_mr call), reuse across steps. Registration becomes a one-time cost at initialization.'
+  common_mistake: 'Assuming RDMA memory registration is free or negligible. RDMA requires memory to be pinned (non-pageable) and registered with the HCA''s memory translation table (MTT). Dynamic allocation/deregistration forces the OS to pin/unpin pages and the HCA to update its MTT on every step—this is the dominant overhead for dynamic buffers.'
+  napkin_math: 'ibv_reg_mr cost: kernel page pin + HCA MTT update. Empirical: ~2µs/4KB page. Gradient buffer size (LLaMA-2 7B, FP32): 7B × 4 bytes = 28GB. Pages: 28GB / 4096 = 7,340,032 pages. Full registration: 7.34M × 2µs = 14.68 seconds (absurd). PyTorch actually registers per-tensor per allreduce: if gradient is split into 128 chunks for ring allreduce = 28GB/128 = 218MB per chunk. Pages: 218MB/4KB = 55,808. Registration: 55,808 × 2µs = 111.6ms per chunk. But only 2-3 chunks in flight = 223-335ms. Matches observed 310ms! Fix: pre-register 28GB once: 14.7s one-time vs 310ms × N steps. At 10,000 steps: dynamic = 310ms × 10,000 = 3,100 seconds = 51.67 minutes overhead. Pre-registered: 14.7s. Savings: 51.67m - 0.24m = 51.4m. ROI: 1 registration call saves 99% of RDMA overhead.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -51,11 +30,9 @@ validation_status: OK
 validation_date: '2026-04-02'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Text is truncated at the end
 human_reviewed:
   status: not-reviewed
   by: null

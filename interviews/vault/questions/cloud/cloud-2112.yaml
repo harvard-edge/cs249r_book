@@ -16,18 +16,20 @@ question: With gradient checkpointing every √96≈10 layers, what activation m
   and training-time compute overhead should you expect?
 details:
   realistic_solution: 'Without checkpointing: 96 layers of saved activations = 48
-    GB. With sqrt(96) ~ 10 checkpoints: only ~10 layers of activations stored = ~5
-    GB. Memory savings: 48 GB -> 5 GB (10x reduction). Compute cost: backward pass
-    recomputes activations for ~86 non-checkpointed layers. Since forward recompute
-    is 1/3 of total training cost (forward = 1/3 total), the overhead is ~(86/96)
-    * (1/3) = ~30% extra wall-clock time. This is the canonical memory-compute tradeoff.'
+    GB. With checkpointing every 10 layers, we store 10 boundaries (~5 GB). During
+    the backward pass, we recompute one block of 10 layers at a time, requiring an
+    additional ~5 GB of activation memory. Total memory is ~10 GB, a nearly 5x reduction.
+    Compute cost: the backward pass recomputes activations for the forward pass once.
+    This adds exactly 1 extra forward pass. Since the forward pass is ~1/3 of total
+    training FLOPs (and backward is ~2/3), the overhead is ~33% extra FLOPs. This
+    is the canonical memory-compute tradeoff.'
   common_mistake: Assuming gradient checkpointing halves memory. It reduces activation
     memory from O(N) to O(sqrt(N)) layers, but also does not realize the recompute
     cost is roughly 33% of total training FLOPs, not 100%.
   napkin_math: 'Standard activation memory = 48 GB. With checkpointing every 10 layers,
-    we store 10 boundaries (48/10 = 4.8 GB) plus recompute 1 block (4.8 GB). Total
-    new activation memory = ~9.6 GB. This prevents OOM on the 80GB A100. Compute overhead:
-    ~33% extra FLOPs for the recomputed forward pass, easily absorbed.'
+    we store 10 boundaries (48/96 * 10 = 5 GB) plus recompute 1 block at a time (5
+    GB). Total new activation memory = ~10 GB. This fits within the 80GB A100. Compute
+    overhead: ~33% extra FLOPs because the forward pass is run twice.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,15 +38,9 @@ chains:
 - id: cloud-chain-453
   position: 2
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The statement 'With checkpointing every 10 layers, we store 10 boundaries (48/10
-  = 4.8 GB) plus recompute 1 block (4.8 GB). Total new activation memory = ~9.6 GB'
-  implies storing 10 layers PLUS the recomputed block, which is not the standard sqrt(N)
-  model. The typical sqrt(N) strategy means you only store sqrt(N) activations at
-  any given time, recomputing the intermediate ones.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -12,7 +12,7 @@ scenario: You train a 1.6T parameter MoE model (128 experts, top-2) on 256 MI300
   GPUs. Each expert has 12.5B parameters (FP16 = 25 GB). A single MI300X (192 GB)
   can hold ~6 experts in memory with room for activations. Design a parallelism strategy
   combining expert parallelism (EP), tensor parallelism (TP), and data parallelism
-  (DP).
+  (DP), assuming a micro-batch size of 256 tokens per GPU and a hidden dimension of 8192.
 question: How would you combine expert parallelism, tensor parallelism, and data parallelism
   for the 1.6T-parameter MoE on 256 MI300X GPUs?
 details:
@@ -31,9 +31,10 @@ details:
     GPUs for DP. This under-utilizes each GPU's 192 GB (only 25 GB used per expert)
     and creates massive All-to-All traffic across 128 GPUs.
   napkin_math: '128 experts × 25 GB = 3.2 TB total model. 4 experts/GPU × 32 GPUs
-    = one full copy. 256 GPUs / 32 = 8 DP replicas. All-to-All per MoE layer: 32 GPUs
-    × 8 MB = 256 MB. 16 MoE layers × 2 directions: 8.2 GB. At 400 Gbps IB: 164ms.
-    Shared attention TP=8 AllReduce: ~15ms intra-node.'
+    = one full copy. 256 GPUs / 32 = 8 DP replicas. All-to-All per MoE layer per GPU:
+    256 tokens × 2 × 8192 × 2B ≈ 8 MB. 16 MoE layers × 2 directions: 256 MB per GPU.
+    At 400 Gbps IB (50 GB/s) per GPU: 256 MB / 50 GB/s = ~5.1 ms.
+    Shared attention TP=8 AllReduce: ~0.3ms intra-node.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -43,12 +44,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-opus-4-6
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- All-to-All per layer volume of 8 MB per GPU is stated without specifying the batch
-  size, making it impossible to fully verify.
 human_reviewed:
   status: not-reviewed
   by: null

@@ -22,19 +22,7 @@ details:
   common_mistake: '"Linear scaling — 32 GPUs = 32,000 samples/sec." This ignores that
     communication overhead grows with GPU count and that crossing the node boundary
     (NVLink → InfiniBand) causes a discontinuous drop in scaling efficiency.'
-  napkin_math: 'Model: 7B params, 14 GB gradients (FP16). Single-GPU step: 100 ms
-    compute. **Intra-node (NVLink 4.0, unidirectional 450 GB/s for ring AllReduce):**
-    AllReduce time for $N$ GPUs: $2(N-1)/N \times 14\text{GB} / 450\text{GB/s}$. 2
-    GPUs: 15.6 ms. 4 GPUs: 23.3 ms. 8 GPUs: 54.4 ms. With overlap: ~30% exposed. Effective
-    overhead: 2→4.7ms, 4→7.0ms, 8→16.3ms. Throughput (N × 1000 × 100 / (100+overhead)):
-    2→1,910 (95.5%), 4→3,738 (93.5%), 8→6,876 (86.0%). **Inter-node (InfiniBand 400
-    Gbps; ~25 GB/s unidirectional effective):** 16 GPUs (2 nodes): a *flat* 16-rank
-    ring across the 25 GB/s WAN moves 2*(15/16) * 14 GB / 25 GB/s ≈ 1.05 s — over
-    10x the compute. Hierarchical AllReduce: intra-node reduce-scatter (16.3 ms) +
-    inter-node AllReduce of one node''s 14 GB / 8 = 1.75 GB shard at 2*(1/2) * 1.75
-    GB / 25 GB/s ≈ 70 ms + intra-node AllGather (~16 ms) ≈ 102 ms exposed. Throughput:
-    16→7,921 (49.5%) — inter-node IB is the dominant cost. **The NVLink→IB boundary
-    at GPU 9 causes the scaling cliff.**'
+  napkin_math: 'Model: 7B params, 14 GB gradients (FP16). Single-GPU step: 100 ms compute. **Intra-node (NVLink 4.0, unidirectional 450 GB/s):** Ring AllReduce time for N GPUs = 2*(N-1)/N * 14 GB / 450 GB/s. 2 GPUs: 31.1 ms; 4 GPUs: 46.7 ms; 8 GPUs: 54.4 ms. With 70% overlapped (30% exposed): exposed overheads are 2→9.3 ms, 4→14.0 ms, 8→16.3 ms. Throughput = N * 1000 * 100 / (100 + exposed). 2 GPUs: 2000 * 100 / 109.3 = 1,830 (91.5%). 4 GPUs: 4000 * 100 / 114.0 = 3,509 (87.7%). 8 GPUs: 8000 * 100 / 116.3 = 6,879 (86.0%). **Inter-node (16 GPUs, 2 nodes):** IB NDR 50 GB/s (unidirectional). Flat ring AllReduce across 16 GPUs: 2*(15/16)*14 GB / 50 GB/s = 525 ms. Exposed overhead (assuming 30% exposed) = 157.5 ms. Throughput = 16 * 1000 * 100 / (100 + 157.5) = 6,213 (38.8%). The massive drop from 450 GB/s NVLink to 50 GB/s InfiniBand creates the scaling cliff.'
 status: archived
 provenance: imported
 requires_explanation: false
@@ -43,31 +31,12 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The AllReduce time calculation for NVLink using '900 GB/s (bus bandwidth)' might
-  be imprecise. For a ring AllReduce, the effective unidirectional bandwidth per GPU
-  is often considered half of the bisection bandwidth (e.g., 450 GB/s).
-- The Napkin Math is truncated at the end for the inter-node InfiniBand calculation.
-validation_status_pro: WARN
-validation_issues_pro:
-- The final throughput numbers in the Napkin Math are mathematically inconsistent
-  with the calculated communication overhead and the stated '30% exposed' overlap
-  factor.
-- The inter-node communication time calculation uses an overly simplistic and incorrect
-  model (TotalSize / LinkBandwidth).
 math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Resolved 2026-04-25: rewrote napkin_math to use unidirectional NVLink (450 GB/s)
-  and unidirectional IB NDR (~25 GB/s) and to derive the hierarchical inter-node step
-  explicitly from a 1.75 GB per-node shard.'
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
-deletion_reason: Archived after G.H cleanup rewrite still failed Phase D's strict
-  judge bar (G.L re-judge). Pre-Phase-D legacy item that doesn't meet today's parallelism
-  prompt standards.

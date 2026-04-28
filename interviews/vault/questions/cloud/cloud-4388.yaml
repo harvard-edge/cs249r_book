@@ -18,26 +18,9 @@ scenario: 'You are designing a power-aware training scheduler for a 256-node H10
 question: What cluster-level DVFS policy would smooth H100 training power under the
   25 MW budget while exploiting GEMM and all-reduce phase differences?
 details:
-  realistic_solution: 'Design a two-level policy: (1) Cluster scheduler annotates
-    jobs with topology metadata (TP degree, PP stages, AllReduce frequency). (2) Power
-    controller subscribes to NCCL collective events and preemptively steps down GPU
-    frequency 50ms before predicted AllReduce windows. During communication phases,
-    reduce GPU clock from 1,980 MHz to 1,410 MHz (boost to base) → ~35% power reduction
-    per GPU. Budget math: during compute phases, 256 nodes × 8 GPUs × 700W = 1.434
-    GW (well over 25 MW). During comm phases at reduced clocks: 256 × 8 × 450W = 921.6
-    MW. Policy target: smooth to constant 850W average by oversubscribing compute
-    phases within thermal buffer.'
-  common_mistake: Treating DVFS as a per-GPU control loop rather than a cluster-level
-    policy. Individual GPU DVFS reacts too slowly (10-100ms) to catch AllReduce windows
-    (often 5-50ms). The scheduler must operate at the job level, using job topology
-    information to predict AllReduce phases.
-  napkin_math: '256 nodes × 8 GPUs = 2,048 GPUs. Compute phase: 2,048 × 700W = 1,434
-    kW. Comm phase: 2,048 × 450W = 921 kW. Average if 60% compute / 40% comm: 0.6×1,434
-    + 0.4×921 = 860 + 368 = 1,228 kW = 1.228 MW. 25 MW facility budget → 25,000 /
-    1,228 = 20× oversubscription potential at cluster level (20 jobs). DVFS smoothing
-    target: cap at 950W peak (boost phase) + 400W comm = weighted avg 710W. Max GPUs
-    under 25 MW: 25,000,000 / 710 = 35,211 GPUs = ~4,401 nodes. Versus naive: 25,000
-    / 700 = 35,714 GPUs (similar, but DVFS eliminates PDU overcurrent spikes).'
+  realistic_solution: 'Design a two-level policy: (1) Cluster scheduler annotates jobs with topology metadata (TP degree, PP stages, AllReduce frequency). (2) Power controller subscribes to NCCL collective events and preemptively shifts power caps. During communication phases where compute is idle, the GPU does not need 700W; capping it at 450W reclaims 250W. Policy target: smooth the cluster power to a constant 600W average by staggering job phases or applying strict node-level power caps during AllReduce. This allows oversubscribing the facility budget based on average power rather than peak power.'
+  common_mistake: 'Treating DVFS as a per-GPU control loop rather than a cluster-level policy. Individual GPU DVFS reacts too slowly (10-100ms) to catch AllReduce windows (often 5-50ms). The scheduler must operate at the job level, using job topology information to predict AllReduce phases and coordinate caps.'
+  napkin_math: '256 nodes × 8 GPUs = 2,048 GPUs. Compute phase: 2,048 × 700W = 1,434 kW. Comm phase: 2,048 × 450W = 921 kW. Average if 60% compute / 40% comm: 0.6×700 + 0.4×450 = 420 + 180 = 600W. 25 MW facility budget → provisioning by peak (700W): 25,000,000 / 700 = 35,714 GPUs. Provisioning by average (600W) with proactive power smoothing: 25,000,000 / 600 = 41,666 GPUs. DVFS scheduling enables safely deploying ~5,950 more GPUs under the same 25 MW budget.'
 status: published
 provenance: imported
 requires_explanation: true

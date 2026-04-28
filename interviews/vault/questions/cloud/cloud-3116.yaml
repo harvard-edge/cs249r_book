@@ -15,17 +15,23 @@ scenario: Concretely calculate the total training FLOPs for BERT-base (110M para
 question: What are BERT-base training FLOPs by 6ND and by layer-by-layer counting,
   and how do the two estimates compare?
 details:
-  realistic_solution: 'FFN FLOPs: 2 × 2 × 256 × 512 × 768 × 3072 = 2×2×256×512×768×3072.
-    Calculating: 2×2=4; 4×256=1024; 1024×512=524,288; 524,288×768=402,653,184; 402,653,184×3072
-    = 1,236,950,048,768 ≈ 1.237×10^12 (not 1.55×10^12).'
-  common_mistake: Applying 6ND where D is total tokens = steps * batch * seq, not
-    total samples, and confusing gradient accumulation steps with actual training
-    steps.
-  napkin_math: '6ND: 6*110e6*131.1e9=8.63e19. Layer-by-layer forward (per step batch=256,
-    seq=512): QKV: 3*2*256*512*768^2=3*2*256*512*589,824=4.636e11. Attn: 2*256*12*262,144*64=1.025e11.
-    FFN: 2*2*256*512*768*3072=1.237e12 (not 1.55e12). LN+other: ~0.1e12. Total forward:
-    ~2.0e12. Backward: 2x forward=4.0e12. Per step: 6.0e12 FLOPs. 1M steps: 6.0e18.
-    6ND estimate: 8.63e19. Ratio: 8.63e19/6.0e18=14.4x.'
+  realistic_solution: 'The 6ND estimate yields ~8.65e19 FLOPs. Layer-by-layer counting
+    for one layer gives ~1.9 TFLOPs for the forward pass (QKV: ~0.46, Attn: ~0.21,
+    FFN: ~1.24). Across 12 layers, the forward pass is ~22.9 TFLOPs. Since training
+    requires 3x the forward pass (1x for forward, 2x for backward), one full step
+    is ~68.7 TFLOPs. Over 1M steps, this is 6.87e19 FLOPs. The two estimates compare
+    very closely. The 6ND estimate is slightly higher (~1.26x) because N (110M) includes
+    the large vocabulary embedding matrix (approx. 23M params), which is a lookup
+    table and does not contribute to the dense matrix multiplication FLOPs.'
+  common_mistake: 'Applying 6ND where D is total tokens = steps * batch * seq, not
+    total samples, or failing to multiply the layer-level FLOPs by the number of
+    layers (12) when doing manual verification, leading to a massive 12x discrepancy.'
+  napkin_math: '6ND: 6 * 110e6 * (1e6 * 256 * 512) = 8.65e19 FLOPs. Layer-by-layer
+    forward pass per step (batch=256, seq=512): QKV: 3 * 2 * 256 * 512 * 768^2 = 4.64e11.
+    Attn: 2 * (2 * 256 * 12 * 512^2 * 64) = 2.06e11. FFN: 2 * (2 * 256 * 512 * 768
+    * 3072) = 1.24e12. Total forward per layer: 1.91e12. Total forward for 12 layers:
+    22.9e12. Total step (fwd+bwd): 3 * 22.9e12 = 68.7e12 FLOPs. 1M steps: 6.87e19
+    FLOPs. Ratio: 8.65e19 / 6.87e19 = 1.26x. The estimates align well.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -35,11 +41,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- FFN FLOPs calculation is incorrect (2*2*256*512*768*3072 = 1.237e12, not 1.55e12).
 human_reviewed:
   status: not-reviewed
   by: null

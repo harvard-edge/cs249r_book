@@ -15,21 +15,16 @@ scenario: Realize the complete kernel fusion impact for 70B LLM inference on 8 H
 question: For seq=8192, hidden size 8192, 64 heads, and head_dim 128, what is the
   correct per-layer attention FLOP count and why is 8.59 TFLOPs too high?
 details:
-  realistic_solution: 'Attention FLOPs for a single layer at seq=8192: QK^T scores
-    = 2 × heads × seq² × head_dim = 2 × 64 × 8192² × 128 = 140 GFLOPs. Full attention
-    including projections: ~560 GFLOPs per layer. 8.59 TFLOPs per layer is too high
-    by ~15×.'
+  realistic_solution: 'Attention FLOPs for a single layer at seq=8192 in DECODE mode (batch=32):
+    QK^T scores = 2 × batch × seq × hidden = 2 × 32 × 8192 × 8192 = 4.29 GFLOPs. Attention over values
+    (SV) adds another 4.29 GFLOPs. Full attention is heavily memory-bound, not compute-bound.
+    8.59 TFLOPs per layer assumes prefill seq² math, which is incorrect for decode.'
   common_mistake: Not distinguishing that with 32 concurrent users, the workload is
-    batch=32 decode — significantly different from batch=1 in terms of arithmetic
-    intensity.
-  napkin_math: 'Single Transformer layer attention FLOPs (seq=8192, hidden=8192, batch=1):
-    QKV projection: 3 × 2 × 1 × 8192 × 8192² = 3 × 2 × 8192³ ≈ too large. Fix: QKV
-    = 3 × 2 × batch × seq × hidden² = 3 × 2 × 1 × 8192 × 8192 × 8192 is wrong — hidden
-    is the projection dim, not seq. Correct: QKV = 3 × 2 × seq × hidden × hidden =
-    3 × 2 × 8192 × 8192 × 8192 for full self-attention with hidden=8192. But per standard
-    formula: QKV proj = 3 × 2 × B × S × d² = 3×2×1×8192×8192² is the matmul. Actually:
-    2×32×8192×8192 = 4.29 GFLOPs for a single layer''s QKV attention scores (not 8.59
-    TFLOPs which is 1000× too high).'
+    batch=32 decode — significantly different from batch=1 prefill in terms of arithmetic intensity
+    and FLOP count.
+  napkin_math: 'Single layer QK^T FLOPs (decode, batch=32, seq=8192, hidden=8192):
+    2 × batch × seq × hidden = 2 × 32 × 8192 × 8192 = 4.29 GFLOPs. Total attention FLOPs (QK^T + SV)
+    = 8.59 GFLOPs. The error 8.59 TFLOPs is exactly 1000× too high, confusing GFLOPs with TFLOPs.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -39,11 +34,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Math error: 2 × 32 × 8192 × 8192 FLOPs = 4.29 GFLOPs, not 8.59T FLOPs.'
 human_reviewed:
   status: not-reviewed
   by: null

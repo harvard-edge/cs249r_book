@@ -24,9 +24,9 @@ details:
     \ as a baseline, and consider mixed-precision or even 4-bit quantization (INT4)\
     \ for weights if memory remains a bottleneck. \n2.  **Comprehensive Memory Estimation**:\
     \ Calculate parameter memory based on chosen quantization. Crucially, estimate\
-    \ activation memory, which can be 1-2x the parameter memory for LLMs, considering\
-    \ batch size 1 for on-device inference. Sum these to get a total peak memory footprint\
-    \ and compare against the 12 GB LPDDR5X. \n3.  **TOPS-to-Latency Mapping**: Roughly\
+    \ the KV cache memory, which can grow significantly for long sequence lengths,\
+    \ along with system overhead and intermediate activations. Sum these to get a total peak\
+    \ memory footprint and compare against the 12 GB LPDDR5X. \n3.  **TOPS-to-Latency Mapping**: Roughly\
     \ estimate the number of operations (e.g., multiply-accumulates) per inference\
     \ forward pass. Divide this by the NPU's 34.7 TOPS to get a theoretical minimum\
     \ inference time. Adjust for an estimated NPU utilization factor (e.g., 50-70%)\
@@ -37,41 +37,12 @@ details:
   common_mistake: A common mistake is to only consider the model's parameter count
     in FP32 precision, ignoring the critical need for quantization (e.g., INT8 or
     INT4) on mobile hardware. Another frequent oversight is neglecting the memory
-    required for activations and intermediate tensors during inference, which can
-    often exceed the parameter memory itself. Lastly, assuming a direct correlation
+    required for the KV cache and OS overhead during inference, which can
+    often be substantial and push the system out of memory. Lastly, assuming a direct correlation
     between theoretical NPU TOPS and real-world inference speed without accounting
     for memory bandwidth limitations, NPU-specific operator efficiencies, and software
     stack overheads can lead to inaccurate feasibility assessments.
-  napkin_math: '**Memory Footprint (Target INT8)**:
-
-    *   Parameters: 7 billion params * 1 byte/param (for INT8) = 7 GB.
-
-    *   Activations & Intermediate Tensors: For LLMs, this can be substantial. A rough
-    estimate suggests 5-10 GB during peak inference.
-
-    *   Total Estimated Memory: 7 GB (params) + 5-10 GB (activations) = 12-17 GB.
-
-    *   Conclusion: The total estimated memory (12-17 GB) is either at the limit or
-    exceeds the 12 GB LPDDR5X. This implies that 7B parameters, even with INT8, will
-    be extremely challenging to fit and run efficiently without further aggressive
-    compression (e.g., INT4 weights) or architectural modifications.
-
-
-    **Computational (TOPS) Feasibility**:
-
-    *   Typical LLM inference FLOPs per parameter: Roughly 2 FLOPs/param for a single
-    pass (very simplified).
-
-    *   Total Operations: 7 billion params * 2 FLOPs/param = 14 TOPS (rough compute
-    requirement).
-
-    *   Exynos 2400 NPU Capacity: 34.7 TOPS.
-
-    *   Conclusion: The NPU theoretically offers enough raw compute (34.7 TOPS vs
-    ~14 TOPS required). However, actual performance will be heavily gated by memory
-    bandwidth, the NPU''s efficiency for specific LLM operators, and how well the
-    model maps to the hardware''s architecture. Memory access patterns and data movement
-    will be critical bottlenecks before raw TOPS.'
+  napkin_math: '**Memory Footprint (Target INT8)**:\n\n    *   Parameters: 7 billion params * 1 byte/param (for INT8) = 7 GB.\n\n    *   KV Cache & OS Overhead: For LLMs, KV cache grows with context. A rough estimate\n    suggests 1-2 GB for KV cache during peak inference, plus 3-4 GB for OS overhead.\n\n    *   Total Estimated Memory: 7 GB (params) + 1-2 GB (KV) + 3-4 GB (OS) = 11-13 GB.\n\n    *   Conclusion: The total estimated memory (11-13 GB) is either at the limit or\n    exceeds the 12 GB LPDDR5X. This implies that 7B parameters, even with INT8, will\n    be extremely challenging to fit and run efficiently without further aggressive\n    compression (e.g., INT4 weights) or architectural modifications.\n\n\n    **Computational Feasibility**:\n\n    *   Typical LLM inference OPs per parameter: Roughly 2 OPs/param for a single\n    pass (very simplified).\n\n    *   Total Operations: 7 billion params * 2 OPs/param = 14 Giga-Operations (rough compute\n    requirement per token).\n\n    *   Exynos 2400 NPU Capacity: 34.7 TOPS (Tera-Operations Per Second).\n\n    *   Conclusion: The NPU theoretically offers vast compute headroom (34.7 TOPS vs\n    ~0.014 TOPS required per token, yielding >2000 tokens/sec theoretically). However, actual performance will be heavily gated by memory\n    bandwidth (e.g., reading 7GB weights at 50GB/s yields ~7 tokens/sec), the NPU''s efficiency for specific LLM operators, and how well the\n    model maps to the hardware''s architecture. Memory access patterns and data movement\n    will be critical bottlenecks before raw TOPS.'
 status: published
 provenance: imported
 requires_explanation: false

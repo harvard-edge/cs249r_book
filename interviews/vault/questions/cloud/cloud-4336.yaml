@@ -19,28 +19,24 @@ details:
     all are dense matrix operations → perfect fit for TPU systolic arrays. Expected
     MFU (model FLOP utilization) > 50%. Embedding lookup components: sparse, random-access
     reads from large tables. TPU HBM controllers are optimized for streaming sequential
-    access, not random scatter-gather. Sparse embedding lookups on TPU can be 10-50×
-    slower than on GPU due to irregular access patterns inefficiency in the systolic
-    architecture. Key modification: offload embedding lookups from TPU to CPU/host
+    access, not random scatter-gather. Without specialized SparseCores, sparse embedding lookups
+    on TPU are severely bottlenecked by XLA''s handling of dynamic indexing and all-to-all
+    communication across the ICI. Key modification: offload embedding lookups from TPU to CPU/host
     memory. Use the ''embedding CPU offload'' pattern: CPUs handle embedding lookups
     (sending batched index requests), TPUs handle all dense operations. Communication
     bridge: embedding vectors are sent from CPU to TPU via PCIe/custom interconnect
-    before each forward pass. This hybrid CPU+TPU architecture (used in Meta''s ZION
-    platform equivalent for Google) is the only practical way to run DLRM on TPUs
-    at scale. Embedding placement: 500 GB fits in cluster CPU DRAM (256 hosts × 512
-    GB each = 128 TB available).'
-  common_mistake: Saying DLRM is fine on TPU because the dense MLP is compute-bound.
-    The embedding lookups are irregular memory accesses (sparse, non-sequential) —
-    TPUs are optimized for dense matrix operations via systolic arrays and perform
-    poorly on irregular sparse access patterns.
+    before each forward pass. This hybrid CPU+TPU architecture (similar to Meta''s ZION
+    platform) is a practical way to run DLRM on TPUs at scale without SparseCores. Embedding
+    placement: 500 GB fits easily in cluster CPU DRAM.'
+  common_mistake: 'Assuming embedding lookup performance is determined by dividing the full 500 GB table size by memory bandwidth. In reality, a step only reads a small fraction (e.g., 6.7 GB for a 262k batch), but TPUs struggle with the random memory access patterns and the all-to-all communication required to route sparse lookups, not the raw read bandwidth.'
   napkin_math: 'TPU v5e pod: 256 × 197 TFLOPS = 50.4 PFLOPS BF16. Dense MLP (5B params,
     batch=262k): FLOPs = 2 × 5e9 × 262144 = 2.6 PFLOPS per step. Time at 50% MFU:
-    2.6P / (50.4P × 0.5) = 103 ms/step. Embedding lookup: 500 GB / (256 chips × 1.6
-    TB/s) = 1.2 ms if sequential. But random access: effective BW drops to ~10% =
-    0.12 TB/s per chip → 500 GB / (256 × 0.12 TB/s) = 16 ms — still faster than MLP.
-    However TPU''s XLA compiler cannot fuse irregular scatter-gather → kernel launch
-    overhead per embedding table lookup: 10 μs × 100 tables × 256 chips = 256 ms overhead
-    alone. CPU offload eliminates this.'
+    2.6P / (50.4P × 0.5) = 103 ms/step. Embedding lookup volume per step (batch=262k, 100 tables, 256 bytes):
+    262,144 × 100 × 256 bytes = 6.7 GB. If distributed evenly, each chip gathers 26 MB. At 1.6 TB/s,
+    this takes microseconds. However, XLA lacks efficient fused dynamic scatter-gather without SparseCores.
+    The host-driven or unfused overhead of processing 100 tables sequentially, combined with
+    all-to-all communication of the 6.7 GB across the ICI, dominates step time (often 100s of ms),
+    making it slower than the MLP. CPU offload pipeline eliminates this.'
 status: published
 provenance: imported
 requires_explanation: true

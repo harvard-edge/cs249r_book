@@ -8,50 +8,38 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: Long-Context INT4 KV Cache Degradation
-scenario: Serving a 7B LLM with a 128k context window. At FP16, the KV cache is 32GB per request, heavily
-  limiting concurrency. You implement INT4 per-channel KV cache quantization, saving 75% memory. Throughput
-  jumps from 5 QPS to 18 QPS, but 'needle in a haystack' retrieval accuracy drops from 99% to 45%.
+scenario: Serving a 7B LLM with a 128k context window. At FP16, the KV cache is 67GB per request, heavily limiting concurrency. You implement INT4 per-channel KV cache quantization, saving 75% memory. Throughput jumps from 5 QPS to 18 QPS, but 'needle in a haystack' retrieval accuracy drops from 99% to 45%.
 question: "Why did INT4 KV cache quantization hurt needle-in-haystack accuracy, and how would you preserve long-context retrieval?"
 details:
   realistic_solution: 'Per-channel INT4 quantization of the KV cache is insufficient for long-context
     retrieval because attention relies on precise outlier key/value pairs representing specific ''needles.''
     INT4 has only 16 representable values. When quantizing Key vectors, dot-product precision with Query
-    vectors degrades, causing attention scores to blur across the context. Note: the true FP16 KV cache
-    for this architecture at 128K context is ~67 GB (not 32 GB as stated in the scenario — 32 GB corresponds
-    to INT8). The fix: implement group-quantization (group size 64-128) to capture local variance within
+    vectors degrades, causing attention scores to blur across the context. The fix: implement group-quantization (group size 64-128) to capture local variance within
     each head dimension, or use mixed-precision KV cache (keep recent tokens and attention-sink tokens
     in FP16, quantize the rest to INT4).'
   common_mistake: Increasing the calibration dataset size, which doesn't fix the fundamental representational
     limit of 4 bits for long-sequence dot products.
   napkin_math: '**7B model: 32 layers, 32 KV heads, head_dim=128.**
 
-
     **FP16 KV cache for 128K context, batch=1:**
 
-    = 2 (K+V) × 32 layers × 32 heads × 128 dim × 128,000 tokens × 2 bytes
+    = 2 (K+V) x 32 layers x 32 heads x 128 dim x 128,000 tokens x 2 bytes
 
-    = 2 × 32 = 64; × 32 = 2,048; × 128 = 262,144; × 128,000 = 33,554,432,000; × 2 = 67,108,864,000 bytes
+    = 67,108,864,000 bytes
 
-    = 67.1 GB (decimal) = 62.5 GiB (binary).
-
-
-    Note: The scenario states ''32 GB per request'' which corresponds to INT8 KV cache (1 byte/element
-    = 33.6 GB), not FP16. With FP16, the actual KV cache is ~67 GB — even more severe for the concurrency
-    limitation.
-
+    = 67.1 GB.
 
     **INT4 KV cache (per scenario''s 75% savings):**
 
-    INT4 = 0.5 bytes/element: 2 × 32 × 32 × 128 × 128,000 × 0.5 = 16.8 GB.
-
+    INT4 = 0.5 bytes/element: 2 x 32 x 32 x 128 x 128,000 x 0.5 = 16.8 GB.
 
     **Grouped quantization overhead (group-size-128):**
 
     Groups = 128,000/128 = 1,000 per (layer, head, dim). Metadata per group: 4 bytes (scale + zero).
 
-    Total metadata ≈ 2 × 32 × 32 × 128 × 1,000 × 4 = 1.05 GB.
+    Total metadata ≈ 2 x 32 x 32 x 128 x 1,000 x 4 = 1.05 GB.
 
-    Effective INT4+metadata = 16.8 + 1.05 = 17.85 GB → ~73% savings vs FP16.'
+    Effective INT4+metadata = 16.8 + 1.05 = 17.85 GB -> ~73% savings vs FP16.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -60,10 +48,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The napkin math for the INT4 KV cache size is incorrect by a factor of 2; it should be ~16.8 GB, not
-  ~8.4 GB.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

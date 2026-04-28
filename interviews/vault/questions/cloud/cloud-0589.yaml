@@ -8,40 +8,12 @@ competency_area: precision
 bloom_level: create
 phase: both
 title: The Mixture-of-Experts Quantization Collapse
-scenario: You are the Staff ML Engineer responsible for a fleet of Mixtral-class 8x22B Mixture-of-Experts
-  (MoE) models. The VP of Engineering mandates a 40% reduction in inference serving cost. Your team's
-  initial attempt was to apply standard post-training INT8 quantization to the model. While this successfully
-  reduced the total model memory footprint from ~282GB (FP16 for 141B total params) to ~141GB, allowing
-  it to fit on fewer GPUs, downstream quality metrics plummeted by over 50%. The team is now convinced
-  that quantization is not viable for MoE models due to 'activation outliers'. The VP is asking you to
-  formulate a new plan to meet the cost-reduction goals. How do you design a quantization strategy that
-  works, and what specific architectural failure explains the initial collapse?
+scenario: You are the Staff ML Engineer responsible for a fleet of Mixtral-class 8x22B Mixture-of-Experts (MoE) models. The VP of Engineering mandates a 40% reduction in inference serving cost. Your team's initial attempt was to apply standard post-training INT8 quantization to the model. While this successfully reduced the total model memory footprint from ~282GB (FP16 for 141B total params) to ~141GB, allowing it to fit on fewer GPUs, downstream quality metrics plummeted by over 50%. The team is now convinced that quantization is not viable for MoE models due to 'activation outliers'. The VP is asking you to formulate a new plan to meet the cost-reduction goals. How do you design a quantization strategy that works, and what specific architectural failure explains the initial collapse?
 question: "How do you design a quantization strategy that works, and what specific architectural failure explains the initial collapse?"
 details:
-  realistic_solution: 'The core insight is that not all parameters are created equal, especially in an
-    MoE architecture. The catastrophic failure is caused by quantizing the **gating network''s logits**.
-    This tiny part of the model determines which experts are routed to for each token. Quantizing them
-    to INT8 collapses their expressive power, leading to poor routing decisions. The total model has ~141B
-    parameters. In FP16 this requires ~282 GB for weights alone — needing 5 H100s to serve with KV cache.
-    The initial INT8 quantization reduced this to ~141 GB, fitting on 2-3 H100s, but destroyed routing
-    quality. The fix is a mixed-precision strategy: keep the gating network and attention layers in FP16
-    while quantizing only the expert FFN weights to INT8. This results in ~171 GB for weights, fitting
-    on 3 H100s (a 40% cost reduction from 5 GPUs) without degrading quality.'
-  common_mistake: The most common answer is to immediately suggest Quantization-Aware Training (QAT).
-    While powerful, QAT is extremely expensive for models of this scale and doesn't address the fundamental
-    architectural reason for the failure. Another common mistake is to blame the calibration dataset,
-    suggesting more data would fix it. While important, no amount of calibration data can fix a fundamental
-    dynamic range mismatch in a specific sub-component of the model.
-  napkin_math: 'An 8×22B MoE model (like Mixtral) has ~141B total parameters. **Memory in FP16:** 141B
-    × 2 bytes = **282 GB** — plus KV cache and activations, requires 5× H100 80GB GPUs. **After naive
-    INT8 quantization:** 141B × 1 byte = **141 GB** — fits on 2-3× H100s, but quality collapsed due to
-    gating network quantization. **Mixed-precision strategy:** (1) Gating networks: keep in FP16 = negligible
-    size. (2) Attention + embeddings (~30B params): FP16 = 60 GB. (3) Expert FFN weights (~111B params):
-    INT8 = 111 GB. **Total: ~171 GB** — fits comfortably on 3× H100s with room for KV cache. **Cost comparison:**
-    Original FP16 (5 GPUs): 5 × $3.50/hr = $17.50/hr. Mixed-precision (3 GPUs): 3 × $3.50/hr = $10.50/hr.
-    **Savings: 40%** — meeting the VP''s mandate while preserving routing quality. The critical insight:
-    the gating network is a tiny fraction of total parameters but controls 100% of expert routing decisions.
-    Keeping it in full precision preserves the routing distribution that the model learned during training.'
+  realistic_solution: 'The core insight is that not all parameters are created equal, especially in an MoE architecture. The catastrophic failure is caused by quantizing the **gating network''s logits**. This tiny part of the model determines which experts are routed to for each token. Quantizing them to INT8 collapses their expressive power, leading to poor routing decisions. The total model has ~141B parameters. In FP16 this requires ~282 GB for weights alone — needing 5 H100s to serve with KV cache. The initial INT8 quantization reduced this to ~141 GB, fitting on 2-3 H100s, but destroyed routing quality. The fix is a mixed-precision strategy: keep the gating network and attention layers in FP16 while quantizing only the expert FFN weights to INT8. This results in ~146 GB for weights, fitting comfortably on 3 H100s (a 40% cost reduction from 5 GPUs) without degrading quality.'
+  common_mistake: The most common answer is to immediately suggest Quantization-Aware Training (QAT). While powerful, QAT is extremely expensive for models of this scale and doesn't address the fundamental architectural reason for the failure. Another common mistake is to blame the calibration dataset, suggesting more data would fix it. While important, no amount of calibration data can fix a fundamental dynamic range mismatch in a specific sub-component of the model.
+  napkin_math: 'An 8×22B MoE model (like Mixtral) has ~141B total parameters. **Memory in FP16:** 141B × 2 bytes = **282 GB** — plus KV cache and activations, requires 5× H100 80GB GPUs. **After naive INT8 quantization:** 141B × 1 byte = **141 GB** — fits on 2-3× H100s, but quality collapsed due to gating network quantization. **Mixed-precision strategy:** (1) Gating networks: keep in FP16 = negligible size. (2) Attention + embeddings (~5B params): FP16 = 10 GB. (3) Expert FFN weights (~136B params): INT8 = 136 GB. **Total: ~146 GB** — fits comfortably on 3× H100s with room for KV cache. **Cost comparison:** Original FP16 (5 GPUs): 5 × $3.50/hr = $17.50/hr. Mixed-precision (3 GPUs): 3 × $3.50/hr = $10.50/hr. **Savings: 40%** — meeting the VP''s mandate while preserving routing quality. The critical insight: the gating network is a tiny fraction of total parameters but controls 100% of expert routing decisions. Keeping it in full precision preserves the routing distribution that the model learned during training.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -50,13 +22,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The napkin math incorrectly calculates memory footprint based on active parameters, not total parameters;
-  a 141B parameter model requires 282GB in FP16 or 141GB in INT8, neither of which fits on a single 80GB
-  H100.
-- The total parameter count of an 8x22B MoE model is likely higher than 141B, as 8 experts of 22B alone
-  is 176B.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

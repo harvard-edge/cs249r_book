@@ -15,21 +15,15 @@ scenario: You are performing on-device knowledge distillation on Jetson Orin to 
 question: How would you reduce activation memory for on-device distillation when the
   20M-parameter teacher is frozen?
 details:
-  realistic_solution: 'Run teacher inference with torch.no_grad(): to get soft labels.
-    Detach soft labels with .detach() before passing to the distillation loss function.
+  realistic_solution: 'Run teacher inference with torch.no_grad() to get soft labels.
     Only the student''s computational graph needs to be built. This reduces activation
-    memory from 22GB to ~2GB (student only). In code: teacher_logits = teacher(x).detach()
+    memory from 22GB to ~2GB (student only). In code: `with torch.no_grad(): teacher_logits = teacher(x)`
     followed by loss = kd_loss(student_logits, teacher_logits, hard_labels).'
   common_mistake: Running teacher and student in the same forward-backward pass, allowing
     the computational graph to track both models. The teacher's activations are stored
     for a backward pass that never happens (teacher is frozen), wasting ~20GB of the
     22GB activation budget.
-  napkin_math: 'Teacher (20M params) activation memory at batch=16, input=224×224:
-    ~10GB. Student (2M params): ~1GB. With no_grad on teacher: only student graph
-    kept = 1GB. Without no_grad: 10GB + 1GB = 11GB. Ratio: 11×. At 32GB Orin: 11GB
-    fits but 22GB (observed, with both graphs) shows teacher is being traced. After
-    fix: 1GB student + 10GB teacher weights = 11GB total, leaving 21GB for OS and
-    other processes.'
+  napkin_math: 'Teacher (20M params) activation memory saved for backward pass: ~20GB. Student (2M params) activation memory: ~2GB. Without no_grad, both are traced: 20GB + 2GB = 22GB activation memory. With no_grad on teacher, its activations are immediately freed after the forward pass, and only the student''s 2GB computational graph is kept. The model weights themselves only take ~44MB (FP16), so activation memory dominates. After fix: 2GB total activation memory, leaving ~30GB for OS and other processes.'
 status: published
 provenance: imported
 requires_explanation: false

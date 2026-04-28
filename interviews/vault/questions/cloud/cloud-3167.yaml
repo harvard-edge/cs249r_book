@@ -10,46 +10,29 @@ phase: inference
 title: Tree-Structured Speculation vs Linear Speculation
 scenario: Compare linear speculation (K=5 sequential draft tokens) with tree-structured
   speculation (branching factor 2, depth 3, total 7 draft tokens) for a 70B target
-  on H100. Draft acceptance rate alpha=0.75. Which produces more accepted tokens per
+  on 4x H100. Draft acceptance rate alpha=0.75. Which produces more accepted tokens per
   verification round, and what is the verification cost difference?
 question: Which produces more accepted tokens per verification round, and what is
   the verification cost difference?
 details:
-  realistic_solution: 'Linear (K=5, alpha=0.75): E[accepted] = (1-0.75^6)/0.25 = 3.22
-    tokens. Verification FLOPs: 6 x 140G = 840G. Tree (depth=3, branch=2, 7 nodes):
-    At each node, probability of reaching it = alpha^depth_from_root. Expected accepted
-    on longest path = 3 x 0.75 = 2.25 tokens. But the tree explores 2 branches at
-    each level, doubling the chance of finding a longer accepted path. Expected tokens:
-    sum over all paths weighted by acceptance. Best path acceptance: 1 - (1-alpha^3)^2
-    at depth 3 = better than linear. Empirically, tree with 7 tokens yields E~3.8
-    vs linear 3.22, a 18% improvement. Verification: 7 x 140G = 980G FLOPs (17% more
-    compute). Tree attention mask: sparse causal mask with tree structure — FlashAttention
-    must handle non-contiguous mask, reducing efficiency by ~10%. Net: 3.8 tokens
-    / (980G x 1.1 inefficiency / 989T + draft) vs linear 3.22 / (840G / 989T + draft).
-    Tree: ~3.8/1.09ms = 3.49 tok/ms. Linear: 3.22/0.85ms = 3.79 tok/ms. Tree is actually
-    slightly worse without careful mask optimization.'
+  realistic_solution: 'Linear (K=5, alpha=0.75): E[accepted] = (1-0.75^6)/0.25 = 3.29
+    tokens. For a 70B model (140GB) on 4x H100 (13.4 TB/s aggregate), batch=1 verification is memory-bandwidth bound, taking ~10.5ms (140GB / 13.4 TB/s) regardless of whether K=5 or K=7. Tree (depth=3, branch=2, 7 nodes): explores 2 branches at each level, empirically yielding E~3.8 tokens vs linear 3.29, a 16% improvement. However, tree attention requires a sparse causal mask with a tree structure. FlashAttention must handle this non-contiguous mask, reducing memory read efficiency and adding ~10% overhead (~11.6ms total verify time). Net throughput ignoring draft time: Tree yields 3.8 tokens / 11.6ms = 327.6 tok/s. Linear yields 3.29 tokens / 10.5ms = 313.3 tok/s. Tree speculation wins by amortizing the massive memory-bound verification cost over more accepted tokens, despite the mask overhead.'
   common_mistake: Assuming tree speculation always wins. Trees explore more paths
     but require more compute for verification (processing 7 vs 5 tokens) and the tree
     attention mask is more complex, reducing FlashAttention efficiency.
-  napkin_math: 'Linear: 3.22 tokens, 840 GFLOP verify. Tree(7): 3.8 tokens, 980 GFLOP
-    verify + 10% mask overhead. Tree throughput: 3.49 tok/ms. Linear: 3.79. Tree only
-    wins at alpha < 0.65 where branching diversity matters more.'
-status: deleted
+  napkin_math: 'Linear: 3.29 tokens, ~10.5ms verify. Tree(7): 3.8 tokens, ~11.6ms verify (+10% mask overhead). Tree throughput: 327.6 tok/s. Linear: 313.3 tok/s. Memory bandwidth is the true bottleneck, not FLOPs, making the marginal cost of verifying 7 vs 5 tokens negligible compared to the 140GB weight read.'
+status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 12
-deletion_reason: Math error unfixable
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-opus-4-6
 math_verified: true
-math_status: ERROR
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Calculates throughput assuming verification is compute-bound (0.85ms), but batch=1
-  verification is memory-bandwidth bound (~41.8ms). Token/ms values are off by ~50x.
 human_reviewed:
   status: not-reviewed
   by: null

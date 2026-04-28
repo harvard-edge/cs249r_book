@@ -8,27 +8,24 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Evaluating Extreme Gradient Accumulation Overhead
-scenario: Your team is pre-training a 13B parameter LLM on an 8x A100 (80GB) node using Distributed Data
-  Parallel (DDP) or ZeRO. The optimization target requires a global batch size of 1024. Across 8 GPUs,
-  the required per-GPU batch size is 128. However, with a 4096 sequence length, a micro-batch size of
-  16 already consumes 75GB of VRAM due to activations. An engineer proposes using gradient accumulation
-  with 8 steps (16 micro-batch * 8 steps = 128) per GPU. Evaluate the operational trade-offs of this design,
-  specifically addressing compute utilization, memory overhead, and distributed communication costs.
-question: "What are the compute, memory, and communication trade-offs of using 8-step gradient accumulation for the 13B LLM on 8x A100s?"
+scenario: Your team is pre-training a 3B parameter LLM on an 8x A100 (80GB) node using Distributed Data
+  Parallel (DDP). The optimization target requires a global batch size of 1024. Across 8 GPUs,
+  the required per-GPU batch size is 128. However, with a 4096 sequence length, a full batch of 128 would
+  consume hundreds of GBs of VRAM. An engineer proposes using gradient accumulation
+  with 8 steps (16 micro-batch * 8 steps = 128) per GPU, noting a micro-batch of 16 consumes 45GB of VRAM for activations. Evaluate
+  the operational trade-offs of this design, specifically addressing compute utilization, memory overhead,
+  and distributed communication costs.
+question: "What are the compute, memory, and communication trade-offs of using 8-step gradient accumulation for the 3B LLM on 8x A100s?"
 details:
-  realistic_solution: Wrap the first 7 micro-batches in PyTorch's `no_sync()` context manager to accumulate
+  realistic_solution: 'Wrap the first 7 micro-batches in PyTorch''s `no_sync()` context manager to accumulate
     gradients locally in VRAM without triggering network communication, and only sync on the 8th step.
     Because the micro-batch size of 16 still processes 65,536 tokens per step, the arithmetic intensity
     remains high enough to keep the A100 compute-bound, making this an excellent choice over complex Tensor
-    or Pipeline Parallelism.
-  common_mistake: Failing to recognize that naive DDP will trigger an All-Reduce operation on every micro-batch
+    or Pipeline Parallelism.'
+  common_mistake: 'Failing to recognize that naive DDP will trigger an All-Reduce operation on every micro-batch
     backward pass, which destroys throughput. Candidates also often incorrectly assume gradient accumulation
-    requires storing activations for all micro-batches simultaneously.
-  napkin_math: 'Without no_sync: 8 All-Reduces per global step. 13B params = 26GB gradient payload (FP16).
-    At ~200GB/s effective NVLink bandwidth, one All-Reduce takes ~260ms. 8 syncs = 2.08s comm overhead
-    per update. With no_sync: 1 All-Reduce per step = 260ms. Comm time is reduced by 87.5% (saving ~1.82s
-    per iteration). Memory-wise, it requires 1x model size for the accumulated FP32 gradients (52GB),
-    which must be factored into the 80GB VRAM budget.'
+    requires storing activations for all micro-batches simultaneously.'
+  napkin_math: 'Without no_sync: 8 All-Reduces per global step. 3B params = 6GB gradient payload (FP16). Data moved per All-Reduce = 2 * (7/8) * 6GB = 10.5GB. At ~200GB/s effective NVLink bandwidth, one All-Reduce takes ~52.5ms. 8 syncs = 420ms comm overhead per update. With no_sync: 1 All-Reduce per step = 52.5ms. Comm time is reduced by 87.5% (saving 367.5ms per iteration). Memory-wise, it requires 1x model size for the accumulated FP32 gradients (12GB). Alongside the 6GB weights, 36GB Adam optimizer states, and 45GB activations, this totals 99GB, exceeding the 80GB VRAM. To fit, they must also enable ZeRO-1 (optimizer state sharding) to reduce optimizer memory to 4.5GB/GPU, keeping total VRAM ~67.5GB.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -42,12 +39,9 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: OK
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- The Ring All-Reduce time uses 2 * Size (52GB / 200GB/s = 260ms) instead of the exact 2 * (N-1)/N * Size
-  (45.5GB / 200GB/s = 227.5ms).
 human_reviewed:
   status: not-reviewed
   by: null

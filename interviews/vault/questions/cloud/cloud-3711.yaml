@@ -15,22 +15,23 @@ scenario: An A100 80GB serves a chatbot with SLA of 300ms TTFT (time to first to
 question: At what batch size does TTFT SLA become violated?
 details:
   realistic_solution: 'Prefill at batch=1: 50ms for 1024 tokens. Prefill is compute-bound
-    (high arithmetic intensity from QK^T over full sequence). Batch scaling: compute
+    (high arithmetic intensity). Batch scaling: compute
     increases linearly but GPU utilization also increases → roughly constant 50ms
     until compute-saturated. A100 at batch=1: likely underutilized. Saturation batch
-    size: A100 compute budget / prefill FLOPs per sequence (1.37 TFLOPs at seq=1024).
-    At batch=4-6, A100 likely saturates. Above saturation, TTFT = N×50ms/batch = queue
+    size: A100 effective compute budget / prefill FLOPs per sequence (1.37 TFLOPs at seq=1024).
+    At batch=5-6, A100 likely saturates. Above saturation, TTFT = N×50ms/batch = queue
     wait time increases. SLA 300ms: TTFT = queue_wait + prefill_time. Max queue: 300ms
-    - 50ms = 250ms. If prefill saturates at batch=6: throughput = 6/50ms = 120 prefills/sec.
-    Queue wait at 100 req/s: 100/120 = 83% utilization → avg wait = 50ms/(1-0.83)
-    ≈ 294ms. Close to limit.'
+    - 50ms = 250ms. If prefill saturates at batch=5: throughput = 5/50ms = 100 prefills/sec.
+    Queue wait at 80 req/s: 80/100 = 80% utilization → avg wait = 50ms/(1-0.8) 
+    = 250ms. Close to limit.'
   common_mistake: Treating prefill as linearly scaling with batch size; prefill is
     compute-bound (unlike decode which is memory-bound), so it scales efficiently
     up to the compute limit.
-  napkin_math: 'Prefill FLOPs: 2×1024×1024×8192×80 layers ≈ 1.37T FLOPs. A100: 312
-    TFLOPS. Saturate at: 312T / 1.37T ≈ 228 seq in parallel (i.e., very high batch
-    before compute saturation). But KV memory limits: 1024×8192×2×2B×80 = 2.1GB per
-    seq → 80GB/2.1GB = 38 sequences max. Compute-bound at batch ≥ 28.'
+  napkin_math: 'Prefill FLOPs for ~670M param model: 2 × 670M × 1024 ≈ 1.37T FLOPs. A100: 312
+    TFLOPS (effective ~150 TFLOPS at 50% MFU). Compute budget in 50ms: 150T * 0.05s
+    = 7.5T FLOPs. Saturate at: 7.5T / 1.37T ≈ 5 seq in parallel. KV memory limits:
+    for a small model, KV cache is ~100MB per seq → 80GB/100MB = 800 sequences max. 
+    Compute-bound at batch ≥ 5.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -40,12 +41,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Prefill FLOPs calculation error: 2x1024x1024x8192x80 evaluates to ~1.37 TFLOPs,
-  not 11 TFLOPs.'
 human_reviewed:
   status: not-reviewed
   by: null

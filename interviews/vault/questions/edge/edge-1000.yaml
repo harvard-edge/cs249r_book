@@ -17,20 +17,8 @@ scenario: A firmware engineer is debugging why enabling gradient checkpointing o
 question: Why might gradient checkpointing on Orin increase ResNet training time by
   80% instead of the expected 33%?
 details:
-  realistic_solution: 'On Jetson Orin, re-executing the forward pass during backward
-    fetches all layer weights from LPDDR5 again. For a ResNet with 100M parameters
-    = 200 MB (fp16), the weight reload during backward re-computation costs: 200 MB
-    / 68 GB/s ≈ 3 ms per recompute pass. The actual forward+backward is ~50 ms/step.
-    With layer-level checkpointing: 50 additional weight reloads at 3 ms each per
-    backward = 150 ms additional. Total: 50 ms (forward) + 50 ms (backward) + 150
-    ms (recompute) = 250 ms, a 150% overhead. The 33% theoretical overhead assumes
-    compute-bound recomputation; on Orin, it is memory-bandwidth-bound.'
-  common_mistake: Assuming the theoretical 33% overhead (one extra forward pass added
-    to backward) holds uniformly regardless of hardware. On memory-bandwidth-constrained
-    hardware like Jetson Orin (LPDDR5 at ~68 GB/s effective throughput vs H100 HBM3
-    at 3.35 TB/s), the ratio of compute throughput to memory bandwidth is much lower,
-    meaning recomputation has a higher relative overhead because the memory fetches
-    for reloading weights during recomputation dominate.
+  realistic_solution: 'A common misdiagnosis is to blame memory bandwidth for weight reloading. However, a 100M parameter model (200MB in FP16) reloading its weights per layer only adds ~3ms total (4MB/layer / 68GB/s = 0.06ms * 50 layers). The actual 80% overhead on a Jetson Orin stems from CPU-bound framework inefficiencies. The PyTorch gradient checkpointing wrapper introduces significant host-device synchronization and kernel launch overhead. Because the Orin has lower single-thread CPU performance compared to desktop/server CPUs, this framework overhead dominates the step time, far exceeding the theoretical 33% compute overhead.'
+  common_mistake: 'Assuming the overhead is simply due to memory bandwidth for reloading weights. While the Orin has lower memory bandwidth (68 GB/s) than a datacenter GPU, calculating the actual byte transfers shows this only accounts for ~2% overhead. The real mistake is ignoring host-side CPU overhead (kernel launches, synchronization) which disproportionately affects mobile SoCs like the Orin when running complex PyTorch wrappers.'
   napkin_math: 'Orin effective BW: 68 GB/s. ResNet weights per layer: 200 MB / 50
     layers = 4 MB/layer. Layer recompute weight reload: 4 MB / 68 GB/s = 0.059 ms/layer.
     50 layers recomputed = 2.9 ms additional. Forward pass time: ~50 ms. Backward:

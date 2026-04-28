@@ -15,24 +15,20 @@ scenario: Specify the minimum batch size and sequence length to achieve ≥99% c
 question: What batch×sequence size is needed for the FFN layer to be compute-bound
   at ≥99% utilization on TPU v5e, and how do you derive it?
 details:
-  realistic_solution: 'FFN layer: two GEMMs. First: (batch*seq, 4096) * (4096, 16384).
-    FLOPs = 2*B*S*4096*16384. Bytes = B*S*4096*2 (input) + 4096*16384*2 (weight) +
-    B*S*16384*2 (output). AI = 2*BS*4096*16384 / (BS*(4096+16384)*2 + 4096*16384*2).
-    Simplify: numerator = 2*BS*67M. Denominator ≈ 2*BS*20480 + 134MB. For BS>>134MB/(2*20480)
-    = 3277: weight BW negligible. AI → 2*4096*16384/(2*(4096+16384)) = 134M/40960
-    ≈ 3277 FLOPs/byte >> 240. For 99% compute: need AI/ridge ≥ 100 → any BS > 1 achieves
-    this (AI = 3277 >> 240*100=24000). Actually AI = 3277 >> 240: 13.7x above ridge
-    at any batch.'
-  common_mistake: Setting AI = ridge point for 99% compute utilization when the correct
-    condition is AI >> ridge (e.g., AI ≥ 10x ridge) to be clearly compute-dominated
-    and achieve high MFU.
-  napkin_math: 'FFN GEMM AI: at large BS, AI → 2*K*N/(2*(K+N)) = 2*4096*16384/(2*20480)
-    = 3277 FLOPs/byte. This is 13.7x the TPU ridge (240). So FFN is always compute
-    bound for any appreciable batch size. Minimum BS for AI ≥ 240: from formula AI
-    = 2*BS*K*N / (BS*2*(K+N) + W_bytes). At BS=1, seq=1: numerator=2*1*4096*16384=134M
-    FLOPs, denominator=1*40960*2+4096*16384*2=81920+134MB=134.2MB. AI=134M/134.2M=0.999
-    FLOPs/byte — memory bound! FFN at BS=1 is MEMORY bound. At BS=128: AI=3277 (compute
-    bound). Crossover: BS=1 (input too small for weight reuse). Must batch.'
+  realistic_solution: 'FFN layer consists of two GEMMs. Let''s analyze the first: (BS, 4096) * (4096, 16384).
+    FLOPs = 2 * BS * 4096 * 16384 = BS * 134.2M.
+    Memory Bytes = BS*4096*2 (input) + 4096*16384*2 (weight) + BS*16384*2 (output) = BS*40,960 + 134.2M.
+    AI = (BS * 134.2M) / (BS * 40,960 + 134.2M).
+    To be compute-bound, we need AI ≥ Ridge Point (240 FLOPs/byte).
+    240 = (BS * 134.2M) / (BS * 40,960 + 134.2M) => BS ≈ 259.
+    So, a batch*sequence size of at least 259 is required just to reach the ridge point. To achieve ≥99% compute utilization, AI typically needs to be significantly higher than the ridge point (e.g., 2-3x higher, depending on the kernel and scheduler). If we target AI = 720 (3x ridge), solving for BS gives BS ≈ 922. The theoretical maximum AI (as BS → ∞) is 134.2M / 40,960 ≈ 3277 FLOPs/byte.'
+  common_mistake: 'Assuming that any small batch size is sufficient to reach peak compute, or confusing the theoretical maximum AI with the actual AI at a finite batch size. Setting AI exactly equal to the ridge point only guarantees ~50% compute utilization in practice; reaching 99% requires operating well to the right of the ridge.'
+  napkin_math: 'AI formula: (BS * 134.2M) / (BS * 40,960 + 134.2M).
+    At BS=1: AI = 134.2M / (40,960 + 134.2M) ≈ 0.999 FLOPs/byte. Very memory bound!
+    At BS=128: AI = 17.17B / (128 * 40,960 + 134.2M) = 17.17B / 139.4M ≈ 123 FLOPs/byte. Still memory bound (123 < 240).
+    At BS=259: AI = 34.76B / (259 * 40,960 + 134.2M) ≈ 240 FLOPs/byte. Crossover point to compute bound!
+    As BS → ∞, AI → 134.2M / 40,960 = 3277 FLOPs/byte.
+    To guarantee ≥99% compute utilization, we want to operate well to the right of the ridge point, requiring a batch size of ~1024 or higher.'
 status: published
 provenance: imported
 requires_explanation: true

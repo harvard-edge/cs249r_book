@@ -29,24 +29,17 @@ details:
   common_mistake: '"Just retrain the cost model on H100 data." This fixes the immediate problem but creates
     a maintenance burden for every new GPU generation.'
   napkin_math: 'Analytical model tuning on H100: 0 calibration cost, 30% suboptimal → wastes $0.30 per
-    $1.00 of GPU compute. Random search: $4{,}096 \times 5\text{ms} = 20\text{s}$ per kernel, finds optimum,
-    but $20\text{s} \times 80$ kernels = 27 min per model compilation. Learned cost model: 1,000 calibration
+    $1.00 of GPU compute. Random search: $4{,}096 \times 5\text{ms} = 20.48\text{s}$ per kernel, finds optimum,
+    but $20.48\text{s} \times 80$ kernels ≈ 27.3 min per model compilation. Learned cost model: 1,000 calibration
     samples × 5ms = 5s one-time cost, then <5% suboptimal per kernel, 100 guided trials × 80 kernels ×
-    5ms = 40s per model compilation. The learned model saves 26.3 min of compilation time while staying
+    5ms = 40s per model compilation. The learned model saves over 26.6 min of compilation time while staying
     within 5% of optimal.'
   options:
-  - Gradient accumulation reduces batch size by K× because each accumulated step uses only 1/K of the
-    data; this is useful when GPU memory is too small for a standard batch
-  - Gradient accumulation requires AllReduce after every micro-batch to prevent gradient staleness; the
-    communication savings come from smaller gradient tensors, not fewer AllReduce calls
-  - 'Gradient accumulation over K steps simulates a K× larger batch by running K forward-backward passes
-    and summing gradients before a single optimizer step. Communication is deferred: AllReduce runs once
-    per K steps instead of every step, reducing communication overhead by K×. Effective batch size = K
-    × micro_batch × N_GPUs. Trade-off: training step latency increases K× but throughput may improve due
-    to reduced communication fraction.'
-  - Gradient accumulation and gradient compression are identical techniques; both reduce the amount of
-    data communicated during AllReduce by K× through lossy gradient representation
-  correct_index: 2
+  - The H100 has a smaller L2 cache than the A100, causing the analytical model to overestimate cache hits. The fix is to hardcode the new cache sizes.
+  - The H100 changed microarchitectural features (like TMA and larger L2 cache) that the analytical model ignored. The scalable fix is to use a learned cost model calibrated with profiling data.
+  - The A100 cost model relies on Tensor Cores, which were replaced by CUDA cores in the H100. The fix is to switch entirely to random search for all compilations.
+  - The auto-tuner was profiling kernels using CPU memory instead of GPU HBM. The fix is to ensure all tensors are moved to device memory before tracing.
+  correct_index: 1
 status: published
 provenance: imported
 requires_explanation: false

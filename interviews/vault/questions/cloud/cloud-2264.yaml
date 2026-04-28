@@ -45,18 +45,11 @@ details:
     intra-chunk computation. With Triton fusion to eliminate intermediate HBM writes, it achieves ~1.0-1.1ms.
     Gap: 1.1/0.8 = 1.4× — close to the theoretical minimum imposed by the residual serial dependency.'
   options:
-  - LoRA reduces the model size by replacing full-rank weight matrices with low-rank approximations permanently;
-    the original weights are discarded after the low-rank decomposition
-  - LoRA requires computing gradients for all 70B parameters during backpropagation; the memory savings
-    come only from the optimizer states, not from gradient computation
-  - LoRA only works with models smaller than 13B parameters because the low-rank approximation error becomes
-    unacceptable for larger models; 70B models require full fine-tuning
-  - 'LoRA (Low-Rank Adaptation) freezes the pretrained weights and adds trainable low-rank matrices A
-    (d×r) and B (r×d) to attention layers, where r << d (typically r=8-64). Total trainable parameters:
-    2×r×d × num_target_layers. For a 70B model with LoRA r=16 on Q,K,V,O in 80 layers: 2 × 16 × 8192 ×
-    4 × 80 = 83.9M params (0.12% of model). Fine-tuning requires storing only these parameters'' gradients
-    and optimizer states, reducing memory from ~280 GB to ~3 GB.'
-  correct_index: 3
+  - 'The compiler is limited by the HBM bandwidth. The GLA operator is fundamentally memory-bound, so no compiler optimization can improve its speed over FlashAttention without hardware changes.'
+  - 'The compiler lacks hardware primitives for recurrent scans. It lowers the scan to scalar loops with serial memory dependencies. The gap can be closed by chunking the sequence to parallelize intra-chunk computation and using a custom Triton kernel to fuse the linear projection.'
+  - 'The compiler cannot vectorize the FP32 accumulators. By enabling TF32 for the recurrent state, the compiler can use Tensor Cores and automatically match FlashAttention performance.'
+  - 'The compiler fails to unroll the sequence length loop. The gap can be closed by manually unrolling the 4096 steps using `#pragma unroll` and storing the entire recurrent state in L1 cache.'
+  correct_index: 1
 status: published
 provenance: imported
 requires_explanation: false

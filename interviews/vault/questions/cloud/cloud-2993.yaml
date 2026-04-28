@@ -18,21 +18,21 @@ details:
   realistic_solution: 'Decode bottleneck: loading 7B × 2B = 14GB model weights per
     forward pass. At H100 3.35 TB/s: 14GB / 3.35TB/s = 4.2ms minimum. Elementwise
     ops run on the tiny (1 × hidden_dim) activation tensors — their memory bandwidth
-    is negligible vs weight loading. Fusion helps by eliminating kernel launch overhead,
-    not bandwidth.'
+    is negligible. However, they execute so fast that the GPU starves waiting for the CPU
+    to launch the next kernel. Fusion helps by eliminating exposed kernel launch overhead,
+    allowing the system to approach the 4.2ms bandwidth limit.'
   common_mistake: Applying prefill-optimized fusion strategies to decode — different
     bottleneck structure. Decode is dominated by weight loading (memory-bound), not
     compute.
   napkin_math: '7B model decode, batch=1. Weight memory: 14GB loaded per token. At
-    3.35 TB/s: 4.2ms/token → 238 tokens/sec theoretical. Current: 4.2ms / 0.38 MFU
-    interpretation for decode: actually 4.2ms is already the memory bandwidth limit.
-    Elementwise ops on 1 × 4096 activations: 4096 × 2B = 8KB. 60% time in elementwise:
-    0.6 × 4.2ms = 2.5ms (as claimed — but this can''t be right if weights are 14GB).
-    Re-check: 60% of time in elementwise on batch=1 likely means 60% of kernel launch
-    count, not time. Actual elementwise HBM traffic: 32 layers × 6 elementwise ops
-    × 8KB = 1.5MB → 1.5MB / 3.35TB/s = 0.45µs. Fusion benefit: eliminate 32×6 = 192
-    kernel launches × 3µs = 576µs = 0.58ms. New decode: 4.2ms - 0.58ms = 3.62ms →
-    276 tokens/sec. 16% throughput improvement purely from reduced kernel launch overhead.'
+    3.35 TB/s: 4.2ms/token hardware minimum limit. Linear layers (224 kernels) take
+    18.6µs each, so CPU launch (3µs) is hidden. Elementwise ops on 1 × 4096 activations: 4096 × 2B = 8KB.
+    Actual elementwise HBM traffic: 32 layers × 6 ops × 8KB = 1.5MB → 1.5MB / 3.35TB/s = 0.45µs.
+    But CPU kernel launch takes 3µs. Since 0.002µs < 3µs, GPU waits for CPU.
+    Elementwise ops add 32×6 = 192 kernel launches × 3µs = 576µs = 0.58ms of exposed overhead.
+    Current decode time: 4.2ms (weights) + 0.58ms (overhead) = 4.78ms → 209 tokens/sec.
+    Fusion benefit: fuse elementwise ops into adjacent linear kernels to eliminate 192 launches.
+    New decode: 4.78ms - 0.58ms = 4.2ms → 238 tokens/sec. 14% throughput improvement purely from reduced kernel launch overhead.'
 status: published
 provenance: imported
 requires_explanation: true

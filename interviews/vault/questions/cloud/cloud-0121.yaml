@@ -18,24 +18,20 @@ question: "What is the most likely root cause of excessive TTFT with 10 RPS, a 4
 details:
   realistic_solution: The system is in an unstable queueing state. The service rate is lower than the
     arrival rate, causing the request queue to grow indefinitely, which results in unbounded wait times.
-    This is a classic queueing theory failure. The static batching timeout adds directly to the service
-    time for a batch, creating a cycle that is too long to handle the incoming request rate. The solution
+    This is a classic queueing theory failure. The GPU can process a maximum of 4 requests every 450ms, meaning its maximum throughput cannot keep up with 10 RPS. The static batching engine forces the system into this inefficient utilization. The solution
     is to abandon static batching in favor of a continuous batching system (e.g., vLLM's PagedAttention)
-    which decouples batch formation from a fixed time window, allowing the system to process requests
-    as soon as the hardware is ready, maximizing utilization and stabilizing the queue.
+    which decouples batch formation from a fixed structure, allowing the system to process requests
+    dynamically and iterate at the token level, stabilizing the queue if capacity permits.
   common_mistake: Engineers often fixate on a single component, like the GPU speed or model size, without
     analyzing the system's dynamics. They might say 'the model is too slow' or 'the GPU isn't powerful
     enough.' While these are contributing factors, they miss the actual failure mode, which is the interaction
-    between the workload (arrival rate) and the serving strategy (batching timeout + processing time),
+    between the workload (arrival rate) and the maximum service rate (batch size / processing time),
     leading to an unstable system.
-  napkin_math: 1. Analyze Arrival vs. Service Rate. Arrival rate is 10 req/s. If the static batching timeout
-    is 200ms and prefill compute is 50ms, total service time per batch is 250ms. Service rate is 1 / 0.25s
-    = 4 batches/sec. If the max batch size is 2, capacity is 4 * 2 = 8 req/s. Since arrival (10) > capacity
-    (8), the queue grows infinitely and latency unbounded.
+  napkin_math: '1. Analyze Arrival vs. Service Rate. Arrival rate is 10 req/s. The GPU requires 450ms to process a full batch. Therefore, the maximum service rate is 1 batch / 0.45s ≈ 2.22 batches/sec. If the max batch size is 4, the maximum capacity is 2.22 * 4 ≈ 8.88 req/s. Since the arrival rate (10) > capacity (8.88), traffic intensity ρ > 1. The queue grows infinitely and latency becomes unbounded.'
   options:
   - The model's 450ms processing time is too slow for the H100 GPU, indicating a compute bottleneck.
   - The 400ms batching timeout is too short, preventing the formation of larger, more efficient batches.
-  - The arrival rate (10 RPS) exceeds the system's maximum service rate (~4.7 RPS), causing an unstable
+  - The arrival rate (10 RPS) exceeds the system's maximum service rate (~8.88 RPS), causing an unstable
     and ever-growing request queue.
   - Network latency between the user and the datacenter is the primary contributor to the 800ms+ TTFT.
   correct_index: 2

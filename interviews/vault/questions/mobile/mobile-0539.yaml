@@ -16,23 +16,19 @@ scenario: You're a mobile ML engineer building an on-device 'Visual Search' feat
   *why* the ViT is so much slower.
 question: "Why does the ViT miss the 16ms mobile jank budget compared with the NAS-proposed depthwise CNN?"
 details:
-  realistic_solution: The correct diagnosis lies in the fundamental difference in algorithmic complexity.
-    The ViT's self-attention mechanism has a computational cost that scales quadratically with the number
-    of input tokens (i.e., patches), making its cost O(N^2 * D). In contrast, a depthwise separable convolution's
-    cost scales linearly with the number of pixels, O(N * D^2), but with a much smaller constant factor.
-    The calculation shows the ViT block requires ~67 MFLOPs, while the depthwise separable block requires
-    only ~9 MFLOPs for the same-sized input. This ~7.4x difference in raw computation is the primary reason
-    the ViT misses the tight 16ms budget, making the NAS-found CNN the only practical choice despite the
-    minor accuracy hit.
-  common_mistake: Engineers often have a hand-wavy sense that 'Transformers are slow' without being able
-    to pinpoint the architectural reason and quantify it. A common mistake is to blame secondary effects
-    like memory access patterns or suggest surface-level fixes like quantization, without addressing the
-    core algorithmic complexity that makes the model non-viable for a real-time mobile budget.
-  napkin_math: 'For 16x16 patches on a 256x256 image, N = 256 tokens. Feature dim D = 128. Self-attention
-    compute is N^2 * D operations: 256 * 256 * 128 * 2 = 16.7M FLOPs. Reading the Q,K,V matrices from
-    DRAM takes 3 * 256 * 128 * 2B = 196KB. AI = 16.7M / 196KB = 85 Ops/Byte. Since the A17 Pro ridge point
-    is ~700 Ops/Byte, attention is massively memory-bound. The 16ms budget is blown waiting on DRAM reads,
-    not compute.'
+  realistic_solution: 'The correct diagnosis lies in the fundamental difference in memory access patterns and arithmetic intensity, not just raw compute. While the ViT block does require more compute (~67 MFLOPs vs ~9 MFLOPs), 67 MFLOPs takes a fraction of a millisecond on a 35 TOPS NPU. The true bottleneck is memory bandwidth. The ViT''s self-attention has a very low Arithmetic Intensity (Ops/Byte) and non-local memory access patterns for the attention map, leading to a high number of cache misses and causing the compute units to stall while waiting for DRAM. The CNN''s convolutional structure has much better spatial locality, leading to better cache utilization.'
+  common_mistake: Engineers often have a hand-wavy sense that 'Transformers are slow' and incorrectly assume the root cause is the higher FLOP count. A common mistake is to only compare the computational complexity (FLOPs) without realizing that on powerful mobile NPUs, raw compute is rarely the bottleneck, while memory bandwidth and cache access patterns dominate real-world latency.
+  napkin_math: |
+    **ViT Self-Attention (QK^T and AV):**
+    For 16x16 patches on a 256x256 image, N = 256 tokens. Feature dim D = 128.
+    Compute: 4 * N^2 * D = 4 * 256^2 * 128 = 33.5 MFLOPs.
+    Memory (Ideal): Reading Q,K,V = 3 * 256 * 128 * 2B = 196 KB.
+    AI = 33.5 MFLOPs / 196 KB ≈ 171 Ops/Byte. 
+    A17 Pro Ridge Point = ~683 Ops/Byte. ViT AI (171) << Ridge (683) -> severely memory-bound. 
+    Crucially, global self-attention requires random access to the N*N attention map, causing cache thrashing.
+
+    **MobileNet CNN (Depthwise Separable):**
+    Spatial locality in 3x3 convolutions allows the NPU to stream features perfectly into SRAM cache using sliding windows, avoiding DRAM roundtrips. Even though depthwise convolutions also have low AI, their sequential memory access guarantees high cache hit rates, allowing the NPU to maintain much higher effective memory bandwidth and throughput.
   options:
   - The ViT's non-local memory access pattern for the attention map results in a high number of cache
     misses on the SoC, which is the primary bottleneck. The FLOP count is secondary.
@@ -43,7 +39,7 @@ details:
     which scales linearly. This large FLOP gap is the root cause of the missed deadline.
   - The model is bottlenecked by memory bandwidth, not compute. The fix is to quantize the ViT from FP16
     to INT8, which will halve the data movement and solve the latency issue without changing the architecture.
-  correct_index: 2
+  correct_index: 0
 status: published
 provenance: imported
 requires_explanation: false

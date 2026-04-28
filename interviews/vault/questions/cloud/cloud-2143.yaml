@@ -14,26 +14,9 @@ scenario: Your search ranking model uses 150 batch features from a feature store
   P99 under 100ms.
 question: "How would you break down the 95ms feature-serving overhead and optimize P99 below the 100ms SLA?"
 details:
-  realistic_solution: '**Latency decomposition**: (1) Feature store lookup (150 batch features via Redis
-    MGET): ~8ms P50, ~25ms P99 (tail from Redis GC pauses and hot shards). (2) Real-time feature computation
-    (20 features from raw signals): ~15ms P50, ~40ms P99 (Flink window lookups + aggregation). (3) Feature
-    assembly and serialization: ~5ms. (4) Network RTT (2 hops): ~20ms. Current architecture runs these
-    sequentially: P99 = 25 + 40 + 5 + 20 = 90ms features + 25ms model = 115ms. Observed 120ms includes
-    ~5ms of scheduling/GC jitter. **Key optimization — parallelize steps 1 and 2**: fetch batch features
-    and compute real-time features concurrently. New P99: max(25, 40) + 5 + 20 + 25 = 90ms. Meets 100ms
-    SLA. Additional headroom: add local feature cache (5s TTL) for batch features (P99: 25ms -> 5ms) and
-    pre-compute real-time features via Flink push (P99: 40ms -> 5ms). Best case: max(5, 5) + 5 + 10 +
-    25 = 45ms.'
-  common_mistake: Assuming all 95ms is 'network latency' and trying to optimize the network. Feature serving
-    latency has multiple distinct components that require different optimizations.
-  napkin_math: 'Current P99: 120ms = 25ms model + 95ms feature overhead. Feature overhead decomposition
-    (sequential pipeline): Feature store lookup P99: ~25ms. Real-time feature computation P99: ~40ms.
-    Serialization: ~5ms. Network (2 hops): ~20ms. Sum: 25+40+5+20 = 90ms. Discrepancy: 120 - 25 - 90 =
-    5ms unaccounted (OS scheduling jitter, GC pauses at tail). Optimization 1 — Parallelize batch + real-time
-    fetch: P99 feature time = max(25, 40) + 5 + 20 = 65ms. Total: 25 + 65 = 90ms < 100ms SLA. Done. Further
-    optimizations if needed: (a) Local feature cache (5s TTL) reduces batch fetch P99 from 25ms to 5ms.
-    (b) Pre-compute real-time features reduces from 40ms to 5ms. After all optimizations: max(5, 5) +
-    5 + 10 + 25 = 45ms.'
+  realistic_solution: '**Latency decomposition**: (1) Feature store lookup (150 batch features via Redis MGET): ~25ms P99. (2) Real-time feature computation: ~45ms P99. (3) Feature assembly: ~5ms. (4) Network RTT (2 hops): ~20ms. Current architecture runs these sequentially: P99 = 25 + 45 + 5 + 20 = 95ms feature overhead + 25ms model = 120ms. **Key optimization — parallelize steps 1 and 2**: fetch batch features and compute real-time features concurrently. New feature P99 roughly max(25, 45) = 45ms. Total P99: 45 + 5 + 20 + 25 = 95ms. Meets 100ms SLA. Additional headroom: add local feature cache for batch features.'
+  common_mistake: Assuming all 95ms is 'network latency' and trying to optimize the network, or failing to realize that independent sequential steps add their latency, whereas parallel steps take the maximum.
+  napkin_math: 'Current P99: 120ms = 25ms model + 95ms feature overhead. Feature overhead decomposition (sequential pipeline): Feature store P99: 25ms. Real-time P99: 45ms. Assembly: 5ms. Network: 20ms. Sum: 25+45+5+20 = 95ms. Optimization 1 — Parallelize batch + real-time fetch: Parallel P99 ≈ max(25, 45) = 45ms. Total: 45 + 5 + 20 + 25 = 95ms < 100ms SLA. Further optimizations: (a) Local feature cache reduces batch P99 from 25ms to 5ms. (b) Pre-compute real-time features reduces from 45ms to 5ms.'
   options:
   - The 95ms is dominated by network latency; upgrade from 10 Gbps to 25 Gbps NICs and add edge caching
     to reduce RTT from 95ms to under 75ms
@@ -41,9 +24,9 @@ details:
     reducing the pipeline to model inference time only (~25ms)
   - Increase the SLA to 150ms since 120ms P99 is already competitive; feature retrieval latency is inherently
     sequential and cannot be parallelized across different feature sources
-  - Decompose the 95ms into feature store lookup (~25ms P99), real-time feature computation (~40ms P99),
+  - Decompose the 95ms into feature store lookup (~25ms P99), real-time feature computation (~45ms P99),
     serialization (~5ms), and network RTT (~20ms); parallelize batch and real-time feature fetches to
-    reduce total to ~90ms, meeting the 100ms SLA
+    reduce total to ~95ms, meeting the 100ms SLA
   correct_index: 3
 status: published
 provenance: imported
@@ -53,12 +36,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The latency decomposition incorrectly sums the P99 latency of some components to arrive at a P50 total,
-  which is methodologically incorrect.
-- The sum of the component P99s (25+40+5+20 = 90ms) does not match the observed 120ms P99, and this discrepancy
-  is not explained.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

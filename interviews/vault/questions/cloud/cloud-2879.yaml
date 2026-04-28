@@ -10,7 +10,7 @@ phase: training
 title: Designing a Gradient Checkpointing Segment Strategy for a 70B Model on A100
 scenario: Your team is fine-tuning a 70B parameter dense Transformer (96 layers, H=8192,
   FFN=4× H) on 8× A100 80 GB GPUs using tensor parallelism degree 8. With fp16 weights
-  and Adam optimizer in fp32, model and optimizer states consume approximately 52
+  and 8-bit Adam optimizer, model and optimizer states (including gradients) consume approximately 52
   GB per GPU. You have roughly 28 GB remaining per GPU for activations. Design a gradient
   checkpointing strategy that keeps peak activation memory under 28 GB while minimizing
   re-computation overhead.
@@ -19,8 +19,9 @@ question: What gradient checkpointing strategy keeps activations under 28 GB per
 details:
   realistic_solution: 'Use selective checkpointing: checkpoint attention score tensors
     (the O(S²) terms) at every layer while retaining MLP activations. For S=2048,
-    H=8192, B=2 per GPU: attention scores are 2×64×2048²×2 B ≈ 1 GB per layer. Discarding
-    and recomputing these across 96 layers saves ~96 GB per GPU while the single-attention
+    H=8192, B=2: attention scores across all heads are 2×64×2048²×2 bytes ≈ 1 GB per layer.
+    With TP=8, each GPU stores 1/8th of the heads, taking ~134 MB per layer. Discarding
+    and recomputing these across 96 layers saves ~12.8 GB per GPU while the single-attention
     recompute adds only ~5% extra FLOPs per backward pass. Combine with activation
     offloading for the residual stream to PCIe host memory during the forward pass
     for layers not in the current backward window.'
@@ -28,11 +29,8 @@ details:
     attention score tensors scale as O(S²) and dominate activation memory at long
     sequences, while MLP layers scale as O(S) and checkpoint much more cheaply per
     byte saved.
-  napkin_math: '28 GB budget: model fp16 = 70B×2 = 140 GB / 8 GPUs = 17.5 GB. Adam
-    states = 70B×12/8 = 105 GB/8 = 13.1 GB. Wait — 17.5+13.1 = 30.6 GB already exceeds
-    28 GB free, so mixed-precision Adam (fp16 moments) is required first, freeing
-    ~6.5 GB. Attention score checkpoint savings: 64 heads × 2048² × 2 B × 96 layers
-    / 8 (TP) ≈ 6.4 GB/GPU saved per segment of 12 layers.'
+  napkin_math: '28 GB budget: model fp16 = 70B×2 / 8 GPUs = 17.5 GB. Gradients = 17.5 GB. 8-bit Adam states = 70B×2 / 8 = 17.5 GB. Total = 52.5 GB (leaves ~27.5 GB free).
+    Attention score checkpoint savings: B=2, 8 local heads (64/8), 2048² seq len, 2 bytes = 2 × 8 × 2048² × 2 = 134 MB/layer. Across 96 layers ≈ 12.8 GB/GPU saved.'
 status: published
 provenance: imported
 requires_explanation: true

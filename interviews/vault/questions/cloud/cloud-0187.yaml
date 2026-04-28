@@ -8,19 +8,17 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The SLA Collision
-scenario: 'You are the tech lead for the ML Serving Platform at a major cloud provider. Your team manages
-  a shared H100 GPU cluster that serves two main services:'
+scenario: 'You are the tech lead for the ML Serving Platform at a major cloud provider. Your team manages a shared H100 GPU cluster that serves two main services: a latency-sensitive interactive chatbot (strict 200ms Time-To-First-Token SLA) and a high-throughput background summarization job (processes 10,000-token documents). Using static monolithic batches, you find that the chatbot frequently violates its SLA when a summarization job is running. A junior engineer suggests adding a priority queue so chatbot requests are always placed at the front.'
 question: "What serving architecture should replace static monolithic batches for two services sharing H100s, and why is a priority queue insufficient?"
 details:
-  realistic_solution: 'The correct architectural solution involves moving away from static, monolithic
-    batches towards a more dynamic, continuous system. The key decisions are:'
+  realistic_solution: 'The correct architectural solution involves moving away from static, monolithic batches towards a more dynamic, continuous system. The key decisions are: implementing continuous batching (iteration-level scheduling) combined with a priority-aware scheduler. With continuous batching, the GPU evaluates the scheduler at every token generation step rather than waiting for an entire batch to finish. When a high-priority chatbot request arrives, the scheduler can immediately inject it into the active batch for the very next token iteration. This avoids head-of-line blocking without requiring expensive context switching or stateful preemption, allowing both services to safely co-exist on the same H100s while meeting their respective SLAs.'
   common_mistake: 'Proposing a simple priority queue or OS-style preemption. A priority queue alone doesn''t
     solve the core problem: a low-priority, long-running batch will still block the GPU for its entire
     duration once it starts. Full, stateful preemption (saving the KV cache of a running batch to HBM
     or DRAM, swapping in a new request, then restoring) is often proposed but is prohibitively expensive.
     The context-switching cost of moving gigabytes of KV cache state would be many milliseconds, violating
     the very SLA you''re trying to meet.'
-  napkin_math: Let's model the two services on an H100 (989 TFLOPS) with a 13B model (26 GFLOPs/token).
+  napkin_math: 'Let''s model the two services on an H100 (989 TFLOPS) with a 13B model (26 GFLOPs/token). A 10,000-token summarization prefill takes 10,000 * 26 GFLOPs = 260 TFLOPs -> ~260ms of compute. In a static batching system, a chatbot request arriving 1ms after the summarization starts must wait 259ms just for the GPU to become free, instantly violating the 200ms TTFT SLA. With continuous batching, the chatbot request is injected at the next token boundary (typically <15ms), easily meeting the 200ms SLA.'
 status: published
 provenance: imported
 requires_explanation: true

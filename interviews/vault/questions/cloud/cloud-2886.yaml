@@ -10,31 +10,31 @@ phase: training
 title: Optimizing Activation Memory for Pipeline-Parallel Training Across A100 Nodes
 scenario: You are running 1F1B (one-forward-one-backward) pipeline-parallel training
   of a 175B model across 8 A100 80 GB nodes (8 GPUs each, 64 GPUs total) with pipeline
-  degree 64. With micro-batch size 4 and gradient accumulation steps 16, you are observing
+  degree 64. With micro-batch size 4 and gradient accumulation steps 128, you are observing
   peak activation memory of 62 GB per GPU on the first pipeline stage. The last pipeline
-  stage uses only 14 GB for activations. Identify the source of the imbalance and
+  stage uses 14 GB of total memory. Identify the source of the imbalance and
   propose an activation-memory optimization.
 question: Why does the first 1F1B pipeline stage use 62 GB of activations while the
-  last uses 14 GB, and how would you reduce the imbalance?
+  last stage uses so much less memory, and how would you reduce the imbalance?
 details:
   realistic_solution: 'In 1F1B, the first stage must keep pipeline_depth (P=64) micro-batches''
     worth of activations live simultaneously in the worst case, while stage k keeps
-    (P - k) micro-batches. First stage: 64 × (activation per micro-batch). Last stage:
-    1 × (activation per micro-batch). To reduce first-stage peak: (1) reduce micro-batch
-    size from 4 to 2 (halves per-micro-batch activation), (2) apply interleaved 1F1B
-    scheduling (reduces in-flight activations by pipeline_chunks factor), or (3) apply
-    gradient checkpointing only to the first N pipeline stages. Interleaved 1F1B with
-    V=2 virtual stages reduces in-flight activations to ~P/V = 32 simultaneously.'
+    (P - k) micro-batches. First stage: 64 \times (activation per micro-batch). Last stage:
+    1 \times (activation per micro-batch). To reduce first-stage peak: (1) reduce micro-batch
+    size from 4 to 2 (halves per-micro-batch activation), (2) increase Tensor Parallelism
+    degree to reduce pipeline depth P (e.g., TP=2 halves P to 32, which also halves per-GPU activation,
+    yielding a 4x reduction in activation memory), or (3) apply
+    gradient checkpointing only to the first N pipeline stages.'
   common_mistake: Treating pipeline stages as memory-symmetric. In 1F1B scheduling,
     the first stage holds in-flight activations for all pipeline micro-batches currently
     in the pipeline (up to pipeline_depth micro-batches) simultaneously, while the
     last stage processes one micro-batch at a time and immediately starts the backward
     pass.
   napkin_math: 'Per micro-batch activation on stage 0: 62 GB / 64 in-flight = 0.97
-    GB/microbatch. Stage 63: 14 GB / 1 in-flight = 14 GB — something else is inflating
+    GB/microbatch. Stage 63: 14 GB total / 1 in-flight = 14 GB \u2014 something else is inflating
     last stage. 14 GB likely includes optimizer states not counted on stage 0 (which
-    has fewer parameters). Switching to interleaved 1F1B (V=2): in-flight activations
-    on stage 0 drop to 32 × 0.97 GB ≈ 31 GB, well within 80 GB.'
+    has fewer parameters). Switching to TP=2 reduces P to 32 and halves per-GPU activation memory:
+    in-flight activations on stage 0 drop to 32 \times 0.485 GB \approx 15.5 GB, well within 80 GB.'
 status: published
 provenance: imported
 requires_explanation: false

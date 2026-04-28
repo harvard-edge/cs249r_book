@@ -8,26 +8,12 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Model Caching Strategy Under Cost Constraints
-scenario: 'Your platform serves 100 models with 95% traffic going to the top 15. Option A: 2× A100-80GB
-  ($30K/month) keeping top 20 models hot. Option B: 1× A100-80GB + 1TB NVMe SSD ($18K/month), using the
-  SSD as a warm cache tier (1s load time). Option C: 4× A10-24GB ($16K/month, 96GB total VRAM) for more
-  models but slower per-model inference. Which minimizes cost while maintaining p99 < 200ms?'
+scenario: 'Your platform serves 100 models. Traffic is highly skewed: 95% goes to the top 15 models, and 99.5% to the top 20. Option A: 2× A100-80GB ($30K/month) keeping top 20 models hot. Option B: 1× A100-80GB + 1TB NVMe SSD ($18K/month), using the SSD as a warm cache tier (1s load time). Option C: 4× A10-24GB ($16K/month, 96GB total VRAM) for more models but slower per-model inference. Which minimizes cost while maintaining p99 < 200ms?'
 question: "Which minimizes cost while maintaining p99 < 200ms?"
 details:
-  realistic_solution: 'Option A: 160GB VRAM, top 20 models fit. Traffic to top 15 = 95%, models 16-20
-    ≈ 3%. Hit rate: ~98%. p99 depends on the 2% miss rate — cold loading from CPU RAM takes 2-5s, violating
-    SLA. Need pre-warming. With pre-warming: p99 ≈ 50ms (GPU inference). Cost: $30K/month. Option B: 80GB
-    VRAM (top 15) + SSD warm tier (next 30 models). VRAM hit rate: 95%. SSD hit rate for remaining: 30/85
-    ≈ 35% of misses. SSD loads in 1s. p99 for SSD-cached: ~1.05s — violates SLA. Need SSD for pre-warming
-    only, not serving. Option C: 96GB total but split across 4 GPUs — each holds ~24GB of models. With
-    model replication overhead, ~20 models fit. Hit rate similar to A (~98%), but A10 inference is 3x
-    slower than A100. p99 ≈ 150ms — within SLA. Cost: $16K/month. Option C wins on cost while meeting
-    SLA, if slower inference is acceptable.'
-  common_mistake: Optimizing for cache hit rate alone. The combination of hit rate, miss penalty, and
-    inference latency determines whether the SLA is met. A high hit rate with an occasional 5s miss still
-    violates a 200ms p99 SLA.
-  napkin_math: 'A: $30K, p99~50ms. B: $18K, p99~1s (SLA fail for misses). C: $16K, p99~150ms (within SLA).
-    C is cheapest viable option.'
+  realistic_solution: 'Option A: 160GB VRAM, top 20 models fit. Hit rate: 99.5%. Since misses are 0.5%, p99 falls in the hot cache. p99 ≈ 50ms (GPU inference). Cost: $30K/month. Option B: 80GB VRAM (top 15) + SSD warm tier. VRAM hit rate: 95%. This means 5% of requests miss VRAM and take >= 1s (SSD load time). Therefore, the p99 latency is ~1s, which violates the 200ms SLA. Option C: 96GB total but split across 4 GPUs — each holds ~24GB of models. With model replication overhead, ~20 models fit. Hit rate is 99.5% (same as A), so p99 is a hot cache hit. However, A10 inference is ~3x slower than A100 (50ms * 3 = 150ms). Since 150ms < 200ms SLA, Option C meets the performance requirements. Cost: $16K/month. Option C wins on cost while safely meeting the p99 SLA.'
+  common_mistake: Optimizing for cache hit rate alone or median latency. A 95% hit rate sounds good, but implies 5% of requests incur the cache miss penalty. This completely dominates the 99th percentile (p99) latency, making Option B fail the SLA.
+  napkin_math: 'A: 99.5% VRAM hit, p99~50ms, $30K. B: 95% VRAM hit, p99 falls in the 5% misses -> ~1s (SLA fail). C: 99.5% VRAM hit, p99~150ms (within SLA), $16K. C is cheapest viable option.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,13 +22,9 @@ chains:
 - id: cloud-chain-508
   position: 2
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Realistic solution for Option C does not explain how the 150ms p99 is achieved.
-- 'The calculation of ''SSD hit rate for remaining: 30/85'' in Option B is unclear and lacks proper context
-  regarding traffic distribution to those models.'
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

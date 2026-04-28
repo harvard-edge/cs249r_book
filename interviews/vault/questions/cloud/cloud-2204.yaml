@@ -26,8 +26,7 @@ details:
     changes triggering recompilation. (4) Check for stragglers: With 64 GPUs, the AllReduce completes
     at the speed of the slowest GPU. If one GPU is 10% slower (thermal throttling, PCIe contention), all
     GPUs wait. nsys shows this as idle time on 63 GPUs before the AllReduce barrier. (5) Compute the theoretical:
-    at 55% MFU target and 35% achieved, the gap is 20 percentage points. That''s 0.20 x step_time of wasted
-    cycles. Locate them on the timeline.'
+    at 55% MFU target and 35% achieved, the step time is 1.57x longer than expected. This means about 36% of the actual step time is wasted cycles (1 - 1/1.57). Locate them on the timeline.'
   common_mistake: Profiling each component in isolation and concluding 'everything looks fine.' The fallacy
     is that system-level emergent behavior — the interaction between components — is invisible to component-level
     profiling.
@@ -37,17 +36,11 @@ details:
     gap = 400ms. If step = 2000ms, that''s 20% — found the main culprit. Fix: use CUDA graphs to eliminate
     launch overhead, or torch.compile() to fuse small operations.'
   options:
-  - Strong scaling efficiency is determined solely by the AllReduce algorithm choice (Ring vs Tree); with
-    the optimal algorithm, efficiency is always >90% regardless of batch size or model size
-  - The critical factor is GPU memory bandwidth, not network bandwidth; training is always compute-bound,
-    so communication overhead is negligible compared to HBM access latency
-  - Scaling efficiency is constant as long as the total batch size stays the same; splitting a batch across
-    more GPUs does not change the compute-to-communication ratio because AllReduce volume is fixed
-  - 'The compute-to-communication ratio determines efficiency: per step, each GPU computes ~6NB/P FLOPS
-    (N=params, B=batch/GPU, P=GPUs) and communicates ~4N bytes for gradient AllReduce. The ratio = 6NB/(P
-    × 4N/BW) = 1.5B×BW/P. To maintain >80% efficiency, this ratio must exceed ~4:1. This sets a minimum
-    micro-batch size per GPU that grows with GPU count.'
-  correct_index: 3
+  - Generate an nsys timeline and look for serialization, micro-bubbles between kernel launches, and straggler GPUs causing idle time before AllReduce barriers.
+  - Switch from a Ring AllReduce to a Tree AllReduce topology to immediately resolve the 20% MFU gap.
+  - Focus exclusively on the data loader; if it is not stalling, the only other possibility is that the CPU is overheating.
+  - Increase the batch size by 4x to force the GPU to become compute-bound, ignoring the network communication overhead.
+  correct_index: 0
 status: published
 provenance: imported
 requires_explanation: false

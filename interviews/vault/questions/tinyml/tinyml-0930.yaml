@@ -8,27 +8,12 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: Diagnose Memory Fragmentation During Transformer Layer Execution
-scenario: 'A 3-layer transformer on ESP32-S3 with 512KB SRAM crashes intermittently
-  with out-of-memory errors during the second attention layer despite static analysis
-  showing peak usage of 480KB. The model uses dynamic allocation for intermediate
-  activations. Profiling reveals fragmentation: after layer 1, free memory is 180KB
-  but largest contiguous block is only 62KB, while layer 2 attention needs a 96KB
-  contiguous QK^T buffer. Diagnose and fix the memory management strategy.'
-question: Why does an ESP32-S3 transformer with 180 KB free heap fail to allocate
-  a 96 KB QK^T buffer?
+scenario: 'A 3-layer transformer on ESP32-S3 with 512KB SRAM crashes intermittently with out-of-memory errors during the second attention layer despite static analysis showing peak usage of 288KB. The model uses dynamic allocation for intermediate activations. Profiling reveals fragmentation: during layer 2, free memory is 160KB but the largest contiguous block is only 96KB, while the attention step needs a 128KB contiguous QK^T buffer. Diagnose and fix the memory management strategy.'
+question: Why does an ESP32-S3 transformer with 160 KB free heap fail to allocate a 128 KB QK^T buffer?
 details:
-  realistic_solution: 'Layer 1 allocates: Q(32KB)+K(32KB)+V(32KB)+QK^T(96KB)+output(32KB)=224KB
-    peak. Frees Q,K,QK^T after attention but heap has 3 holes of 32KB+96KB+32KB=160KB
-    non-contiguous. Layer 2 requests 96KB contiguous → fails. Fix: (1) Use arena/pool
-    allocator with single 224KB static buffer, reused each layer. (2) Process layers
-    with explicit activation checkpointing to ensure clean buffer reuse. (3) Plan
-    tensor lifetimes statically using TFLite Micro''s memory planner.'
-  common_mistake: Increasing SRAM budget or reducing model size; the issue is allocator
-    fragmentation, not total memory shortage.
-  napkin_math: 'QK^T buffer = seq_len × seq_len × heads × 2B (INT16 intermediate)
-    = 64×64×4×2 = 32,768B = 32KB per head tile; full multi-head = 4×32KB = 128KB.
-    With 64-dim heads per head: 64×64×2B = 8KB per head × 4 heads = 32KB. Static allocation
-    prevents fragmentation.'
+  realistic_solution: 'With dynamic allocation, Layer 1 allocates tensors (Q, K, V, QK^T, Context, Output) sequentially. Because tensors have different lifespans (e.g., QK^T is freed before Output is computed), freeing them creates holes. When Layer 2 begins, it allocates its Q, K, and V (32KB each) into these fragmented holes. This leaves the remaining 160KB of free memory split into blocks smaller than 128KB. When Layer 2 requests 128KB contiguous for QK^T, it fails. Fix: Use an arena allocator with static memory planning (e.g., TFLite Micro''s memory planner) to calculate overlapping tensor lifetimes offline, ensuring a single pre-allocated contiguous buffer is perfectly reused without fragmentation.'
+  common_mistake: Increasing SRAM budget or reducing model size; the issue is allocator fragmentation, not total memory shortage.
+  napkin_math: 'QK^T buffer = seq_len * seq_len * heads * 2B (INT16 intermediate). For seq_len=128, heads=4: 128 * 128 * 4 * 2 = 131,072B = 128KB. Q, K, V are each 128 * 256 * 1B = 32KB. Static allocation prevents fragmentation by computing maximum overlap offline, ensuring the 128KB QK^T buffer always maps to the same contiguous memory space.'
 status: published
 provenance: imported
 requires_explanation: false

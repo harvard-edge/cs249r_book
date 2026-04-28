@@ -7,22 +7,17 @@ topic: software-portability
 competency_area: cross-cutting
 bloom_level: apply
 phase: both
-title: 'Multi-Backend Distributed Training: NCCL vs RCCL vs Gloo Interop'
-scenario: Your distributed training job spans 32 H100 nodes (NCCL) and 16 MI300X nodes
-  (RCCL). PyTorch's distributed backend only supports one communication library per
-  process group. How do you architect heterogeneous multi-vendor distributed training?
-question: What is the correct time to transfer 14 GB over a 900 Gbps link, and why
-  is 15 ms wrong?
+title: 'Multi-Backend Distributed Training: Network Bandwidth Trap'
+scenario: Your distributed training job spans 32 H100 nodes and 16 MI300X nodes,
+  connected by an inter-cluster 900 Gbps Ethernet link. PyTorch's distributed backend
+  only supports one communication library per process group (NCCL for NVIDIA, RCCL for AMD).
+  How do you architect heterogeneous multi-vendor distributed training, and what is the correct
+  expected time to transfer a 14 GB gradient bucket over the inter-cluster link?
+question: How do you architect the multi-backend training, and why is the 14 GB transfer time 124 ms instead of 15 ms?
 details:
-  realistic_solution: '14GB at 900 Gbps: 14GB × 8 bits/byte / 900 Gbps = 112 Gb /
-    900 Gbps = 0.124s = 124ms (not 15ms which would require only 7.5 Gbps bandwidth).'
-  common_mistake: Trying to use NCCL for both NVIDIA and AMD GPUs. NCCL only works
-    with CUDA devices; RCCL only works with ROCm devices. A single process group cannot
-    span both.
-  napkin_math: '14GB model transfer at 900 Gbps NVLink: 14GB × 8 bits/byte / 900 Gbps
-    = 112 Gbits / 900 Gbps = 0.1244s = 124ms (not 15ms — 15ms would require 7.5 Gbps
-    or 14 × 8/15ms = 7.47 Gbps, far below NVLink speed). At 900 Gbps: 112/900 = 0.124s
-    = 124ms.'
+  realistic_solution: 'You must use a unified communication backend like UCC or Gloo for the global process group across all nodes, while using device-specific backends (NCCL and RCCL) for intra-cluster subgroups. For the network transfer: 14GB at 900 Gbps = 14GB × 8 bits/byte / 900 Gbps = 112 Gb / 900 Gbps = 0.124s = 124ms. A common error is treating 900 Gbps as 900 GB/s, which would yield 14 GB / 900 GB/s = 0.0155s ≈ 15ms. In heterogeneous clusters, miscalculating cross-vendor link speeds (which are Ethernet Gbps, not NVLink GB/s) leads to drastically underestimated communication overhead.'
+  common_mistake: 'Trying to use NCCL for both NVIDIA and AMD GPUs, or confusing Gbps with GB/s when estimating heterogeneous network bottlenecks. NCCL only works with CUDA; RCCL with ROCm.'
+  napkin_math: '14GB model transfer at 900 Gbps: 14GB × 8 bits/byte = 112 Gbits. Time = 112 Gb / 900 Gbps = 0.1244s = 124ms. If the link were 900 GB/s (like NVLink), time would be 14 / 900 = 0.0155s ≈ 15ms. Calculating 112 Gb / 0.015s = 7,466 Gbps, showing that 15ms requires vastly more bandwidth than available.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -32,12 +27,9 @@ validation_status: OK
 validation_date: '2026-04-02'
 validation_model: claude-opus-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Unit mismatch: states 900 Gbps but calculates the 15ms latency using 900 GB/s.
-  (14GB at 900 Gbps would take 124ms).'
 human_reviewed:
   status: not-reviewed
   by: null

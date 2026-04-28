@@ -17,24 +17,9 @@ scenario: A developer asks why their agentic system — which works fine on a cl
 question: Why does the 8-tool-call agent slow from 4 seconds in the cloud to 47 seconds
   on Jetson Orin?
 details:
-  realistic_solution: 'The bottleneck is memory bandwidth for KV cache reads, not
-    just FLOPS. After 4 tool calls, context is 4096 tokens. Each reasoning step reads
-    the full KV cache: 4096 * 2 * num_layers * head_dim * 2 bytes. For a 7B model
-    (32 layers, 128 dim): 4096 * 2 * 32 * 128 * 2 = 67MB per step. At LPDDR5''s 68.3GB/s:
-    67MB/68.3GB/s = 1ms per KV read. But at only 12 tok/s decode: 8 hops * (context_prefill
-    + 50 token generation) = 8 * (4s + 4s) = 64s. Must reduce hop count via tool result
-    summarization.'
-  common_mistake: Attributing the slowdown entirely to the LLM being slower and recommending
-    a smaller model. While model size matters, the primary issue is that each tool
-    call incurs a full prefill round-trip (reading the accumulated context + tool
-    result), and the memory bandwidth of LPDDR5 (68.3GB/s) vs HBM3 (3.35TB/s) creates
-    a 49x bandwidth gap for KV cache reads.
-  napkin_math: 'Cloud H100 decode: ~100 tok/s. Jetson Orin: ~12 tok/s. Speedup ratio:
-    100/12 = 8.3x. Expected slowdown for same work: 4s * 8.3 = 33s. Actual: 47s suggests
-    additional overhead. KV cache per hop: 4096 tokens * 40KB/token = 160MB by hop
-    4. LPDDR5: 160MB / 68.3GB/s = 2.3ms per prefill scan — minimal. Real issue: 8
-    hops * 50 decode tokens each = 400 tokens / 12 tok/s = 33s decode alone + 8 *
-    prefill overhead.'
+  realistic_solution: 'The bottleneck is memory bandwidth for KV cache reads during generation. After 4 tool calls, context is 4096 tokens. Each generation step must read the full KV cache: 2 (K,V) * num_layers * num_kv_heads * head_dim * 2 bytes. For a 7B model with GQA (32 layers, 8 KV heads, 128 dim), that is 128 KB/token, or 512 MB for 4096 tokens. At LPDDR5''s 68.3 GB/s, reading 512 MB takes 7.5ms per token. Generating 50 tokens spends 375ms just re-reading the cache. Across 8 hops, this memory-bound decode speed (along with context prefill) balloons the latency to ~47s. You must reduce hop count via tool result summarization or use a model with fewer KV heads.'
+  common_mistake: 'Attributing the slowdown entirely to the LLM being slower and recommending a smaller model. While model size matters, the primary issue is that each tool call incurs a full prefill round-trip (reading the accumulated context + tool result), and the memory bandwidth of LPDDR5 (68.3GB/s) vs HBM3 (3.35TB/s) creates a 49x bandwidth gap for KV cache reads.'
+  napkin_math: 'Cloud H100 decode: ~100 tok/s. Jetson Orin: ~12 tok/s. Speedup ratio: 100/12 = 8.3x. Expected slowdown for same work: 4s * 8.3 = 33s. Actual: 47s suggests additional overhead. KV cache per token: 2 (K,V) * 32 * 8 * 128 * 2 bytes = 128 KB. 4096 tokens = 512 MB. LPDDR5: 512 MB / 68.3 GB/s = 7.5 ms per token read. Generating 50 tokens = 375 ms memory bound. 8 hops * 50 decode tokens each = 400 tokens / 12 tok/s = 33s decode alone + significant prefill and KV read overhead.'
 status: published
 provenance: imported
 requires_explanation: false

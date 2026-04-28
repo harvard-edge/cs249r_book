@@ -8,33 +8,12 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: 'Network Bandwidth Bottlenecks: Master PCIe+NVLink Communication Overlap Strategy'
-scenario: 'A 13B model is trained on 16 H100 GPUs across 2 DGX nodes (8 GPUs/node,
-  NVLink 900GB/s intra-node, 200Gb/s=25GB/s InfiniBand inter-node). Profile and optimize
-  the communication pattern: within-node TP-2 all-reduces, between-node DP-8 gradient
-  AllReduce, and data loading via PCIe. Identify bottlenecks and quantify a communication
-  schedule that achieves >90% GPU utilization.'
-question: What communication schedule and optimizations are needed for 13B training
-  on 16 H100s across two DGX nodes to reach over 90% GPU utilization?
+scenario: 'A 13B model is trained on 16 H100 GPUs across 2 DGX nodes (8 GPUs/node, NVLink 900GB/s intra-node, 8x 200Gb/s InfiniBand inter-node). Profile and optimize the communication pattern: within-node TP-2 all-reduces, between-node DP-8 gradient AllReduce, and data loading via PCIe. Identify bottlenecks and quantify a communication schedule that achieves >90% GPU utilization.'
+question: What communication schedule and optimizations are needed for 13B training on 16 H100s across two DGX nodes to reach over 90% GPU utilization?
 details:
-  realistic_solution: 'TP-2 within node: per layer, 2 all-reduces × 84MB (seq=2048,
-    hidden=5120, batch=4) / 450GB/s = 0.37ms × 40 layers = 14.9ms/fwd+bwd. Cannot
-    overlap (synchronous). DP-8 (4 GPUs per DP group × 4 DPs): gradient AllReduce
-    after backward. Gradient: 13B/2=6.5B per TP shard × 2B = 13GB per DP participant.
-    Ring over 2 inter-node IB links: 2×7/8×(13/8)GB = 2.84GB per GPU / 25GB/s = 113ms.
-    Backward: ~100ms. Overlap: start AllReduce at layer 30 during backward (50% overlap):
-    effective IB time = 113-50ms = 63ms sequential. Total: TP_comm(14.9ms) + compute(200ms)
-    + IB_unparalleled(63ms) = 277.9ms. Without overlap: 327ms. Efficiency: 200/277.9=72%.
-    To reach 90%: need 200/total < 10% comm: total ≤ 222ms. Need IB AllReduce ≤ 22ms.
-    Requires 400Gb/s IB or gradient compression.'
-  common_mistake: Analyzing communications sequentially instead of recognizing that
-    TP all-reduces (synchronous with compute) cannot be overlapped, but DP gradient
-    AllReduce CAN be overlapped with backward pass.
-  napkin_math: 'TP-2 all-reduce: 14.9ms (unavoidable). Backward: 100ms. IB AllReduce
-    (113ms) overlapped 50%: 56.5ms tail. Total step: 100+14.9+56.5=171.4ms. Util:
-    100/171.4=58.3%? Add TP comm in fwd: compute fwd+bwd=200ms with TP overhead included.
-    Step: 200+56.5=256.5ms. Util: 200/256.5=78%. Compress gradients 4× (PowerSGD):
-    IB: 113/4=28.25ms, overlapped 50%: 14ms tail. Total: 200+14=214ms. Util: 200/214=93.5%
-    ✓.'
+  realistic_solution: 'TP-2 within node: per layer, 2 all-reduces * 84MB (seq=2048, hidden=5120, batch=4) / 450GB/s = 0.37ms * 40 layers = 14.9ms/fwd+bwd. DP-8 (gradient AllReduce after backward). Gradient: 13B/2=6.5B per TP shard * 2B = 13GB per DP participant. Ring AllReduce data sent per GPU: 2 * 7/8 * 13GB = 22.75GB. At 25GB/s per GPU IB: 22.75GB / 25GB/s = 910ms. Backward pass compute is ~100ms. If we start AllReduce early (50% overlap), we hide ~50ms. Total step time = TP_comm(14.9ms) + compute(200ms) + IB_unoverlapped(860ms) = 1074.9ms. GPU Efficiency: 200/1074.9 = 18.6%. To reach >90% util, total step must be <= 222ms, meaning IB unoverlapped must be < 7ms. This requires 400Gb/s IB *and* aggressive gradient compression (e.g., 8x PowerSGD), or switching to FSDP/ZeRO-3 over pure DP to shard the gradients.'
+  common_mistake: 'Dividing the gradient size by the number of parallel rings, assuming it reduces total communication volume per GPU. The data moved per GPU in a ring AllReduce is always ~2 * Total_Size, regardless of the number of parallel rings used to utilize multiple NVLinks/NICs.'
+  napkin_math: 'TP-2 all-reduce: 14.9ms. Backward: 100ms. DP-8 AllReduce: 2 * 7/8 * 13GB = 22.75GB. 22.75GB / 25GB/s = 910ms. Step = 200 + 15 + (910 - 50) = 1075ms. Util: 200/1075 = 18.6%. With 8x compression and 400Gb/s IB: AllReduce = 910 / 16 = 57ms. Overlapped 50ms -> 7ms tail. Total = 200 + 15 + 7 = 222ms. Util = 200/222 = 90% \checkmark.'
 status: published
 provenance: imported
 requires_explanation: true

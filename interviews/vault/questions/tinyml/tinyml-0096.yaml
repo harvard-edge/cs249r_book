@@ -19,21 +19,19 @@ details:
     RF energy (2.4 GHz) into shared silicon, coupling into the ADC''s analog frontend. (2) Power supply
     noise — WiFi TX draws 300 mA bursts, causing supply rail droop that shifts the ADC''s reference voltage.
     (3) Digital switching noise from the WiFi baseband processor couples through ground bounce. Combined:
-    8-12% ADC offset during TX bursts. Fix: add a 100 nF + 10 uF RC filter on the ADC input (attenuates
-    RF by -46 dB), oversample 16x with trimmed mean (discards TX-contaminated outliers), and schedule
-    ADC reads in the WiFi TX quiet periods between beacon intervals.'
+    8-12% ADC offset during TX bursts. Fix: add an RC filter on the ADC input to attenuate high-frequency noise,
+    and crucially, schedule the 400 µs ADC reads in the 95 ms WiFi TX quiet periods between beacon intervals.
+    Oversampling alone cannot fix this if the entire sample burst falls within the 5 ms TX window.'
   common_mistake: '"WiFi and ADC are digital and analog — they shouldn''t interfere. Must be a software
     timing issue." On a system-on-chip where the WiFi radio and ADC share the same silicon die, substrate,
     and power supply, interference is a physics problem, not a software problem.'
   napkin_math: 'WiFi TX burst: 5 ms every 100 ms = 5% duty cycle. ADC sampling: 1 sample takes 25 µs.
-    Probability of sampling during TX: 5%. With 16 samples per reading: P(at least one during TX) = 1
-    - 0.95^16 = 56%. With trimmed mean (discard top/bottom 25%): the TX-contaminated samples are likely
-    in the top 25% (positive offset) and get discarded. Effective offset after trimming: <1 LSB. Cost:
-    16 × 25 µs = 400 µs per reading. At 1 reading per minute: 400 µs / 60 s = 0.0007% CPU. RC filter attenuation
-    at 312.5 MHz (half of 625 MHz WiFi fundamental): with R=100 ohm, C=100 pF, cutoff = 1/(2*pi*RC) =
-    15.9 MHz. Attenuation at 312.5 MHz = 20*log10(15.9/312.5) = -25.9 dB. This reduces the coupled noise
-    from 50 mV to ~2.5 mV, bringing ENOB back to ~10.5 bits kHz: 20 × log₁₀(1.6 kHz / 312.5 kHz) = -46
-    dB. RF coupling after filter: 5 mV × 10^(-46/20) = 0.025 mV = 0.03 LSBs. Negligible.'
+    With 16 continuous samples per reading (400 µs total), the probability of the entire burst falling
+    inside the 5 ms TX window is (5ms + 0.4ms) / 100ms = 5.4%. If this happens, ALL 16 samples are
+    contaminated, meaning a trimmed mean or oversampling alone will fail to remove the offset. The only
+    robust software fix is scheduling: the WiFi baseband must notify the application to trigger the 400 µs
+    ADC read strictly during the 95 ms quiet period. Hardware fix: an RC filter with R=100 ohm, C=100 nF
+    provides a cutoff of 15.9 kHz, heavily attenuating MHz/GHz range RF.'
 status: published
 provenance: imported
 requires_explanation: false

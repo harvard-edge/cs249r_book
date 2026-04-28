@@ -8,52 +8,18 @@ competency_area: parallelism
 bloom_level: create
 phase: inference
 title: The Multi-Tenant Starvation Cascade
-scenario: 'You are the Staff engineer responsible for the GPU scheduling platform serving 20 ML teams
-  at your company. The current system uses fair-share scheduling with per-team quotas. Three problems
-  have converged into a crisis: (1) Team A (search ranking) consistently uses 120% of their quota by borrowing
-  idle capacity, and now claims they cannot give it back without missing launch deadlines. (2) Team B
-  (NLP research) has a 256-GPU training job that has been queued for 3 days because their fair share is
-  only 50 GPUs and no preemption mechanism exists for borrowed capacity. (3) Team C (ads inference) needs
-  burst capacity for a Black Friday traffic spike but the cluster is 98% allocated. Design a scheduling
-  policy that resolves all three issues simultaneously without simply buying more hardware.'
+scenario: 'You are the Staff engineer responsible for the GPU scheduling platform serving 20 ML teams at your company. The current system uses fair-share scheduling with per-team quotas. Three problems have converged into a crisis: (1) Team A (search ranking) consistently uses 120% of their quota by borrowing idle capacity, and now claims they cannot give it back without missing launch deadlines. (2) Team B (NLP research) has a 256-GPU training job that has been queued for 3 days because their fair share is only 50 GPUs and no preemption mechanism exists for borrowed capacity. (3) Team C (ads inference) needs burst capacity for a Black Friday traffic spike but the cluster is 98% allocated. Design a scheduling policy that resolves all three issues simultaneously without simply buying more hardware.'
 question: "What scheduling policy resolves Team A's borrowed GPUs, Team B's queued 256-GPU job, and Team C's Black Friday burst without new hardware?"
 details:
-  realistic_solution: 'Implement a three-tier scheduling architecture: **Tier 1 — Guaranteed quota with
-    lending**: Each team gets a hard minimum (guaranteed capacity they can always reclaim). Team A: 100
-    GPUs guaranteed. Team B: 50 GPUs guaranteed. Team C: 80 GPUs guaranteed. Total guaranteed < total
-    cluster (e.g., 800 of 1000) — the gap is the lending pool. **Tier 2 — Opportunistic borrowing with
-    preemption contracts**: Teams can borrow from other teams'' idle quota and from the lending pool.
-    Borrowed capacity is preemptible with a 30-minute warning. Team A''s 20 extra GPUs above quota are
-    preemptible — Team B''s 256-GPU job can trigger preemption to reclaim GPUs. **Tier 3 — Burst reservations
-    with advance scheduling**: Team C can reserve burst capacity up to 2 weeks in advance for known events
-    (Black Friday). Reserved capacity trumps opportunistic borrowing. Implementation: use a token-based
-    system. Guaranteed tokens are permanent. Opportunistic tokens expire when the lending team wants them
-    back. Burst tokens are time-boxed reservations. The scheduler evaluates in order: burst reservations
-    > guaranteed quota > opportunistic. This resolves all three: A keeps borrowed GPUs until B or C needs
-    them. B''s 256-GPU job preempts A''s borrowed capacity (A retains their 100 guaranteed). C''s Black
-    Friday burst is reserved in advance.'
-  common_mistake: Proposing simple priority queues or hard quotas. Hard quotas waste resources (teams
-    cannot borrow idle capacity), and simple priorities just shift the starvation to a different team.
-    Buying more hardware is not a scheduling solution — fragmentation and policy failures persist at any
-    scale.
-  napkin_math: 'Cluster: 1,000 GPUs. Guaranteed: A=100, B=50, C=80, others=470. Total guaranteed=700.
-    Lending pool=300. Current state: A uses 120 (100 guaranteed + 20 borrowed). B needs 256 but has 50.
-    Resolution: preempt A''s 20 borrowed → A has 100. Team B gets 50 guaranteed + 206 from lending pool
-    (300 available - others). Total for B: 256. Time to preempt: 30-min checkpoint warning. Time for B
-    to start: ~35 minutes (vs 3 days). Team C Black Friday: reserve 200 GPUs for 48 hours. Cost of reservation:
-    200 × 48 × $2 = $19,200. Revenue protected: $50M+ (Black Friday ad revenue).'
+  realistic_solution: 'Implement a three-tier scheduling architecture: **Tier 1 — Guaranteed quota with lending**: Each team gets a hard minimum (guaranteed capacity they can always reclaim). Team A: 100 GPUs guaranteed. Team B: 50 GPUs guaranteed. Team C: 80 GPUs guaranteed. Total guaranteed < total cluster (e.g., 800 of 1000) — the gap is the lending pool. **Tier 2 — Opportunistic borrowing with preemption contracts**: Teams can borrow from other teams'' idle quota and from the lending pool. Borrowed capacity is preemptible with a 30-minute warning. Team A''s 20 extra GPUs above quota are preemptible — Team B''s 256-GPU job can trigger preemption to reclaim GPUs. **Tier 3 — Burst reservations with advance scheduling**: Team C can reserve burst capacity up to 2 weeks in advance for known events (Black Friday). Reserved capacity trumps opportunistic borrowing. Implementation: use a token-based system. Guaranteed tokens are permanent. Opportunistic tokens expire when the lending team wants them back. Burst tokens are time-boxed reservations. The scheduler evaluates in order: burst reservations > guaranteed quota > opportunistic. This resolves all three: A keeps borrowed GPUs until B or C needs them. B''s 256-GPU job preempts A''s borrowed capacity (A retains their 100 guaranteed). C''s Black Friday burst is reserved in advance.'
+  common_mistake: Proposing simple priority queues or hard quotas. Hard quotas waste resources (teams cannot borrow idle capacity), and simple priorities just shift the starvation to a different team. Buying more hardware is not a scheduling solution — fragmentation and policy failures persist at any scale.
+  napkin_math: 'Cluster: 1,000 GPUs. Guaranteed: A=100, B=50, C=80, others=470. Total guaranteed=700. Lending pool=300. Current state: A uses 120 (100 guaranteed + 20 borrowed). B needs 256 but has 50. Resolution: preempt A''s 20 borrowed -> A has 100. Team B gets 50 guaranteed + 206 from lending pool (300 available - others). Total for B: 256. Time to preempt: 30-min checkpoint warning. Time for B to start: ~35 minutes (vs 3 days). Team C Black Friday: reserve 200 GPUs for 48 hours. Cost of reservation: 200 × 48 × $2 = $19,200. Revenue protected: $50M+ (Black Friday ad revenue).'
   options:
-  - The training time is dominated by checkpoint I/O, not compute; with 4,096 GPUs checkpointing every
-    15 minutes, the I/O overhead exceeds 50% of total wall-clock time
-  - Training cost scales linearly with GPU count, so using 8,192 GPUs would halve the time and cost; there
-    is no scaling efficiency penalty because AllReduce overhead is negligible at this scale
-  - Power consumption is irrelevant to cost analysis because cloud providers charge only for GPU-hours;
-    a 5 MW power draw has no impact on the $655K compute budget
-  - 'For a 500B token pre-training run on 4,096 H100 GPUs: (1) End-to-end time = 6×175B×500B tokens /
-    (4,096 × 989 TFLOPS × MFU). At MFU=45%: 525e21 / (4096 × 989e12 × 0.45) = 525e21 / 1.823e18 = 287,987
-    seconds ≈ 80 hours ≈ 3.3 days. (2) At $2/GPU-hr: 4,096 × 80 hrs × $2 = $655K. (3) Power: 4,096 × 700W
-    = 2.87 MW for GPUs alone, ~5 MW with cooling/networking.'
-  correct_index: 3
+  - Implement hard quotas where no team can exceed their allocation, forcing Team A to return GPUs and instantly unblocking Team B, while leaving Team C to rely on spot instances.
+  - Use a strict FIFO priority queue where Team C's Black Friday job preempts everything, Team B waits until Team C finishes, and Team A is evicted immediately.
+  - Implement a token-based, three-tier policy: guaranteed quotas, opportunistic borrowing with 30-minute preemption (resolving A & B), and advance burst reservations (resolving C).
+  - Increase cluster size by 20% to handle burst capacity natively, allocating the new nodes specifically to Team C for Black Friday.
+  correct_index: 2
 status: published
 provenance: imported
 requires_explanation: true

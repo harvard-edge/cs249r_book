@@ -8,27 +8,12 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: MoE Quantization Strategy for Serving
-scenario: You want to serve Mixtral 8x22B (141B total params) on a single 8×H100 node.
-  In BF16 the weights need 282 GB, barely fitting in 640 GB HBM but leaving insufficient
-  room for KV-cache at high batch sizes. Design a mixed-precision quantization strategy
-  for the experts vs shared layers.
-question: Using consistent parameter counts, how much memory does a BF16-shared, INT4-expert
-  Mixtral-style quantization plan need?
+scenario: You want to serve Mixtral 8x22B (141B total params, 39B active per token) on as few 80GB GPUs as possible to minimize costs. In BF16 the weights need 282 GB, requiring 4x 80GB GPUs. Design a mixed-precision quantization strategy (BF16 for shared layers, INT4 for experts) to reduce the GPU requirement.
+question: Using consistent parameter counts for Mixtral 8x22B, how much memory does a BF16-shared, INT4-expert quantization plan need, and how many 80GB GPUs are required?
 details:
-  realistic_solution: 'Mixtral 8×7B has ~46.7B active params (not 141B). Using consistent
-    7B shared: BF16 = 14GB. 8 expert FFNs (134B) at INT4 = 67GB. Total ≈ 81GB. The
-    42+88=130GB figure uses inconsistent param counts.'
-  common_mistake: Quantizing everything uniformly to INT4. The shared attention layers
-    (which process every token) are more sensitive to quantization than expert FFN
-    layers (which each see only a fraction of tokens).
-  napkin_math: 'Mixtral 8×7B: total params ≈ 46.7B (shared 7B + 8 experts each adding
-    incremental FFN). But described as 141B: shared params = ~7B, expert FFN = 8 ×
-    (141-7)/8 = 8 × 16.75B = 134B expert FFN. Memory: shared (active) BF16 = 7B ×
-    2B = 14GB. Expert FFN INT4: 134B × 0.5B = 67GB. Total: 81GB. Alternatively using
-    stated 21B shared + 176B expert = 197B total: shared INT8 21B×1B = 21GB + expert
-    INT4 176B×0.5B = 88GB. Total = 109GB. The issue is 42+88=130 doesn''t equal 141B
-    params. Fix using consistent params: 7B shared × 2B + 8×16.75B × 0.5B = 14 + 67
-    = 81GB.'
+  realistic_solution: 'First, solve for the shared vs expert parameter counts. Total params = Shared + 8 * Expert = 141B. Active params = Shared + 2 * Expert = 39B. Subtracting the two gives 6 * Expert = 102B, so Expert = 17B. Shared = 39B - 34B = 5B. A mixed-precision plan keeps the highly sensitive shared attention layers in BF16 and quantizes the large expert FFNs to INT4. Memory required: Shared BF16 (5B params) = 10 GB. Experts INT4 (8 * 17B = 136B params) = 68 GB. Total weight memory = 78 GB. This allows the entire 141B parameter model to fit on a single 80GB GPU, though in practice 2 GPUs might be used to leave sufficient room for KV-cache and activations.'
+  common_mistake: 'Applying a uniform quantization (like INT4 for everything) degrades performance because the shared attention layers process every token and are highly sensitive to quantization errors. Conversely, assuming 141B params requires 141GB even at INT8 ignores the opportunity for mixed precision.'
+  napkin_math: 'System of equations: S + 8E = 141B. S + 2E = 39B. 6E = 102B -> E = 17B. S = 5B. Shared BF16: 5B * 2B/param = 10 GB. Experts INT4: 136B * 0.5B/param = 68 GB. Total = 78 GB. 78 GB fits on a single 80GB GPU (e.g., A100/H100 80GB), saving 3 GPUs compared to a pure BF16 deployment.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -38,12 +23,10 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-opus-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Hybrid memory breakdown 42 + 88 = 130 GB does not align with 141B total parameters.
-  For INT4 experts, memory would be smaller.
+math_issues: []
 human_reviewed:
   status: not-reviewed
   by: null

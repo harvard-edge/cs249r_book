@@ -28,24 +28,12 @@ details:
     amax calculation into the routing kernel.'
   common_mistake: Assuming FP8 compute is inherently slower due to downcasting overhead, and reverting
     to FP16 instead of investigating the kernel execution profile.
-  napkin_math: 'FP16 GEMM for 3 tokens: ~3us kernel time. FP8 for 3 tokens: Amax kernel launch (4us) +
-    Unaligned FP8 GEMM launch (4us) = 8us minimum overhead, completely negating the 2x theoretical math
-    speedup. Across 32 layers * 8 experts = 256 expert calls per token. 256 * 5us extra overhead = ~1.2ms
-    extra overhead per token just in kernel launches, heavily exacerbating latency when scaling up concurrency.'
+  napkin_math: 'FP16 GEMM for 3 tokens: ~3us kernel time. FP8 for 3 tokens: Amax kernel launch (4us) + Unaligned FP8 GEMM execution (fallback path, ~60us) = 64us minimum overhead, completely negating the 2x theoretical math speedup. Across 32 layers * 8 experts = 256 expert calls per decode step. 256 * 61us extra overhead = ~15.6ms extra overhead per step, matching the 17ms latency regression.'
   options:
-  - Speculative decoding generates multiple candidate sequences (beams) in parallel and selects the highest-scoring
-    one; it is equivalent to beam search with a faster selection mechanism
-  - Speculative decoding improves quality by generating more diverse token candidates; the speed improvement
-    is a side effect of the better token selection, not the primary goal
-  - 'Speculative decoding uses a small draft model to generate K candidate tokens autoregressively, then
-    the large target model verifies all K tokens in a single parallel forward pass. If the draft model''s
-    acceptance rate is α, expected tokens per target forward pass = 1/(1-α). For α=0.8 and K=5: expected
-    accepted = 4 tokens + 1 corrected = 5 tokens per target pass. Speedup ≈ K×α = 4x if draft model overhead
-    is negligible. Critical insight: verification is parallel (compute-bound prefill), not sequential
-    (memory-bound decode).'
-  - Speculative decoding requires the draft model to be a quantized version of the target model (e.g.,
-    INT4); using a different model architecture as the draft is not possible because the token distributions
-    would be incompatible
+  - 'The Hopper architecture does not support FP8 for Mixture of Experts because expert routing requires FP16 precision to maintain numerical stability; the solution is to revert to FP16.'
+  - 'FP8 Tensor Cores operate at double the clock speed of FP16, causing thermal throttling on the H100; the fix is to lower the GPU power limit to 350W during MoE inference.'
+  - 'Small, skewed token counts per expert cause unaligned FP8 GEMMs and high amax reduction kernel overhead, destroying the theoretical speedup; the fix is to enforce fixed-size aligned expert batches via padding and fuse the amax calculations into the routing kernel.'
+  - 'The memory bandwidth required to load the FP8 scaling factors exceeds the bandwidth saved by halving the weight precision; the fix is to cache the scaling factors in the L1 cache instead of reading them from HBM.'
   correct_index: 2
 status: published
 provenance: imported

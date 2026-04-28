@@ -40,19 +40,21 @@ details:
     up per-token latency (it doesn't, because decoding is memory-bound). Another error
     is to think Speculative Decoding can help with the initial prompt processing (it
     can't, as it's an auto-regressive optimization).
-  napkin_math: '**Problem 1 (Prefill):** With a sequence length N=8192, the attention
-    matrix has $N^2 \approx 67$ million elements. For one head, this is $67M \times
-    2 \text{ bytes/elem} \approx 134$ MB. A 70B model (e.g., 80 layers, 8 KV head
-    groups) generates many such matrices per layer. A standard attention implementation
-    materializes this full NxN matrix to HBM (3.35 TB/s bandwidth on H100). Reading
-    and writing 134 MB per head × 64 query heads × 80 layers = ~687 GB of HBM traffic
-    for attention alone. FlashAttention tiles computations to keep intermediates in
-    on-chip SRAM (~20 MB per SM on H100, TB/s-level bandwidth), reducing HBM traffic
-    to O(N) instead of O(N^2). | **Problem 2 (Decode):** Each token generation reads
-    all 140 GB of weights from HBM. At 3.35 TB/s: 140 GB / 3.35 TB/s = 42ms per token
-    at BS=1. Speculative decoding uses a small draft model (e.g., 1B, ~2 GB weights,
-    ~0.6ms/token) to predict 4 tokens, then verifies all 4 in one 70B forward pass
-    (42ms). If 3 of 4 are accepted: effective 3 tokens / 42ms = 14ms/token (3x improvement).'
+  napkin_math: |
+    **Problem 1 (Prefill):**
+    With sequence N=8192, attention matrix has N^2 ≈ 67M elements.
+    For one head, this is 67M × 2 bytes ≈ 134 MB.
+    Standard attention materializes this NxN matrix to HBM (3.35 TB/s on H100).
+    Reading/writing 134 MB per head × 64 heads × 80 layers = ~686 GB of HBM traffic.
+    686 GB / 3.35 TB/s = ~205ms of pure memory I/O latency for attention alone.
+    FlashAttention reduces this traffic to O(N) via SRAM tiling, solving the bottleneck.
+    
+    **Problem 2 (Decode):**
+    Each generated token reads 140 GB of weights.
+    140 GB / 3.35 TB/s = 42ms per token.
+    Speculative decoding draft model (~1B params) takes ~0.6ms/token.
+    Predicting 4 tokens takes 2.4ms, plus one 70B verification pass (42ms).
+    If 3 are accepted: 44.4ms / 3 tokens = 14.8ms/token, a ~2.8x speedup.
   options:
   - Apply FlashAttention to the chatbot to reduce per-token time, and Speculative
     Decoding to the summarizer to handle the long context.
@@ -67,27 +69,3 @@ status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 5
-chains:
-- id: cloud-chain-386
-  position: 1
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-validation_status_pro: WARN
-validation_issues_pro:
-- The napkin math section is incomplete; it sets up the problem by calculating the
-  size of an attention matrix but does not perform any calculations to demonstrate
-  the HBM bottleneck.
-- The reasoning mode 'tradeoff-analysis' is a minor mismatch, as the question is about
-  mapping two distinct problems to their respective solutions rather than trading
-  off between them.
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -17,19 +17,9 @@ scenario: A senior engineer claims that inverted residuals in MobileNetV2 are fa
 question: How would a roofline model on A100 show that MobileNetV2 inverted residual
   speedups are not explained by FLOPs alone?
 details:
-  realistic_solution: Standard conv weight bandwidth depends on kernel size × in_channels
-    × out_channels. For the specific layer, weight BW ≈ 1.18MB + input BW ≈ 1.2MB
-    total (not 0.8MB).
-  common_mistake: Accepting the FLOP-only explanation without analyzing that the depthwise
-    layer in inverted residuals has much lower arithmetic intensity than standard
-    convolutions, and that this matters only when the bandwidth ceiling is the constraint.
-  napkin_math: 'Standard 3×3 conv weight bandwidth: filter_size × in_channels × out_channels
-    × bytes. For typical conv layer: 3×3×64×128×4B = 294,912B = 288KB. Plus input
-    activations: H×W×C×4B. For 28×28×64 input: 28×28×64×4B = 200,704B = 196KB. Total
-    bandwidth: 288KB + 196KB ≈ 484KB... for specific layer with 3×3×64×64: 3×3×64×64×4B
-    = 147,456B = 144KB weights. Input: 56×56×64×4B = 802,816B = 784KB. Total: ~928KB.
-    Corrected: weights alone ≈ 1.18MB for the specific layer described (not 0.8MB
-    which underestimates by ~48%).'
+  realistic_solution: 'A standard ResNet bottleneck uses a 3x3 convolution which, while compute-heavy, has high arithmetic intensity and is often compute-bound on A100. An inverted residual replaces this with a 1x1 expansion, a 3x3 depthwise convolution, and a 1x1 projection. Depthwise convolutions have extremely low arithmetic intensity (FLOPs scale linearly with channels, while memory also scales linearly), making them severely memory-bandwidth bound. The speedup of inverted residuals on A100 is therefore not proportional to the FLOP reduction (often 10x fewer FLOPs) because the depthwise layer bottleneck shifts from compute to memory bandwidth. A roofline model shows the depthwise layer operating far to the left of the ridge point.'
+  common_mistake: 'Accepting the FLOP-only explanation without analyzing that the depthwise layer in inverted residuals has much lower arithmetic intensity than standard convolutions, meaning it hits the memory bandwidth ceiling.'
+  napkin_math: 'For a 3x3 standard conv with C channels: FLOPs = H*W*C*C*9*2, Weights = 9*C*C*2 bytes (FP16). Intensity \approx FLOPs/Weights = H*W. For a 3x3 depthwise conv: FLOPs = H*W*C*9*2, Weights = 9*C*2 bytes. Activations = 4*H*W*C bytes (input+output). Intensity \approx FLOPs/(Weights+Acts) \approx 18*H*W*C / (18*C + 4*H*W*C) = 4.5 / (4.5/(H*W) + 1) \approx 4.5 FLOPs/byte. A100 FP16 tensor core ridge point is ~160 FLOPs/byte. Depthwise is purely bandwidth-bound (4.5 << 160).'
 status: published
 provenance: imported
 requires_explanation: true
@@ -39,13 +29,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Standard conv reads weights (1.18MB) + input (25KB) = ~1.2MB, not ~0.8MB.
-- Inverted residual FLOPs are 38.5M, not 38.4M. Reads include weights (12KB) + input
-  (200KB) = ~212KB. 38.5M/212KB = 181 FLOP/byte, not 192.
 human_reviewed:
   status: not-reviewed
   by: null

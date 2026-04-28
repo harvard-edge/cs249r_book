@@ -25,39 +25,32 @@ details:
     layers use column-wise partitioning (e.g., input to attention weights, feed-forward
     up-projection) and others use row-wise (e.g., attention output weights, feed-forward
     down-projection). Key to efficiency is strategically overlapping the all-reduce
-    communication with subsequent computations. For example, during a column-wise
-    partitioned matrix multiplication, the all-reduce for the output (needed for the
-    next row-wise partitioned layer) can be initiated as soon as partial results are
-    available, running concurrently with the remaining local computation for the current
-    layer or with other independent operations. Leverage the high-bandwidth inter-chip
-    interconnect of the TPU v5e to minimize communication latency.
+    communication with independent computations. For example, during the row-wise partitioned
+    matrix multiplication (like the feed-forward down-projection), the all-reduce for
+    the partial sum outputs can be overlapped with other independent operations or
+    subsequent un-partitioned computations. Leverage the high-bandwidth inter-chip
+    interconnect of the TPU v5e to minimize communication latency and explore sequence
+    parallelism to further optimize memory and communication.
   common_mistake: A common mistake is underestimating the communication overhead,
     especially for all-reduce operations required when switching between column-wise
     and row-wise parallelism (e.g., after matrix multiplication or element-wise operations).
     If communication is not effectively overlapped with computation, TPUs can spend
     significant time idle waiting for data, leading to suboptimal utilization and
     higher inference latency.
-  napkin_math: Consider a large linear layer where the output dimension `H_out` is
-    `12288` and the effective batch size `B*S` is `1024`. If BF16 precision is used,
-    an all-reduce operation across `N` TPUs for the activations would involve transferring
-    `1024 * 12288 * 2 bytes = 25.16 MB`. With the Google TPU v5e's HBM bandwidth of
-    1.6 TB/s, the theoretical communication time for this data transfer would be approximately
-    `25.16 MB / (1.6 TB/s) ≈ 15.7 microseconds`. Meanwhile, a single TPU (out of N=8)
-    computing a matrix multiplication of `[1024, H_in] @ [H_in, H_out/8]` (assuming
-    `H_in = H_out = 12288`) performs `1024 * 12288 * (12288/8)` BF16 operations. This
-    amounts to approximately `19.33 billion` operations. Given the TPU v5e's 197 TFLOPS
-    BF16 performance, the computation time for this local part would be `19.33 * 10^9
-    ops / (197 * 10^12 ops/s) ≈ 98 microseconds`. Since the computation time (98 µs)
-    is significantly larger than the communication time (15.7 µs), there is ample
-    opportunity to effectively overlap communication with computation, maximizing
-    TPU utilization.
-status: archived
-deletion_reason: 'Multiple compounding issues: napkin math computes "19.33 billion operations" for a
-  matrix multiply but neglects the 2 FLOPs per MAC factor (the real count is 38.66 GFLOPs, halving the
-  computed time and inverting the "compute >> communication" claim that the realistic_solution leans
-  on); scenario uses "Imagine deploying..." LLM template; and the question uses HBM bandwidth (1.6 TB/s)
-  as if it were inter-chip bandwidth. The TP-overlap content is well covered by the rewritten cloud-3931
-  and cloud-0899; archiving avoids propagating the FLOP-count error.'
+  napkin_math: Consider a row-parallel linear layer where the output dimension `H_out`
+    is `12288` and the effective batch size `B*S` is `1024`. If BF16 precision is used,
+    an all-reduce operation across `N=8` TPUs for the partial sum activations involves
+    a tensor of `1024 * 12288 * 2 bytes = 25.16 MB`. In a ring all-reduce, each TPU
+    transfers `2 * (7/8) * 25.16 MB \u2248 44 MB`. With the Google TPU v5e's ICI bandwidth
+    of ~200 GB/s, the theoretical communication time is approximately `44 MB / 200 GB/s \u2248 220 microseconds`.
+    Meanwhile, a single TPU computing the row-parallel matrix multiplication `[1024, H_in/8] @ [H_in/8, H_out]`
+    (assuming `H_in = H_out = 12288`) performs `2 * 1024 * 1536 * 12288` BF16 FLOPs. This
+    amounts to `38.65 billion` FLOPs. Given the TPU v5e's 197 TFLOPS BF16 performance,
+    the compute time is `38.65 * 10^9 / (197 * 10^12) \u2248 196 microseconds`. Since communication
+    time (220 \u03bcs) slightly exceeds compute time (196 \u03bcs), the layer is communication-bound,
+    highlighting the critical need to overlap this all-reduce with other independent operations
+    to prevent the TPUs from idling.
+status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 8

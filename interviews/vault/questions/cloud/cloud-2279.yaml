@@ -1,37 +1,47 @@
 schema_version: '1.0'
 id: cloud-2279
 track: cloud
-level: L2
-zone: recall
-topic: extreme-quantization
-competency_area: deployment
-bloom_level: understand
+level: L5
+zone: optimization
+topic: mlops-lifecycle
+competency_area: latency
+bloom_level: analyze
 phase: both
-title: N:M Sparsity and Tensor Core Alignment
-scenario: NVIDIA's Ampere and Hopper GPUs support 2:4 structured sparsity natively in their Tensor Cores.
-  A colleague proposes using 1:4 sparsity instead, arguing that removing 75% of weights (vs 50%) should
-  yield even greater speedup. Why does 1:4 sparsity NOT get hardware acceleration on these GPUs, and what
-  is the fundamental constraint that makes 2:4 the specific ratio supported?
-question: "Why does 1:4 sparsity NOT get hardware acceleration on these GPUs, and what is the fundamental constraint that makes 2:4 the specific ratio supported?"
+title: High-Fanout Item Feature Retrieval
+scenario: 'Your recommendation serving system scores 1,000 candidate items per user request at 2,000 QPS.
+  The end-to-end P99 latency is 320ms against a 150ms SLA. Profiling reveals: Candidate Generation takes
+  20ms, User Feature Fetch takes 10ms, Item Feature Fetch takes 250ms, Cross-feature computation takes
+  10ms, and Model Scoring takes 30ms. The 250ms item fetch is caused by 10 concurrent threads making 100
+  sequential gRPC calls each to a Redis-backed feature store. Network RTT is 0.5ms.'
+question: "How would you fix the 250ms item feature fetch and bring end-to-end P99 under the 150ms SLA?"
 details:
-  realistic_solution: 'The Tensor Core''s sparse math unit is hardwired to process exactly 2 non-zero
-    values out of every group of 4 elements. This is a fixed datapath design: the hardware reads 4 values,
-    uses a 2-bit index to select which 2 are non-zero, and feeds those 2 values into the multiply-accumulate
-    pipeline. Changing the ratio to 1:4 would require a different selection circuit and different storage
-    format. The 2:4 pattern was chosen because it provides a clean 2x theoretical speedup (half the multiplications)
-    while maintaining enough representational capacity that accuracy loss is manageable for most architectures.
-    The compressed format stores the 2 non-zero values plus a small metadata index per group, halving
-    the memory bandwidth for weight loading.'
-  common_mistake: Assuming that any sparsity ratio can be accelerated, and that higher sparsity always
-    means more speedup. The hardware supports exactly one sparsity pattern.
-  napkin_math: 'Dense 4 elements: 4 multiplies, 4 values stored. 2:4 sparse: 2 multiplies + 2-bit index,
-    2 values + metadata stored. Memory reduction: ~50%. Compute reduction: exactly 2x on the supported
-    datapath. 1:4 would save 75% compute but requires custom hardware that doesn''t exist in current Tensor
-    Cores.'
+  realistic_solution: 'The 250ms bottleneck is dominated by network RTT overhead due to an N+1 query anti-pattern
+    in feature retrieval. We decompose the latency: 100 sequential calls per thread * (0.5ms RTT + 2.0ms
+    DB processing) = 250ms. Optimization 1: Implement batched retrievals (MGET). Group the 1,000 item
+    IDs into 5 parallel batches of 200 items. Optimization 2: Introduce an in-memory L1 cache (e.g., Caffeine)
+    on the serving nodes for item features, as item features typically mutate slowly compared to user
+    features. With an 80% cache hit rate, we only need to fetch 200 items over the network per request,
+    further reducing network bandwidth and Redis CPU load.'
+  common_mistake: Reducing the candidate pool from 1,000 to 200 to cut down fetch times, which severely
+    degrades recommendation quality.
+  napkin_math: 'Current Item Fetch: 100 sequential calls * 2.5ms = 250ms. Optimized Fetch with MGET: 1,000
+    items split into 5 parallel gRPC calls. Network RTT (0.5ms) + Redis MGET processing for 200 keys (~4.5ms)
+    = 5ms total latency. With 80% L1 cache hit rate, we only fetch 200 keys total, reducing Redis load
+    and dropping fetch latency to ~2ms. New End-to-End P99: 20ms (Gen) + 10ms (User) + 2ms (Item Fetch)
+    + 10ms (Cross) + 30ms (Model) = 72ms. This represents a 77.5% reduction in latency.'
+  options:
+  - Reduce the candidate pool from 1,000 to 200 items to cut down fetch times by 80%, reducing item fetch to 50ms and total latency to 120ms.
+  - Implement batched retrievals (MGET) to group the 1,000 item IDs into 5 parallel batches, and add an in-memory L1 cache to achieve an 80% hit rate, dropping fetch latency to ~2ms.
+  - Upgrade the Redis-backed feature store to faster NVMe SSDs to reduce the 2.0ms database processing time per item down to 0.1ms.
+  - Increase the number of concurrent threads from 10 to 100 so each thread only makes 10 sequential calls, reducing fetch latency to 25ms.
+  correct_index: 1
 status: published
 provenance: imported
 requires_explanation: false
-expected_time_minutes: 2
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-467
+  position: 0
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'

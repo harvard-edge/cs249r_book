@@ -16,19 +16,13 @@ scenario: 'Calculate the memory bandwidth savings from using Flash-Attention vs.
 question: How would you calculate the memory bandwidth savings from using Flash-Attention
   vs. standard attention for a 3B LLM prefill on Snapdragon 8 Gen 3 (77 GB/s)?
 details:
-  realistic_solution: 'Standard attention per layer: write Q×K^T: [1024×1024×2B=2MB]
-    + read for softmax: 2MB + write softmax output: 2MB + write V@score: [1024×128×2B=256KB].
-    Total BW per layer: ~6.25MB. 32 layers: 200MB extra per prefill. Flash-Attention:
-    tiles computation, never materializes full 1024×1024 matrix. BW reduction: 6MB/layer
-    × 32 = 192MB saved. At 77GB/s: time saved = 192MB/77GB/s=2.5ms. Prefill baseline
-    compute-bound: ~27ms. Flash-Attention saves 2.5ms (9.3% of prefill). Modest but
-    meaningful for mobile.'
+  realistic_solution: 'Standard attention materializes the Q×K^T matrix. For sequence length 1024, this is 1024×1024 elements per head. With 32 heads and 2 bytes per element (FP16), this is 32 × 1024 × 1024 × 2B = 64MB per layer. Reading and writing this matrix, plus the softmax outputs, adds significant memory bandwidth overhead (~2GB total across 32 layers). Flash-Attention tiles the computation and never materializes the full attention matrix to LPDDR5X. BW reduction: ~64MB/layer × 32 = 2GB saved. At 77GB/s, time saved = 2GB / 77GB/s ≈ 26ms. For a prefill that normally takes ~27ms compute-bound, saving 26ms of memory overhead is a massive reduction.'
   common_mistake: Applying Flash-Attention savings to decode (where it doesn't apply
     the same way) instead of prefill; during decode, only 1 new token attends to KV
     cache, so the QK^T matrix is trivially small.
   napkin_math: 'Standard attention Q×K^T matrix: 1024×1024×2B=2MB per head? No: per
     layer (all heads combined): [batch=1, heads=32, seq=1024, seq=1024]×2B=32×1024²×2B=64MB
-    per layer × 32=2GB total. Flash-Attention: never writes this. BW savings: 2GB
+    per layer × 32=2048MB = 2GB total. Flash-Attention: never writes this. BW savings: 2GB
     / 77GB/s=26ms saved per prefill! 27ms prefill baseline → Flash reduces to 1ms
     prefill overhead. Major impact for long-context prefill. (Standard: 64MB per layer
     × 32=2048MB = 2GB).'

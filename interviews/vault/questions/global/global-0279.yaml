@@ -16,18 +16,18 @@ question: "How would you design a serving architecture that minimizes GPU cost w
 details:
   realistic_solution: 'Architecture: shared base model with hot-swappable LoRA adapters. (1) Base model
     deployment: 70B INT8 = 70 GB per replica. Use TP=2 across 2 A100-80GB (35 GB/GPU, leaving 45 GB for
-    KV cache and adapters). (2) LoRA adapter size: rank=16, 4 projections per layer, 80 layers. Per adapter:
-    4 projections × 2 matrices × (8192 × 16) params × 2B × 80 layers = 167.7 MB FP16. All 200 adapters:
-    33.5 GB — fits in host RAM with GPU-side caching. (3) Adapter scheduling: keep top-20 adapters (~90%
-    traffic) in GPU memory permanently (20 × 167.7 MB = 3.35 GB). Remaining adapters loaded on-demand
-    from CPU (PCIe: 167.7 MB / 32 GB/s = 5.2ms — well within SLA). (4) Capacity planning: 5K req/s with
-    continuous batching, batch=64 per replica. Per replica throughput: ~250 req/s. Need 5000/250 = 20
-    replicas = 40 A100 GPUs. Without LoRA sharing: 200 models × 2 GPUs = 400 GPUs. LoRA sharing saves
-    360 GPUs (90% reduction).'
+    KV cache and adapters). (2) LoRA adapter size: rank=16, 4 projections per layer (with GQA, K and V are smaller), 80 layers.
+    Per adapter: ~819k params per layer × 2B × 80 layers ≈ 131 MB FP16. All 200 adapters: 26.2 GB — fits in host
+    RAM with GPU-side caching. (3) Adapter scheduling: keep top-20 adapters (~90% traffic) in GPU memory
+    permanently (20 × 131 MB = 2.62 GB). Remaining adapters loaded on-demand from CPU (PCIe: 131 MB / 32 GB/s
+    = 4.1ms — well within SLA). (4) Capacity planning: 5K req/s with continuous batching, batch=64 per replica.
+    Per replica throughput: ~250 req/s. Need 5000/250 = 20 replicas = 40 A100 GPUs. Without LoRA sharing:
+    200 models × 2 GPUs = 400 GPUs. LoRA sharing saves 360 GPUs (90% reduction).'
   common_mistake: Deploying each adapter as a separate model instance — that would require 200 × 70B model
     copies, consuming petabytes of VRAM. LoRA's whole point is that adapters share the base model.
-  napkin_math: 'Adapter size: 4 × 2 × 8192 × 16 × 2B × 80 layers = 167.7 MB each. 200 adapters = 33.5
-    GB total. Base model: 70 GB INT8. 20 replicas × 2 GPUs = 40 GPUs vs 400 without sharing. 10x GPU reduction.'
+  napkin_math: 'Adapter size: ~819,200 params per layer (accounting for GQA in 70B) × 2B × 80 layers = 131.1 MB each.
+    200 adapters = 26.2 GB total. Base model: 70 GB INT8. 20 replicas × 2 GPUs = 40 GPUs vs 400 without sharing.
+    10x GPU reduction.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -40,13 +40,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- The formula 4 × 2 × 8192 × 16 assumes Q, K, V, and O projections all have shape 8192x8192 (standard
-  MHA). A 70B model (like Llama-2-70B) uses Grouped Query Attention (GQA), so K and V are much smaller
-  (e.g., 8192x1024), making the adapter size calculation an overestimate.
 human_reviewed:
   status: not-reviewed
   by: null

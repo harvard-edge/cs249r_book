@@ -18,20 +18,26 @@ details:
   common_mistake: Engineers make two common mistakes here. The first is to be greedy and assume the largest
     possible batch size is always best for throughput, ignoring the latency constraint. The second is
     to calculate latency but forget the waiting time component. They solve for `T_inference(N) <= 150ms`
-    but forget that in continuous batching, a frame has to wait for the rest of its batch to arrive, adding
-    `T_avg_wait` to the total latency.
+    but forget that in continuous/dynamic batching, a frame has to wait for the rest of its batch to arrive,
+    as well as for the previous batch to finish.
   napkin_math: '1. Arrival rate: 10 cameras x 10 FPS = 100 frames/s, one frame every 10ms.
 
     2. Inference time: T_inference(N) = 40ms + 5ms*(N-1) = 35ms + 5N.
 
-    3. Worst-case latency: A frame arriving just after a batch starts must wait for the current batch
-    to finish, then wait for N-1 more frames to form its batch, then wait for its batch to process. Worst-case
-    latency = T_inference(N) + (N-1)*10ms (waiting for batch to fill) = 35ms + 5N + 10(N-1) = 25ms + 15N.
+    3. Worst-case latency: A frame arriving just after a batch starts (t=0) must wait for N-1 more frames
+    to arrive to form its batch (at t=10*(N-1)). However, it also must wait for the previous batch to finish
+    (at t=T_inference(N)). Thus, its batch starts at max(T_inference(N), 10*(N-1)). Once started, it takes
+    T_inference(N) to process. Worst-case latency = max(35 + 5N, 10N - 10) + (35 + 5N).
 
-    4. Constraint: 25 + 15N ≤ 150 → 15N ≤ 125 → N ≤ 8.33 → N = 8.
+    4. Let''s test N=8: T_inference(8) = 35 + 40 = 75ms. Time to fill batch = 7 * 10 = 70ms. Batch starts
+    at max(75, 70) = 75ms. Total latency = 75 + 75 = 150ms.
 
-    5. Verify N=8: Latency = 25 + 15*8 = 145ms ≤ 150ms ✓. T_inference(8) = 35 + 40 = 75ms. Throughput
-    = 8/75ms = 106.7 FPS > 100 FPS demand ✓.'
+    5. Let''s test N=9: T_inference(9) = 35 + 45 = 80ms. Time to fill batch = 8 * 10 = 80ms. Batch starts
+    at max(80, 80) = 80ms. Total latency = 80 + 80 = 160ms.
+
+    6. Constraint: Latency ≤ 150ms. Therefore, N=8 is the maximum batch size.
+
+    7. Verify N=8: Latency = 150ms ✓. Throughput = 8 / 75ms = 106.7 FPS > 100 FPS demand ✓.'
   options:
   - '8'
   - '23'
@@ -43,21 +49,10 @@ provenance: imported
 requires_explanation: false
 expected_time_minutes: 2
 validated: true
-validation_status: WARN
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-validation_issues:
-- The 'Scenario' incorrectly states that each camera sends a frame every 100ms (10 FPS), but later uses
-  an arrival rate of one frame every 10ms in 'Napkin Math' (100 FPS total).
-validation_status_pro: ERROR
-validation_issues_pro:
-- The realistic solution's answer of 11 is mathematically incorrect; the maximum batch size that meets
-  the 150ms worst-case latency constraint is 8.
-- The napkin math section is an empty stub and does not show the required latency calculation.
-- The reasoning mode is 'concept-recall' but the question is a 'napkin-math' optimization problem.
+validation_status: OK
 math_verified: true
 math_status: CORRECT
-math_date: '2026-04-03'
+math_date: '2026-04-27'
 math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed

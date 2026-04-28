@@ -16,27 +16,9 @@ scenario: After switching from ring to tree AllReduce on a 512-A100 cluster, you
 question: Why does tree AllReduce generate 40% more ECN-marked packets than ring AllReduce
   despite the same total data volume?
 details:
-  realistic_solution: 'In ring AllReduce with N GPUs, each GPU sends/receives 2×(N-1)/N
-    of the data, distributed uniformly across N links — no single link sees more than
-    1/N of total traffic. In tree AllReduce, intermediate aggregation nodes receive
-    data from their 2 children (binary tree) before forwarding to the parent. At level
-    1: 256 nodes, each with 2:1 incast. At level 2: 128 nodes, each aggregating 4
-    original streams cumulatively. The root''s uplink carries the fully aggregated
-    data (~50% of all traffic), which is ~256× more concentrated than a single ring
-    link. At the first spine level, tree roots create 8:1 or 16:1 incast at switch
-    ports, triggering ECN marking even though average utilization is low. Fix: use
-    double-binary tree (two trees with complementary roots) to halve the incast factor,
-    or switch to recursive halving-doubling which balances traffic more evenly.'
-  common_mistake: Assuming congestion is only about total bytes. Tree AllReduce has
-    the same total data volume as ring but concentrates traffic at tree roots, creating
-    incast patterns that ring AllReduce avoids by design.
-  napkin_math: '512-GPU binary tree: at each level, each node receives from exactly
-    2 children (binary tree property). Root: 2:1 incast. Level below root: 128 nodes
-    each with 2:1 incast. Each level doubles the incast factor cumulatively, but no
-    single node ever receives from all 512 sources simultaneously. The root''s uplink
-    carries ~50% of total traffic (all data aggregated) vs ring where each link carries
-    1/512 — so root link is ~256× more loaded than a ring link. Double-binary tree
-    halves this to ~128× per root.'
+  realistic_solution: 'In ring AllReduce, traffic is perfectly balanced: each of the N GPUs sends and receives continuously in a peer-to-peer fashion, avoiding switch incast. In tree AllReduce, intermediate aggregation nodes receive data from their 2 children (binary tree) simultaneously before forwarding the reduced result to the parent. While the total byte volume per link is identical to ring (~2\u00d7 message size), the communication pattern creates a 2:1 incast at every aggregation step. When mapped onto a physical data center network, multiple logical tree nodes often share the same physical switch, causing these 2:1 incasts to compound into 8:1 or 16:1 physical incasts at spine switches. This microburst congestion overflows switch buffers and triggers ECN marking despite low average utilization. Fix: use algorithms like double-binary tree to distribute the root bottleneck, or recursive halving-doubling to maintain perfectly balanced peer-to-peer traffic.'
+  common_mistake: 'Assuming congestion is only about total bytes. Tree AllReduce has the same total data volume as ring but concentrates traffic temporally at tree nodes, creating incast patterns that ring AllReduce avoids by design.'
+  napkin_math: 'Ring and tree both move ~2\u00d7S bytes per node. However, in a 512-node binary tree, 256 leaf nodes send to 128 parents simultaneously. If 8 parents are on the same ToR switch, that switch experiences a 16:8 incast burst. Ring avoids this by having exactly 1 sender per receiver at all times.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -46,12 +28,9 @@ validation_status: OK
 validation_date: '2026-04-02'
 validation_model: claude-opus-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- In a binary tree topology, the root node receives from its 2 children, not from
-  512 sources simultaneously.
 human_reviewed:
   status: not-reviewed
   by: null

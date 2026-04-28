@@ -9,16 +9,16 @@ bloom_level: apply
 phase: both
 title: 'The Multi-Node Scaling Cliff: Collective Communication'
 scenario: You are a Staff ML Systems Engineer diagnosing a severe scaling issue. Your team is training
-  a 70B parameter model using FSDP (Fully Sharded Data Parallel) across 16 nodes, each with 8 H100 GPUs.
+  a 70B parameter model using 8-way Tensor Parallelism and 16-way Data Parallelism across 16 nodes, each with 8 H100 GPUs.
   When training on a single node, GPU utilization is >90%, but at 16 nodes, scaling efficiency plummets
   to 45%, and `top` shows GPUs frequently waiting. `nccl-tests` confirm intra-node bandwidth is near the
-  theoretical maximum, but inter-node bandwidth is dramatically lower. Given that FSDP requires an All-Reduce
+  theoretical maximum, but inter-node bandwidth is dramatically lower. Given that Data Parallelism requires an All-Reduce
   collective communication step for gradients after each backward pass, diagnose the primary bottleneck
   limiting your multi-node performance.
-question: "What is the primary bottleneck limiting the 16-node FSDP job’s scaling efficiency?"
+question: "What is the primary bottleneck limiting the 16-node training job’s scaling efficiency?"
 details:
-  realistic_solution: The primary bottleneck is the inter-node InfiniBand fabric. In FSDP, the All-Reduce
-    operation sums and distributes gradients across all GPUs in the training job. While communication
+  realistic_solution: The primary bottleneck is the inter-node InfiniBand fabric. In Data Parallelism, the All-Reduce
+    operation sums and distributes gradients across all GPUs in the DP group. While communication
     within a node (8 GPUs) happens over the ultra-fast 900 GB/s NVLink, communication between the 16 nodes
     must cross the significantly slower 50 GB/s (400 Gbps) InfiniBand network. This disparity creates
     a massive communication bottleneck as the model scales out, leaving GPUs waiting for gradient updates
@@ -28,8 +28,7 @@ details:
     bridge between GPUs within a node, bypassing PCIe for GPU-to-GPU traffic. Another is to assume all
     network is the same, not realizing the orders-of-magnitude difference between on-server and across-server
     bandwidth.
-  napkin_math: 1. **Calculate Gradient Size:** A 70B parameter model using FP16 for gradients requires
-    70 billion * 2 bytes/param = 140 GB of data to be communicated during the All-Reduce step.
+  napkin_math: '1. **Calculate Gradient Size:** A 70B parameter model using FP16 for gradients requires 70 billion * 2 bytes/param = 140 GB of data to be communicated during the All-Reduce step. 2. **Calculate Inter-Node Time:** At 50 GB/s (400 Gbps), a 140 GB transfer across the InfiniBand network takes roughly 2 * 140 GB / 50 GB/s = 5.6 seconds, creating a massive bottleneck compared to the 900 GB/s NVLink which could do it in ~0.3 seconds.'
   options:
   - The PCIe Gen5 bus is saturated from transferring activations between the CPU and GPU memory.
   - HBM3 memory bandwidth on the H100s is insufficient to keep the Tensor Cores fed during computation.
@@ -45,11 +44,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- napkin_math is incomplete, only calculates gradient size
 human_reviewed:
   status: not-reviewed
   by: null

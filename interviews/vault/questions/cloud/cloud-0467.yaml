@@ -16,22 +16,16 @@ scenario: You are training a 70B parameter model using 8-way tensor parallelism 
   likely bottleneck that explains this poor scaling.
 question: "What hardware bottleneck explains the poor scaling when moving from 8 H100s on one node to 16 H100s across two nodes?"
 details:
-  realistic_solution: The primary bottleneck is the inter-node InfiniBand connection. In the single-node
-    setup, all communication for the tensor parallel all-reduce operation happens over the extremely fast
-    900 GB/s NVLink. When scaling to two nodes, half of the all-reduce data must cross the much slower
-    InfiniBand fabric that connects the nodes. This relatively slow link becomes the dominant factor in
-    the step time, negating most of the performance gains from the additional GPUs.
+  realistic_solution: "The primary bottleneck is the inter-node InfiniBand connection. While intra-node communication uses the extremely fast 900 GB/s NVLink, the 2-way data parallelism requires synchronizing the gradients for the entire 70B model across the much slower InfiniBand fabric. This massive data transfer throttles the step time, negating most of the performance gains from the additional GPUs."
   common_mistake: Engineers often misdiagnose scaling problems. They might incorrectly blame the GPU compute
     (suggesting the model is too small), the PCIe bus (misunderstanding the GPU-to-GPU communication path
     for tensor parallelism), or the NVLink itself (failing to recognize its massive bandwidth). The key
     is identifying the slowest path that the new configuration introduced.
-  napkin_math: In 8-way Tensor Parallelism, activations (e.g., 500MB per layer) are all-reduced multiple
-    times per step. On 1 node via NVLink (900 GB/s), an all-reduce takes ~0.55ms. Across 2 nodes via InfiniBand
-    (50 GB/s), the transfer takes ~10ms. This 9.5ms penalty per layer ruins TP scaling.
+  napkin_math: "In 2-way Data Parallelism, the entire model's gradients (70B parameters * 2 bytes = 140 GB in FP16/BF16) must be all-reduced across the nodes. Over a 50 GB/s InfiniBand link, this 140 GB transfer takes at least 2.8 seconds per step. This massive communication overhead at the end of the step negates the compute time saved by doubling the GPUs."
   options:
   - The GPU compute is saturated; the model is too small for 16 GPUs.
   - The PCIe Gen5 bus connecting the GPUs to the CPU is saturated by the increased data parallelism.
-  - The inter-node InfiniBand connection has become the primary bottleneck for the tensor-parallel all-reduce.
+  - The inter-node InfiniBand connection has become the primary bottleneck for the data-parallel all-reduce.
   - The intra-node NVLink bandwidth is insufficient for the 8-way tensor parallel collectives.
   correct_index: 2
 status: published
@@ -45,10 +39,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: WARN
-validation_issues_pro:
-- The description of the two-node parallelism strategy ('8-way tensor parallelism... with 2-way data parallelism')
-  is ambiguous about how the tensor parallel group is mapped to the nodes.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

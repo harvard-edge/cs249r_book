@@ -9,27 +9,26 @@ bloom_level: analyze
 phase: both
 title: RAG Pipeline Latency Budget on H100
 scenario: 'A RAG pipeline on H100 (80GB HBM3) runs: FAISS retrieval (50ms), cross-encoder
-  reranking of top-50 docs (120ms), and LLM generation with a 3072-token context (210ms
-  at 40 tok/s). End-to-end P95 latency is 420ms but the SLA is 300ms. The team proposes
+  reranking of top-50 docs (120ms), and LLM Time-To-First-Token (TTFT) with a 3072-token context
+  (210ms). End-to-end P95 TTFT is 420ms but the SLA is 300ms. The team proposes
   adding a query cache. Analyze where the latency budget is being spent and identify
   which stage is the primary bottleneck.'
-question: Where is the 420 ms RAG latency being spent, which stage is the bottleneck,
+question: Where is the 420 ms RAG TTFT being spent, which stage is the bottleneck,
   and what changes get P95 under 300 ms?
 details:
   realistic_solution: 'Profile each stage independently. Reranking 50 docs with a
     cross-encoder at 120ms is disproportionate — it dominates relative to retrieval.
-    Reduce reranker candidates from 50 to 20 (cuts to ~48ms). Parallelize retrieval
-    across shards. With reranker at 48ms: 50+48+210=308ms, still over SLA. Also reduce
-    context to 2048 tokens: 210*(2048/3072)=140ms. Total: 50+48+140=238ms, comfortably
-    under 300ms.'
+    Reduce reranker candidates from 50 to 20 (cuts to ~48ms). Also, the LLM TTFT of
+    210ms for 3072 tokens is high; reducing the context to 2048 tokens by passing fewer
+    documents cuts the prefill compute linearly: 210ms * (2048/3072) = 140ms. Total TTFT:
+    50 (retrieval) + 48 (rerank) + 140 (LLM) = 238ms, comfortably under the 300ms SLA.'
   common_mistake: Assuming the LLM generation step is always the bottleneck and spending
     effort on speculative decoding or quantization before profiling the other stages.
   napkin_math: 'Reranker scales linearly with candidate count: 120ms * (20/50) = 48ms.
-    LLM generation: 3072 tokens / 40 tok/s = 76.8s... wait, 40 tok/s means 3072/40
-    = 76.8s for generation — that cannot be right for 210ms. Re-read: 210ms total
-    generation at batch decode. At H100 throughput: 3072 context tokens prefill at
-    ~10ms, decode 200 tokens at ~200ms = 210ms total. Reducing context to 2048: prefill
-    ~7ms + decode ~140ms = 147ms. Pipeline total: 50+48+147 = 245ms.'
+    LLM TTFT (prefill) scales linearly with sequence length (or quadratically depending
+    on attention, but linearly is a safe lower bound for reduction): 210ms * (2048/3072) = 140ms.
+    Pipeline total: 50 + 48 + 140 = 238ms. Query cache is unhelpful for P95 latency because
+    cache misses will still hit the 420ms slow path.'
 status: published
 provenance: imported
 requires_explanation: false

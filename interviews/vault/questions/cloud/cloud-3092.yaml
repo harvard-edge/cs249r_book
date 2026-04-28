@@ -16,24 +16,23 @@ scenario: 'A TPU v5e (197 TFLOPS BF16) runs BERT-large inference at 15 TFLOPS (7
 question: Why is BERT-large at only 7.6% MFU on TPU v5e, and how much speedup should
   fusing GeLU, LayerNorm, and Linear deliver?
 details:
-  realistic_solution: 'GeLU+LN are element-wise: AI ≈ 1-2 FLOPs/byte vs TPU ridge
-    240 → systolic array unutilized. GEMM 15% of time: 0.15 * total_time * 197 TFLOPS
-    → actual GEMM at ~65% MFU. Fusing GeLU+LN into GEMM prologue/epilogue: eliminate
-    separate memory round-trips. GeLU bandwidth: BERT hidden=1024, seq=128, batch=64:
-    64*128*1024*2=16MB. At 819 GB/s: 0.02ms. LayerNorm: another 16MB read + write
-    = 32MB = 0.039ms. Total saved: 0.059ms per layer. 24 layers: 1.42ms saved. Total
-    time was: if GEMM=15% and 65% MFU: GEMM_time = FLOPs/TPU. Improvement from fusion:
-    ~2x overall (Amdahl 85%→15% of total is memory-bound).'
+  realistic_solution: 'GeLU+LN are element-wise: AI ≈ 1 FLOP/byte vs TPU ridge
+    240 → systolic array unutilized. Fusing GeLU+LN into GEMM prologue/epilogue eliminates
+    separate memory round-trips. GeLU bandwidth: BERT FFN intermediate=4096, seq=128, batch=64:
+    64*128*4096*2=64MB. Reading and writing takes 128MB. At 819 GB/s, pure memory transfer is ~0.16ms. However, un-fused
+    element-wise operations on accelerators often suffer from severe kernel launch
+    overheads and sub-optimal memory access patterns. Fusion eliminates this overhead
+    and the memory round trips, shifting the bottleneck back to the GEMMs.'
   common_mistake: Optimizing the GEMM portion (15% of time) via algorithmic changes
     when Amdahl's Law shows the bottleneck is GeLU+LN (85% of time). The systolic
     array is idle during memory-bound operations.
-  napkin_math: 'BERT-large at batch=64, seq=128: GEMM FLOPs = 2 * 24 * 4 * 1024^2
-    * 64 / 128 = ... Layer GEMM: 2*1024*1024*64*128/128 = hmm, better: per layer 4
-    GEMMs each (seq*batch, hidden)*(hidden,hidden) = 4*2*8192*1024*1024 = 68.7 GFLOP
-    per layer * 24 = 1.65 TFLOP total. At 15 TFLOPS: time = 1.65T/15T = 110ms. GEMM_time
-    at 65% MFU: 1.65T/(197T*0.65) = 12.9ms (15% of 86ms measured). GeLU+LN (85%):
-    73ms. After fusion: eliminate 73ms overhead, GEMMs take 12.9ms. Speedup: 86ms/12.9ms
-    = 6.7x. MFU improves from 7.6% to ~51%.'
+  napkin_math: 'BERT-large (24 layers, hidden=1024) at batch=64, seq=128 (8192 tokens):
+    Total GEMM FLOPs ≈ 12 * 2 * 8192 * 1024^2 * 24 = 4.95 TFLOPs. At 15 TFLOPS, total
+    time = 4.95T / 15T = 330ms. If GEMM runs at 65% MFU (128 TFLOPS), GEMM time = 4.95T
+    / 128T = 38.6ms. The remaining ~291ms (88% of time) is spent in memory-bound
+    operations and overhead (GeLU+LN). Fusion eliminates the majority of this 291ms
+    overhead, reducing total time to ~38.6ms. Speedup: 330ms / 38.6ms = 8.5x. MFU
+    improves from 7.6% to 65%.'
 status: published
 provenance: imported
 requires_explanation: false

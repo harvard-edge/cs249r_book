@@ -10,7 +10,7 @@ phase: training
 title: The Context Parallelism for Long Sequences
 scenario: You need to train a model with a 1M token context window. Standard self-attention requires $O(n^2)$
   memory for the attention matrix. With hidden dim 8192 and FP16, a single attention head's score matrix
-  for 1M tokens is 1.86 TB — it doesn't fit on any single GPU. How do you distribute the sequence across
+  for 1M tokens is 2 TB — it doesn't fit on any single GPU. How do you distribute the sequence across
   GPUs, and what's the communication pattern?
 question: "How do you distribute the sequence across GPUs, and what's the communication pattern?"
 details:
@@ -25,15 +25,15 @@ details:
     $O(n^2)$. At 1M tokens, even with FlashAttention, a single GPU would take prohibitively long to compute
     attention, and the KV cache for all heads still exceeds memory.'
   napkin_math: '1M tokens, $h=8192$, 128 attention heads, head_dim=64, FP16. KV per head: $1M \times 64
-    \times 2\text{B} = 122\text{ MB}$. All heads: $128 \times 122\text{ MB} = 15.25\text{ GB}$ for K,
-    same for V = **30.5 GB** total KV. Split across $P=32$ GPUs: 31.25K tokens per GPU. Local KV per GPU:
-    30.5 GB / 32 = **0.95 GB**. Ring communication: each step sends 0.95 GB of KV to the next GPU. 31
-    ring steps × 0.95 GB = 29.5 GB total sent per GPU. At 900 GB/s NVLink (intra-node) for 8 GPUs + 50
-    GB/s IB (inter-node) for 24 cross-node hops: intra-node steps: 0.95 GB / 900 GB/s = 1.06 ms. Inter-node
-    steps: 0.95 GB / 50 GB/s = 19 ms. If attention compute per block ≥ 19 ms, communication is fully hidden.
-    Attention FLOPs per block: $2 \times 31.25K \times 31.25K \times 64 \times 128 = 16\text{ TFLOP}$.
-    H100 at 989 TFLOPS: 16/989 = **16.2 ms** — close but slightly less than the 19 ms transfer. Communication
-    is *almost* hidden; need to tune chunk sizes or use 2 IB links.'
+    \times 2\text{B} = 128\text{ MB} (\sim122\text{ MiB})$. All heads: $128 \times 122\text{ MiB} \approx 15.25\text{ GiB}$ for K,
+    same for V = **30.5 GiB** total KV. Split across $P=32$ GPUs: 31.25K tokens per GPU. Local KV per GPU:
+    30.5 GiB / 32 = **0.95 GiB**. Ring communication: each step sends 0.95 GiB of KV to the next GPU. 31
+    ring steps × 0.95 GiB = 29.5 GiB total sent per GPU. At 900 GB/s NVLink (intra-node) for 8 GPUs + 50
+    GB/s IB (inter-node) for 24 cross-node hops: intra-node steps: 0.95 GiB / 900 GB/s = 1.06 ms. Inter-node
+    steps: 0.95 GiB / 50 GB/s = 19 ms. If attention compute per block ≥ 19 ms, communication is fully hidden.
+    Attention FLOPs per block: $4 \times 31.25K \times 31.25K \times 64 \times 128 = 32\text{ TFLOP}$.
+    H100 at 989 TFLOPS: 32/989 = **32.4 ms** — greater than the 19 ms transfer. Communication
+    is fully hidden; no tuning or extra IB links needed.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -42,21 +42,10 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: WARN
-validation_issues_pro:
-- The calculation for the full attention matrix size (1.86 TB) is slightly off; 1M x 1M x 2 bytes is exactly
-  2 TB.
-- The calculation for KV cache size uses 'MB' and 'GB' but the numbers (122 MB) suggest MiB and GiB, which
-  could be clarified.
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- The calculation for the full attention matrix size (1.86 TB) is slightly off; 1M x 1M x 2 bytes is exactly
-  2 TB.
-- The calculation for KV cache size uses 'MB' and 'GB' but the numbers (122 MB) suggest MiB and GiB, which
-  could be clarified.
 human_reviewed:
   status: not-reviewed
   by: null

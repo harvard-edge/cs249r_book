@@ -18,21 +18,13 @@ scenario: 'An autonomous drone uses Jetson Orin (275 TOPS INT8, 60W, 204 GB/s LP
 question: Can the drone perception-planning-control loop meet the 30ms budget, what
   is the bottleneck, and what quantified fix would you use?
 details:
-  realistic_solution: 'Sequential: 2 + (8/110) + (26/110) + 5 + 1 = 2 + 73ms + 236ms
-    — impossible. Use INT8 at 275 TOPS: 8/275 ≈ 29ms, 26/275 ≈ 95ms. Still too slow.
-    Fix: use DLA for depth (dedicated, ~8ms) and GPU for YOLO (~26ms at 40% util ≈
-    65ms). Pipeline them: max(8,65) = 65ms. Still over budget. Reduce YOLO to YOLOv8-s
-    (6.5 GOPs): 6.5/275×0.5 ≈ 47ms. Or use INT4: halve latency → 24ms YOLO. Total:
-    2 + max(8, 24) + 5 + 1 = 32ms. Close — optimize planning to 3ms.'
-  common_mistake: Running depth estimation and object detection sequentially when
-    they can be pipelined; also underestimating memory bandwidth pressure when both
-    models share LPDDR5.
-  napkin_math: 'YOLOv8-m: 26 GOPs INT8. Orin at 275 TOPS × 40% util = 110 TOPS effective.
-    26/110 = 0.24s? No: 26G/110T = 0.24ms — that''s right. Wait: 26 GOPs / 110 TOPS
-    = 0.24ms. So pipeline: 2 + 0.24 + 5 + 1 = 8.24ms total. Well within 30ms. Key:
-    275 TOPS is INT8 ops/s not FLOPS — 26G INT8 ops / 275G ops/s = 94ms? Recheck:
-    275 TOPS = 275×10^12 ops/s. 26 GOPs = 26×10^9. 26×10^9 / 275×10^12 = 0.094ms.
-    Total pipeline: ~7ms. Comfortable under 30ms budget.'
+  realistic_solution: 'Yes, the pipeline easily meets the 30ms budget. A common pitfall is miscalculating the latency by dividing GOPS by TOPS without accounting for the 1000x magnitude difference (e.g., treating 26 GOPs / 110 effective TOPS as 236ms instead of 0.236ms). The actual INT8 compute time for the 26 GOP model on a 110 effective TOPS GPU is ~0.24ms. The true bottleneck is the CPU-bound trajectory planning (5ms), which takes the majority of the ~8.3ms total pipeline time. The quantified fix is to simply run the models sequentially, as pipelining adds unnecessary complexity for a system comfortably under budget.'
+  common_mistake: 'Failing to convert TOPS (Tera-ops) to GOPS (Giga-ops), resulting in a 1000x overestimation of inference latency and incorrectly concluding the hardware is insufficient.'
+  napkin_math: 'YOLOv8-m: 26 GOPs INT8. Orin at 275 TOPS × 40% util = 110 TOPS effective. 
+    Incorrect math: 26 / 110 = 0.236 seconds = 236ms.
+    Correct math: 26 GOPs / 110 TOPS = 26×10^9 / 110×10^12 = 0.000236s = 0.236ms.
+    Total pipeline sequential: 2ms (capture) + 0.07ms (depth) + 0.24ms (YOLO) + 5ms (plan) + 1ms (control) = ~8.3ms total.
+    This is well within the 30ms budget.'
 status: published
 provenance: imported
 requires_explanation: true

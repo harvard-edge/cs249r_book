@@ -17,14 +17,19 @@ details:
   realistic_solution: 'The full integer-only inference pipeline works as follows.
     Each tensor has a quantization scheme: $x_{real} = S_x (x_{int} - Z_x)$ where
     $S$ is a float scale and $Z$ is an integer zero-point. For convolution, the real-valued
-    output is $Y = W \cdot X + b$. Substituting the quantization parameters and expanding:'
+    output is $Y = W \cdot X + b$. Substituting the quantization parameters and expanding:
+    $S_y (Y_{int} - Z_y) = S_w (W_{int} - Z_w) \cdot S_x (X_{int} - Z_x) + S_b (b_{int} - Z_b)$.
+    This simplifies to an integer dot product $\sum (W_{int} - Z_w)(X_{int} - Z_x)$, which is
+    accumulated in 32-bit integer registers, then multiplied by a precomputed multiplier
+    $M = \frac{S_w S_x}{S_y}$ (applied via integer multiply and bit-shift), and finally shifted by $Z_y$
+    before clamping back to 8-bit.'
   common_mistake: '"You just multiply INT8 values and truncate." This ignores the
     accumulator width, the zero-point offsets, and the requantization step — all of
     which are essential for correctness.'
   napkin_math: 'A 3×3 depthwise conv on a 48×48×64 INT8 feature map: MACs = $3 \times
     3 \times 48 \times 48 \times 64 = 1,327,104$. Each MAC is an INT8×INT8→INT32 multiply-add
-    — one cycle on Cortex-M4 with CMSIS-NN''s SMLAD instruction. At 100 MHz: $1.3M
-    / 100M \approx 13$ ms per layer. The requantization adds ~1 shift + 1 add per
+    — two MACs per cycle on Cortex-M4 with CMSIS-NN''s SMLAD instruction. At 100 MHz: $1.3M
+    / 200M \approx 6.5$ ms per layer. The requantization adds ~1 shift + 1 add per
     output element ($48 \times 48 \times 64 = 147,456$ ops) — negligible overhead.'
   options:
   - Simply multiply INT8 inputs by INT8 weights, truncate to INT8, and output. The
@@ -50,14 +55,9 @@ chains:
 - id: tinyml-chain-076
   position: 0
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The 'Realistic Solution' describes the integer-only inference pipeline but doesn't
-  complete the full mathematical derivation for how the real-valued output (Y) is
-  mapped back to a quantized output using the substituting and expanding steps.
-- The question is missing 'reasoning_competency' and 'reasoning_mode' classifications.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

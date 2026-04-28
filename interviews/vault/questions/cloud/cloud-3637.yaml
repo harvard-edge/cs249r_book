@@ -15,25 +15,9 @@ scenario: 'Design the complete network fabric for a 4096-H100 cluster optimized 
 question: How would you design the network fabric to meet the 4096-H100 cluster’s
   latency, all-reduce, fault-tolerance, and $50M budget requirements?
 details:
-  realistic_solution: 'Architecture: 3-tier fat-tree with InfiniBand NDR 400Gbps.
-    Tier 1 (edge): 512 top-of-rack switches, 8 GPUs/switch (H100 NVSwitch nodes),
-    8×400Gbps downlinks, 8×400Gbps uplinks. Tier 2 (aggregation): 64 pods × 8 agg
-    switches = 512 agg switches. Tier 3 (core): 512 core switches (oversubscribed
-    1:1 for DP traffic, 2:1 for TP). Intra-pod: 8 H100s via NVLink (900GB/s), no switch
-    latency. Inter-pod (tensor parallel): via Tier 1-2, 2 hops, <2μs. Cross-pod (data
-    parallel): via Tier 3, 4-6 hops, 4-5μs. Fault tolerance: each link in fat-tree
-    has 2 parallel paths → single switch failure loses 50% of paths but fat-tree routing
-    adapts, <1% throughput impact with ECMP. Cost estimate: 4096 NIC ports × $5k (NDR
-    CX7) = $20.5M. 4096 switch ports × $5k = $20.5M. Cables/optics: $8M. Total $49M,
-    under budget.'
-  common_mistake: Designing a flat two-tier network and discovering that the bisection
-    bandwidth is insufficient for collective communications at 4096 GPU scale.
-  napkin_math: '4096 H100s. NVLink intra-node: 8 GPUs at 900GB/s. IB NDR 400Gbps=50GB/s
-    per port. Fat-tree bisection BW: 4096 GPUs × 50GB/s / 2 (bisection) = 102TB/s.
-    AllReduce for 175B params (700GB BF16): per GPU: 2×(4095/4096)×700GB/50GB/s=28s
-    (!). Need multiple NICs per node: 8×400Gbps/node → 50GB/s×8=400GB/s → 700GB/(400GB/s×4095/4096×2)=3.5s
-    AllReduce. Gradient compression to 70GB: 0.35s. Target: <1s with full NDR and
-    compression.'
+  realistic_solution: 'Architecture: Rail-optimized 2-tier fat-tree with InfiniBand NDR 400Gbps. The 4096 GPUs are in 512 nodes (8 GPUs/node). Form 8 independent rails. Each rail connects 512 GPUs using a 2-tier non-blocking fat-tree of 64-port switches: 16 leaf switches (32 down, 32 up) and 8 spine switches per rail. Total: 192 switches. Intra-node: 8 H100s via NVLink (900GB/s). Inter-node (tensor/pipeline parallel): single rail, 3 hops, <2µs. Cross-cluster (data parallel): striped across rails, 3 hops, <2µs. Fault tolerance: adaptive routing and SHARP handle switch failures, avoiding traffic collapse. Cost estimate: 4096 NICs (NDR CX7) × $3k = $12.3M. 192 switches × $100k = $19.2M. 8,192 cables/optics × $800 = $6.55M. Total $38.05M, fitting the $50M budget.'
+  common_mistake: 'Assuming 4096 GPUs require a 3-tier fat-tree without using a rail-optimized design, leading to massive switch count inflation that blows the budget. A rail-optimized 2-tier network per rail avoids this.'
+  napkin_math: '4096 H100s. NVLink intra-node: 8 GPUs at 900GB/s. IB NDR 400Gbps=50GB/s per port. Fat-tree bisection BW: 4096 GPUs × 50GB/s / 2 (bisection) = 102TB/s. AllReduce for 175B params (350GB BF16 gradients): per GPU: 2×(4095/4096)×350GB/50GB/s=14s (!). Need multiple NICs per node: 8×400Gbps/node → 50GB/s×8=400GB/s → 2×(4095/4096)×350GB/400GB/s=1.75s AllReduce. Gradient compression to 35GB: 0.175s. Target: <1s with full NDR and compression.'
 status: published
 provenance: imported
 requires_explanation: true

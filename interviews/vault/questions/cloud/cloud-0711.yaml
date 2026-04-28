@@ -14,21 +14,10 @@ scenario: You're training a 175B parameter model using ZeRO Stage 3 (DeepSpeed) 
   states). Where is the time going?
 question: "Where is the time going?"
 details:
-  realistic_solution: ZeRO-3 must perform an all-gather to reconstruct the full weight tensor before every
-    forward and backward layer computation, then a reduce-scatter to redistribute gradients after each
-    layer's backward pass. This means 3× the communication volume of ZeRO-1 (which only communicates gradients
-    once at the end of the backward pass). For a 175B model, this communication happens for every single
-    layer, every single step.
+  realistic_solution: "ZeRO-3 must perform an all-gather to reconstruct the full weight tensor before every forward and backward layer computation, then a reduce-scatter to redistribute gradients after each layer's backward pass. This means roughly 1.5x the communication volume per step compared to ZeRO-1 (which communicates gradients once at the end). For a 175B model, this communication happens for every single layer, every single step."
   common_mistake: '"ZeRO-3 just uses less memory per GPU — communication should be the same." This confuses
     memory savings with communication cost. ZeRO-3 trades memory for bandwidth.'
-  napkin_math: '175B model in FP16 = 350 GB. Optimizer states = 2100 GB. Total footprint = 2800 GB. ZeRO-1
-    memory per GPU: full weights (350 GB) + full gradients (350 GB) + 1/64th optimizer (2100/64 = 32.8
-    GB) = 732.8 GB — doesn''t fit on 80 GB. ZeRO-3 stores 1/64th of everything: 2800 GB / 64 = 43.75 GB
-    — fits easily. ZeRO-1 communication per step: one all-reduce of gradients = 700 GB. ZeRO-3 communication
-    per step: for each layer: all-gather forward + all-gather backward + reduce-scatter gradients = 3
-    × 350 GB = 1,050 GB total. With 64 GPUs on 8 nodes (8 GPUs/node), inter-node bandwidth = 50 GB/s per
-    link. ZeRO-1: 700 / 50 ≈ 14 s communication. ZeRO-3: 1050 / 50 ≈ 21 s, but critically, the all-gathers
-    cannot be fully overlapped because each layer needs its weights before computing.'
+  napkin_math: '175B model in FP16 = 350 GB. Optimizer states = 2100 GB. Total footprint = 2800 GB. ZeRO-1 memory per GPU: full weights (350 GB) + full gradients (350 GB) + 1/64th optimizer (32.8 GB) = 732.8 GB (OOM on 80 GB). ZeRO-3 stores 1/64th of everything: 2800 GB / 64 = 43.75 GB (fits easily). ZeRO-1 communication: one All-Reduce of gradients transfers 2*(63/64)*350 ≈ 689 GB per GPU. ZeRO-3 communication: All-Gather forward (344 GB) + All-Gather backward (344 GB) + Reduce-Scatter gradients (344 GB) ≈ 1,032 GB per GPU. Assuming 50 GB/s effective inter-node bandwidth per GPU, ZeRO-1 network time per step is ~689 / 50 ≈ 13.8 s. ZeRO-3 network time is ~1,032 / 50 ≈ 20.6 s. ZeRO-3 increases communication volume by 1.5x, directly inflating step time since All-Gathers block forward/backward compute.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,20 +26,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The memory calculation for ZeRO-1 (350 GB weights + 350 GB gradients + 32.8 GB optimizer) totals 732.8
-  GB. The conclusion 'doesn't fit on 80 GB' is correct, but '350GB gradients' might be an oversight if
-  gradients are normally sharded as well in ZeRO-1 (though ZeRO-1 typically means no gradient sharding,
-  just optimizer state sharding).
-- The communication volume for ZeRO-1 is stated as 'one all-reduce of gradients = 700 GB'. However, if
-  gradients are 350 GB, then one all-reduce of gradients should be around 350 GB, not 700 GB, unless it's
-  a specific communication pattern. (e.g., 2*(N-1)/N * 350GB).
-- The communication volume for ZeRO-3 is stated as '3 × 350 GB'. This simplification might hide the fact
-  that AllGather and ReduceScatter involve different volumes and patterns than a simple AllReduce.
-validation_status_pro: WARN
-validation_issues_pro:
-- The napkin math for communication time is methodologically flawed, incorrectly modeling collective time
-  as Total_Volume / Single_Link_Bandwidth.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

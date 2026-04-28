@@ -18,15 +18,9 @@ question: Design a scheduling policy that handles (a) prefix-cache collisions vi
   latency for inter-token latency. Identify the threshold prefill length at which
   chunking pays off.
 details:
-  realistic_solution: Implement continuous batching (iteration-level scheduling).
-    Instead of waiting for an entire batch to finish, the scheduler monitors the batch
-    at the token level. As soon as a sequence emits its EOS token (e.g., after 10
-    tokens), it is immediately evicted. A pending request from the queue is instantly
-    pulled into the active batch for the next token generation step, keeping GPU utilization
-    near 100%.
-  common_mistake: Padding all sequences to the maximum length of 2000, which wastes
-    massive amounts of compute on PAD tokens.
-  napkin_math: 10 < 2000
+  realistic_solution: 'Implement PagedAttention with reference-counted prefix sharing to lock the 4k system prompt in the KV cache, preventing unpredictable evictions. For scheduling, use chunked prefill: instead of processing the entire 4k prefill atomically, split it into smaller chunks (e.g., 512 tokens). Interleave these prefill chunks with the decode steps of active requests. This converts a massive 100ms prefill latency spike into smaller ~12ms increments, slightly increasing average inter-token latency but completely eliminating the tail latency spike for ongoing generations.'
+  common_mistake: 'Assuming that prefill must be atomic to maximize GPU saturation. While atomic prefill maximizes pure prefill throughput, it causes severe head-of-line blocking for active decodes, destroying P99 inter-token latency. Another mistake is relying on a standard LRU cache for system prompts instead of explicit reference counting.'
+  napkin_math: 'If atomic prefill of 4k tokens takes 100ms, and inter-token decode latency is 15ms: a new request forces existing decodes to wait 100ms, creating a severe tail latency spike. By chunking prefill into 8x 512-token blocks (each taking ~12ms), decodes can interleave between chunks. The decode latency increases slightly (e.g., 15ms -> 27ms) but the 100ms tail spike is completely eliminated.'
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

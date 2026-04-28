@@ -22,19 +22,19 @@ details:
     the execution graph is split. The system runs the supported ops on the NPU, but then must copy the
     intermediate activation tensors to the CPU or GPU to run the unsupported op, and then copy the result
     back to the NPU to continue. This CPU-NPU round trip (2 copies for a single CPU segment) involves
-    driver calls, memory copies, and context switching. If each copy takes 2.5ms, these 2 copies add 5ms
-    of overhead. If the model graph is split multiple times, the cumulative overhead from these round
-    trips can easily overwhelm the 2x speedup gained from the INT8 compute itself, leading to a net slowdown.
+    driver calls, memory copies, and context switching. If each copy takes 2.5ms, a single round trip adds 5ms
+    of overhead. If the model graph is split multiple times (e.g., 2 CPU segments meaning 4 copies), the 10ms
+    cumulative overhead from these round trips can easily overwhelm the speedup gained from the INT8 compute itself,
+    leading to a net 50% slowdown.
   common_mistake: Engineers often focus solely on the compute speedup of the quantized operations, assuming
     the whole model benefits equally. They might blame 'Python overhead' or 'the OS scheduler,' which
     are orders of magnitude too small to explain such a large regression.
-  napkin_math: 'Let''s model a single token generation. The original FP16 model runs entirely on the mobile
-    GPU at 12ms/token. The quantized INT8 model splits the graph into 3 segments: 2 run on the NPU (taking
-    4ms and 2ms), and 1 unsupported op runs on the CPU (taking 2ms). Total compute is 8ms (a 1.5x speedup).
-    However, the graph splitting forces 2 memory copies between NPU and CPU (one NPU→CPU copy, one CPU→NPU
-    copy). If each copy takes 2.5ms of driver overhead and memory bandwidth, the total transfer time is
-    5ms. Final latency: 8ms compute + 5ms transfer = 13ms/token — slightly slower than the original 12ms,
-    making this near break-even, not a 50% regression.'
+  napkin_math: "Let's model a single token generation. The original FP16 model runs entirely on the mobile
+    GPU at 12ms/token. The quantized INT8 model splits the graph into 5 segments: 3 run on the NPU (taking
+    8ms total), and 2 unsupported ops run on the CPU (taking 0ms compute but triggering splits). Total compute is
+    8ms (a 1.5x speedup). However, the graph splitting forces 4 memory copies between NPU and CPU (two NPU->CPU,
+    two CPU->NPU). If each copy takes 2.5ms of driver overhead and memory bandwidth, the total transfer time is
+    10ms. Final latency: 8ms compute + 10ms transfer = 18ms/token — exactly 50% slower than the original 12ms."
 status: published
 provenance: imported
 requires_explanation: false
@@ -47,9 +47,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Graph splitting into 3 segments (NPU->CPU->NPU) introduces 2 memory copies between NPU and CPU, not
-  4.
 human_reviewed:
   status: not-reviewed
   by: null

@@ -19,13 +19,13 @@ details:
     produces 200 MB per GPU on NVMe. With 8 GPUs per node, each checkpoint deposits 1.6 GB on the local
     NVMe. At 15-minute intervals, that is 6.4 GB/hour accumulating on NVMe. The background flush to Lustre
     must drain this at least as fast. The total cluster checkpoint size is $50{,}000 \times 200\text{
-    MB} = 10\text{ TB}$. At 1 TB/s Lustre write bandwidth, draining takes 10 seconds — easy. But the failure
+    MB} = 10\text{ TB}$. At 1 TB/s Lustre write bandwidth, draining takes 10 seconds \u2014 easy. But the failure
     mode is subtle: Lustre bandwidth is shared. If any other I/O load (data loading, logging, other jobs''
     checkpoints) consumes even 30% of Lustre bandwidth, the drain rate drops. Over 3 days (288 checkpoints),
     the NVMe accumulation grows: $288 \times 1.6\text{ GB} = 461\text{ GB}$ produced per node. If the
     drain rate lags by even 5% per checkpoint (flushing 1.52 GB instead of 1.6 GB), the deficit is $288
-    \times 0.08 = 23\text{ GB}$, plus the unflushed checkpoints themselves. Once NVMe fills, the synchronous
-    DRAM→NVMe phase blocks, training stalls, and the backpressure cascades. Prevention: monitor NVMe free
+    \times 0.08 = 23.04\text{ GB}$, plus the unflushed checkpoints themselves. Once NVMe fills, the synchronous
+    DRAM\u2192NVMe phase blocks, training stalls, and the backpressure cascades. Prevention: monitor NVMe free
     space and checkpoint drain lag as a first-class metric, implement checkpoint garbage collection (keep
     only the 3 most recent on NVMe), and reserve dedicated Lustre bandwidth for checkpoint traffic.'
   common_mistake: Assuming a single checkpoint is the problem. At 200 MB per shard, even 20 checkpoints
@@ -33,26 +33,13 @@ details:
     time.
   napkin_math: 'Per-node accumulation rate: $1.6\text{ GB} / 15\text{ min} = 6.4\text{ GB/hr}$. Per-node
     drain rate (ideal): same. If drain lags 5%: deficit = $0.08\text{ GB/checkpoint} \times 4\text{ checkpoints/hr}
-    = 0.32\text{ GB/hr}$. After 72 hours: $72 \times 0.32 = 23\text{ GB}$ deficit. Meanwhile, if the system
+    = 0.32\text{ GB/hr}$. After 72 hours: $72 \times 0.32 = 23.04\text{ GB}$ deficit. Meanwhile, if the system
     retains the last 3 checkpoints for safety: $3 \times 1.6 = 4.8\text{ GB}$ pinned. Total NVMe consumed:
-    $23 + 4.8 = 27.8\text{ GB}$ — still fits. But if drain lag increases to 20% (Lustre under load): deficit
-    = $0.32 \times 4 = 1.28\text{ GB/hr}$. After 72 hours: $72 \times 1.28 = 92\text{ GB}$ + retained
+    $23.04 + 4.8 = 27.84\text{ GB}$ \u2014 still fits. But if drain lag increases to 20% (Lustre under load): deficit
+    = $0.32 \times 4 = 1.28\text{ GB/hr}$. After 72 hours: $72 \times 1.28 = 92.16\text{ GB}$ + retained
     checkpoints pile up because old ones never fully flushed. NVMe fills: $3{,}840\text{ GB} / (6.4\text{
     GB/hr} \times 20\%\text{ unflushed}) = 3{,}000\text{ hours}$. Except once Lustre spikes, *multiple*
     checkpoints queue: the failure is non-linear.'
-  options:
-  - ZeRO-Offload moves computation to the CPU rather than offloading data; the CPU computes optimizer
-    updates directly using AVX-512 instructions, which is faster than GPU for element-wise operations
-  - ZeRO-Offload offloads to NVMe SSDs, not CPU DRAM; this is possible because SSDs provide 7 GB/s bandwidth
-    which is sufficient for streaming optimizer states during training
-  - ZeRO-Offload has zero performance overhead because modern PCIe Gen5 provides 64 GB/s bandwidth, which
-    exceeds the training data movement requirements for any model up to 100B parameters
-  - 'DeepSpeed ZeRO-Offload extends ZeRO by offloading optimizer states and optionally gradients to CPU
-    DRAM, enabling training of models that exceed total GPU memory. Trade-off: CPU-GPU PCIe bandwidth
-    (Gen4: 32 GB/s) becomes the bottleneck. For a 30B model: optimizer states = 360 GB (Adam, FP32), stored
-    in CPU DRAM across nodes. PCIe transfer per step ≈ 60 GB (params to GPU + gradients to CPU) → 60/32
-    ≈ 1.9s overhead.'
-  correct_index: 3
 status: published
 provenance: imported
 requires_explanation: false
@@ -61,12 +48,9 @@ chains:
 - id: cloud-chain-463
   position: 1
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The napkin math calculation for total NVMe consumed after 72 hours with a 5% drain lag is incorrect;
-  72 * 0.32 GB is 23.04 GB, not 23 GB, and the overall calculation of total consumed is slightly off.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

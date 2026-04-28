@@ -18,18 +18,18 @@ question: What remaining TensorRT ResNet-50 activation buffers cause the 1.8GB p
 details:
   realistic_solution: 'Profile TensorRT layer memory with `trtexec --dumpProfile --separateProfileRun`.
     Key remaining sources: (1) Residual addition inputs: both branches must exist
-    simultaneously — 2 × batch × C × H × W × dtype. For the 4th residual stage at
-    14×14×2048 with B=32: 2 × 32 × 2048 × 14 × 14 × 2 B = 0.8 GB. (2) Unfused BN layers:
+    simultaneously — 2 × batch × C × H × W × dtype. For the 3rd residual stage at
+    14×14×1024 with B=32: 2 × 32 × 1024 × 14 × 14 × 2 B = 25.7 MB per layer pair, totaling ~0.8 GB across all network stages. (2) Unfused BN layers:
     each adds C × 4 parameters stored as activation workspace — minor. Fix: use INT8
     precision for residual tensors (saves 50%) and enable `builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)`
     to enforce INT8 throughout residual paths. INT8 residual: 0.8 GB → 0.4 GB. Total
-    drops from 1.8 GB to ~1.4 GB. Further: reduce batch to 24 → 1.05 GB < 1 GB target.'
+    drops from 1.8 GB to ~1.4 GB. Further: reduce batch to 22 → 0.96 GB < 1 GB target.'
   common_mistake: Assuming TensorRT's automatic layer fusion has already found all
     opportunities, and that the remaining memory is irreducible. In practice, TensorRT's
     default optimization level (OPT=3) may not fuse all eligible Conv+BN+ReLU chains
     across skip connections, and residual addition tensors must be explicitly sized.
-  napkin_math: 'Stage 4 residual: 2 × 32 × 2048 × 14 × 14 × 2 B (fp16) = 2 × 32 ×
-    2048 × 196 × 2 = 51.4 MB per layer pair. 3 bottlenecks in stage 4: 154 MB. All
+  napkin_math: 'Stage 3 residual: 2 × 32 × 1024 × 14 × 14 × 2 B (fp16) = 2 × 32 ×
+    1024 × 196 × 2 = 25.7 MB per layer pair. 6 bottlenecks in stage 3: 154 MB. All
     stages combined: ~800 MB residual tensors. INT8: 400 MB. Non-residual activations:
     1000 MB. With INT8 residual: 1000 + 400 = 1400 MB. At batch 24: 1400 × 24/32 =
     1050 MB ≈ 1.05 GB — just above target. Use batch 22: 1400 × 22/32 = 963 MB < 1

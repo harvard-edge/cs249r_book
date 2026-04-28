@@ -15,24 +15,11 @@ scenario: Design the tiling strategy for a 16384x16384 weight matrix (LLM FFN la
 question: What tile sizes, tile counts, memory transfers, and total bandwidth are
   needed for the 16384x16384 FFN GEMM on a 128x128 array?
 details:
-  realistic_solution: 'Matrix A: 16384x16384 BF16 = 512MB. Array: 128x128. Tile size
-    for systolic array: 128x128 BF16 = 32KB (fits in 4MB SRAM along with partial sums).
-    Tiles in A: (16384/128)^2 = 128^2 = 16384 tiles. For C = A*B where B is 16384x16384:
-    need tiles of A and B. Tile strategy: tile A into 128x128, tile B into 128x128.
-    For each output tile C[i,j]: load A[i,k] and B[k,j] for k=0..127 (128 A-tiles
-    and 128 B-tiles). Total loads: 128*128 = 16384 tile pairs. BW: 16384 tiles * 2
-    * 32KB = 1GB loaded, plus writing output. Total BW ≈ 3 * 512MB = 1.5GB. At 819GB/s:
-    1.83ms.'
+  realistic_solution: 'Matrix A and B are 16384x16384 BF16 = 512MB each. The 4MB SRAM cannot hold them. We must use SRAM tiling to minimize HBM traffic, while feeding the 128x128 systolic array. Output stationary dataflow is best: accumulate a large C tile in SRAM, and stream in slices of A and B. If we choose a 1024x1024 C tile, it takes 2MB of SRAM. We can stream A in 1024x256 blocks (512KB) and B in 256x1024 blocks (512KB), utilizing 3MB of the 4MB SRAM. There are (16384/1024)^2 = 256 C tiles. For each C tile, we load a 1024x16384 strip of A (32MB) and a 16384x1024 strip of B (32MB). Total HBM reads: 256 * 64MB = 16GB. Total HBM writes (C): 512MB. Total bandwidth is 16.5GB, which is optimal for a 4MB SRAM limit.'
   common_mistake: Choosing square tiles without considering the output accumulation
     requirements, and not accounting for the fact that each tile result must be accumulated
     in SRAM before being written to HBM.
-  napkin_math: 'A: 16384*16384*2 = 512MB. B: 512MB. C: 512MB. Tile: 128*128*2 = 32KB.
-    Tiles: 16384/128 = 128 tiles per dimension. Total tiles per matrix: 128*128 =
-    16384. For each C tile (128*128 elements): load 128 A-tiles (1 row of A-tiles)
-    + 128 B-tiles = 256 tile loads = 8MB. C tiles: 16384. If perfectly fused: total
-    A+B loads = 2*512MB = 1024MB. C write: 512MB. Total: 1536MB. At 819GB/s: 1536/819000
-    = 1.88ms. At 197 TFLOPS: compute = 2*16384^3 / 197e12 = 44.6ms. Compute bound
-    (23x over bandwidth). Good dataflow.'
+  napkin_math: 'A, B, C are 512MB each. Idealized perfect fusion (1.5GB) is impossible since 512MB > 4MB SRAM. Using 1024x1024 output-stationary tiles: 256 total C tiles. For each C tile, we read 32MB of A and 32MB of B. 256 * 64MB = 16GB reads. Write 512MB of C. Total HBM traffic = 16.5GB. At 819GB/s HBM bandwidth: 16.5 / 819 = ~20.1ms memory time. Compute: 2 * 16384^3 / 197e12 = 44.6ms. Since 44.6ms > 20.1ms, the layer is safely compute-bound, achieving high systolic array utilization.'
 status: published
 provenance: imported
 requires_explanation: true

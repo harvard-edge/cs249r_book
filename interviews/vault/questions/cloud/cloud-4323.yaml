@@ -10,35 +10,34 @@ phase: inference
 title: Social-Scale Serving QPS and Caching Strategy
 scenario: Your social platform serves 500M daily active users, with peak QPS of 2M
   recommendation requests/second. Each request requires embedding lookups across 100
-  tables (avg 1M rows, 64-dim FP32). Table access follows a Zipf distribution (α=1.2).
+  tables (avg 100M rows, 64-dim FP32). Table access follows a Zipf distribution (α=0.8).
   Design a multi-tier caching strategy for embedding vectors and calculate the cache
   hit rate achievable with a 1 TB L2 cache (GPU HBM cluster), assuming Zipf access
   patterns.
 question: How would you design a multi-tier embedding cache, and what hit rate can
-  a 1 TB GPU HBM L2 cache achieve under Zipf α=1.2?
+  a 1 TB GPU HBM L2 cache achieve under Zipf α=0.8?
 details:
-  realistic_solution: 'Zipf α=1.2: the top-k fraction f(k) of items captures fraction
-    C(k) of all accesses. For α=1.2, the top 1% of items (10k rows per table) captures
+  realistic_solution: 'Zipf α=0.8: the top-k fraction f(k) of items captures fraction
+    C(k) of all accesses. For α=0.8, the top 1% of items (1M rows per table) captures
     ~30% of lookups; top 10% captures ~60%. Cache 10% of each table''s rows by access
-    frequency: 100 tables × 1M rows × 10% = 10M rows × 64 dim × 4 bytes = 2.56 GB
+    frequency: 100 tables × 100M rows × 10% = 10M rows × 64 dim × 4 bytes = 2.56 GB
     per table slice × 100 = 256 GB — fits in 1 TB cache. Expected hit rate: ~60% for
-    Zipf α=1.2 at 10% cache. Cache miss handling: on miss, fetch from DRAM (100 TB
-    total) — latency 100 μs vs 5 μs for HBM hit. At 2M QPS and 60% hit rate: 800k
-    misses/s. DRAM bandwidth needed: 800k × 100 tables × 64 × 4 × 0.4 (miss fraction
-    per table) = 800k × 25.6 KB = 20.5 TB/s — exceeds DRAM. Must use distributed DRAM
-    across many nodes: 20.5 TB/s / 50 GB/s per node = 410 nodes. OR: increase cache
-    hit rate to 90% (cache top 20% of rows: 512 GB). At 90%: 200k misses/s × 25.6
-    KB = 5.1 TB/s — 102 nodes.'
-  common_mistake: Sizing the cache based on total table size (100 TB) and concluding
+    Zipf α=0.8 at 10% cache. Cache miss handling: on miss, fetch from DRAM (2.56 TB
+    total) — latency 100 μs vs 5 μs for HBM hit. At 2M QPS and 60% hit rate, 40% of
+    all lookups miss. DRAM bandwidth needed: 2M × 100 tables × 0.4 × 256 bytes = 20.48
+    GB/s. This easily fits within modern single-node DRAM bandwidth, but the 2.56 TB
+    total capacity requires distributed DRAM across several nodes. OR: increase cache
+    hit rate by caching top 20% of rows (512 GB) to reduce misses further. At 72%
+    hit rate: 200M lookups × 0.28 × 256 bytes = 14.3 GB/s.'
+  common_mistake: Sizing the cache based on total table size (2.56 TB) and concluding
     caching is impossible. Zipf access means a tiny fraction of rows captures most
     lookups — the cache size needed for high hit rate is far smaller than total table
     size.
-  napkin_math: 'Zipf(α=1.2), N=1M rows: fraction of accesses covered by top-f fraction
-    of items ≈ 1 - (1-f)^(1-α+1) for α<2 ... use empirical: top 1% ≈ 26%, top 5% ≈
-    48%, top 10% ≈ 60%, top 20% ≈ 72%. Cache 10% × 1M = 100k rows × 100 tables × 256
-    bytes = 2.56 GB. 1 TB cache holds 100% of top-10% rows per table. Hit rate: 60%.
-    To reach 90% hit rate: need top-30% ≈ cache 300k rows × 100 tables × 256 bytes
-    = 7.68 GB. Well within 1 TB.'
+  napkin_math: 'Zipf(α=0.8), N=100M rows: Empirical distribution: top 1% ≈ 30%, top 5% ≈ 48%, top 10% ≈
+    60%, top 20% ≈ 72%. Cache 10% × 100M = 10M rows × 100 tables × 256 bytes = 256 GB.
+    1 TB cache holds 100% of top-10% rows per table. Hit rate: 60%. To reach 72% hit
+    rate: need top-20% ≈ cache 20M rows × 100 tables × 256 bytes = 512 GB. Well within
+    1 TB.'
 status: published
 provenance: imported
 requires_explanation: false

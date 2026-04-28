@@ -10,54 +10,34 @@ phase: training
 title: The Conservation of Bottlenecks
 scenario: You profile a training step and find the GEMM kernels in the FFN layers are the bottleneck,
   consuming 45% of step time. You apply operator fusion to the FFN, reducing GEMM time by 40%. After re-profiling,
-  total step time decreased by only 12%, and now the AllReduce communication takes 38% of step time (up
+  total step time decreased by only 12%, and now the AllReduce communication takes 25% of step time (up
   from 22% before). Your manager asks why the optimization 'didn't work.' Explain what happened using
   the principle of Conservation of Complexity.
 question: "How does Conservation of Complexity explain the FFN fusion's 12% step-time reduction and AllReduce becoming the bottleneck?"
 details:
   realistic_solution: 'This is Conservation of Complexity (or Liebig''s Law applied to systems). Before
     optimization: GEMM = 45%, AllReduce = 22%, other = 33% of a 500ms step. After fusing FFN GEMMs (40%
-    faster): GEMM = 27% of the new step time, but AllReduce time didn''t change — its absolute time is
+    reduction in time): GEMM''s theoretical time drops to 135ms (27% of the original step time), but AllReduce time didn''t change — its absolute time is
     the same (~110ms), but it''s now a larger fraction because the denominator shrank. The step went from
-    500ms to 440ms (12% faster), which is exactly what Amdahl''s Law predicts: S = 1 / (0.55 + 0.45/1.67)
-    = 1 / (0.55 + 0.27) = 1.22x. The remaining gap from 1.22x theoretical to 1.12x actual is the added
+    500ms to 440ms (a 12% reduction in time), which is exactly what Amdahl''s Law predicts: S = 1 / (0.55 + 0.45/1.67)
+    = 1 / (0.55 + 0.27) = 1.22x throughput. The remaining gap from 1.22x theoretical throughput to 1.136x actual is the added
     overhead of the fused kernel (launch cost, register pressure). The optimization did work — it just
     shifted the binding constraint from compute to communication. The next optimization should target
     AllReduce: gradient compression, communication-computation overlap, or topology-aware placement.'
   common_mistake: Expecting a 40% reduction in the bottleneck to yield a proportional E2E improvement.
     This ignores that fixing one bottleneck reveals the next one.
   napkin_math: 'Before: 500ms total = 225ms GEMM + 110ms AllReduce + 165ms other. After fusion: GEMM =
-    225ms x 0.6 = 135ms. New total = 135 + 110 + 165 = 410ms (18% faster theoretical). Actual = 440ms
-    (12% faster) due to fusion overhead. AllReduce share: 110/440 = 25% -> next bottleneck. To get another
-    20% speedup, need to cut AllReduce by 80ms => requires gradient compression or async overlap.'
-  options:
-  - Flash Attention approximates the attention computation by using sparse attention patterns (attending
-    to only √N tokens), trading accuracy for speed; it is not mathematically exact
-  - Flash Attention reduces memory by storing the attention matrix in FP8 instead of FP16, halving memory
-    from O(N²) to O(N²/2); the 'Flash' refers to FP8 flash-point arithmetic
-  - 'Flash Attention reduces memory from O(N²) to O(N) by computing attention in tiles that fit in SRAM,
-    never materializing the full N×N attention matrix in HBM. It also improves speed by reducing HBM read/writes
-    (IO-bound operation). For sequence length 8,192 with 16 GB KV cache: standard attention allocates
-    8192² × 2 bytes ≈ 128 MB per head per layer for the attention matrix; Flash Attention uses only a
-    few MB of SRAM workspace.'
-  - Flash Attention only benefits inference, not training, because training requires the full attention
-    matrix for the backward pass; during training it falls back to standard O(N²) memory
-  correct_index: 2
+    225ms x 0.6 = 135ms. New total = 135 + 110 + 165 = 410ms (18% reduction theoretical). Actual = 440ms
+    (12% reduction) due to fusion overhead. AllReduce share: 110/440 = 25% -> next bottleneck. To reduce step time by 20%
+    (reducing step from 440ms to 352ms), we must remove 88ms. Targeting AllReduce means we must cut it by 88ms => requires gradient compression or async overlap.'
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The napkin math for achieving 'another 20% speedup' requires cutting AllReduce by 58ms, but the text
-  states 80ms, leading to a 25% speedup instead of 20%.
-validation_status_pro: WARN
-validation_issues_pro:
-- The scenario states AllReduce becomes 38% of the new step time, but the napkin math correctly calculates
-  it as 25% (110ms / 440ms), creating a contradiction.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

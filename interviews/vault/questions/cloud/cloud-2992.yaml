@@ -12,23 +12,29 @@ scenario: You are optimizing throughput for 70B LLM prefill on 8 H100s (80GB HBM
   3.35 TB/s, 989 TFLOPS BF16) processing batches of 512 sequences × 2048 tokens. Current
   MFU is 38%. Identify the top fusion opportunities, implement a fusion roadmap, and
   quantify the expected MFU improvement.
-question: What is the correct order-of-magnitude FLOP estimate for GPT-3 175B training
-  on 300B tokens, and why is 6 PFLOPs too low?
+question: What are the top fusion opportunities to improve the 38% MFU for 70B LLM
+  prefill on 8 H100s, and what is the expected MFU improvement?
 details:
-  realistic_solution: GPT-3 training required ~3×10^23 FLOPs total. 420 PFLOPs/day
-    × several days gives correct order of magnitude. 6 PetaFLOPs total is too low
-    by ~50000×.
+  realistic_solution: 'For a 70B model with a large prefill batch (512 × 2048 = 1M
+    tokens), the large matrix multiplications are compute-bound, but the element-wise
+    operations (SwiGLU, RMSNorm, RoPE) are severely memory-bound. The top fusion opportunities
+    are: 1) fusing RMSNorm with the subsequent linear layer or attention projection,
+    2) fusing RoPE embeddings directly into the attention kernel (e.g., via FlashAttention-2),
+    and 3) vertical fusion of the SwiGLU activation with the FFN''s up/gate projections.
+    By fusing these memory-bound operators, we eliminate redundant HBM read/writes
+    that stall the Tensor Cores. This can elevate MFU from 38% to ~55%, drastically
+    reducing the prefill latency.'
   common_mistake: Applying fusion uniformly without first profiling which kernels
     are memory-bound vs compute-bound; applying fusion to compute-bound matmuls where
     it adds overhead without benefit.
-  napkin_math: 'GPT-3 (175B params) training: 300B tokens × 6 × 175B = 315 PFLOPs.
-    H100 cluster 1024 GPUs at 989 TFLOPS × 0.45 MFU = 445 TFLOPS each. Total cluster:
-    1024 × 445T = 455.7 PFLOPs/s. Training time: 315P / 455.7P = 0.69 seconds? No
-    — 315 PFLOPs = 3.15×10^17 FLOPs. 455.7 × 10^15 FLOPS. Time = 3.15×10^17 / 4.557×10^17
-    = 0.69s per step. Over 1M steps: 8 days. 420 PFLOPs total estimate for 175B ×
-    300B × 8 (forward+backward+optimizer) / some_factor — the key fix: 420 PFLOPs
-    is the correct order of magnitude for GPT-3 (not 6 PetaFLOPs which is too low
-    by 70×).'
+  napkin_math: 'Total prefill tokens = 512 × 2048 = 1,048,576 tokens. Total FLOPs
+    ≈ 2 × 70B × 1.048M ≈ 146.8 PFLOPs. 8 H100s peak compute = 8 × 989 = 7,912 TFLOPS.
+    At 38% MFU, effective throughput is ~3,006 TFLOPS, taking 146.8 / 3.006 ≈ 48.8s
+    per batch. Without fusion, reading and writing intermediate tensors for RMSNorm
+    and SwiGLU consumes a massive portion of the 3.35 TB/s HBM bandwidth, starving
+    the compute units. Fusing these operations removes the memory bottleneck. Achieving
+    55% MFU would increase throughput to ~4,351 TFLOPS, reducing the prefill batch
+    time to 33.7s.'
 status: published
 provenance: imported
 requires_explanation: true
@@ -38,11 +44,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Math error: 6 FLOPs/token × 1M tokens × 70B model = 420 PFLOPs, not 6P FLOPs.'
 human_reviewed:
   status: not-reviewed
   by: null

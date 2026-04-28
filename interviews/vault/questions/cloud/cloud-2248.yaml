@@ -15,36 +15,33 @@ scenario: 'You need to enrich a 50 TB training dataset with metadata from three 
   the total network I/O across all three joins.'
 question: "Which join strategy should you use for the 5 GB, 200 GB, and 2 TB lookup joins, and what is the total network I/O?"
 details:
-  realistic_solution: 'Join 1 (50 TB × 5 GB on language key): Broadcast the 5 GB table. Each of the 500
-    executors receives a copy: 5 GB × 500 = 2.5 TB network I/O, but the 50 TB table stays put (zero shuffle).
-    Total: 2.5 TB. Join 2 (50 TB × 200 GB on domain key): 200 GB fits in executor memory (64 GB with some
-    overhead — marginal). If it fits, broadcast: 200 GB × 500 = 100 TB — this is MORE than shuffling both
-    sides (50.2 TB). So use shuffle hash join: shuffle both sides by domain key. Network I/O: 50 TB +
-    200 GB ≈ 50.2 TB. Join 3 (50 TB × 2 TB on URL key): Both tables are large. Sort-merge join: shuffle
-    both sides by URL. Network I/O: 50 TB + 2 TB = 52 TB. Total across all 3 joins: 2.5 + 50.2 + 52 =
-    104.7 TB. Optimization: if you order the joins so that Join 1 (broadcast) happens first, the output
-    is still ~50 TB. Then chain Join 2 and Join 3 — but with careful co-partitioning, you can make Join
-    2''s output already partitioned by URL for Join 3, saving one shuffle.'
+  realistic_solution: 'Join 1 (50 TB \u00d7 5 GB on language key): Broadcast the 5 GB table.
+    Each of the 500 executors receives a copy: 5 GB \u00d7 500 = 2.5 TB network I/O, but
+    the 50 TB table stays put (zero shuffle). Total: 2.5 TB. Join 2 (50 TB \u00d7 200 GB
+    on domain key): The 200 GB table does NOT fit in the 64 GB executor memory, so it
+    cannot be broadcast. Use shuffle hash join or sort-merge join: shuffle both sides
+    by domain key. Network I/O: 50 TB + 200 GB \u2248 50.2 TB. Join 3 (50 TB \u00d7 2 TB on
+    URL key): Both tables are large. Sort-merge join: shuffle both sides by URL.
+    Network I/O: 50 TB + 2 TB = 52 TB. Total across all 3 joins: 2.5 + 50.2 + 52 =
+    104.7 TB. Optimization: if you order the joins so that Join 1 (broadcast) happens
+    first, the output is still ~50 TB. Then chain Join 2 and Join 3 \u2014 but with careful
+    co-partitioning, you can make Join 2''s output already partitioned by URL for Join
+    3, saving one shuffle.'
   common_mistake: '"Use sort-merge join for everything because the tables are large." This ignores that
     broadcast join is dramatically more efficient when one side fits in executor memory, and that join
     strategy choice depends on the size ratio between the two tables.'
-  napkin_math: 'Broadcast breakeven point: broadcast costs R × N (where R = small table size, N = number
-    of nodes). Shuffle costs L + R (both tables shuffled). Broadcast wins when R × N < L + R, i.e., R
-    < L / (N - 1). For N=500, L=50 TB: R < 50 TB / 499 ≈ 100 GB. So tables under 100 GB should be broadcast.
-    5 GB: broadcast. 200 GB: shuffle (200 > 100). 2 TB: shuffle.'
+  napkin_math: 'Broadcast breakeven point: broadcast costs R \u00d7 N (where R = small
+    table size, N = number of nodes). Shuffle costs L + R (both tables shuffled).
+    Broadcast wins when R \u00d7 N < L + R, i.e., R < L / (N - 1). For N=500, L=50 TB: R
+    < 50 TB / 499 \u2248 100 GB. However, broadcast requires R < Executor Memory (64 GB).
+    So tables under 64 GB should be broadcast. 5 GB: broadcast. 200 GB: shuffle (200
+    > 64). 2 TB: shuffle.'
   options:
-  - Data preprocessing is never a bottleneck because it runs on CPU while training runs on GPU; the two
-    are completely independent and never contend for resources
-  - The solution to data pipeline bottlenecks is always to increase batch size; larger batches amortize
-    the fixed overhead of data loading, eliminating any throughput gap
-  - GPU utilization below 100% is always caused by insufficient model size (GPU starved of compute); data
-    pipeline performance has no effect on GPU utilization metrics
-  - 'Data preprocessing throughput must match GPU consumption: if N GPUs consume B samples/sec each →
-    total demand = NB samples/sec. A typical pipeline: read from storage → decompress → decode (images:
-    JPEG→tensor) → augmentation → transfer to GPU. Bottleneck identification: if GPU utilization < 100%,
-    profile the data pipeline. Common bottlenecks: single-threaded decode, slow random reads on HDD, CPU-GPU
-    transfer without pinned memory.'
-  correct_index: 3
+  - "Use Broadcast join for all three tables since Spark can spill broadcast variables to disk. Total network I/O is 2.5 TB."
+  - "Use Sort-Merge join for all three tables to avoid memory errors. Total network I/O is 50 TB + 5 GB + 200 GB + 2 TB \u2248 52.2 TB."
+  - "Use Broadcast join for the 5 GB table, and Sort-Merge or Shuffle Hash join for the 200 GB and 2 TB tables. Total network I/O is roughly 2.5 TB (broadcast) + 50.2 TB (shuffle 2) + 52 TB (shuffle 3) = 104.7 TB."
+  - "Use Shuffle Hash join for the 5 GB and 200 GB tables, and Sort-Merge join for the 2 TB table. Total network I/O is 154 TB."
+  correct_index: 2
 status: published
 provenance: imported
 requires_explanation: false

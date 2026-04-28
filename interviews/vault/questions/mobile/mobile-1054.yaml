@@ -16,15 +16,9 @@ scenario: 'Implement the maximum context length calculation for Phi-3-Mini-3.8B 
 question: 'How would you calculate : model memory, KV cache per token, maximum context
   tokens given RAM constraint, and verify throughput SLO?'
 details:
-  realistic_solution: Max context = KV_budget / KV_per_token. Use consistent binary
-    (GiB) or decimal (GB) throughout to avoid unit mixing errors.
-  common_mistake: Calculating KV cache per token incorrectly by using hidden_dim instead
-    of num_heads*head_dim*2(K+V)*num_layers, giving a 2-32x error.
-  napkin_math: 'Max context calculation: memory_budget / bytes_per_token = KV cache
-    budget / KV_per_token. If 4GB available for KV, KV_per_token = 131KB (32-layer
-    GQA-8, fp16): max_tokens = 4GB / 131KB = 4×1024×1024KB / 131KB = 4,194,304 / 131
-    = 32,018 tokens ≈ 32K context. Use consistent units throughout: GB = 10^9 or GiB
-    = 2^30.'
+  realistic_solution: 'Memory budget allows ~40K context (10 GiB KV). However, verifying the throughput SLO reveals a bottleneck: decoding 100 tokens under 2s requires TPOT < 20ms. At 77 GB/s, 20ms allows reading only 1.54 GB per token. The INT4 3.8B model alone is 1.9 GB, taking ~24.7ms to read (failing the 20ms SLO before even adding KV cache bandwidth). Thus, the throughput SLO cannot be met on this hardware without speculative decoding.'
+  common_mistake: 'Calculating KV cache per token incorrectly by using hidden_dim instead of num_heads*head_dim*2(K+V)*num_layers, giving a 2-32x error, and completely failing to verify the throughput SLO which reveals the latency constraint is tighter than the memory constraint.'
+  napkin_math: 'Max context: 16 GiB - 4 GiB (OS) - 1.9 GiB (model) = 10.1 GiB. KV/token = 2 * 32 * 32 * 64 * 2B = 256 KiB. Max tokens = 10.1 GiB / 256 KiB = 41,369 tokens. SLO check: 2s / 100 tokens = 20ms TPOT. Required BW for model alone = 1.9 GB / 0.02s = 95 GB/s > 77 GB/s. Actual TPOT (model only) = 1.9 / 77 = 24.7ms. 100 tokens take > 2.47s. SLO fails.'
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,9 +31,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Mixing base-10 and base-2 units for max context token calculation yields incorrect
-  result
 human_reviewed:
   status: not-reviewed
   by: null

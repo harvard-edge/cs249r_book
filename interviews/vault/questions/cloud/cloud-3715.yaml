@@ -18,18 +18,19 @@ details:
   realistic_solution: 'Hybrid setup: 8-stage PP × 2-way DP = 16 GPUs. Each PP stage
     holds ~70B/8 = 8.75B params. ZeRO-1 within DP groups (2 GPUs): optimizer state
     sharded 2×. FP32 optimizer: 8.75B × 12B = 105GB per stage → sharded = 52.5GB per
-    GPU. AllGather at update: 52.5GB at 450 GB/s = 116ms. ZeRO-3 within DP groups:
-    params also sharded. Each PP stage needs AllGather before forward, ReduceScatter
-    after backward = 2 collectives per stage per micro-batch. With 8 pipeline stages
-    and 4 micro-batches: 8×4×2 = 64 collectives. Each: 8.75B×2B/2 = 8.75GB at 450
-    GB/s = 19.4ms. Total: 64 × 19.4ms = 1.24s additional communication per batch vs
-    ZeRO-1 adding ~232ms.'
+    GPU. ZeRO-1 only communicates at the end of the batch: ReduceScatter gradients (8.75GB)
+    and AllGather updated parameters (8.75GB). Total: 17.5GB at 450 GB/s = 38.8ms per GPU.
+    ZeRO-3 within DP groups: params also sharded. Each PP stage needs AllGather before
+    forward and ReduceScatter after backward for every micro-batch. With 4 micro-batches:
+    4 × 2 = 8 collectives per GPU. Each collective transfers 8.75GB at 450 GB/s = 19.4ms. Total
+    critical path communication for ZeRO-3: 8 × 19.4ms = 155ms per batch vs ZeRO-1 adding 38.8ms.'
   common_mistake: Applying ZeRO sharding across all 16 GPUs when pipeline parallelism
     requires adjacent pipeline stages to share full parameter copies; ZeRO should
     shard only within the DP dimension.
-  napkin_math: 'ZeRO-1 DP all-reduce: 8.75B×4B/2 = 17.5GB at 450 GB/s = 39ms × 2 GPUs
-    = 78ms/step. ZeRO-3 AllGather+RS per micro-batch per stage: 64 × 8.75GB/450 GB/s
-    = 1.24s. ZeRO-1 much better for pipeline parallelism.'
+  napkin_math: 'ZeRO-1 DP communication: ReduceScatter grads + AllGather params = 17.5GB at
+    450 GB/s = 38.8ms per step. ZeRO-3 AllGather+RS per micro-batch: 4 micro-batches × 2
+    collectives = 8 collectives per GPU. 8 × 19.4ms = 155ms. ZeRO-1 is much better for
+    pipeline parallelism critical path latency.'
 status: published
 provenance: imported
 requires_explanation: true

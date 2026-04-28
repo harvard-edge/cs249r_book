@@ -16,25 +16,11 @@ scenario: 'You are deploying a custom vision transformer (ViT-Tiny: 5M params, 1
 question: For ViT-Tiny on Jetson Orin, should attention, FFN, and patch embedding
   run on GPU or DLA, and what latency and energy meet 30 FPS?
 details:
-  realistic_solution: 'DLA supports: Conv, FC, pooling, normalization. Does NOT support
-    attention (gather/scatter, softmax with dynamic scaling). GPU handles attention.
-    Strategy: run patch embedding (conv) on DLA, attention on GPU, FFN on DLA if FC-shaped.
-    ViT-Tiny attention: Q,K,V proj = 3*(2*197*192*192)=43.4M FLOPs. QK^T: 2*3*197^2*64=14.9M.
-    Softmax+V: 14.9M. GPU time: 87.2M/275T=0.317μs (trivial). FFN: 2*197*192*192*4=2*197*768*192=116M
-    FLOPs. AI=116M/(2*197*192+197*768+197*192)=116M/600KB=193. Memory bound on GPU
-    (ridge 2686). DLA for patch embed: 3*3 conv, 3ch→192ch, 224×224: FLOPs = 2*192*14*14*(16^2*3)=2*192*196*768=115M.
-    Fits DLA.'
+  realistic_solution: 'DLA supports: Conv, FC, pooling. Does NOT support attention (gather/scatter, softmax). GPU handles attention. Strategy: run patch embedding (conv) on DLA, then run the 12 ViT blocks (Attention + FFN) entirely on GPU to avoid passing activations back and forth between GPU and DLA every block. ViT-Tiny attention FLOPs: 4 projections (Q,K,V,O) = 4*(2*197*192*192)=58.1M FLOPs. QK^T and Softmax+V = 2*(2*197^2*64*3)=29.8M. Total attention = 87.9M. FFN FLOPs: 2*(2*197*192*768)=116.2M. Total per block = 204.1M FLOPs. GPU computes block in 204.1M/275T = 0.74µs. But memory is the bottleneck: moving ~5MB of activations per block at 204.8 GB/s takes 24.4µs. DLA patch embed: 2*192*14*14*(16^2*3) = 57.8M FLOPs. AI=57.8M/335KB=172 (compute bound on DLA). DLA time = 57.8M/11T = 5.25µs.'
   common_mistake: Running ViT on DLA without checking if the self-attention operation
     (irregular data access pattern) is supported by the DLA's fixed dataflow engine,
     which typically only supports CNNs and simple FC layers.
-  napkin_math: 'Patch embed (DLA): 2*192*196*768/(16^2 patches) = 115M FLOPs. Weights:
-    192*16^2*3=147KB. BW: input(3*224^2=150KB)+weights+output(192*14^2=37.6KB)=335KB.
-    AI=115M/335KB=343 > DLA ridge 55 → compute bound on DLA. Time=115M/11T=0.010ms.
-    GPU attention+FFN: 87.2M+116M=203M FLOPs. BW: 5MB activations. Time=5MB/3350GB/s=1.5μs.
-    Compute: 203M/1979T=0.10μs. BW bound. Time=1.5μs. 12 ViT blocks: 12*(0.010ms DLA
-    + 0.0015ms GPU)=0.138ms total. At 30 FPS: budget=33ms. 0.138ms << 33ms. Energy:
-    DLA=2W*0.12ms=0.24μJ, GPU=60W*0.018ms=1.08μJ total per forward=1.32μJ. FPS limited
-    by camera, not compute.'
+  napkin_math: 'Patch embed (DLA): 57.8M FLOPs. Weights: 147KB. IO: 335KB. Time = 57.8M / 11 TOPS = 5.25µs. GPU Attention+FFN (1 block): 204.1M FLOPs. Bandwidth bound: 5MB / 204.8 GB/s = 24.4µs per block. 12 blocks: 12 * 24.4µs = 293µs = 0.293ms. Total latency: 5.25µs (DLA) + 293µs (GPU) = 0.298ms. At 30 FPS, budget is 33ms, so 0.298ms easily meets it. Energy: DLA (2W * 5.25µs) = 10.5µJ. GPU (60W * 293µs) = 17.6mJ. Total energy per frame ≈ 17.6mJ.'
 status: published
 provenance: imported
 requires_explanation: true

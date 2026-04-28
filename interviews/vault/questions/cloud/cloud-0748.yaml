@@ -13,25 +13,11 @@ scenario: Your company has 512 H100 GPUs in Virginia and 512 in Oregon, connecte
   feasible with synchronous training, and if not, what's your architecture?
 question: "Is this feasible with synchronous training, and if not, what's your architecture?"
 details:
-  realistic_solution: 'Synchronous AllReduce across the WAN is infeasible. A ring AllReduce with 1024
-    GPUs at 60 ms per cross-site hop would add seconds of latency per step. Instead, use **hierarchical
-    parallelism**: run fully synchronous training *within* each datacenter (512 GPUs, InfiniBand, <5 μs
-    latency), then synchronize *between* datacenters asynchronously or with a relaxed consistency model.
-    Options: (1) **Local SGD / DiLoCo** — each site runs independent synchronous SGD for $H$ steps, then
-    averages parameters across sites every $H$ steps. (2) **Async gradient averaging** — each site pushes
-    compressed gradient deltas over the WAN without blocking. (3) **Pipeline parallelism across sites**
-    — place different pipeline stages in each DC; only point-to-point activation transfers cross the WAN
-    (lower bandwidth, tolerant of latency).'
+  realistic_solution: 'Synchronous AllReduce across the WAN is infeasible. Even with a topology-aware ring that minimizes WAN crossings to just 2 hops, the total data traversing the 100 Gbps link is 2 * 140 GB = 280 GB, taking over 22 seconds per step. An unoptimized ring would add dozens of seconds of latency. Instead, use **hierarchical parallelism**: run fully synchronous training *within* each datacenter (512 GPUs, InfiniBand, <5 µs latency), then synchronize *between* datacenters asynchronously or with a relaxed consistency model. Options: (1) **Local SGD / DiLoCo** — each site runs independent synchronous SGD for $H$ steps, then averages parameters across sites every $H$ steps. (2) **Async gradient averaging** — each site pushes compressed gradient deltas over the WAN without blocking.'
   common_mistake: '"100 Gbps is plenty of bandwidth — just run standard DDP across both sites." This ignores
     that WAN latency (60 ms RTT) makes synchronous AllReduce across sites catastrophically slow, even
     if bandwidth is sufficient.'
-  napkin_math: '70B model, DDP AllReduce volume: 70B × 2B = 140 GB. At 100 Gbps WAN (12.5 GB/s): transfer
-    time = 140/12.5 = 11.2 seconds. Plus ring latency: if the ring crosses the WAN once, add 60 ms × number
-    of cross-site hops. With 1024 GPUs in a ring, ~512 hops cross the WAN: 512 × 60 ms = **30.7 seconds**
-    of pure latency. A training step that takes 2 seconds of compute would take 33+ seconds. **Local SGD
-    alternative:** sync within each DC in ~1 second, exchange compressed deltas (1% of 140 GB = 1.4 GB)
-    every 10 steps over WAN: 1.4 GB / 12.5 GB/s = 112 ms every 10 steps = 11.2 ms amortized overhead per
-    step.'
+  napkin_math: '70B model, DDP AllReduce volume: 70B × 2B = 140 GB. At 100 Gbps WAN (12.5 GB/s): in a ring all-reduce, the WAN link must transfer 2 × (N-1)/N × 140 GB ≈ 280 GB of data per step. Transfer time = 280 / 12.5 = 22.4 seconds. A training step that takes 2 seconds of compute would take 24+ seconds, dropping utilization to <10%. **Local SGD alternative:** sync within each DC in ~1 second, exchange compressed deltas (1% of 140 GB = 1.4 GB) every 10 steps over WAN: 1.4 GB / 12.5 GB/s = 112 ms every 10 steps = 11.2 ms amortized overhead per step.'
 status: published
 provenance: imported
 requires_explanation: true
